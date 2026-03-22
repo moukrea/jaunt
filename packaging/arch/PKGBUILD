@@ -1,0 +1,21 @@
+# Maintainer: moukrea <contact@moukrea.dev>
+pkgname=jaunt-bin
+pkgver=VERSION_PLACEHOLDER
+pkgrel=1
+pkgdesc="Access your machine's shell sessions from any device, anywhere, with zero infrastructure"
+arch=('x86_64' 'aarch64')
+url="https://github.com/moukrea/jaunt"
+license=('MIT')
+provides=('jaunt')
+conflicts=('jaunt')
+
+source_x86_64=("${url}/releases/download/${pkgver}/jaunt-${pkgver}-linux-x86_64.tar.gz")
+source_aarch64=("${url}/releases/download/${pkgver}/jaunt-${pkgver}-linux-aarch64.tar.gz")
+sha256sums_x86_64=('SHA256_X86_64_PLACEHOLDER')
+sha256sums_aarch64=('SHA256_AARCH64_PLACEHOLDER')
+
+package() {
+    install -Dm755 jaunt-host "${pkgdir}/usr/bin/jaunt-host"
+    install -Dm755 jaunt-client "${pkgdir}/usr/bin/jaunt-client"
+    install -Dm644 <(curl -sL "${url}/raw/refs/heads/main/LICENSE") "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

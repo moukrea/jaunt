@@ -1,0 +1,38 @@
+[package]
+name = "jaunt-host"
+version = "0.1.0"
+edition = "2021"
+description = "Jaunt host daemon — bridge cairn P2P to local snag sessions"
+license = "MIT"
+
+[[bin]]
+name = "jaunt-host"
+path = "src/main.rs"
+
+[dependencies]
+jaunt-protocol = { path = "../jaunt-protocol" }
+cairn-p2p = { path = "../../../cairn/packages/rs/cairn-p2p" }
+tokio = { version = "1", features = ["rt", "macros", "signal", "sync", "time", "process", "io-util"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1"
+toml = "0.8"
+hostname = "0.4"
+
+[package.metadata.deb]
+maintainer = "moukrea <contact@moukrea.dev>"
+copyright = "2026, moukrea"
+license-file = ["../../LICENSE", "0"]
+depends = "libc6 (>= 2.31)"
+extended-description = """Jaunt host daemon — access your machine's shell sessions from any device via cairn P2P."""
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/jaunt-host", "usr/bin/", "755"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/jaunt-host", dest = "/usr/bin/jaunt-host", mode = "755" },
+]
