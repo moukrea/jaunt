@@ -1585,7 +1585,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jaunt-client"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "cairn-p2p",
  "clap",
@@ -1599,7 +1599,7 @@ dependencies = [
 
 [[package]]
 name = "jaunt-host"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "cairn-p2p",
  "clap",
@@ -1614,7 +1614,7 @@ dependencies = [
 
 [[package]]
 name = "jaunt-protocol"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "rmp-serde",
