@@ -184,19 +184,22 @@ export default function Settings() {
         </section>
       </Show>
 
-      <Show when={!store.connected()}>
-        <div class="text-center mt-4">
-          <button
-            class="text-xs text-text-3 hover:text-text-2 bg-transparent border-none cursor-pointer transition-colors"
-            onClick={() => {
-              store.setConnected(false);
+      {/* Always show back navigation */}
+      <div class="text-center mt-6 pb-4">
+        <button
+          class="text-xs text-text-3 hover:text-text-1 bg-transparent border-none cursor-pointer transition-colors flex items-center gap-1.5 mx-auto"
+          onClick={() => {
+            if (store.connected()) {
+              store.setView('sessions');
+            } else {
               store.setView('pairing');
-            }}
-          >
-            Back to pairing
-          </button>
-        </div>
-      </Show>
+            }
+          }}
+        >
+          <span class="text-text-3">&larr;</span>
+          {store.connected() ? 'Back to sessions' : 'Back to pairing'}
+        </button>
+      </div>
     </div>
   );
 }

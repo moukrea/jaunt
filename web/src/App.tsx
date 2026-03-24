@@ -29,7 +29,10 @@ export default function App() {
       {/* Main content */}
       <main class="flex-1 flex flex-col min-h-0">
         <Switch>
-          <Match when={!store.connected()}>
+          <Match when={store.view() === 'settings'}>
+            <div class="view-enter flex-1 flex flex-col"><Settings /></div>
+          </Match>
+          <Match when={!store.connected() && store.view() !== 'settings'}>
             <PairingScreen />
           </Match>
           <Match when={store.view() === 'sessions'}>
@@ -41,13 +44,10 @@ export default function App() {
           <Match when={store.view() === 'files'}>
             <div class="view-enter flex-1 flex flex-col"><FileBrowser /></div>
           </Match>
-          <Match when={store.view() === 'settings'}>
-            <div class="view-enter flex-1 flex flex-col"><Settings /></div>
-          </Match>
         </Switch>
       </main>
 
-      {/* Bottom navigation — mobile-first, thumb-friendly */}
+      {/* Bottom navigation — only when connected and not in fullscreen terminal */}
       <Show when={store.connected() && store.view() !== 'terminal'}>
         <nav class="flex bg-bg-1 border-t border-bg-3/40 shrink-0 safe-area-pb">
           <NavItem view="sessions" label="Sessions" active={store.view() === 'sessions'} />

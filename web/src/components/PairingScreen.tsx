@@ -187,7 +187,7 @@ export default function PairingScreen() {
         <div class="text-center mt-8">
           <button
             class="text-xs text-text-3 hover:text-text-2 transition-colors bg-transparent border-none cursor-pointer"
-            onClick={() => { store.setView('settings'); store.setConnected(true); }}
+            onClick={() => store.setView('settings')}
           >
             Advanced settings
           </button>

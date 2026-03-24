@@ -122,15 +122,25 @@ export default function FileBrowser() {
         <div class="flex-1 bg-bg-1 border border-bg-3/40 rounded-lg px-3 py-2 text-xs font-mono text-text-2 truncate">
           {shortPath()}
         </div>
-        <label class="flex items-center gap-1.5 text-[11px] text-text-3 cursor-pointer select-none shrink-0">
-          <input
-            type="checkbox"
-            checked={store.showHidden()}
-            onChange={() => store.setShowHidden(!store.showHidden())}
-            class="accent-amber w-3.5 h-3.5"
-          />
-          Dotfiles
-        </label>
+        <button
+          class="flex items-center gap-2 shrink-0 bg-transparent border-none cursor-pointer select-none group"
+          onClick={() => store.setShowHidden(!store.showHidden())}
+          role="switch"
+          aria-checked={store.showHidden()}
+        >
+          <span class="text-[11px] text-text-3 group-hover:text-text-2 transition-colors">Dotfiles</span>
+          <div
+            class={`relative w-8 h-[18px] rounded-full transition-colors duration-200 ${
+              store.showHidden() ? 'bg-amber' : 'bg-bg-4'
+            }`}
+          >
+            <div
+              class={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                store.showHidden() ? 'translate-x-[16px]' : 'translate-x-[2px]'
+              }`}
+            />
+          </div>
+        </button>
         <button class="btn-primary text-xs py-1.5 shrink-0" onClick={openSessionHere}>
           Open here
         </button>
