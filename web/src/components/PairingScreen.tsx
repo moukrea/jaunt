@@ -5,11 +5,14 @@ import { store, saveHost } from '../lib/store';
 
 type PairingPhase = 'idle' | 'decoding' | 'initializing' | 'pairing' | 'connecting' | 'done' | 'error';
 
+const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 export default function PairingScreen() {
   const [pin, setPin] = createSignal('');
   const [phase, setPhase] = createSignal<PairingPhase>('idle');
   const [statusMsg, setStatusMsg] = createSignal('');
   const [errorMsg, setErrorMsg] = createSignal('');
+  const [showHelp, setShowHelp] = createSignal(false);
 
   onMount(async () => {
     const fragment = window.location.hash.slice(1);
@@ -99,31 +102,65 @@ export default function PairingScreen() {
   const isWorking = () => !['idle', 'error'].includes(phase());
 
   return (
-    <div class="flex-1 flex flex-col items-center justify-center px-5 py-12">
+    <div class="flex-1 flex flex-col items-center justify-center px-5 py-10 relative">
       {/* Brand */}
-      <div class="mb-12 text-center" style="animation: viewIn 0.4s cubic-bezier(0.16,1,0.3,1) both">
-        <div class="inline-flex items-center gap-2 mb-4">
+      <div class="mb-10 text-center" style="animation: viewIn 0.4s cubic-bezier(0.16,1,0.3,1) both">
+        <div class="inline-flex items-center gap-2 mb-3">
           <div class="w-8 h-8 rounded-lg bg-amber/15 flex items-center justify-center">
             <div class="w-3 h-3 rounded-sm bg-amber" />
           </div>
           <span class="font-mono text-lg font-600 tracking-widest text-text-0">JAUNT</span>
         </div>
-        <p class="text-text-2 text-sm max-w-64 mx-auto leading-relaxed">
-          Access your machine from anywhere. Zero infrastructure, end-to-end encrypted.
+        <p class="text-text-2 text-sm max-w-72 mx-auto leading-relaxed">
+          Access your machine's terminal from anywhere.
+          <br />Zero infrastructure. End-to-end encrypted.
         </p>
       </div>
 
       {/* Connection card */}
-      <div
-        class="w-full max-w-sm"
-        style="animation: viewIn 0.4s cubic-bezier(0.16,1,0.3,1) 0.08s both"
-      >
-        <div class="surface-card p-6">
-          <div class="text-xs font-500 text-text-3 tracking-wider uppercase mb-4">
-            Enter host PIN
+      <div class="w-full max-w-sm" style="animation: viewIn 0.4s cubic-bezier(0.16,1,0.3,1) 0.08s both">
+
+        {/* Step indicator — teach the user what to do first */}
+        <div class="surface-card p-4 mb-3">
+          <div class="flex items-start gap-3">
+            <div class="w-5 h-5 rounded-full bg-amber/15 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-[10px] font-700 text-amber">1</span>
+            </div>
+            <div class="text-xs text-text-2 leading-relaxed">
+              On the machine you want to access, run:
+              <code class="block font-mono text-text-0 bg-bg-0 px-2.5 py-1.5 rounded-lg mt-1.5 text-[13px] select-all">jaunt-host serve</code>
+              <span class="text-text-3 text-[11px] mt-1 block">
+                This will display a PIN and QR code.
+                <button
+                  class="text-amber hover:underline bg-transparent border-none cursor-pointer p-0 ml-0.5"
+                  onClick={() => setShowHelp(!showHelp())}
+                >
+                  {showHelp() ? 'Less' : 'How to install?'}
+                </button>
+              </span>
+            </div>
           </div>
 
-          {/* PIN Input — large, monospaced, centered */}
+          <Show when={showHelp()}>
+            <div class="mt-3 ml-8 text-[11px] text-text-3 leading-relaxed bg-bg-0 rounded-lg p-3 space-y-1" style="animation: viewIn 0.15s ease-out">
+              <div><span class="text-text-2">Homebrew:</span> <code class="text-text-1">brew install moukrea/tap/jaunt</code></div>
+              <div><span class="text-text-2">Cargo:</span> <code class="text-text-1">cargo install jaunt-host</code></div>
+              <div><span class="text-text-2">Binary:</span> <a href="https://github.com/moukrea/jaunt/releases" target="_blank" rel="noopener" class="text-amber hover:underline">Download from GitHub</a></div>
+            </div>
+          </Show>
+        </div>
+
+        {/* PIN entry */}
+        <div class="surface-card p-5">
+          <div class="flex items-start gap-3 mb-4">
+            <div class="w-5 h-5 rounded-full bg-amber/15 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-[10px] font-700 text-amber">2</span>
+            </div>
+            <div class="text-xs text-text-2">
+              Enter the PIN shown by your host
+            </div>
+          </div>
+
           <input
             type="text"
             inputMode="text"
@@ -153,29 +190,42 @@ export default function PairingScreen() {
           </button>
         </div>
 
-        {/* Divider */}
-        <div class="flex items-center gap-3 my-5">
-          <div class="flex-1 h-px bg-bg-3/40" />
-          <span class="text-[11px] text-text-3 tracking-wider uppercase">or</span>
-          <div class="flex-1 h-px bg-bg-3/40" />
-        </div>
-
-        {/* QR hint */}
-        <div class="surface-card p-5">
-          <p class="text-sm text-text-2 leading-relaxed">
-            Scan the <span class="text-amber font-500">QR code</span> displayed
-            by <code class="font-mono text-xs text-text-1 bg-bg-2 px-1.5 py-0.5 rounded">jaunt-host serve</code> to
-            connect automatically with the host's network settings.
-          </p>
+        {/* QR / Link hint — adaptive to platform */}
+        <div class="surface-card p-4 mt-3">
+          <Show when={isMobile()}>
+            {/* Mobile: QR scanning is relevant */}
+            <div class="flex items-start gap-3">
+              <span class="text-lg shrink-0 mt-px">📷</span>
+              <p class="text-xs text-text-2 leading-relaxed">
+                You can also <span class="text-amber font-500">scan the QR code</span> displayed by your host.
+                It contains the connection settings — no PIN needed.
+              </p>
+            </div>
+          </Show>
+          <Show when={!isMobile()}>
+            {/* Desktop: link pasting is more relevant */}
+            <div class="flex items-start gap-3">
+              <span class="text-lg shrink-0 mt-px">🔗</span>
+              <p class="text-xs text-text-2 leading-relaxed">
+                You can also <span class="text-amber font-500">open the link</span> from your host.
+                Copy the URL shown by <code class="font-mono text-[11px] text-text-1 bg-bg-2 px-1 py-0.5 rounded">jaunt-host serve</code> and
+                paste it in your browser — it connects automatically.
+              </p>
+            </div>
+          </Show>
         </div>
 
         {/* Error state */}
         <Show when={phase() === 'error'}>
-          <div class="mt-4 p-4 bg-coral/8 border border-coral/20 rounded-xl">
+          <div class="mt-3 p-4 bg-coral/8 border border-coral/20 rounded-xl" style="animation: viewIn 0.2s ease-out">
             <div class="text-sm text-coral font-500 mb-1">Connection failed</div>
-            <div class="text-xs text-text-2">{errorMsg()}</div>
+            <div class="text-xs text-text-2 mb-2">{errorMsg()}</div>
+            <div class="text-[11px] text-text-3 mb-3">
+              Make sure <code class="font-mono text-text-2">jaunt-host serve</code> is running on your machine
+              and both devices are on the same network (or using Tier 1+ infrastructure).
+            </div>
             <button
-              class="mt-3 text-xs text-amber font-500 hover:underline bg-transparent border-none cursor-pointer p-0"
+              class="text-xs text-amber font-500 hover:underline bg-transparent border-none cursor-pointer p-0"
               onClick={() => { setPhase('idle'); setErrorMsg(''); }}
             >
               Try again
@@ -183,14 +233,25 @@ export default function PairingScreen() {
           </div>
         </Show>
 
-        {/* Settings link */}
-        <div class="text-center mt-8">
+        {/* Footer links */}
+        <div class="flex items-center justify-between mt-8">
           <button
-            class="text-xs text-text-3 hover:text-text-2 transition-colors bg-transparent border-none cursor-pointer"
+            class="text-[11px] text-text-3 hover:text-text-2 transition-colors bg-transparent border-none cursor-pointer"
             onClick={() => store.setView('settings')}
           >
             Advanced settings
           </button>
+          <a
+            href="https://github.com/moukrea/jaunt"
+            target="_blank"
+            rel="noopener"
+            class="text-text-3 hover:text-text-2 transition-colors"
+            title="View on GitHub"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+          </a>
         </div>
       </div>
     </div>

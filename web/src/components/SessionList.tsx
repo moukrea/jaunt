@@ -58,13 +58,20 @@ export default function SessionList() {
       <div class="flex items-center justify-between mb-5">
         <div>
           <h2 class="text-lg font-600 text-text-0 leading-none mb-1">Sessions</h2>
-          <p class="text-xs text-text-3">{store.sessions().length} active</p>
+          <p class="text-xs text-text-3">
+            {store.sessions().length} active
+            <span class="text-text-3/50 ml-1">— tap to attach</span>
+          </p>
         </div>
         <div class="flex items-center gap-2">
-          <button class="btn-ghost text-xs" onClick={refreshSessions}>
+          <button class="btn-ghost text-xs" onClick={refreshSessions} title="Refresh session list">
             Refresh
           </button>
-          <button class="btn-primary text-xs py-2" onClick={() => setCreating(!creating())}>
+          <button
+            class="btn-primary text-xs py-2"
+            onClick={() => setCreating(!creating())}
+            title="Create a new shell session on the host"
+          >
             New session
           </button>
         </div>
