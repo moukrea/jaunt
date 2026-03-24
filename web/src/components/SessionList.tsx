@@ -1,12 +1,11 @@
 import { createSignal, onMount, For, Show } from 'solid-js';
 import { sendRpc } from '../lib/cairn';
 import { store } from '../lib/store';
-import type { SessionInfo, RpcResponse, RpcData } from '../lib/protocol';
 
 export default function SessionList() {
   const [loading, setLoading] = createSignal(true);
+  const [creating, setCreating] = createSignal(false);
   const [newName, setNewName] = createSignal('');
-  const [showNew, setShowNew] = createSignal(false);
 
   onMount(() => refreshSessions());
 
@@ -30,7 +29,7 @@ export default function SessionList() {
     const name = newName().trim() || undefined;
     try {
       await sendRpc({ SessionCreate: { name, shell: undefined, cwd: undefined } });
-      setShowNew(false);
+      setCreating(false);
       setNewName('');
       await refreshSessions();
     } catch (e: any) {
@@ -38,12 +37,13 @@ export default function SessionList() {
     }
   }
 
-  async function killSession(id: string) {
+  async function killSession(id: string, e: Event) {
+    e.stopPropagation();
     try {
       await sendRpc({ SessionKill: { target: id } });
       await refreshSessions();
     } catch (e: any) {
-      store.setError(e.message);
+      store.setError((e as Error).message);
     }
   }
 
@@ -53,113 +53,117 @@ export default function SessionList() {
   }
 
   return (
-    <div class="flex-1 p-4 max-w-3xl mx-auto w-full">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold">
-          Sessions
-          <span class="text-gray-500 text-sm ml-2">on {store.hostName()}</span>
-        </h2>
-        <div class="flex gap-2">
-          <button
-            class="px-3 py-1.5 bg-surface-2 hover:bg-surface-3 rounded-lg text-sm transition-colors"
-            onClick={refreshSessions}
-          >
+    <div class="flex-1 flex flex-col px-4 pt-4 pb-2 max-w-2xl mx-auto w-full">
+      {/* Header */}
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h2 class="text-lg font-600 text-text-0 leading-none mb-1">Sessions</h2>
+          <p class="text-xs text-text-3">{store.sessions().length} active</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="btn-ghost text-xs" onClick={refreshSessions}>
             Refresh
           </button>
-          <button
-            class="px-3 py-1.5 bg-accent hover:bg-accent/80 rounded-lg text-sm font-medium transition-colors"
-            onClick={() => setShowNew(!showNew())}
-          >
-            + New
+          <button class="btn-primary text-xs py-2" onClick={() => setCreating(!creating())}>
+            New session
           </button>
         </div>
       </div>
 
-      {/* New session form */}
-      <Show when={showNew()}>
-        <div class="bg-surface-1 rounded-lg p-4 mb-4 flex gap-2">
+      {/* Inline create */}
+      <Show when={creating()}>
+        <div class="surface-raised p-3 mb-4 flex gap-2 items-center" style="animation: viewIn 0.2s ease-out">
           <input
             type="text"
-            placeholder="Session name (optional)"
-            class="flex-1 bg-surface-2 border border-surface-3 rounded px-3 py-2 text-sm focus:border-accent focus:outline-none"
+            class="input-field flex-1"
+            placeholder="Name (optional)"
             value={newName()}
             onInput={(e) => setNewName(e.currentTarget.value)}
             onKeyDown={(e) => e.key === 'Enter' && createSession()}
+            autofocus
           />
-          <button
-            class="px-4 py-2 bg-accent rounded text-sm font-medium"
-            onClick={createSession}
-          >
+          <button class="btn-primary text-xs whitespace-nowrap" onClick={createSession}>
             Create
+          </button>
+          <button class="btn-ghost text-xs" onClick={() => setCreating(false)}>
+            Cancel
           </button>
         </div>
       </Show>
 
-      {/* Loading */}
+      {/* Loading skeleton */}
       <Show when={loading()}>
-        <div class="text-center text-gray-500 py-8">Loading sessions...</div>
+        <div class="space-y-2">
+          <div class="h-18 surface-raised animate-pulse" />
+          <div class="h-18 surface-raised animate-pulse" style="animation-delay:0.1s" />
+        </div>
       </Show>
 
       {/* Empty state */}
       <Show when={!loading() && store.sessions().length === 0}>
-        <div class="text-center text-gray-500 py-8">
-          <p class="mb-2">No sessions running.</p>
-          <button
-            class="px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg text-sm font-medium text-white transition-colors"
-            onClick={() => { setShowNew(true); }}
-          >
-            Create one
+        <div class="flex-1 flex flex-col items-center justify-center text-center py-16">
+          <div class="w-12 h-12 rounded-2xl bg-bg-2 flex items-center justify-center mb-4">
+            <div class="w-5 h-5 rounded bg-amber/20" />
+          </div>
+          <p class="text-sm text-text-2 mb-1">No sessions running</p>
+          <p class="text-xs text-text-3 mb-5">Create one to get started</p>
+          <button class="btn-primary" onClick={() => setCreating(true)}>
+            New session
           </button>
         </div>
       </Show>
 
       {/* Session list */}
-      <div class="space-y-2">
+      <div class="flex-1 overflow-y-auto -mx-1 px-1 space-y-1.5 stagger">
         <For each={store.sessions()}>
-          {(session) => (
-            <div
-              class="bg-surface-1 rounded-lg p-4 flex items-center gap-4 hover:bg-surface-2 transition-colors cursor-pointer group"
-              onClick={() => attachSession(session.id)}
-            >
-              {/* Status indicator */}
-              <div class={`w-2 h-2 rounded-full ${
-                session.state === 'running' ? 'bg-success' : 'bg-gray-500'
-              }`} />
+          {(session) => {
+            const shell = () => session.shell.split('/').pop() || session.shell;
+            const cwd = () => session.cwd.replace(/^\/home\/[^/]+/, '~');
+            const fg = () => session.fg_process && session.fg_process !== 'idle' ? session.fg_process : null;
+            const isRunning = () => session.state === 'running';
+            const displayName = () => session.name || session.id.slice(0, 8);
 
-              {/* Info */}
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium">
-                    {session.name || session.id.slice(0, 8)}
-                  </span>
-                  <span class="text-gray-500 text-xs font-mono">
-                    {session.shell.split('/').pop()}
-                  </span>
-                </div>
-                <div class="text-sm text-gray-400 truncate">
-                  {session.cwd.replace(/^\/home\/[^/]+/, '~')}
-                  {session.fg_process && session.fg_process !== 'idle' && (
-                    <span class="text-accent ml-2">{session.fg_process}</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Attached count */}
-              <Show when={session.attached > 0}>
-                <span class="text-xs text-gray-500 bg-surface-3 px-2 py-1 rounded">
-                  {session.attached} attached
-                </span>
-              </Show>
-
-              {/* Kill button */}
-              <button
-                class="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs text-danger hover:bg-danger/10 rounded transition-all"
-                onClick={(e) => { e.stopPropagation(); killSession(session.id); }}
+            return (
+              <div
+                class="w-full text-left surface-raised p-4 flex items-start gap-3.5 cursor-pointer transition-all duration-150 hover:bg-bg-3/60 active:scale-[0.995] group"
+                role="button"
+                tabIndex={0}
+                onClick={() => attachSession(session.id)}
+                onKeyDown={(e) => e.key === 'Enter' && attachSession(session.id)}
               >
-                Kill
-              </button>
-            </div>
-          )}
+                {/* Status + shell badge */}
+                <div class="pt-0.5 flex flex-col items-center gap-1.5">
+                  <div class={`w-2 h-2 rounded-full shrink-0 ${isRunning() ? 'bg-sage' : 'bg-text-3/40'}`} />
+                  <span class="text-[10px] font-mono text-text-3 leading-none">{shell()}</span>
+                </div>
+
+                {/* Info */}
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-baseline gap-2 mb-0.5">
+                    <span class="text-sm font-500 text-text-0 truncate">{displayName()}</span>
+                    <Show when={session.attached > 0}>
+                      <span class="text-[10px] font-mono text-sky shrink-0">{session.attached} viewer{session.attached > 1 ? 's' : ''}</span>
+                    </Show>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-xs text-text-3 font-mono truncate">
+                    <span class="truncate">{cwd()}</span>
+                    <Show when={fg()}>
+                      <span class="text-amber/80 shrink-0">{fg()}</span>
+                    </Show>
+                  </div>
+                </div>
+
+                {/* Kill button */}
+                <button
+                  class="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-danger text-[11px] py-1 px-2 shrink-0 transition-opacity"
+                  onClick={(e) => killSession(session.id, e)}
+                  title="Kill session"
+                >
+                  End
+                </button>
+              </div>
+            );
+          }}
         </For>
       </div>
     </div>

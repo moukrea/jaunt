@@ -15,74 +15,70 @@ export default function TerminalComponent() {
   onMount(async () => {
     if (!termDiv) return;
 
-    // Create terminal
+    // Warm charcoal terminal theme — matches app palette
     term = new XTerm({
       theme: {
-        background: '#0a0a0f',
-        foreground: '#e2e8f0',
-        cursor: '#6366f1',
-        cursorAccent: '#0a0a0f',
-        selectionBackground: '#6366f133',
-        black: '#1a1a25',
-        red: '#ef4444',
-        green: '#22c55e',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#a855f7',
-        cyan: '#06b6d4',
-        white: '#e2e8f0',
-        brightBlack: '#64748b',
-        brightRed: '#f87171',
-        brightGreen: '#4ade80',
-        brightYellow: '#fbbf24',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#c084fc',
-        brightCyan: '#22d3ee',
-        brightWhite: '#f8fafc',
+        background: '#0c0c0e',
+        foreground: '#c8c5bd',
+        cursor: '#e8a245',
+        cursorAccent: '#0c0c0e',
+        selectionBackground: '#e8a24525',
+        selectionForeground: '#eae8e3',
+        black: '#1c1c21',
+        red: '#e06c5a',
+        green: '#7dba6e',
+        yellow: '#e8a245',
+        blue: '#6ba3d6',
+        magenta: '#b07dc9',
+        cyan: '#5db8a8',
+        white: '#c8c5bd',
+        brightBlack: '#5a5955',
+        brightRed: '#ef8a7a',
+        brightGreen: '#9dd490',
+        brightYellow: '#f0b86a',
+        brightBlue: '#8dbde8',
+        brightMagenta: '#c99dda',
+        brightCyan: '#7dd0c0',
+        brightWhite: '#eae8e3',
       },
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: 14,
+      lineHeight: 1.35,
+      letterSpacing: 0,
       cursorBlink: true,
+      cursorStyle: 'bar',
+      cursorWidth: 2,
+      scrollback: 10000,
       allowProposedApi: true,
+      drawBoldTextInBrightColors: true,
     });
 
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-
     term.open(termDiv);
 
-    // Try WebGL renderer
     try {
       term.loadAddon(new WebglAddon());
     } catch {
-      // WebGL not available, fall back to canvas
+      // WebGL not available
     }
 
     fitAddon.fit();
 
-    // Handle terminal input -> send to host via PTY channel
     term.onData((data) => {
-      const bytes = new TextEncoder().encode(data);
-      sendPtyInput(bytes);
+      sendPtyInput(new TextEncoder().encode(data));
     });
 
-    // Handle terminal binary input
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
       sendPtyInput(bytes);
     });
 
-    // Handle resize
-    term.onResize(({ cols, rows }) => {
-      sendResize(cols, rows);
-    });
+    term.onResize(({ cols, rows }) => sendResize(cols, rows));
 
-    // Receive PTY output from host
     setPtyDataCallback((data: Uint8Array) => {
-      if (term) {
-        term.write(data);
-      }
+      term?.write(data);
     });
 
     // Attach to session
@@ -91,65 +87,74 @@ export default function TerminalComponent() {
         const resp = await sendRpc({ SessionAttach: { target: store.currentSession()! } });
         if ('Ok' in resp) {
           const data = resp.Ok;
-          // Write scrollback
           if ('Output' in (data as any)) {
             term.write((data as any).Output);
           }
           setAttached(true);
-
-          // Send initial resize
           sendResize(term.cols, term.rows);
         }
       } catch (e: any) {
-        term.write(`\r\n\x1b[31mFailed to attach: ${e.message}\x1b[0m\r\n`);
+        term.write(`\r\n\x1b[38;2;224;108;90m Connection failed: ${e.message}\x1b[0m\r\n`);
       }
     }
 
-    // Handle window resize
-    const resizeObserver = new ResizeObserver(() => {
-      if (fitAddon) fitAddon.fit();
-    });
+    const resizeObserver = new ResizeObserver(() => fitAddon?.fit());
     resizeObserver.observe(termDiv);
 
     onCleanup(() => {
       resizeObserver.disconnect();
-      // Detach from session
       sendRpc({ SessionDetach: {} }).catch(() => {});
       setPtyDataCallback(() => {});
       term?.dispose();
     });
   });
 
+  function detach() {
+    sendRpc({ SessionDetach: {} }).catch(() => {});
+    store.setCurrentSession(null);
+    store.setView('sessions');
+  }
+
   return (
-    <div class="flex-1 flex flex-col">
+    <div class="flex-1 flex flex-col min-h-0">
       <Show when={!store.currentSession()}>
-        <div class="flex-1 flex items-center justify-center text-gray-500">
-          <p>Select a session from the Sessions tab to attach.</p>
+        <div class="flex-1 flex flex-col items-center justify-center text-center px-6 view-enter">
+          <div class="w-14 h-14 rounded-2xl bg-bg-2 flex items-center justify-center mb-5">
+            <span class="text-2xl text-amber/40">_</span>
+          </div>
+          <p class="text-sm text-text-2 mb-1">No session attached</p>
+          <p class="text-xs text-text-3 mb-5">Pick a session from the list to connect</p>
+          <button
+            class="btn-ghost text-sm"
+            onClick={() => store.setView('sessions')}
+          >
+            View sessions
+          </button>
         </div>
       </Show>
+
       <Show when={store.currentSession()}>
-        <div class="flex items-center justify-between px-4 py-2 bg-surface-1 border-b border-surface-3">
-          <span class="text-sm text-gray-400">
-            Terminal — {store.currentSession()?.slice(0, 8)}
-            <Show when={attached()}>
-              <span class="text-success ml-2">attached</span>
-            </Show>
-          </span>
+        {/* Terminal toolbar — minimal, stays out of the way */}
+        <div class="flex items-center justify-between px-3 h-9 bg-bg-1 border-b border-bg-3/30 shrink-0">
+          <div class="flex items-center gap-2 text-xs min-w-0">
+            <div class={`w-1.5 h-1.5 rounded-full shrink-0 ${attached() ? 'bg-sage pulse' : 'bg-text-3'}`} />
+            <span class="font-mono text-text-2 truncate">
+              {store.currentSession()?.slice(0, 12)}
+            </span>
+          </div>
           <button
-            class="text-xs text-gray-500 hover:text-gray-300 px-2 py-1"
-            onClick={() => {
-              sendRpc({ SessionDetach: {} }).catch(() => {});
-              store.setCurrentSession(null);
-              store.setView('sessions');
-            }}
+            class="text-[11px] text-text-3 hover:text-text-1 bg-transparent border-none cursor-pointer transition-colors px-2 py-1"
+            onClick={detach}
           >
             Detach
           </button>
         </div>
+
+        {/* Terminal — full bleed, no wasted space */}
         <div
           ref={termDiv}
-          class="flex-1"
-          style={{ padding: '4px' }}
+          class="flex-1 min-h-0"
+          style={{ padding: '6px 4px 4px 8px' }}
         />
       </Show>
     </div>

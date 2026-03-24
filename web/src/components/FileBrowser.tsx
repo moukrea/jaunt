@@ -55,8 +55,7 @@ export default function FileBrowser() {
       if ('Ok' in resp) {
         const data = resp.Ok;
         if ('SessionCreated' in (data as any)) {
-          const id = (data as any).SessionCreated.id;
-          store.setCurrentSession(id);
+          store.setCurrentSession((data as any).SessionCreated.id);
           store.setView('terminal');
         }
       }
@@ -65,16 +64,16 @@ export default function FileBrowser() {
     }
   }
 
-  function entryTypeName(et: EntryType): string {
-    if (et === 'File') return 'file';
-    if (et === 'Directory') return 'dir';
-    if (typeof et === 'object' && 'Symlink' in et) return 'link';
-    return '?';
+  function isDir(et: EntryType): boolean {
+    return et === 'Directory';
+  }
+  function isLink(et: EntryType): boolean {
+    return typeof et === 'object' && 'Symlink' in et;
   }
 
   function handleClick(entry: DirEntry) {
     const fullPath = store.currentPath() + '/' + entry.name;
-    if (entry.entry_type === 'Directory') {
+    if (isDir(entry.entry_type)) {
       browsePath(fullPath);
     } else {
       previewFile(fullPath);
@@ -90,74 +89,85 @@ export default function FileBrowser() {
   const visibleEntries = () => {
     const entries = store.dirEntries();
     if (store.showHidden()) return entries;
-    return entries.filter(e => !e.hidden);
+    return entries.filter((e) => !e.hidden);
   };
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} K`;
+    if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} M`;
+    return `${(bytes / 1073741824).toFixed(1)} G`;
   }
 
+  function fileIcon(entry: DirEntry): string {
+    if (isDir(entry.entry_type)) return '\u{1F4C1}';
+    if (isLink(entry.entry_type)) return '\u{1F517}';
+    const ext = entry.name.split('.').pop()?.toLowerCase();
+    if (['rs', 'ts', 'js', 'py', 'go', 'c', 'cpp', 'h'].includes(ext || '')) return '\u{1F4C4}';
+    if (['md', 'txt', 'toml', 'yaml', 'json', 'xml'].includes(ext || '')) return '\u{1F4DD}';
+    if (['jpg', 'png', 'gif', 'svg', 'webp'].includes(ext || '')) return '\u{1F5BC}';
+    if (['zip', 'tar', 'gz', 'xz'].includes(ext || '')) return '\u{1F4E6}';
+    return '\u{1F4C3}';
+  }
+
+  const shortPath = () => store.currentPath().replace(/^\/home\/[^/]+/, '~');
+
   return (
-    <div class="flex-1 flex flex-col p-4 max-w-4xl mx-auto w-full">
-      {/* Toolbar */}
+    <div class="flex-1 flex flex-col px-4 pt-4 pb-2 max-w-3xl mx-auto w-full">
+      {/* Breadcrumb bar */}
       <div class="flex items-center gap-2 mb-4">
-        <button
-          class="px-3 py-1.5 bg-surface-2 hover:bg-surface-3 rounded text-sm"
-          onClick={goUp}
-        >
+        <button class="btn-ghost text-xs px-2 py-1.5 font-mono" onClick={goUp}>
           ..
         </button>
-        <div class="flex-1 bg-surface-1 rounded px-3 py-1.5 text-sm font-mono text-gray-300 truncate">
-          {store.currentPath()}
+        <div class="flex-1 bg-bg-1 border border-bg-3/40 rounded-lg px-3 py-2 text-xs font-mono text-text-2 truncate">
+          {shortPath()}
         </div>
-        <label class="flex items-center gap-1 text-sm text-gray-400 cursor-pointer">
+        <label class="flex items-center gap-1.5 text-[11px] text-text-3 cursor-pointer select-none shrink-0">
           <input
             type="checkbox"
             checked={store.showHidden()}
             onChange={() => store.setShowHidden(!store.showHidden())}
-            class="accent-accent"
+            class="accent-amber w-3.5 h-3.5"
           />
-          Hidden
+          Dotfiles
         </label>
-        <button
-          class="px-3 py-1.5 bg-accent hover:bg-accent/80 rounded text-sm font-medium"
-          onClick={openSessionHere}
-        >
-          Open session here
+        <button class="btn-primary text-xs py-1.5 shrink-0" onClick={openSessionHere}>
+          Open here
         </button>
       </div>
 
       <Show when={loading()}>
-        <div class="text-center text-gray-500 py-8">Loading...</div>
+        <div class="flex-1 flex items-center justify-center">
+          <div class="spinner" />
+        </div>
       </Show>
 
       {/* File list */}
-      <div class="flex-1 overflow-auto">
+      <div class="flex-1 overflow-y-auto -mx-1 px-1">
         <Show when={!previewContent()}>
-          <div class="space-y-0.5">
+          <div class="stagger">
             <For each={visibleEntries()}>
               {(entry) => (
-                <div
-                  class="flex items-center gap-3 px-3 py-2 rounded hover:bg-surface-1 cursor-pointer transition-colors"
+                <button
+                  class={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-100 hover:bg-bg-2 active:bg-bg-3 group border-none bg-transparent ${
+                    entry.hidden ? 'opacity-50' : ''
+                  }`}
                   onClick={() => handleClick(entry)}
                 >
-                  <span class={`text-xs w-8 ${
-                    entry.entry_type === 'Directory' ? 'text-accent' :
-                    entryTypeName(entry.entry_type) === 'link' ? 'text-warning' : 'text-gray-500'
-                  }`}>
-                    {entry.entry_type === 'Directory' ? 'DIR' :
-                     entryTypeName(entry.entry_type) === 'link' ? 'LNK' : ''}
-                  </span>
-                  <span class={`flex-1 text-sm ${entry.hidden ? 'text-gray-500' : ''}`}>
+                  <span class="text-sm w-5 text-center shrink-0">{fileIcon(entry)}</span>
+                  <span
+                    class={`flex-1 text-sm truncate ${
+                      isDir(entry.entry_type)
+                        ? 'text-text-0 font-500'
+                        : 'text-text-1'
+                    }`}
+                  >
                     {entry.name}
                   </span>
-                  <span class="text-xs text-gray-500 w-20 text-right">
-                    {entry.entry_type !== 'Directory' ? formatSize(entry.size) : ''}
+                  <span class="text-[11px] font-mono text-text-3 w-12 text-right shrink-0">
+                    {!isDir(entry.entry_type) ? formatSize(entry.size) : ''}
                   </span>
-                </div>
+                </button>
               )}
             </For>
           </div>
@@ -165,19 +175,21 @@ export default function FileBrowser() {
 
         {/* File preview */}
         <Show when={previewContent()}>
-          <div class="bg-surface-1 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-mono text-gray-400">{previewPath()}</span>
+          <div class="view-enter">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-mono text-text-2 truncate">{previewPath().split('/').pop()}</span>
               <button
-                class="text-xs text-gray-500 hover:text-gray-300"
+                class="btn-ghost text-xs"
                 onClick={() => setPreviewContent(null)}
               >
-                Close
+                Back
               </button>
             </div>
-            <pre class="text-sm font-mono text-gray-300 overflow-auto max-h-96 whitespace-pre-wrap">
-              {previewContent()}
-            </pre>
+            <div class="surface-raised p-4 overflow-auto max-h-[calc(100dvh-220px)]">
+              <pre class="text-xs font-mono text-text-1 leading-relaxed whitespace-pre-wrap m-0">
+                {previewContent()}
+              </pre>
+            </div>
           </div>
         </Show>
       </div>
