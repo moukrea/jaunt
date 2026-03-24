@@ -5,6 +5,7 @@
 <p align="center">
   <a href="#installation">Installation</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#web-client">Web Client</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
   <a href="#commands">Commands</a> &bull;
   <a href="CONTRIBUTING.md">Contributing</a>
@@ -141,6 +142,37 @@ jaunt-client connect mybox send dev "cargo test"
 # Create a new session
 jaunt-client connect mybox new --name build
 ```
+
+## Web Client
+
+The web client is a SolidJS SPA hosted on GitHub Pages. No installation needed — works from any browser.
+
+**Stack:** SolidJS + xterm.js + cairn-p2p (npm) + UnoCSS + Vite
+
+**Features:**
+- Automatic pairing via QR code URL (connection profile embedded in URL fragment)
+- PIN-based manual pairing
+- Full terminal emulation (xterm.js with WebGL rendering)
+- File browser with hidden files toggle and "open session here"
+- Session management (create, attach, kill, rename)
+- Settings panel for manual cairn infrastructure configuration
+- Mobile-responsive layout
+- IndexedDB persistence for paired hosts and settings
+- PWA support (works offline after first load)
+
+Scan the QR code from `jaunt-host serve` or open the link — the web client extracts the connection profile from the URL fragment (never sent to any server) and connects automatically.
+
+## Tauri App
+
+The Tauri 2.0 app wraps the web client with native capabilities:
+
+- **Native cairn Rust crate** — QUIC transport, better NAT traversal than WebRTC
+- **OS keychain** for cairn identity persistence
+- **Native notifications** for session events
+- **Background operation** — stays connected while minimized
+- **Cross-platform** — Linux, macOS, Windows, Android, iOS
+
+Build: `cd tauri/src-tauri && cargo tauri build`
 
 ## Commands
 
