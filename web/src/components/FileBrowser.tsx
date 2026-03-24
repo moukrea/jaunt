@@ -99,15 +99,13 @@ export default function FileBrowser() {
     return `${(bytes / 1073741824).toFixed(1)} G`;
   }
 
-  function fileIcon(entry: DirEntry): string {
-    if (isDir(entry.entry_type)) return '\u{1F4C1}';
-    if (isLink(entry.entry_type)) return '\u{1F517}';
+  function fileIconColor(entry: DirEntry): string {
+    if (isDir(entry.entry_type)) return 'text-amber';
+    if (isLink(entry.entry_type)) return 'text-sky';
     const ext = entry.name.split('.').pop()?.toLowerCase();
-    if (['rs', 'ts', 'js', 'py', 'go', 'c', 'cpp', 'h'].includes(ext || '')) return '\u{1F4C4}';
-    if (['md', 'txt', 'toml', 'yaml', 'json', 'xml'].includes(ext || '')) return '\u{1F4DD}';
-    if (['jpg', 'png', 'gif', 'svg', 'webp'].includes(ext || '')) return '\u{1F5BC}';
-    if (['zip', 'tar', 'gz', 'xz'].includes(ext || '')) return '\u{1F4E6}';
-    return '\u{1F4C3}';
+    if (['rs', 'ts', 'js', 'py', 'go', 'c', 'cpp', 'h'].includes(ext || '')) return 'text-sage';
+    if (['jpg', 'png', 'gif', 'svg', 'webp'].includes(ext || '')) return 'text-coral';
+    return 'text-text-3';
   }
 
   const shortPath = () => store.currentPath().replace(/^\/home\/[^/]+/, '~');
@@ -164,7 +162,15 @@ export default function FileBrowser() {
                   }`}
                   onClick={() => handleClick(entry)}
                 >
-                  <span class="text-sm w-5 text-center shrink-0">{fileIcon(entry)}</span>
+                  <span class={`w-4 h-4 shrink-0 ${fileIconColor(entry)}`}>
+                    {isDir(entry.entry_type) ? (
+                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
+                    ) : isLink(entry.entry_type) ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    )}
+                  </span>
                   <span
                     class={`flex-1 text-sm truncate ${
                       isDir(entry.entry_type)

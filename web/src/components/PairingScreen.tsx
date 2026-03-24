@@ -193,9 +193,8 @@ export default function PairingScreen() {
         {/* QR / Link hint — adaptive to platform */}
         <div class="surface-card p-4 mt-3">
           <Show when={isMobile()}>
-            {/* Mobile: QR scanning is relevant */}
             <div class="flex items-start gap-3">
-              <span class="text-lg shrink-0 mt-px">📷</span>
+              <svg class="w-4 h-4 shrink-0 mt-0.5 text-text-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               <p class="text-xs text-text-2 leading-relaxed">
                 You can also <span class="text-amber font-500">scan the QR code</span> displayed by your host.
                 It contains the connection settings — no PIN needed.
@@ -203,9 +202,8 @@ export default function PairingScreen() {
             </div>
           </Show>
           <Show when={!isMobile()}>
-            {/* Desktop: link pasting is more relevant */}
             <div class="flex items-start gap-3">
-              <span class="text-lg shrink-0 mt-px">🔗</span>
+              <svg class="w-4 h-4 shrink-0 mt-0.5 text-text-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
               <p class="text-xs text-text-2 leading-relaxed">
                 You can also <span class="text-amber font-500">open the link</span> from your host.
                 Copy the URL shown by <code class="font-mono text-[11px] text-text-1 bg-bg-2 px-1 py-0.5 rounded">jaunt-host serve</code> and
