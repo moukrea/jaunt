@@ -100,7 +100,7 @@ Download the `PKGBUILD` from the [latest release](https://github.com/moukrea/jau
 makepkg -si
 ```
 
-### Pre-built Binaries
+### Pre-built Binaries (CLI)
 
 Download from the [latest release](https://github.com/moukrea/jaunt/releases/latest):
 
@@ -108,6 +108,24 @@ Download from the [latest release](https://github.com/moukrea/jaunt/releases/lat
 |----------|-------------|---------|
 | Linux | x86_64 | `jaunt-<version>-linux-x86_64.tar.gz` |
 | Linux | aarch64 | `jaunt-<version>-linux-aarch64.tar.gz` |
+
+### Desktop App (Tauri)
+
+Native desktop app with the full web UI. Download from the [latest release](https://github.com/moukrea/jaunt/releases/latest):
+
+| Platform | Format |
+|----------|--------|
+| Linux | `.AppImage`, `.deb` |
+| macOS | `.dmg` |
+| Windows | `.msi` |
+
+### Android App
+
+Download the APK from the [latest release](https://github.com/moukrea/jaunt/releases/latest):
+
+| Platform | Format |
+|----------|--------|
+| Android | `.apk` |
 
 ### Requirements
 

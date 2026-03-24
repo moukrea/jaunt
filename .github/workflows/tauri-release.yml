@@ -1,0 +1,185 @@
+name: Tauri Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  build-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+          - platform: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            label: linux-aarch64
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'tauri/src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install cross-compilation tools (aarch64)
+        if: matrix.label == 'linux-aarch64'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web client
+        working-directory: web
+        run: npm run build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+
+      - name: Build Tauri app
+        working-directory: tauri/src-tauri
+        run: cargo tauri build --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.label == 'linux-aarch64' && 'aarch64-linux-gnu-gcc' || '' }}
+
+      - name: Collect artifacts (Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          mkdir -p dist
+          find tauri/src-tauri/target/${{ matrix.target }}/release/bundle -name '*.deb' -exec cp {} dist/ \; 2>/dev/null || true
+          find tauri/src-tauri/target/${{ matrix.target }}/release/bundle -name '*.AppImage' -exec cp {} dist/ \; 2>/dev/null || true
+          find tauri/src-tauri/target/${{ matrix.target }}/release/bundle -name '*.rpm' -exec cp {} dist/ \; 2>/dev/null || true
+          # Rename for clarity
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            ext="${f##*.}"
+            mv "$f" "dist/jaunt-app-${{ github.ref_name }}-${{ matrix.label }}.${ext}" 2>/dev/null || true
+          done
+
+      - name: Collect artifacts (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          mkdir -p dist
+          find tauri/src-tauri/target/${{ matrix.target }}/release/bundle -name '*.dmg' -exec cp {} dist/ \; 2>/dev/null || true
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            mv "$f" "dist/jaunt-app-${{ github.ref_name }}-${{ matrix.label }}.dmg" 2>/dev/null || true
+          done
+
+      - name: Collect artifacts (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Get-ChildItem -Recurse tauri/src-tauri/target/${{ matrix.target }}/release/bundle -Filter *.msi | Copy-Item -Destination dist/
+          Get-ChildItem -Recurse tauri/src-tauri/target/${{ matrix.target }}/release/bundle -Filter *.exe | Where-Object { $_.Name -like '*setup*' -or $_.Name -like '*installer*' } | Copy-Item -Destination dist/
+          Get-ChildItem dist/ | Rename-Item -NewName { "jaunt-app-${{ github.ref_name }}-${{ matrix.label }}$($_.Extension)" }
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            gh release upload "${{ github.ref_name }}" "$f" --clobber || true
+          done
+        shell: bash
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web client
+        working-directory: web
+        run: npm run build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+
+      - name: Initialize Tauri Android
+        working-directory: tauri/src-tauri
+        run: cargo tauri android init
+
+      - name: Build Android APK
+        working-directory: tauri/src-tauri
+        run: cargo tauri android build --apk
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Collect Android artifacts
+        run: |
+          mkdir -p dist
+          find tauri/src-tauri/gen/android -name '*.apk' -exec cp {} dist/ \; 2>/dev/null || true
+          for f in dist/*.apk; do
+            [ -f "$f" ] || continue
+            mv "$f" "dist/jaunt-app-${{ github.ref_name }}-android.apk"
+          done
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in dist/*.apk; do
+            [ -f "$f" ] || continue
+            gh release upload "${{ github.ref_name }}" "$f" --clobber || true
+          done
