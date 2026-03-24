@@ -27,7 +27,7 @@ pub async fn generate_qr_profile(
         host_name,
     };
 
-    let url = encode_profile_url(&profile);
+    let url = encode_profile_url(&profile, config.server.web_url.as_deref());
     Ok((profile, url))
 }
 

@@ -15,6 +15,7 @@ pub struct ServerConfig {
     pub shell: String,
     pub auto_session: bool,
     pub require_approval: bool,
+    pub web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -42,6 +43,7 @@ impl Default for ServerConfig {
             shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
             auto_session: true,
             require_approval: true,
+            web_url: None,
         }
     }
 }

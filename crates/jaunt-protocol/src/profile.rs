@@ -26,12 +26,16 @@ pub enum PairingData {
     Pin { pin: String },
 }
 
+/// Default web client URL (GitHub Pages deployment).
+pub const DEFAULT_WEB_URL: &str = "https://moukrea.github.io/jaunt";
+
 /// Encode a connection profile into a URL with the profile as a base64url fragment.
 /// The fragment is never sent to any server — it stays in the browser.
-pub fn encode_profile_url(profile: &ConnectionProfile) -> String {
+pub fn encode_profile_url(profile: &ConnectionProfile, base_url: Option<&str>) -> String {
+    let base = base_url.unwrap_or(DEFAULT_WEB_URL);
     let json = serde_json::to_vec(profile).unwrap();
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&json);
-    format!("https://jaunt.app/#{encoded}")
+    format!("{base}/#{encoded}")
 }
 
 /// Decode a connection profile from a URL fragment (base64url-encoded JSON).
@@ -47,7 +51,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_roundtrip_tier0() {
+    fn profile_roundtrip_tier0_default_url() {
         let profile = ConnectionProfile {
             pairing: PairingData::Qr {
                 qr_data: vec![1, 2, 3],
@@ -59,9 +63,9 @@ mod tests {
             turn_password: None,
             host_name: "mybox".into(),
         };
-        let url = encode_profile_url(&profile);
-        assert!(url.starts_with("https://jaunt.app/#"));
-        let fragment = url.strip_prefix("https://jaunt.app/#").unwrap();
+        let url = encode_profile_url(&profile, None);
+        assert!(url.starts_with(DEFAULT_WEB_URL));
+        let fragment = url.split('#').nth(1).unwrap();
         let decoded = decode_profile_from_fragment(fragment).unwrap();
         assert_eq!(decoded.host_name, "mybox");
         assert!(decoded.signal_server.is_none());
@@ -69,6 +73,26 @@ mod tests {
             PairingData::Qr { qr_data } => assert_eq!(qr_data, vec![1, 2, 3]),
             _ => panic!("wrong pairing type"),
         }
+    }
+
+    #[test]
+    fn profile_roundtrip_custom_url() {
+        let profile = ConnectionProfile {
+            pairing: PairingData::Pin {
+                pin: "A1B2".into(),
+            },
+            signal_server: None,
+            signal_auth_token: None,
+            turn_server: None,
+            turn_username: None,
+            turn_password: None,
+            host_name: "box".into(),
+        };
+        let url = encode_profile_url(&profile, Some("https://my.jaunt.dev"));
+        assert!(url.starts_with("https://my.jaunt.dev/#"));
+        let fragment = url.split('#').nth(1).unwrap();
+        let decoded = decode_profile_from_fragment(fragment).unwrap();
+        assert_eq!(decoded.host_name, "box");
     }
 
     #[test]
@@ -84,8 +108,8 @@ mod tests {
             turn_password: Some("pass".into()),
             host_name: "mybox".into(),
         };
-        let url = encode_profile_url(&profile);
-        let fragment = url.strip_prefix("https://jaunt.app/#").unwrap();
+        let url = encode_profile_url(&profile, None);
+        let fragment = url.split('#').nth(1).unwrap();
         let decoded = decode_profile_from_fragment(fragment).unwrap();
         assert_eq!(
             decoded.signal_server.as_deref(),
@@ -126,8 +150,8 @@ mod tests {
             turn_password: None,
             host_name: "laptop".into(),
         };
-        let url = encode_profile_url(&profile);
-        let fragment = url.strip_prefix("https://jaunt.app/#").unwrap();
+        let url = encode_profile_url(&profile, None);
+        let fragment = url.split('#').nth(1).unwrap();
         let decoded = decode_profile_from_fragment(fragment).unwrap();
         match decoded.pairing {
             PairingData::Link { uri } => assert_eq!(uri, "cairn://pair/abc123"),
