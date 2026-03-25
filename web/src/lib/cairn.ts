@@ -30,7 +30,8 @@ export async function initNode(profile?: Partial<ConnectionProfile>): Promise<No
 
   config.storageBackend = 'memory';
 
-  node = await Node.create(config);
+  // Use createAndStart to initialize transport layer for real connectivity
+  node = await Node.createAndStart(config);
 
   // Determine tier
   if (profile?.signal_server) {

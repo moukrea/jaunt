@@ -12,10 +12,17 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     let snag = SnagBridge::new();
     snag.check_available()?;
 
-    // Build cairn config
+    // Build cairn config and start transport
     let cairn_config = build_cairn_config(&config);
-    let node = cairn_p2p::create_with_config(cairn_config)
+    let node = cairn_p2p::create_and_start_with_config(cairn_config)
+        .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
+
+    // Log listen addresses
+    let addrs = node.listen_addresses().await;
+    if !addrs.is_empty() {
+        eprintln!("  Listen: {}", addrs.join(", "));
+    }
 
     // Generate connection profile
     let (_conn_profile, profile_url) = profile::generate_qr_profile(&node, &config).await?;
