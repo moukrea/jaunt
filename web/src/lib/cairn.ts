@@ -30,8 +30,15 @@ export async function initNode(profile?: Partial<ConnectionProfile>): Promise<No
 
   config.storageBackend = 'memory';
 
-  // Use createAndStart to initialize transport layer for real connectivity
-  node = await Node.createAndStart(config);
+  // Create node and start transport if available (cairn-p2p >= 0.3.0)
+  node = await Node.create(config);
+  if (typeof (node as any).startTransport === 'function') {
+    try {
+      await (node as any).startTransport();
+    } catch {
+      // Transport start may fail in some environments — continue without it
+    }
+  }
 
   // Determine tier
   if (profile?.signal_server) {
