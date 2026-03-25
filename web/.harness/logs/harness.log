@@ -1,0 +1,80 @@
+{"timestamp":"2026-03-24T11:43:13Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T11:43:13Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/web/tsconfig.json","duration_ms":5}
+{"timestamp":"2026-03-24T11:43:15Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T11:43:15Z","hook":"post-edit","decision":"errors","detail":"vite.config.ts: 9 error line(s)","duration_ms":674}
+{"timestamp":"2026-03-24T11:43:16Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T11:43:17Z","hook":"post-edit","decision":"errors","detail":"uno.config.ts: 9 error line(s)","duration_ms":665}
+{"timestamp":"2026-03-24T11:43:19Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T11:43:19Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/web/index.html","duration_ms":7}
+{"timestamp":"2026-03-24T11:43:21Z","hook":"guard-writes","decision":"pass","duration_ms":35}
+{"timestamp":"2026-03-24T11:43:21Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/web/public/manifest.json","duration_ms":8}
+{"timestamp":"2026-03-24T11:43:35Z","hook":"guard-writes","decision":"pass","duration_ms":13}
+{"timestamp":"2026-03-24T11:43:36Z","hook":"post-edit","decision":"errors","detail":"protocol.ts: 9 error line(s)","duration_ms":847}
+{"timestamp":"2026-03-24T11:43:40Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T11:43:41Z","hook":"post-edit","decision":"errors","detail":"profile.ts: 9 error line(s)","duration_ms":990}
+{"timestamp":"2026-03-24T11:43:46Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T11:43:50Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T11:43:51Z","hook":"post-edit","decision":"errors","detail":"store.ts: 9 error line(s)","duration_ms":733}
+{"timestamp":"2026-03-24T11:44:06Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T11:44:07Z","hook":"post-edit","decision":"errors","detail":"cairn.ts: 9 error line(s)","duration_ms":697}
+{"timestamp":"2026-03-24T11:44:12Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T11:44:13Z","hook":"post-edit","decision":"errors","detail":"index.tsx: 9 error line(s)","duration_ms":667}
+{"timestamp":"2026-03-24T11:44:20Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T11:44:21Z","hook":"post-edit","decision":"errors","detail":"App.tsx: 9 error line(s)","duration_ms":776}
+{"timestamp":"2026-03-24T11:44:40Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T11:44:41Z","hook":"post-edit","decision":"errors","detail":"PairingScreen.tsx: 9 error line(s)","duration_ms":732}
+{"timestamp":"2026-03-24T11:44:57Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T11:44:57Z","hook":"post-edit","decision":"errors","detail":"SessionList.tsx: 9 error line(s)","duration_ms":635}
+{"timestamp":"2026-03-24T11:45:15Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T11:45:16Z","hook":"post-edit","decision":"errors","detail":"Terminal.tsx: 9 error line(s)","duration_ms":682}
+{"timestamp":"2026-03-24T11:45:37Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T11:45:38Z","hook":"post-edit","decision":"errors","detail":"FileBrowser.tsx: 9 error line(s)","duration_ms":611}
+{"timestamp":"2026-03-24T11:45:57Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-24T11:45:57Z","hook":"post-edit","decision":"errors","detail":"Settings.tsx: 9 error line(s)","duration_ms":669}
+{"timestamp":"2026-03-24T11:46:00Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T11:46:01Z","hook":"post-edit","decision":"errors","detail":"StatusBar.tsx: 9 error line(s)","duration_ms":624}
+{"timestamp":"2026-03-24T11:46:49Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-24T11:46:55Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":9}
+{"timestamp":"2026-03-24T11:47:25Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T11:47:27Z","hook":"post-edit","decision":"errors","detail":"vite.config.ts: 19 error line(s)","duration_ms":1711}
+{"timestamp":"2026-03-24T11:47:33Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":10}
+{"timestamp":"2026-03-24T11:47:46Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T11:47:48Z","hook":"post-edit","decision":"errors","detail":"vite.config.ts: 19 error line(s)","duration_ms":1674}
+{"timestamp":"2026-03-24T11:48:02Z","hook":"task-gate","decision":"skip","duration_ms":5}
+{"timestamp":"2026-03-24T11:48:15Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T11:48:15Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tauri/src-tauri/Cargo.toml","duration_ms":7}
+{"timestamp":"2026-03-24T11:48:15Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T11:48:15Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T11:48:20Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T11:48:20Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tauri/src-tauri/tauri.conf.json","duration_ms":7}
+{"timestamp":"2026-03-24T11:48:30Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T11:48:30Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":10}
+{"timestamp":"2026-03-24T11:48:48Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-24T11:48:48Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T11:48:49Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T11:48:49Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":10}
+{"timestamp":"2026-03-24T11:48:53Z","hook":"task-gate","decision":"skip","duration_ms":8}
+{"timestamp":"2026-03-24T11:49:06Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-24T11:49:06Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/web.yml","duration_ms":6}
+{"timestamp":"2026-03-24T11:49:16Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T11:49:16Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.gitignore","duration_ms":6}
+{"timestamp":"2026-03-24T11:49:27Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T11:49:27Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/README.md","duration_ms":4}
+{"timestamp":"2026-03-24T11:49:40Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T11:49:40Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/README.md","duration_ms":5}
+{"timestamp":"2026-03-24T11:49:44Z","hook":"task-gate","decision":"skip","duration_ms":5}
+{"timestamp":"2026-03-24T11:49:51Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}
+{"timestamp":"2026-03-24T11:50:15Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":13}
+{"timestamp":"2026-03-24T12:32:26Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T12:32:27Z","hook":"post-edit","decision":"errors","detail":"SessionList.tsx: 7 error line(s)","duration_ms":1716}
+{"timestamp":"2026-03-24T12:32:33Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T12:32:35Z","hook":"post-edit","decision":"errors","detail":"SessionList.tsx: 19 error line(s)","duration_ms":2335}
+{"timestamp":"2026-03-25T08:08:38Z","hook":"failure-tracker","decision":"track","detail":"count=0 sig=Exit code ","duration_ms":12}
+{"timestamp":"2026-03-25T17:14:26Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-25T17:14:27Z","hook":"post-edit","decision":"errors","detail":"cairn.ts: 19 error line(s)","duration_ms":1652}
+{"timestamp":"2026-03-25T17:16:04Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-25T17:16:05Z","hook":"post-edit","decision":"errors","detail":"cairn.ts: 19 error line(s)","duration_ms":1485}
+{"timestamp":"2026-03-25T19:02:26Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T19:02:28Z","hook":"post-edit","decision":"clean","duration_ms":1739}
+{"timestamp":"2026-03-25T19:05:09Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-25T19:05:11Z","hook":"post-edit","decision":"clean","duration_ms":1415}
