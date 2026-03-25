@@ -30,15 +30,11 @@ export async function initNode(profile?: Partial<ConnectionProfile>): Promise<No
 
   config.storageBackend = 'memory';
 
-  // Create node and start transport if available (cairn-p2p >= 0.3.0)
+  // Create node (cairn-p2p 0.2.0 — browser-compatible build)
+  // Transport wiring (startTransport/createAndStart) requires cairn-p2p 0.3.0+
+  // which pulls in Node.js libp2p deps that don't bundle for browser yet.
+  // The Rust host handles real transport; web client uses cairn's pairing/crypto.
   node = await Node.create(config);
-  if (typeof (node as any).startTransport === 'function') {
-    try {
-      await (node as any).startTransport();
-    } catch {
-      // Transport start may fail in some environments — continue without it
-    }
-  }
 
   // Determine tier
   if (profile?.signal_server) {
