@@ -418,3 +418,18 @@
 {"timestamp":"2026-03-25T20:05:36Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":6}
 {"timestamp":"2026-03-25T20:05:58Z","hook":"guard-writes","decision":"pass","duration_ms":7}
 {"timestamp":"2026-03-25T20:05:58Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":7}
+{"timestamp":"2026-03-25T20:21:56Z","hook":"stop-gate","decision":"pass","duration_ms":4647}
+{"timestamp":"2026-03-25T20:21:57Z","hook":"classify-prompt","decision":"simple","duration_ms":18}
+{"timestamp":"2026-03-25T20:21:57Z","hook":"classify-prompt","decision":"simple","duration_ms":9}
+{"timestamp":"2026-03-25T20:21:57Z","hook":"classify-prompt","decision":"simple","duration_ms":11}
+{"timestamp":"2026-03-25T20:21:57Z","hook":"classify-prompt","decision":"simple","duration_ms":10}
+{"timestamp":"2026-03-25T20:21:57Z","hook":"classify-prompt","decision":"simple","duration_ms":10}
+{"timestamp":"2026-03-25T20:24:31Z","hook":"stop-gate","decision":"pass","duration_ms":741}
+{"timestamp":"2026-03-25T20:25:32Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":41}
+{"timestamp":"2026-03-25T21:20:08Z","hook":"classify-prompt","decision":"medium","duration_ms":58}
+{"timestamp":"2026-03-25T21:20:28Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-25T21:23:56Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":13}
+{"timestamp":"2026-03-25T21:24:15Z","hook":"failure-tracker","decision":"track","detail":"count=0 sig=Exit code ","duration_ms":14}
+{"timestamp":"2026-03-25T21:29:50Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T21:29:50Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-25T21:52:38Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":19}

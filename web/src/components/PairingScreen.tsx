@@ -16,13 +16,16 @@ export default function PairingScreen() {
 
   onMount(async () => {
     const fragment = window.location.hash.slice(1);
+    console.log('[jaunt] onMount, fragment length:', fragment.length);
     if (fragment) {
       try {
         setPhase('decoding');
         setStatusMsg('Reading connection profile...');
         const profile = decodeProfileFromFragment(fragment);
+        console.log('[jaunt] profile decoded:', profile.host_name, 'ws_addrs:', profile.ws_addrs);
         await pairFromProfile(profile);
       } catch (e: any) {
+        console.error('[jaunt] pairing error:', e);
         setPhase('error');
         setErrorMsg(e.message);
       }
@@ -30,14 +33,26 @@ export default function PairingScreen() {
   });
 
   async function pairFromProfile(profile: ConnectionProfile) {
+    // If we have WebSocket addresses, connect directly — no cairn pairing needed.
+    // The WS address is already in the profile, we just need to establish the connection.
+    if (profile.ws_addrs && profile.ws_addrs.length > 0) {
+      setPhase('connecting');
+      setStatusMsg(`Connecting to ${profile.host_name}...`);
+      console.log('[jaunt] Direct WS connection, skipping cairn pairing');
+      setConnectionHints(profile.ws_addrs);
+      store.setHostName(profile.host_name);
+      await connectToHost('ws-direct');
+      setPhase('done');
+      store.setConnected(true);
+      store.setView('sessions');
+      history.replaceState(null, '', window.location.pathname);
+      return;
+    }
+
+    // No WS addresses — fall back to cairn P2P pairing
     setPhase('initializing');
     setStatusMsg(`Reaching ${profile.host_name}...`);
     await initNode(profile);
-
-    // Pass WebSocket addresses from profile to cairn transport layer
-    if (profile.ws_addrs && profile.ws_addrs.length > 0) {
-      setConnectionHints(profile.ws_addrs);
-    }
 
     setPhase('pairing');
     setStatusMsg('Establishing secure channel...');

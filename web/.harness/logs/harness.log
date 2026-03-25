@@ -108,3 +108,26 @@
 {"timestamp":"2026-03-25T20:19:16Z","hook":"post-edit","decision":"clean","duration_ms":1362}
 {"timestamp":"2026-03-25T20:19:49Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
 {"timestamp":"2026-03-25T20:20:37Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}
+{"timestamp":"2026-03-25T21:32:07Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":16}
+{"timestamp":"2026-03-25T21:32:18Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}
+{"timestamp":"2026-03-25T21:34:31Z","hook":"guard-writes","decision":"pass","duration_ms":14}
+{"timestamp":"2026-03-25T21:34:34Z","hook":"post-edit","decision":"clean","duration_ms":2648}
+{"timestamp":"2026-03-25T21:34:55Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-25T21:34:58Z","hook":"post-edit","decision":"clean","duration_ms":2474}
+{"timestamp":"2026-03-25T21:35:26Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-25T21:35:28Z","hook":"post-edit","decision":"clean","duration_ms":2647}
+{"timestamp":"2026-03-25T21:36:41Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-25T21:36:44Z","hook":"post-edit","decision":"clean","duration_ms":2637}
+{"timestamp":"2026-03-25T21:37:02Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-25T21:37:04Z","hook":"post-edit","decision":"clean","duration_ms":2402}
+{"timestamp":"2026-03-25T21:40:14Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":12}
+{"timestamp":"2026-03-25T21:40:24Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":23}
+{"timestamp":"2026-03-25T21:42:11Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":29}
+{"timestamp":"2026-03-25T21:42:39Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":15}
+{"timestamp":"2026-03-25T21:45:03Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-25T21:45:05Z","hook":"post-edit","decision":"clean","duration_ms":2310}
+{"timestamp":"2026-03-25T21:45:32Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-25T21:45:35Z","hook":"post-edit","decision":"clean","duration_ms":2598}
+{"timestamp":"2026-03-25T21:45:48Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-25T21:45:50Z","hook":"post-edit","decision":"clean","duration_ms":2521}
+{"timestamp":"2026-03-25T21:48:34Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}

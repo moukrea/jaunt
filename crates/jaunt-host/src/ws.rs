@@ -103,7 +103,7 @@ fn handle_rpc(
     file_browser: &Option<FileBrowser>,
 ) -> RpcResponse {
     match request {
-        RpcRequest::SessionList => match snag.list_sessions() {
+        RpcRequest::SessionList {} => match snag.list_sessions() {
             Ok(sessions) => RpcResponse::Ok(RpcData::SessionList(sessions)),
             Err(e) => RpcResponse::Error {
                 code: 2,
@@ -120,14 +120,14 @@ fn handle_rpc(
             }
         }
         RpcRequest::SessionKill { target } => match snag.kill_session(target) {
-            Ok(()) => RpcResponse::Ok(RpcData::Empty),
+            Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
             Err(e) => RpcResponse::Error {
                 code: 4,
                 message: e,
             },
         },
         RpcRequest::SessionSend { target, input } => match snag.send_input(target, input) {
-            Ok(()) => RpcResponse::Ok(RpcData::Empty),
+            Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
             Err(e) => RpcResponse::Error {
                 code: 5,
                 message: e,
@@ -142,7 +142,7 @@ fn handle_rpc(
         },
         RpcRequest::SessionRename { target, new_name } => {
             match snag.rename_session(target, new_name) {
-                Ok(()) => RpcResponse::Ok(RpcData::Empty),
+                Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
                 Err(e) => RpcResponse::Error {
                     code: 7,
                     message: e,
@@ -180,7 +180,7 @@ fn handle_rpc(
         },
         RpcRequest::FileDelete { path } => match file_browser {
             Some(fb) => match fb.delete(path) {
-                Ok(()) => RpcResponse::Ok(RpcData::Empty),
+                Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
                 Err(e) => RpcResponse::Error {
                     code: 12,
                     message: e,
@@ -191,6 +191,6 @@ fn handle_rpc(
                 message: "file browser disabled".into(),
             },
         },
-        _ => RpcResponse::Ok(RpcData::Empty),
+        _ => RpcResponse::Ok(RpcData::Empty {}),
     }
 }

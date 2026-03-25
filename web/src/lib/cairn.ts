@@ -82,29 +82,10 @@ export function setConnectionHints(hints: string[]) {
  * Messages are sent as raw bytes (msgpack-encoded RPC requests/responses).
  */
 export async function connectToHost(peerId: string): Promise<void> {
-  if (!node) throw new Error('Node not initialized');
-
-  // Create cairn session (handles crypto/identity)
-  session = await node.connect(peerId);
-  rpcChannel = session.openChannel('rpc');
-  ptyChannel = session.openChannel('pty');
-
-  // Set up cairn session callbacks (for when real transport works)
-  session.onMessage(rpcChannel, (data: Uint8Array) => {
-    const resp = decodeResponse(data);
-    if (pendingRpcResolve) {
-      const resolve = pendingRpcResolve;
-      pendingRpcResolve = null;
-      resolve(resp);
-    }
-  });
-
-  session.onMessage(ptyChannel, (data: Uint8Array) => {
-    if (onPtyData) onPtyData(data);
-  });
-
-  // Try to connect via WebSocket using connection hints
+  // Try WebSocket first — this is the primary transport for browser clients
+  console.log('[jaunt] connectToHost, connectionHints:', connectionHints);
   const wsAddr = findWsAddress();
+  console.log('[jaunt] wsAddr:', wsAddr);
   if (wsAddr) {
     try {
       await connectWebSocket(wsAddr);
@@ -164,15 +145,17 @@ function connectWebSocket(url: string): Promise<void> {
 
     socket.onmessage = (event) => {
       const data = new Uint8Array(event.data);
+      console.log('[jaunt] WS received:', data.length, 'bytes');
       // Route incoming messages
       if (pendingRpcResolve) {
         try {
           const resp = decodeResponse(data);
+          console.log('[jaunt] WS decoded response:', JSON.stringify(resp).substring(0, 200));
           const resolve = pendingRpcResolve;
           pendingRpcResolve = null;
           resolve(resp);
-        } catch {
-          // Not an RPC response — might be PTY data
+        } catch (e) {
+          console.error('[jaunt] WS decode failed:', e, 'raw:', Array.from(data.slice(0, 30)));
           if (onPtyData) onPtyData(data);
         }
       } else if (onPtyData) {
@@ -194,15 +177,16 @@ function connectWebSocket(url: string): Promise<void> {
 }
 
 export async function sendRpc(request: RpcRequest): Promise<RpcResponse> {
-  if (!session || !rpcChannel) throw new Error('Not connected');
-
   const data = encodeRequest(request);
+  console.log('[jaunt] sendRpc:', Object.keys(request)[0], 'ws:', ws ? ws.readyState : 'null', 'data:', data.length, 'bytes');
 
-  // Send via WebSocket if available, otherwise via cairn session outbox
+  // Send via WebSocket
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(data);
-  } else {
+  } else if (session && rpcChannel) {
     session.send(rpcChannel, data);
+  } else {
+    throw new Error('Not connected');
   }
 
   return new Promise((resolve) => {

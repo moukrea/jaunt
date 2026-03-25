@@ -165,7 +165,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
     };
 
     match request {
-        RpcRequest::SessionList => match snag.list_sessions() {
+        RpcRequest::SessionList {} => match snag.list_sessions() {
             Ok(sessions) => RpcResponse::Ok(RpcData::SessionList(sessions)),
             Err(e) => RpcResponse::Error {
                 code: 2,
@@ -182,14 +182,14 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
             }
         }
         RpcRequest::SessionKill { target } => match snag.kill_session(&target) {
-            Ok(()) => RpcResponse::Ok(RpcData::Empty),
+            Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
             Err(e) => RpcResponse::Error {
                 code: 4,
                 message: e,
             },
         },
         RpcRequest::SessionSend { target, input } => match snag.send_input(&target, &input) {
-            Ok(()) => RpcResponse::Ok(RpcData::Empty),
+            Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
             Err(e) => RpcResponse::Error {
                 code: 5,
                 message: e,
@@ -204,7 +204,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
         },
         RpcRequest::SessionRename { target, new_name } => {
             match snag.rename_session(&target, &new_name) {
-                Ok(()) => RpcResponse::Ok(RpcData::Empty),
+                Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
                 Err(e) => RpcResponse::Error {
                     code: 7,
                     message: e,
@@ -242,7 +242,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
         },
         RpcRequest::FileDelete { path } => match file_browser {
             Some(fb) => match fb.delete(&path) {
-                Ok(()) => RpcResponse::Ok(RpcData::Empty),
+                Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
                 Err(e) => RpcResponse::Error {
                     code: 12,
                     message: e,
@@ -254,12 +254,12 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
             },
         },
         RpcRequest::SessionAttach { .. }
-        | RpcRequest::SessionDetach
+        | RpcRequest::SessionDetach {}
         | RpcRequest::Resize { .. }
         | RpcRequest::FileDownload { .. }
         | RpcRequest::FileUpload { .. } => {
             // Streaming operations handled separately via PTY/file channels
-            RpcResponse::Ok(RpcData::Empty)
+            RpcResponse::Ok(RpcData::Empty {})
         }
     }
 }

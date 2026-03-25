@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Client → Host RPC requests, sent on cairn's "rpc" channel as MessagePack.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RpcRequest {
-    SessionList,
+    SessionList {},
     SessionCreate {
         shell: Option<String>,
         name: Option<String>,
@@ -12,7 +12,7 @@ pub enum RpcRequest {
     SessionAttach {
         target: String,
     },
-    SessionDetach,
+    SessionDetach {},
     SessionKill {
         target: String,
     },
@@ -79,7 +79,7 @@ pub enum RpcData {
     FileReady {
         size: u64,
     },
-    Empty,
+    Empty {},
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub enum EntryType {
 }
 
 pub fn encode_request(req: &RpcRequest) -> Result<Vec<u8>, String> {
-    rmp_serde::to_vec(req).map_err(|e| format!("encode error: {e}"))
+    rmp_serde::to_vec_named(req).map_err(|e| format!("encode error: {e}"))
 }
 
 pub fn decode_request(data: &[u8]) -> Result<RpcRequest, String> {
@@ -119,7 +119,7 @@ pub fn decode_request(data: &[u8]) -> Result<RpcRequest, String> {
 }
 
 pub fn encode_response(resp: &RpcResponse) -> Result<Vec<u8>, String> {
-    rmp_serde::to_vec(resp).map_err(|e| format!("encode error: {e}"))
+    rmp_serde::to_vec_named(resp).map_err(|e| format!("encode error: {e}"))
 }
 
 pub fn decode_response(data: &[u8]) -> Result<RpcResponse, String> {
@@ -132,10 +132,10 @@ mod tests {
 
     #[test]
     fn request_roundtrip_session_list() {
-        let req = RpcRequest::SessionList;
+        let req = RpcRequest::SessionList {};
         let data = encode_request(&req).unwrap();
         let decoded = decode_request(&data).unwrap();
-        assert!(matches!(decoded, RpcRequest::SessionList));
+        assert!(matches!(decoded, RpcRequest::SessionList {}));
     }
 
     #[test]
@@ -332,9 +332,9 @@ mod tests {
 
     #[test]
     fn response_roundtrip_empty() {
-        let resp = RpcResponse::Ok(RpcData::Empty);
+        let resp = RpcResponse::Ok(RpcData::Empty {});
         let data = encode_response(&resp).unwrap();
         let decoded = decode_response(&data).unwrap();
-        assert!(matches!(decoded, RpcResponse::Ok(RpcData::Empty)));
+        assert!(matches!(decoded, RpcResponse::Ok(RpcData::Empty {})));
     }
 }

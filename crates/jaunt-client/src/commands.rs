@@ -181,7 +181,7 @@ pub async fn cmd_sessions(config: &ClientConfig, host: &HostEntry) -> Result<(),
         .await
         .map_err(|e| format!("channel open failed: {e}"))?;
 
-    let request = RpcRequest::SessionList;
+    let request = RpcRequest::SessionList {};
     let data = jaunt_protocol::encode_request(&request).map_err(|e| format!("encode: {e}"))?;
     session
         .send(&channel, &data)
