@@ -104,8 +104,13 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                         }
                         // Send response back via cairn session
                         if let Ok(resp_data) = jaunt_protocol::encode_response(&response) {
-                            // In production, this would send via the cairn session's rpc channel
-                            let _ = resp_data;
+                            let sessions = node.sessions().await;
+                            if let Some(session) = sessions.get(peer_id) {
+                                let ch = session.open_channel("rpc").await;
+                                if let Ok(ch) = ch {
+                                    let _ = session.send(&ch, &resp_data).await;
+                                }
+                            }
                         }
                     }
                     "pty" => {
