@@ -78,3 +78,33 @@
 {"timestamp":"2026-03-25T19:02:28Z","hook":"post-edit","decision":"clean","duration_ms":1739}
 {"timestamp":"2026-03-25T19:05:09Z","hook":"guard-writes","decision":"pass","duration_ms":5}
 {"timestamp":"2026-03-25T19:05:11Z","hook":"post-edit","decision":"clean","duration_ms":1415}
+{"timestamp":"2026-03-25T20:08:50Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-25T20:08:51Z","hook":"post-edit","decision":"clean","duration_ms":1691}
+{"timestamp":"2026-03-25T20:12:52Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T20:12:54Z","hook":"post-edit","decision":"clean","duration_ms":1342}
+{"timestamp":"2026-03-25T20:13:43Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T20:13:43Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-25T20:14:07Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-25T20:14:07Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-25T20:14:23Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-25T20:14:23Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-25T20:15:11Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-25T20:15:12Z","hook":"post-edit","decision":"clean","duration_ms":1352}
+{"timestamp":"2026-03-25T20:15:33Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-25T20:15:34Z","hook":"post-edit","decision":"clean","duration_ms":1358}
+{"timestamp":"2026-03-25T20:16:01Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T20:16:02Z","hook":"post-edit","decision":"clean","duration_ms":1455}
+{"timestamp":"2026-03-25T20:16:37Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T20:16:37Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-host/Cargo.toml","duration_ms":6}
+{"timestamp":"2026-03-25T20:17:14Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-25T20:17:14Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-25T20:17:35Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T20:17:35Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-25T20:17:58Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T20:17:58Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-25T20:18:26Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T20:18:27Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-25T20:19:15Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-25T20:19:16Z","hook":"post-edit","decision":"clean","duration_ms":1362}
+{"timestamp":"2026-03-25T20:19:49Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-25T20:20:37Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}

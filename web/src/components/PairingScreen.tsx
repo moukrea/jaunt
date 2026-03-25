@@ -1,6 +1,6 @@
 import { createSignal, onMount, Show } from 'solid-js';
 import { decodeProfileFromFragment, type ConnectionProfile } from '../lib/profile';
-import { initNode, pairScanQr, pairEnterPin, connectToHost } from '../lib/cairn';
+import { initNode, pairScanQr, pairEnterPin, connectToHost, setConnectionHints } from '../lib/cairn';
 import { store, saveHost } from '../lib/store';
 
 type PairingPhase = 'idle' | 'decoding' | 'initializing' | 'pairing' | 'connecting' | 'done' | 'error';
@@ -33,6 +33,11 @@ export default function PairingScreen() {
     setPhase('initializing');
     setStatusMsg(`Reaching ${profile.host_name}...`);
     await initNode(profile);
+
+    // Pass WebSocket addresses from profile to cairn transport layer
+    if (profile.ws_addrs && profile.ws_addrs.length > 0) {
+      setConnectionHints(profile.ws_addrs);
+    }
 
     setPhase('pairing');
     setStatusMsg('Establishing secure channel...');

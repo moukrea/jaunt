@@ -16,6 +16,9 @@ pub struct ConnectionProfile {
     pub turn_username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_password: Option<String>,
+    /// WebSocket addresses the host is listening on (for browser clients).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ws_addrs: Vec<String>,
     pub host_name: String,
 }
 
@@ -62,6 +65,7 @@ mod tests {
             turn_username: None,
             turn_password: None,
             host_name: "mybox".into(),
+            ws_addrs: vec![],
         };
         let url = encode_profile_url(&profile, None);
         assert!(url.starts_with(DEFAULT_WEB_URL));
@@ -87,6 +91,7 @@ mod tests {
             turn_username: None,
             turn_password: None,
             host_name: "box".into(),
+            ws_addrs: vec![],
         };
         let url = encode_profile_url(&profile, Some("https://my.jaunt.dev"));
         assert!(url.starts_with("https://my.jaunt.dev/#"));
@@ -107,6 +112,7 @@ mod tests {
             turn_username: Some("user".into()),
             turn_password: Some("pass".into()),
             host_name: "mybox".into(),
+            ws_addrs: vec![],
         };
         let url = encode_profile_url(&profile, None);
         let fragment = url.split('#').nth(1).unwrap();
@@ -131,6 +137,7 @@ mod tests {
             turn_username: None,
             turn_password: None,
             host_name: "host".into(),
+            ws_addrs: vec![],
         };
         let json = serde_json::to_string(&profile).unwrap();
         assert!(!json.contains("signal_server"));
@@ -149,6 +156,7 @@ mod tests {
             turn_username: None,
             turn_password: None,
             host_name: "laptop".into(),
+            ws_addrs: vec![],
         };
         let url = encode_profile_url(&profile, None);
         let fragment = url.split('#').nth(1).unwrap();

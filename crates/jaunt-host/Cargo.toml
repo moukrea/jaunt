@@ -12,7 +12,9 @@ path = "src/main.rs"
 [dependencies]
 jaunt-protocol = { path = "../jaunt-protocol" }
 cairn-p2p = { git = "https://github.com/moukrea/cairn.git", branch = "main" }
-tokio = { version = "1", features = ["rt", "macros", "signal", "sync", "time", "process", "io-util"] }
+tokio = { version = "1", features = ["rt", "macros", "signal", "sync", "time", "process", "io-util", "net"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

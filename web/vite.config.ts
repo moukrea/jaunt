@@ -18,6 +18,7 @@ export default defineConfig({
       external: [
         /^@libp2p\//,
         /^@chainsafe\//,
+        /^@multiformats\//,
         /^libp2p$/,
       ],
     },

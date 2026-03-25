@@ -5,6 +5,7 @@ export interface ConnectionProfile {
   turn_server?: string;
   turn_username?: string;
   turn_password?: string;
+  ws_addrs?: string[];
   host_name: string;
 }
 

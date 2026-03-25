@@ -4,6 +4,7 @@ mod files;
 mod node;
 mod profile;
 mod snag;
+mod ws;
 
 use clap::{Parser, Subcommand};
 

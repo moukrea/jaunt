@@ -1,0 +1,420 @@
+{"timestamp":"2026-03-22T22:29:36Z","hook":"session-start","decision":"silent","duration_ms":16}
+{"timestamp":"2026-03-22T22:33:29Z","hook":"classify-prompt","decision":"massive","duration_ms":35}
+{"timestamp":"2026-03-22T22:33:46Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":15}
+{"timestamp":"2026-03-22T22:34:02Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-22T22:34:02Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_jaunt_overview.md","duration_ms":4}
+{"timestamp":"2026-03-22T22:34:04Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T22:34:04Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":8}
+{"timestamp":"2026-03-22T22:34:49Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-22T22:34:49Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_snag_current_state.md","duration_ms":9}
+{"timestamp":"2026-03-22T22:34:57Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T22:34:57Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_snag_cargo_issue.md","duration_ms":6}
+{"timestamp":"2026-03-22T22:35:03Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T22:35:03Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":6}
+{"timestamp":"2026-03-22T22:36:00Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T22:36:00Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_cairn_structure.md","duration_ms":6}
+{"timestamp":"2026-03-22T22:36:11Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T22:36:11Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":5}
+{"timestamp":"2026-03-22T22:36:13Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T22:36:13Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_snag_current_state.md","duration_ms":7}
+{"timestamp":"2026-03-22T22:36:15Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T22:36:15Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_cairn_cicd.md","duration_ms":5}
+{"timestamp":"2026-03-22T22:36:22Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T22:36:22Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":6}
+{"timestamp":"2026-03-22T22:37:20Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T22:37:20Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T22:37:25Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T22:37:25Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T22:37:31Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-22T22:37:31Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T22:37:41Z","hook":"task-gate","decision":"skip","duration_ms":4}
+{"timestamp":"2026-03-22T22:37:53Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T22:37:53Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T22:38:12Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T22:38:12Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T22:38:44Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-22T22:38:44Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T22:38:54Z","hook":"task-gate","decision":"skip","duration_ms":4}
+{"timestamp":"2026-03-22T22:39:33Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T22:39:33Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T22:39:52Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T22:39:53Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T22:40:19Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-22T22:40:19Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":10}
+{"timestamp":"2026-03-22T22:40:35Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T22:40:35Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T22:40:48Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-22T22:40:48Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T22:40:53Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T22:40:53Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T22:41:06Z","hook":"task-gate","decision":"skip","duration_ms":4}
+{"timestamp":"2026-03-22T22:41:14Z","hook":"guard-writes","decision":"pass","duration_ms":16}
+{"timestamp":"2026-03-22T22:41:14Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T22:41:56Z","hook":"guard-writes","decision":"pass","duration_ms":17}
+{"timestamp":"2026-03-22T22:41:56Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T22:42:00Z","hook":"guard-writes","decision":"pass","duration_ms":18}
+{"timestamp":"2026-03-22T22:42:00Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T22:42:27Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-22T22:42:51Z","hook":"guard-writes","decision":"pass","duration_ms":23}
+{"timestamp":"2026-03-22T22:42:51Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T22:42:56Z","hook":"guard-writes","decision":"pass","duration_ms":18}
+{"timestamp":"2026-03-22T22:42:56Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T22:42:59Z","hook":"guard-writes","decision":"pass","duration_ms":20}
+{"timestamp":"2026-03-22T22:42:59Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T22:43:21Z","hook":"task-gate","decision":"skip","duration_ms":4}
+{"timestamp":"2026-03-22T22:43:27Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":13}
+{"timestamp":"2026-03-22T22:44:19Z","hook":"task-gate","decision":"skip","duration_ms":3}
+{"timestamp":"2026-03-22T22:45:32Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":10}
+{"timestamp":"2026-03-22T22:51:31Z","hook":"task-gate","decision":"skip","duration_ms":4}
+{"timestamp":"2026-03-22T22:51:57Z","hook":"stop-gate","decision":"skip","detail":"no verification command found","duration_ms":6}
+{"timestamp":"2026-03-22T22:51:57Z","hook":"classify-prompt","decision":"massive","duration_ms":21}
+{"timestamp":"2026-03-22T22:51:57Z","hook":"classify-prompt","decision":"massive","duration_ms":14}
+{"timestamp":"2026-03-22T22:51:57Z","hook":"classify-prompt","decision":"massive","duration_ms":11}
+{"timestamp":"2026-03-22T22:51:57Z","hook":"classify-prompt","decision":"massive","duration_ms":11}
+{"timestamp":"2026-03-22T22:51:57Z","hook":"classify-prompt","decision":"massive","duration_ms":12}
+{"timestamp":"2026-03-22T22:52:06Z","hook":"stop-gate","decision":"skip","detail":"no verification command found","duration_ms":6}
+{"timestamp":"2026-03-22T22:53:06Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":36}
+{"timestamp":"2026-03-22T22:55:25Z","hook":"classify-prompt","decision":"simple","duration_ms":16}
+{"timestamp":"2026-03-22T22:56:22Z","hook":"stop-gate","decision":"skip","detail":"no verification command found","duration_ms":6}
+{"timestamp":"2026-03-22T22:57:12Z","hook":"classify-prompt","decision":"simple","duration_ms":17}
+{"timestamp":"2026-03-22T22:57:31Z","hook":"stop-gate","decision":"skip","detail":"no verification command found","duration_ms":6}
+{"timestamp":"2026-03-22T22:58:51Z","hook":"classify-prompt","decision":"massive","duration_ms":17}
+{"timestamp":"2026-03-22T22:59:21Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":43}
+{"timestamp":"2026-03-22T22:59:24Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-22T22:59:28Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":10}
+{"timestamp":"2026-03-22T22:59:31Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-22T22:59:35Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":12}
+{"timestamp":"2026-03-22T22:59:57Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T22:59:57Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_snag_protocol.md","duration_ms":5}
+{"timestamp":"2026-03-22T23:00:00Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:00:00Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":8}
+{"timestamp":"2026-03-22T23:01:35Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:01:35Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_cairn_rs_api.md","duration_ms":6}
+{"timestamp":"2026-03-22T23:01:46Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:01:46Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":6}
+{"timestamp":"2026-03-22T23:01:56Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:01:56Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/Cargo.toml","duration_ms":6}
+{"timestamp":"2026-03-22T23:01:57Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T23:01:57Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.gitignore","duration_ms":5}
+{"timestamp":"2026-03-22T23:06:12Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:06:12Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-protocol/Cargo.toml","duration_ms":7}
+{"timestamp":"2026-03-22T23:06:13Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T23:06:13Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T23:06:40Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-22T23:06:40Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T23:06:59Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-22T23:06:59Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T23:07:08Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:07:08Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-host/Cargo.toml","duration_ms":6}
+{"timestamp":"2026-03-22T23:07:18Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-22T23:07:19Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T23:07:36Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:07:36Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T23:07:48Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-22T23:07:49Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T23:07:59Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:07:59Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":10}
+{"timestamp":"2026-03-22T23:08:15Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-22T23:08:15Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T23:08:29Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:08:29Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T23:08:56Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:08:56Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":21}
+{"timestamp":"2026-03-22T23:09:03Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-22T23:09:03Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-client/Cargo.toml","duration_ms":9}
+{"timestamp":"2026-03-22T23:09:17Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:09:17Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T23:09:30Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:09:31Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T23:10:17Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-22T23:10:17Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-22T23:13:16Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:13:16Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-22T23:13:21Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-22T23:13:21Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T23:13:25Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T23:13:25Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-22T23:13:28Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:13:28Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T23:13:33Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-22T23:13:33Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-22T23:13:40Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":13}
+{"timestamp":"2026-03-22T23:14:01Z","hook":"task-gate","decision":"pass","duration_ms":579}
+{"timestamp":"2026-03-22T23:14:01Z","hook":"task-gate","decision":"pass","duration_ms":576}
+{"timestamp":"2026-03-22T23:14:01Z","hook":"task-gate","decision":"pass","duration_ms":455}
+{"timestamp":"2026-03-22T23:14:02Z","hook":"task-gate","decision":"pass","duration_ms":438}
+{"timestamp":"2026-03-22T23:14:09Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:14:09Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/Makefile","duration_ms":5}
+{"timestamp":"2026-03-22T23:14:25Z","hook":"guard-writes","decision":"pass","duration_ms":21}
+{"timestamp":"2026-03-22T23:14:25Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/cliff.toml","duration_ms":8}
+{"timestamp":"2026-03-22T23:14:29Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:14:29Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/pr.yml","duration_ms":6}
+{"timestamp":"2026-03-22T23:14:40Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:14:40Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/build.yml","duration_ms":9}
+{"timestamp":"2026-03-22T23:14:53Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:14:53Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/release.yml","duration_ms":5}
+{"timestamp":"2026-03-22T23:15:18Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:15:19Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tag-release.yml","duration_ms":7}
+{"timestamp":"2026-03-22T23:15:22Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:15:22Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/packaging/arch/PKGBUILD","duration_ms":6}
+{"timestamp":"2026-03-22T23:16:02Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-22T23:16:02Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/README.md","duration_ms":6}
+{"timestamp":"2026-03-22T23:16:18Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-22T23:16:18Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/CONTRIBUTING.md","duration_ms":8}
+{"timestamp":"2026-03-22T23:18:07Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:18:07Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-host/Cargo.toml","duration_ms":7}
+{"timestamp":"2026-03-22T23:18:11Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-22T23:18:11Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-client/Cargo.toml","duration_ms":7}
+{"timestamp":"2026-03-22T23:24:20Z","hook":"task-gate","decision":"pass","duration_ms":653}
+{"timestamp":"2026-03-22T23:24:20Z","hook":"task-gate","decision":"pass","duration_ms":631}
+{"timestamp":"2026-03-22T23:24:45Z","hook":"stop-gate","decision":"pass","duration_ms":1893}
+{"timestamp":"2026-03-22T23:24:45Z","hook":"classify-prompt","decision":"massive","duration_ms":11}
+{"timestamp":"2026-03-22T23:24:45Z","hook":"classify-prompt","decision":"massive","duration_ms":10}
+{"timestamp":"2026-03-22T23:24:56Z","hook":"stop-gate","decision":"pass","duration_ms":748}
+{"timestamp":"2026-03-22T23:25:56Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":54}
+{"timestamp":"2026-03-24T11:30:59Z","hook":"classify-prompt","decision":"simple","duration_ms":18}
+{"timestamp":"2026-03-24T11:31:24Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-24T11:38:42Z","hook":"stop-gate","decision":"pass","duration_ms":1007}
+{"timestamp":"2026-03-24T11:39:42Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":30}
+{"timestamp":"2026-03-24T11:41:41Z","hook":"classify-prompt","decision":"massive","duration_ms":53}
+{"timestamp":"2026-03-24T11:51:21Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}
+{"timestamp":"2026-03-24T11:58:36Z","hook":"task-gate","decision":"pass","duration_ms":674}
+{"timestamp":"2026-03-24T11:58:55Z","hook":"stop-gate","decision":"pass","duration_ms":2670}
+{"timestamp":"2026-03-24T11:58:55Z","hook":"classify-prompt","decision":"massive","duration_ms":16}
+{"timestamp":"2026-03-24T11:59:02Z","hook":"stop-gate","decision":"pass","duration_ms":1106}
+{"timestamp":"2026-03-24T12:00:02Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":26}
+{"timestamp":"2026-03-24T12:26:58Z","hook":"classify-prompt","decision":"simple","duration_ms":50}
+{"timestamp":"2026-03-24T12:28:09Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T12:28:09Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/web/index.html","duration_ms":9}
+{"timestamp":"2026-03-24T12:28:25Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T12:28:25Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/uno.config.ts","duration_ms":9}
+{"timestamp":"2026-03-24T12:28:47Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T12:28:47Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/App.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:29:21Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-24T12:29:21Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":9}
+{"timestamp":"2026-03-24T12:29:50Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-24T12:29:51Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/SessionList.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:30:20Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T12:30:20Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/Terminal.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:30:52Z","hook":"guard-writes","decision":"pass","duration_ms":14}
+{"timestamp":"2026-03-24T12:30:52Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/FileBrowser.tsx","duration_ms":6}
+{"timestamp":"2026-03-24T12:31:44Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T12:31:44Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/Settings.tsx","duration_ms":7}
+{"timestamp":"2026-03-24T12:32:00Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T12:32:00Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/StatusBar.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:33:12Z","hook":"failure-tracker","decision":"track","detail":"count=0 sig=Exit code ","duration_ms":18}
+{"timestamp":"2026-03-24T12:34:08Z","hook":"stop-gate","decision":"block","detail":"verification timed out","duration_ms":30018}
+{"timestamp":"2026-03-24T12:34:28Z","hook":"stop-gate","decision":"loop-prevention","duration_ms":8}
+{"timestamp":"2026-03-24T12:35:29Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":42}
+{"timestamp":"2026-03-24T12:55:52Z","hook":"classify-prompt","decision":"simple","duration_ms":27}
+{"timestamp":"2026-03-24T12:56:14Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T12:56:14Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:56:25Z","hook":"guard-writes","decision":"pass","duration_ms":15}
+{"timestamp":"2026-03-24T12:56:25Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/App.tsx","duration_ms":7}
+{"timestamp":"2026-03-24T12:56:35Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T12:56:35Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/App.tsx","duration_ms":7}
+{"timestamp":"2026-03-24T12:56:44Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T12:56:44Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/Settings.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:56:54Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T12:56:54Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/FileBrowser.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T12:57:44Z","hook":"stop-gate","decision":"pass","duration_ms":15052}
+{"timestamp":"2026-03-24T12:58:44Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":65}
+{"timestamp":"2026-03-24T14:45:23Z","hook":"classify-prompt","decision":"medium","duration_ms":27}
+{"timestamp":"2026-03-24T14:46:33Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-24T14:46:33Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":7}
+{"timestamp":"2026-03-24T14:46:48Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T14:46:48Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/SessionList.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T14:47:00Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T14:47:01Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/App.tsx","duration_ms":8}
+{"timestamp":"2026-03-24T14:48:01Z","hook":"stop-gate","decision":"pass","duration_ms":10000}
+{"timestamp":"2026-03-24T14:49:02Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":68}
+{"timestamp":"2026-03-24T14:51:36Z","hook":"classify-prompt","decision":"simple","duration_ms":28}
+{"timestamp":"2026-03-24T14:52:02Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-24T14:52:02Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":10}
+{"timestamp":"2026-03-24T14:52:15Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T14:52:15Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/FileBrowser.tsx","duration_ms":7}
+{"timestamp":"2026-03-24T14:52:25Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T14:52:25Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/FileBrowser.tsx","duration_ms":6}
+{"timestamp":"2026-03-24T14:53:05Z","hook":"stop-gate","decision":"pass","duration_ms":9284}
+{"timestamp":"2026-03-24T14:54:05Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":24}
+{"timestamp":"2026-03-24T15:01:17Z","hook":"classify-prompt","decision":"simple","duration_ms":37}
+{"timestamp":"2026-03-24T15:01:30Z","hook":"stop-gate","decision":"pass","duration_ms":1353}
+{"timestamp":"2026-03-24T15:17:06Z","hook":"classify-prompt","decision":"simple","duration_ms":30}
+{"timestamp":"2026-03-24T15:18:04Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T15:18:04Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":6}
+{"timestamp":"2026-03-24T15:18:21Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T15:18:21Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tauri/src-tauri/tauri.conf.json","duration_ms":7}
+{"timestamp":"2026-03-24T15:18:48Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-24T15:18:48Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/README.md","duration_ms":6}
+{"timestamp":"2026-03-24T15:19:24Z","hook":"stop-gate","decision":"pass","duration_ms":10148}
+{"timestamp":"2026-03-24T15:20:24Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":34}
+{"timestamp":"2026-03-24T15:29:42Z","hook":"classify-prompt","decision":"simple","duration_ms":20}
+{"timestamp":"2026-03-24T15:30:47Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T15:30:47Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":6}
+{"timestamp":"2026-03-24T15:31:19Z","hook":"stop-gate","decision":"pass","duration_ms":6231}
+{"timestamp":"2026-03-24T15:32:20Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":29}
+{"timestamp":"2026-03-24T15:59:01Z","hook":"classify-prompt","decision":"simple","duration_ms":19}
+{"timestamp":"2026-03-24T15:59:13Z","hook":"stop-gate","decision":"pass","duration_ms":718}
+{"timestamp":"2026-03-24T16:00:34Z","hook":"classify-prompt","decision":"simple","duration_ms":14}
+{"timestamp":"2026-03-24T16:00:48Z","hook":"stop-gate","decision":"pass","duration_ms":657}
+{"timestamp":"2026-03-24T16:11:06Z","hook":"classify-prompt","decision":"medium","duration_ms":14}
+{"timestamp":"2026-03-24T16:11:29Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T16:11:29Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T16:11:56Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T16:11:56Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T16:12:07Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T16:12:07Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T16:12:13Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T16:12:13Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T16:12:24Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T16:12:24Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T16:13:01Z","hook":"stop-gate","decision":"pass","duration_ms":6027}
+{"timestamp":"2026-03-24T16:14:01Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":31}
+{"timestamp":"2026-03-24T22:53:21Z","hook":"classify-prompt","decision":"medium","duration_ms":14}
+{"timestamp":"2026-03-24T22:54:18Z","hook":"stop-gate","decision":"pass","duration_ms":1131}
+{"timestamp":"2026-03-24T22:56:06Z","hook":"classify-prompt","decision":"simple","duration_ms":18}
+{"timestamp":"2026-03-24T22:56:45Z","hook":"stop-gate","decision":"pass","duration_ms":812}
+{"timestamp":"2026-03-24T22:56:45Z","hook":"classify-prompt","decision":"simple","duration_ms":10}
+{"timestamp":"2026-03-24T22:57:37Z","hook":"stop-gate","decision":"pass","duration_ms":639}
+{"timestamp":"2026-03-24T22:58:37Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-24T23:03:24Z","hook":"classify-prompt","decision":"simple","duration_ms":22}
+{"timestamp":"2026-03-24T23:03:59Z","hook":"stop-gate","decision":"pass","duration_ms":649}
+{"timestamp":"2026-03-24T23:04:59Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":22}
+{"timestamp":"2026-03-24T23:05:41Z","hook":"classify-prompt","decision":"massive","duration_ms":12}
+{"timestamp":"2026-03-24T23:05:55Z","hook":"stop-gate","decision":"pass","duration_ms":620}
+{"timestamp":"2026-03-24T23:06:55Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":18}
+{"timestamp":"2026-03-24T23:15:49Z","hook":"classify-prompt","decision":"medium","duration_ms":45}
+{"timestamp":"2026-03-24T23:18:48Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-24T23:18:48Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/project_cairn_wiring_architecture.md","duration_ms":6}
+{"timestamp":"2026-03-24T23:18:57Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T23:18:57Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-researcher/MEMORY.md","duration_ms":5}
+{"timestamp":"2026-03-24T23:20:21Z","hook":"stop-gate","decision":"pass","duration_ms":799}
+{"timestamp":"2026-03-24T23:20:21Z","hook":"classify-prompt","decision":"massive","duration_ms":11}
+{"timestamp":"2026-03-24T23:21:32Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:21:32Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T23:21:43Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:21:43Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:22:05Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T23:22:05Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T23:22:13Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:22:13Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:22:31Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:22:31Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:22:42Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:22:42Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:23:35Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:23:35Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:23:45Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:23:45Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:23:52Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:23:52Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:24:21Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:24:21Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-24T23:24:33Z","hook":"guard-writes","decision":"pass","duration_ms":9}
+{"timestamp":"2026-03-24T23:24:33Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-24T23:24:38Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:24:38Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T23:24:58Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:24:58Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-24T23:25:29Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-24T23:25:29Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:25:40Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:25:40Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:27:41Z","hook":"guard-writes","decision":"pass","duration_ms":20}
+{"timestamp":"2026-03-24T23:27:41Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:27:55Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-24T23:27:55Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T23:28:01Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":14}
+{"timestamp":"2026-03-24T23:28:17Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-24T23:28:17Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-24T23:29:25Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:29:25Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-24T23:29:58Z","hook":"task-gate","decision":"pass","duration_ms":417}
+{"timestamp":"2026-03-24T23:30:56Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:30:56Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":4}
+{"timestamp":"2026-03-24T23:31:13Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:31:13Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":5}
+{"timestamp":"2026-03-24T23:31:34Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:31:34Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":6}
+{"timestamp":"2026-03-24T23:32:25Z","hook":"task-gate","decision":"pass","duration_ms":403}
+{"timestamp":"2026-03-24T23:32:57Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:33:06Z","hook":"post-edit","decision":"errors","detail":"node.go: 2 error line(s)","duration_ms":8626}
+{"timestamp":"2026-03-24T23:33:18Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:33:18Z","hook":"post-edit","decision":"errors","detail":"node.go: 2 error line(s)","duration_ms":553}
+{"timestamp":"2026-03-24T23:33:41Z","hook":"task-gate","decision":"pass","duration_ms":395}
+{"timestamp":"2026-03-24T23:34:00Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:34:00Z","hook":"post-edit","decision":"errors","detail":"node.py: 1 error line(s)","duration_ms":47}
+{"timestamp":"2026-03-24T23:34:14Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:34:14Z","hook":"post-edit","decision":"errors","detail":"node.py: 1 error line(s)","duration_ms":16}
+{"timestamp":"2026-03-24T23:34:26Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-24T23:34:26Z","hook":"post-edit","decision":"errors","detail":"node.py: 1 error line(s)","duration_ms":15}
+{"timestamp":"2026-03-24T23:34:50Z","hook":"task-gate","decision":"pass","duration_ms":396}
+{"timestamp":"2026-03-24T23:35:06Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-24T23:35:06Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/packages/php/cairn-p2p/src/Node.php","duration_ms":5}
+{"timestamp":"2026-03-24T23:35:15Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-24T23:35:15Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/packages/php/cairn-p2p/src/Node.php","duration_ms":5}
+{"timestamp":"2026-03-24T23:35:34Z","hook":"task-gate","decision":"pass","duration_ms":419}
+{"timestamp":"2026-03-24T23:36:23Z","hook":"task-gate","decision":"pass","duration_ms":358}
+{"timestamp":"2026-03-24T23:36:34Z","hook":"stop-gate","decision":"pass","duration_ms":800}
+{"timestamp":"2026-03-24T23:37:35Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":78}
+{"timestamp":"2026-03-25T06:33:35Z","hook":"classify-prompt","decision":"simple","duration_ms":23}
+{"timestamp":"2026-03-25T06:40:04Z","hook":"stop-gate","decision":"pass","duration_ms":1117}
+{"timestamp":"2026-03-25T06:41:05Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-25T08:05:44Z","hook":"classify-prompt","decision":"simple","duration_ms":36}
+{"timestamp":"2026-03-25T08:07:29Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-25T08:07:29Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-25T08:07:41Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T08:07:41Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/cairn.ts","duration_ms":6}
+{"timestamp":"2026-03-25T08:09:04Z","hook":"stop-gate","decision":"pass","duration_ms":1747}
+{"timestamp":"2026-03-25T08:10:04Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":37}
+{"timestamp":"2026-03-25T08:36:38Z","hook":"classify-prompt","decision":"simple","duration_ms":12}
+{"timestamp":"2026-03-25T08:38:30Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T08:38:30Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/cairn.ts","duration_ms":6}
+{"timestamp":"2026-03-25T08:39:03Z","hook":"stop-gate","decision":"pass","duration_ms":977}
+{"timestamp":"2026-03-25T08:39:54Z","hook":"classify-prompt","decision":"simple","duration_ms":13}
+{"timestamp":"2026-03-25T08:40:53Z","hook":"stop-gate","decision":"pass","duration_ms":760}
+{"timestamp":"2026-03-25T08:41:53Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":25}
+{"timestamp":"2026-03-25T09:06:57Z","hook":"classify-prompt","decision":"simple","duration_ms":15}
+{"timestamp":"2026-03-25T09:07:53Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-25T09:07:53Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/.github/workflows/tag-release.yml","duration_ms":5}
+{"timestamp":"2026-03-25T09:08:22Z","hook":"stop-gate","decision":"pass","duration_ms":1072}
+{"timestamp":"2026-03-25T09:09:22Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":32}
+{"timestamp":"2026-03-25T17:01:35Z","hook":"classify-prompt","decision":"simple","duration_ms":31}
+{"timestamp":"2026-03-25T17:05:33Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-25T17:05:33Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/.github/workflows/tag-release.yml","duration_ms":5}
+{"timestamp":"2026-03-25T17:05:48Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T17:05:48Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/.github/workflows/tag-release.yml","duration_ms":6}
+{"timestamp":"2026-03-25T17:08:10Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T17:08:10Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/.github/workflows/tag-release.yml","duration_ms":7}
+{"timestamp":"2026-03-25T17:10:18Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T17:10:18Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/.github/workflows/tag-release.yml","duration_ms":5}
+{"timestamp":"2026-03-25T17:12:35Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-25T17:12:35Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/.github/workflows/tag-release.yml","duration_ms":6}
+{"timestamp":"2026-03-25T17:16:48Z","hook":"stop-gate","decision":"pass","duration_ms":1039}
+{"timestamp":"2026-03-25T17:17:48Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":34}
+{"timestamp":"2026-03-25T18:55:56Z","hook":"classify-prompt","decision":"simple","duration_ms":33}
+{"timestamp":"2026-03-25T18:57:09Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T18:57:09Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/browser.ts","duration_ms":5}
+{"timestamp":"2026-03-25T19:01:35Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-25T19:01:35Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/vite.config.ts","duration_ms":4}
+{"timestamp":"2026-03-25T19:07:24Z","hook":"stop-gate","decision":"pass","duration_ms":1152}
+{"timestamp":"2026-03-25T19:08:24Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-25T19:32:03Z","hook":"classify-prompt","decision":"simple","duration_ms":15}
+{"timestamp":"2026-03-25T19:33:45Z","hook":"classify-prompt","decision":"medium","duration_ms":11}
+{"timestamp":"2026-03-25T19:34:52Z","hook":"stop-gate","decision":"pass","duration_ms":696}
+{"timestamp":"2026-03-25T19:35:52Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-25T19:51:39Z","hook":"classify-prompt","decision":"medium","duration_ms":13}
+{"timestamp":"2026-03-25T19:56:03Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-25T19:56:03Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":8}
+{"timestamp":"2026-03-25T19:57:09Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T19:57:09Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-25T19:59:46Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T19:59:46Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-25T20:02:13Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T20:02:13Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-25T20:05:27Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-25T20:05:27Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":6}
+{"timestamp":"2026-03-25T20:05:36Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-25T20:05:36Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":6}
+{"timestamp":"2026-03-25T20:05:58Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-25T20:05:58Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":7}
