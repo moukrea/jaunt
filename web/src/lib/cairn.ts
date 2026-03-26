@@ -1,7 +1,7 @@
 import { Node, NodeSession, NodeChannel } from 'cairn-p2p';
 import type { CairnConfig } from 'cairn-p2p';
 import type { ConnectionProfile } from './profile';
-import { store, saveHost } from './store';
+import { store } from './store';
 import { encodeRequest, decodeResponse } from './protocol';
 import type { RpcRequest, RpcResponse } from './protocol';
 
@@ -10,16 +10,14 @@ let session: NodeSession | null = null;
 let rpcChannel: NodeChannel | null = null;
 let ptyChannel: NodeChannel | null = null;
 
-// Direct WebSocket connection to host (browser transport layer)
-let ws: WebSocket | null = null;
-
 // Callbacks for PTY data and RPC responses
 let onPtyData: ((data: Uint8Array) => void) | null = null;
 let pendingRpcResolve: ((resp: RpcResponse) => void) | null = null;
 
-// Connection hints from pairing
-let connectionHints: string[] = [];
-
+/**
+ * Initialize a cairn node with optional infrastructure config from the profile.
+ * This creates the node but does NOT start the transport layer yet.
+ */
 export async function initNode(profile?: Partial<ConnectionProfile>): Promise<Node> {
   const config: Partial<CairnConfig> = {};
 
@@ -47,13 +45,14 @@ export async function initNode(profile?: Partial<ConnectionProfile>): Promise<No
   return node;
 }
 
+/**
+ * Pair by scanning QR data. The QR payload contains the host's peer ID
+ * and connection hints (multiaddrs), which cairn stores internally for
+ * use during connect().
+ */
 export async function pairScanQr(data: Uint8Array): Promise<string> {
   if (!node) throw new Error('Node not initialized');
-  const peerId = await node.pairScanQr(data);
-  // Extract connection hints from the QR payload for later WebSocket connection
-  // The hints are embedded in the CBOR payload — cairn stores them internally
-  // We also extract them from the profile passed during initNode
-  return peerId;
+  return await node.pairScanQr(data);
 }
 
 export async function pairEnterPin(pin: string): Promise<string> {
@@ -67,127 +66,83 @@ export async function pairFromLink(uri: string): Promise<string> {
 }
 
 /**
- * Extract WebSocket addresses from the connection profile's pairing data.
- * The QR payload contains connection hints as multiaddr strings.
- */
-export function setConnectionHints(hints: string[]) {
-  connectionHints = hints;
-}
-
-/**
- * Connect to the host via WebSocket.
+ * Connect to the host via cairn's transport layer.
  *
- * The cairn Node/Session handles pairing and crypto. For the actual transport
- * in the browser, we open a direct WebSocket to the host's /ws multiaddr.
- * Messages are sent as raw bytes (msgpack-encoded RPC requests/responses).
+ * 1. Starts the libp2p transport (WebSocket + WebRTC in browser).
+ * 2. Calls node.connect(peerId) which dials the host using connection
+ *    hints stored during pairing (multiaddrs like /ip4/x.x.x.x/tcp/PORT/ws).
+ * 3. Opens an "rpc" channel and a "pty" channel on the session.
+ * 4. Registers message handlers to route incoming data to the right callbacks.
  */
 export async function connectToHost(peerId: string): Promise<void> {
-  // Try WebSocket first — this is the primary transport for browser clients
-  console.log('[jaunt] connectToHost, connectionHints:', connectionHints);
-  const wsAddr = findWsAddress();
-  console.log('[jaunt] wsAddr:', wsAddr);
-  if (wsAddr) {
-    try {
-      await connectWebSocket(wsAddr);
-      store.setConnected(true);
-      store.setPeerId(peerId);
-      return;
-    } catch (e) {
-      console.warn('WebSocket connection failed, falling back to cairn session:', e);
-    }
-  }
+  if (!node) throw new Error('Node not initialized');
 
-  // Fallback: cairn session without real transport
+  console.log('[jaunt] Starting cairn transport...');
+  await node.startTransport();
+  console.log('[jaunt] Transport started, listen addrs:', node.listenAddresses);
+
+  console.log('[jaunt] Connecting to peer:', peerId);
+  session = await node.connect(peerId);
+  console.log('[jaunt] Connected, session state:', session.state);
+
+  // Open channels for RPC and PTY data
+  rpcChannel = session.openChannel('rpc');
+  ptyChannel = session.openChannel('pty');
+
+  // Route incoming messages on the RPC channel
+  session.onMessage(rpcChannel, (data: Uint8Array) => {
+    console.log('[jaunt] RPC received:', data.length, 'bytes');
+    if (pendingRpcResolve) {
+      try {
+        const resp = decodeResponse(data);
+        console.log('[jaunt] Decoded response:', JSON.stringify(resp).substring(0, 200));
+        const resolve = pendingRpcResolve;
+        pendingRpcResolve = null;
+        resolve(resp);
+      } catch (e) {
+        console.error('[jaunt] RPC decode failed, forwarding as PTY data:', e);
+        if (onPtyData) onPtyData(data);
+      }
+    } else if (onPtyData) {
+      // No pending RPC -- treat as PTY output
+      onPtyData(data);
+    }
+  });
+
+  // Route incoming messages on the PTY channel directly to terminal
+  session.onMessage(ptyChannel, (data: Uint8Array) => {
+    if (onPtyData) onPtyData(data);
+  });
+
+  // Monitor session state changes
+  session.onStateChange((prev, current) => {
+    console.log(`[jaunt] Session state: ${prev} -> ${current}`);
+    if (current === 'disconnected' || current === 'failed') {
+      store.setConnected(false);
+    } else if (current === 'reconnected' || current === 'connected') {
+      store.setConnected(true);
+    }
+  });
+
+  session.onError((error) => {
+    console.error('[jaunt] Session error:', error.code, error.message);
+    store.setError(error.message);
+  });
+
   store.setConnected(true);
   store.setPeerId(peerId);
 }
 
 /**
- * Find a usable WebSocket URL from connection hints.
- * Hints are ws:// URLs from the host's connection profile.
+ * Send an RPC request and wait for the response.
+ * The request is msgpack-encoded and sent on the "rpc" channel.
  */
-function findWsAddress(): string | null {
-  // Direct ws:// URLs from profile.ws_addrs
-  for (const hint of connectionHints) {
-    if (hint.startsWith('ws://') || hint.startsWith('wss://')) {
-      return hint;
-    }
-  }
-  // Fallback: try to parse libp2p multiaddr format
-  for (const hint of connectionHints) {
-    const match = hint.match(/\/ip4\/([\d.]+)\/tcp\/(\d+)\/ws/);
-    if (match) {
-      return `ws://${match[1]}:${match[2]}`;
-    }
-  }
-  return null;
-}
-
-/**
- * Open a WebSocket to the host and set up message routing.
- */
-function connectWebSocket(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    socket.binaryType = 'arraybuffer';
-
-    const timeout = setTimeout(() => {
-      socket.close();
-      reject(new Error('WebSocket connection timed out'));
-    }, 10000);
-
-    socket.onopen = () => {
-      clearTimeout(timeout);
-      ws = socket;
-      console.log('WebSocket connected to host:', url);
-      resolve();
-    };
-
-    socket.onmessage = (event) => {
-      const data = new Uint8Array(event.data);
-      console.log('[jaunt] WS received:', data.length, 'bytes');
-      // Route incoming messages
-      if (pendingRpcResolve) {
-        try {
-          const resp = decodeResponse(data);
-          console.log('[jaunt] WS decoded response:', JSON.stringify(resp).substring(0, 200));
-          const resolve = pendingRpcResolve;
-          pendingRpcResolve = null;
-          resolve(resp);
-        } catch (e) {
-          console.error('[jaunt] WS decode failed:', e, 'raw:', Array.from(data.slice(0, 30)));
-          if (onPtyData) onPtyData(data);
-        }
-      } else if (onPtyData) {
-        onPtyData(data);
-      }
-    };
-
-    socket.onerror = (event) => {
-      clearTimeout(timeout);
-      console.error('WebSocket error:', event);
-      reject(new Error('WebSocket connection failed'));
-    };
-
-    socket.onclose = () => {
-      ws = null;
-      store.setConnected(false);
-    };
-  });
-}
-
 export async function sendRpc(request: RpcRequest): Promise<RpcResponse> {
-  const data = encodeRequest(request);
-  console.log('[jaunt] sendRpc:', Object.keys(request)[0], 'ws:', ws ? ws.readyState : 'null', 'data:', data.length, 'bytes');
+  if (!session || !rpcChannel) throw new Error('Not connected');
 
-  // Send via WebSocket
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(data);
-  } else if (session && rpcChannel) {
-    session.send(rpcChannel, data);
-  } else {
-    throw new Error('Not connected');
-  }
+  const data = encodeRequest(request);
+  console.log('[jaunt] sendRpc:', Object.keys(request)[0], 'data:', data.length, 'bytes');
+  session.send(rpcChannel, data);
 
   return new Promise((resolve) => {
     pendingRpcResolve = resolve;
@@ -200,24 +155,28 @@ export async function sendRpc(request: RpcRequest): Promise<RpcResponse> {
   });
 }
 
+/**
+ * Send raw PTY input bytes on the "pty" channel.
+ */
 export function sendPtyInput(data: Uint8Array): void {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(data);
-  } else if (session && ptyChannel) {
+  if (session && ptyChannel) {
     session.send(ptyChannel, data);
   }
 }
 
+/**
+ * Send a resize RPC on the "rpc" channel.
+ */
 export function sendResize(cols: number, rows: number): void {
+  if (!session || !rpcChannel) return;
   const req: RpcRequest = { Resize: { cols, rows } };
   const data = encodeRequest(req);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(data);
-  } else if (session && rpcChannel) {
-    session.send(rpcChannel, data);
-  }
+  session.send(rpcChannel, data);
 }
 
+/**
+ * Register a callback to receive PTY output data.
+ */
 export function setPtyDataCallback(cb: (data: Uint8Array) => void): void {
   onPtyData = cb;
 }
@@ -230,16 +189,19 @@ export function getSession(): NodeSession | null {
   return session;
 }
 
-export function disconnect(): void {
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
+/**
+ * Disconnect from the host and clean up.
+ */
+export async function disconnect(): Promise<void> {
   if (session) {
     session.close();
     session = null;
   }
   rpcChannel = null;
   ptyChannel = null;
+  if (node) {
+    await node.close();
+    node = null;
+  }
   store.setConnected(false);
 }

@@ -12,20 +12,14 @@ export default defineConfig({
   build: {
     target: 'esnext',
     outDir: 'dist',
-    rollupOptions: {
-      // Externalize Node.js-only libp2p deps that exist in cairn-p2p's
-      // browser bundle as dead dynamic imports (never called in browser)
-      external: [
-        /^@libp2p\//,
-        /^@chainsafe\//,
-        /^@multiformats\//,
-        /^libp2p$/,
-      ],
-    },
   },
   resolve: {
     alias: {
-      'cairn-p2p': resolve(__dirname, 'node_modules/cairn-p2p/dist/browser.js'),
+      // @libp2p/yamux has a broken dep on @libp2p/utils (missing AbstractStream).
+      // Use the maintained @chainsafe/libp2p-yamux which is API-compatible.
+      '@libp2p/yamux': resolve(__dirname, 'node_modules/@chainsafe/libp2p-yamux'),
+      // Ensure cairn-p2p's external deps resolve to this app's node_modules
+      '@chainsafe/libp2p-yamux': resolve(__dirname, 'node_modules/@chainsafe/libp2p-yamux'),
     },
   },
 });

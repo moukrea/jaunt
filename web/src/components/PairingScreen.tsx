@@ -1,6 +1,6 @@
 import { createSignal, onMount, Show } from 'solid-js';
-import { decodeProfileFromFragment, type ConnectionProfile } from '../lib/profile';
-import { initNode, pairScanQr, pairEnterPin, connectToHost, setConnectionHints } from '../lib/cairn';
+import { decodeProfileFromFragment, getMultiaddrs, type ConnectionProfile } from '../lib/profile';
+import { initNode, pairScanQr, pairEnterPin, connectToHost } from '../lib/cairn';
 import { store, saveHost } from '../lib/store';
 
 type PairingPhase = 'idle' | 'decoding' | 'initializing' | 'pairing' | 'connecting' | 'done' | 'error';
@@ -22,7 +22,7 @@ export default function PairingScreen() {
         setPhase('decoding');
         setStatusMsg('Reading connection profile...');
         const profile = decodeProfileFromFragment(fragment);
-        console.log('[jaunt] profile decoded:', profile.host_name, 'ws_addrs:', profile.ws_addrs);
+        console.log('[jaunt] profile decoded:', profile.host_name, 'addrs:', getMultiaddrs(profile));
         await pairFromProfile(profile);
       } catch (e: any) {
         console.error('[jaunt] pairing error:', e);
@@ -33,23 +33,7 @@ export default function PairingScreen() {
   });
 
   async function pairFromProfile(profile: ConnectionProfile) {
-    // If we have WebSocket addresses, connect directly — no cairn pairing needed.
-    // The WS address is already in the profile, we just need to establish the connection.
-    if (profile.ws_addrs && profile.ws_addrs.length > 0) {
-      setPhase('connecting');
-      setStatusMsg(`Connecting to ${profile.host_name}...`);
-      console.log('[jaunt] Direct WS connection, skipping cairn pairing');
-      setConnectionHints(profile.ws_addrs);
-      store.setHostName(profile.host_name);
-      await connectToHost('ws-direct');
-      setPhase('done');
-      store.setConnected(true);
-      store.setView('sessions');
-      history.replaceState(null, '', window.location.pathname);
-      return;
-    }
-
-    // No WS addresses — fall back to cairn P2P pairing
+    // Always go through cairn pairing + transport -- no direct WS bypass.
     setPhase('initializing');
     setStatusMsg(`Reaching ${profile.host_name}...`);
     await initNode(profile);
@@ -59,6 +43,8 @@ export default function PairingScreen() {
     let peerId: string;
 
     if ('Qr' in profile.pairing) {
+      // QR pairing payload contains peer ID + connection hints (multiaddrs).
+      // cairn stores the hints internally for use during connect().
       peerId = await pairScanQr(new Uint8Array(profile.pairing.Qr.qr_data));
     } else if ('Pin' in profile.pairing) {
       peerId = await pairEnterPin(profile.pairing.Pin.pin);
@@ -78,7 +64,7 @@ export default function PairingScreen() {
     });
 
     setPhase('connecting');
-    setStatusMsg('Connected. Loading sessions...');
+    setStatusMsg('Connecting via cairn transport...');
     await connectToHost(peerId);
     setPhase('done');
     store.setConnected(true);
@@ -108,7 +94,7 @@ export default function PairingScreen() {
       });
 
       setPhase('connecting');
-      setStatusMsg('Establishing connection...');
+      setStatusMsg('Connecting via cairn transport...');
       await connectToHost(peerId);
       setPhase('done');
       store.setConnected(true);

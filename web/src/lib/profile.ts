@@ -5,8 +5,34 @@ export interface ConnectionProfile {
   turn_server?: string;
   turn_username?: string;
   turn_password?: string;
+  /** Legacy: plain WebSocket URLs (ws://host:port) from the direct WS server. */
   ws_addrs?: string[];
+  /** Cairn transport multiaddrs (e.g. /ip4/x.x.x.x/tcp/port/ws). */
+  cairn_addrs?: string[];
   host_name: string;
+}
+
+/**
+ * Convert a ws:// URL to a libp2p multiaddr string.
+ * e.g. "ws://192.168.1.100:54321" -> "/ip4/192.168.1.100/tcp/54321/ws"
+ */
+export function wsUrlToMultiaddr(url: string): string {
+  const u = new URL(url);
+  return `/ip4/${u.hostname}/tcp/${u.port}/ws`;
+}
+
+/**
+ * Extract multiaddr connection hints from a profile.
+ * Prefers cairn_addrs if present, otherwise converts ws_addrs.
+ */
+export function getMultiaddrs(profile: ConnectionProfile): string[] {
+  if (profile.cairn_addrs && profile.cairn_addrs.length > 0) {
+    return profile.cairn_addrs;
+  }
+  if (profile.ws_addrs && profile.ws_addrs.length > 0) {
+    return profile.ws_addrs.map(wsUrlToMultiaddr);
+  }
+  return [];
 }
 
 export type PairingData =

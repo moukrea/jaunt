@@ -45,8 +45,8 @@ export default function Settings() {
     setHosts(await listHosts());
   }
 
-  function handleDisconnect() {
-    disconnect();
+  async function handleDisconnect() {
+    await disconnect();
     store.setView('pairing');
   }
 
