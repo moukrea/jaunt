@@ -122,12 +122,22 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                     eprintln!("Auto-approved peer: {peer_id}");
                 }
 
-                match channel.as_str() {
-                    "rpc" | "" => {
-                        eprintln!("RPC from {peer_id} ({} bytes)", data.len());
+                // Route by tag byte (application-layer multiplexing).
+                // cairn strips channel names, so we can't rely on them.
+                // First byte: TAG_RPC (0x01) or TAG_PTY (0x02).
+                // Fall back to channel name for legacy/untagged messages.
+                if data.is_empty() {
+                    continue;
+                }
 
-                        // Decode the request first so we can handle attach/detach specially
-                        let request = match jaunt_protocol::decode_request(data) {
+                let tag = data[0];
+                let payload = &data[1..];
+
+                match tag {
+                    TAG_RPC => {
+                        eprintln!("RPC from {peer_id} ({} bytes, tagged)", payload.len());
+
+                        let request = match jaunt_protocol::decode_request(payload) {
                             Ok(r) => r,
                             Err(e) => {
                                 let response = RpcResponse::Error {
@@ -169,7 +179,6 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                                 send_rpc_response(&node, peer_id, &response).await;
                             }
                             _ => {
-                                // Standard RPC: handle synchronously
                                 let response =
                                     handle_rpc_request(&request, &snag, &file_browser);
                                 if let RpcResponse::Error { message, .. } = &response {
@@ -179,22 +188,51 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                             }
                         }
                     }
-                    "pty" => {
-                        // PTY relay: forward raw bytes to attached snag session via SnagAttachment
+                    TAG_PTY => {
+                        // PTY input from browser: forward to attached snag session
                         let att = attachments.read().await;
                         if let Some(attachment) = att.get(peer_id) {
                             let mut guard = attachment.writer.lock().await;
                             if let Some(ref mut w) = *guard {
-                                if let Err(e) = w.send_pty_input(data).await {
+                                if let Err(e) = w.send_pty_input(payload).await {
                                     eprintln!("PTY send to {} failed: {e}", attachment.target);
                                 }
                             }
                         }
                     }
-                    "file" => {
-                        // File transfer streaming
+                    _ => {
+                        // Legacy fallback: try routing by channel name
+                        match channel.as_str() {
+                            "rpc" => {
+                                eprintln!("RPC from {peer_id} ({} bytes, legacy channel)", data.len());
+                                let request = match jaunt_protocol::decode_request(data) {
+                                    Ok(r) => r,
+                                    Err(e) => {
+                                        let response = RpcResponse::Error {
+                                            code: 1,
+                                            message: format!("decode error: {e}"),
+                                        };
+                                        send_rpc_response(&node, peer_id, &response).await;
+                                        continue;
+                                    }
+                                };
+                                let response = handle_rpc_request(&request, &snag, &file_browser);
+                                send_rpc_response(&node, peer_id, &response).await;
+                            }
+                            "pty" => {
+                                let att = attachments.read().await;
+                                if let Some(attachment) = att.get(peer_id) {
+                                    let mut guard = attachment.writer.lock().await;
+                                    if let Some(ref mut w) = *guard {
+                                        if let Err(e) = w.send_pty_input(data).await {
+                                            eprintln!("PTY send to {} failed: {e}", attachment.target);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                    _ => {}
                 }
             }
             Event::Error { ref error } => {
@@ -207,15 +245,25 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// Send an RPC response back to the peer on the "rpc" channel.
+// Application-layer message tags.
+// cairn's dispatch_incoming strips channel names, so ALL messages arrive with
+// channel "". We prefix every message with a 1-byte tag so both sides can
+// distinguish RPC traffic from PTY traffic.
+const TAG_RPC: u8 = 0x01;
+const TAG_PTY: u8 = 0x02;
+
+/// Send an RPC response back to the peer, prefixed with TAG_RPC.
 async fn send_rpc_response(node: &Node, peer_id: &str, response: &RpcResponse) {
     match jaunt_protocol::encode_response(response) {
         Ok(resp_data) => {
+            let mut tagged = Vec::with_capacity(1 + resp_data.len());
+            tagged.push(TAG_RPC);
+            tagged.extend_from_slice(&resp_data);
             let sessions = node.sessions().await;
             if let Some(session) = sessions.get(peer_id) {
                 match session.open_channel("rpc").await {
-                    Ok(ch) => match session.send(&ch, &resp_data).await {
-                        Ok(_) => eprintln!("  Sent {} bytes response", resp_data.len()),
+                    Ok(ch) => match session.send(&ch, &tagged).await {
+                        Ok(_) => eprintln!("  Sent {} bytes response (tagged RPC)", resp_data.len()),
                         Err(e) => eprintln!("  Send failed: {e}"),
                     },
                     Err(e) => eprintln!("  Open channel failed: {e}"),
@@ -286,11 +334,15 @@ async fn handle_session_attach(
     let (reader, writer) = snag_attachment.split();
     let writer = Arc::new(tokio::sync::Mutex::new(Some(writer)));
 
-    // Send scrollback so the terminal isn't blank
+    // Send scrollback so the terminal isn't blank (tagged as PTY output)
     if !scrollback.is_empty() {
         if let Ok(ch) = session.open_channel("pty").await {
-            let _ = session.send(&ch, scrollback.as_bytes()).await;
-            eprintln!("  Sent {} bytes scrollback", scrollback.len());
+            let sb_bytes = scrollback.as_bytes();
+            let mut tagged = Vec::with_capacity(1 + sb_bytes.len());
+            tagged.push(TAG_PTY);
+            tagged.extend_from_slice(sb_bytes);
+            let _ = session.send(&ch, &tagged).await;
+            eprintln!("  Sent {} bytes scrollback (tagged PTY)", sb_bytes.len());
         }
     }
 
@@ -331,7 +383,10 @@ async fn pty_output_forwarder(
     loop {
         match reader.read_pty_output().await {
             Ok(Some(data)) => {
-                if let Err(e) = session.send(&pty_channel, &data).await {
+                let mut tagged = Vec::with_capacity(1 + data.len());
+                tagged.push(TAG_PTY);
+                tagged.extend_from_slice(&data);
+                if let Err(e) = session.send(&pty_channel, &tagged).await {
                     eprintln!("  PTY forwarder: send failed for peer {peer_id}: {e}");
                     break;
                 }

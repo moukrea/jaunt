@@ -8,7 +8,13 @@ import type { RpcRequest, RpcResponse } from './protocol';
 let node: Node | null = null;
 let session: NodeSession | null = null;
 let rpcChannel: NodeChannel | null = null;
-let ptyChannel: NodeChannel | null = null;
+
+// Application-layer message tags.
+// cairn strips channel names in dispatch_incoming, so ALL messages arrive
+// with channel "". We prefix every message with a 1-byte tag to distinguish
+// RPC from PTY traffic.
+const TAG_RPC = 0x01;
+const TAG_PTY = 0x02;
 
 // Callbacks for PTY data and RPC responses
 let onPtyData: ((data: Uint8Array) => void) | null = null;
@@ -88,33 +94,55 @@ export async function connectToHost(libp2pPeerId: string, addrs: string[]): Prom
   session = await (node as any).connectTransport(libp2pPeerId, addrs);
   console.log('[jaunt] Connected via cairn transport');
 
-  // Open channels for RPC and PTY data
+  // Open a single channel (cairn strips channel names, so everything arrives
+  // on the same callback regardless). We use tag-based routing.
   rpcChannel = session.openChannel('rpc');
-  ptyChannel = session.openChannel('pty');
 
-  // Route incoming messages on the RPC channel
+  // Route ALL incoming messages by tag byte
   session.onMessage(rpcChannel, (data: Uint8Array) => {
-    console.log('[jaunt] RPC received:', data.length, 'bytes');
-    if (pendingRpcResolve) {
-      try {
-        const resp = decodeResponse(data);
-        console.log('[jaunt] Decoded response:', JSON.stringify(resp).substring(0, 200));
-        const resolve = pendingRpcResolve;
-        pendingRpcResolve = null;
-        resolve(resp);
-      } catch (e) {
-        console.error('[jaunt] RPC decode failed, forwarding as PTY data:', e);
-        if (onPtyData) onPtyData(data);
-      }
-    } else if (onPtyData) {
-      // No pending RPC -- treat as PTY output
-      onPtyData(data);
-    }
-  });
+    if (data.length === 0) return;
 
-  // Route incoming messages on the PTY channel directly to terminal
-  session.onMessage(ptyChannel, (data: Uint8Array) => {
-    if (onPtyData) onPtyData(data);
+    const tag = data[0];
+    const payload = data.slice(1);
+
+    if (tag === TAG_RPC) {
+      // RPC response
+      console.log('[jaunt] RPC received:', payload.length, 'bytes (tagged)');
+      if (pendingRpcResolve) {
+        try {
+          const resp = decodeResponse(payload);
+          console.log('[jaunt] Decoded response:', JSON.stringify(resp).substring(0, 200));
+          const resolve = pendingRpcResolve;
+          pendingRpcResolve = null;
+          resolve(resp);
+        } catch (e) {
+          console.error('[jaunt] RPC decode failed:', e);
+        }
+      } else {
+        console.warn('[jaunt] RPC response received but no pending resolve');
+      }
+    } else if (tag === TAG_PTY) {
+      // PTY output
+      console.log('[jaunt] PTY data received:', payload.length, 'bytes');
+      if (onPtyData) onPtyData(payload);
+    } else {
+      // Legacy untagged message: try as RPC, fall back to PTY
+      console.log('[jaunt] Untagged message:', data.length, 'bytes, first byte:', tag);
+      if (pendingRpcResolve) {
+        try {
+          const resp = decodeResponse(data);
+          console.log('[jaunt] Decoded legacy response:', JSON.stringify(resp).substring(0, 200));
+          const resolve = pendingRpcResolve;
+          pendingRpcResolve = null;
+          resolve(resp);
+        } catch (e) {
+          console.error('[jaunt] Legacy decode failed, forwarding as PTY:', e);
+          if (onPtyData) onPtyData(data);
+        }
+      } else if (onPtyData) {
+        onPtyData(data);
+      }
+    }
   });
 
   // Monitor session state changes
@@ -144,8 +172,21 @@ export async function sendRpc(request: RpcRequest): Promise<RpcResponse> {
   if (!session || !rpcChannel) throw new Error('Not connected');
 
   const data = encodeRequest(request);
-  console.log('[jaunt] sendRpc:', Object.keys(request)[0], 'data:', data.length, 'bytes');
-  session.send(rpcChannel, data);
+  // Prefix with TAG_RPC so the host can distinguish from PTY input
+  const tagged = new Uint8Array(1 + data.length);
+  tagged[0] = TAG_RPC;
+  tagged.set(data, 1);
+  console.log('[jaunt] sendRpc:', Object.keys(request)[0], 'data:', data.length, 'bytes (tagged)',
+    'session.state:', (session as any).state,
+    'outbox:', (session as any).outbox?.length,
+    'hasTransport:', (session as any).hasTransport);
+  try {
+    session.send(rpcChannel, tagged);
+    console.log('[jaunt] sendRpc: send() returned, outbox now:', (session as any).outbox?.length);
+  } catch (e: any) {
+    console.error('[jaunt] sendRpc: send() threw:', e.message);
+    throw e;
+  }
 
   return new Promise((resolve) => {
     pendingRpcResolve = resolve;
@@ -162,8 +203,12 @@ export async function sendRpc(request: RpcRequest): Promise<RpcResponse> {
  * Send raw PTY input bytes on the "pty" channel.
  */
 export function sendPtyInput(data: Uint8Array): void {
-  if (session && ptyChannel) {
-    session.send(ptyChannel, data);
+  if (session && rpcChannel) {
+    // Prefix with TAG_PTY so the host routes to the PTY handler
+    const tagged = new Uint8Array(1 + data.length);
+    tagged[0] = TAG_PTY;
+    tagged.set(data, 1);
+    session.send(rpcChannel, tagged);
   }
 }
 
@@ -174,7 +219,11 @@ export function sendResize(cols: number, rows: number): void {
   if (!session || !rpcChannel) return;
   const req: RpcRequest = { Resize: { cols, rows } };
   const data = encodeRequest(req);
-  session.send(rpcChannel, data);
+  // Prefix with TAG_RPC so the host routes to the RPC handler
+  const tagged = new Uint8Array(1 + data.length);
+  tagged[0] = TAG_RPC;
+  tagged.set(data, 1);
+  session.send(rpcChannel, tagged);
 }
 
 /**
@@ -201,7 +250,6 @@ export async function disconnect(): Promise<void> {
     session = null;
   }
   rpcChannel = null;
-  ptyChannel = null;
   if (node) {
     await node.close();
     node = null;
