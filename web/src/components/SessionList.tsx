@@ -6,6 +6,8 @@ export default function SessionList() {
   const [loading, setLoading] = createSignal(true);
   const [creating, setCreating] = createSignal(false);
   const [newName, setNewName] = createSignal('');
+  const [renamingId, setRenamingId] = createSignal<string | null>(null);
+  const [renameValue, setRenameValue] = createSignal('');
 
   onMount(() => refreshSessions());
 
@@ -47,9 +49,28 @@ export default function SessionList() {
     }
   }
 
-  function attachSession(id: string) {
-    store.setCurrentSession(id);
-    store.setView('terminal');
+  function openInTab(id: string, name?: string | null, e?: Event) {
+    e?.stopPropagation();
+    store.addTab(id, name ?? undefined);
+  }
+
+  async function startRename(id: string, currentName: string, e: Event) {
+    e.stopPropagation();
+    setRenamingId(id);
+    setRenameValue(currentName);
+  }
+
+  async function commitRename(id: string) {
+    const val = renameValue().trim();
+    if (val) {
+      try {
+        await sendRpc({ SessionRename: { target: id, new_name: val } });
+        await refreshSessions();
+      } catch (e: any) {
+        store.setError((e as Error).message);
+      }
+    }
+    setRenamingId(null);
   }
 
   return (
@@ -60,7 +81,7 @@ export default function SessionList() {
           <h2 class="text-lg font-600 text-text-0 leading-none mb-1">Sessions</h2>
           <p class="text-xs text-text-3">
             {store.sessions().length} active
-            <span class="text-text-3/50 ml-1">— tap to attach</span>
+            <span class="text-text-3/50 ml-1">-- click to open in tab</span>
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -129,14 +150,15 @@ export default function SessionList() {
             const fg = () => session.fg_process && session.fg_process !== 'idle' ? session.fg_process : null;
             const isRunning = () => session.state === 'running';
             const displayName = () => session.name || session.id.slice(0, 8);
+            const isRenaming = () => renamingId() === session.id;
 
             return (
               <div
                 class="w-full text-left surface-raised p-4 flex items-start gap-3.5 cursor-pointer transition-all duration-150 hover:bg-bg-3/60 active:scale-[0.995] group"
                 role="button"
                 tabIndex={0}
-                onClick={() => attachSession(session.id)}
-                onKeyDown={(e) => e.key === 'Enter' && attachSession(session.id)}
+                onClick={() => openInTab(session.id, session.name)}
+                onKeyDown={(e) => e.key === 'Enter' && openInTab(session.id, session.name)}
               >
                 {/* Status + shell badge */}
                 <div class="pt-0.5 flex flex-col items-center gap-1.5">
@@ -147,7 +169,27 @@ export default function SessionList() {
                 {/* Info */}
                 <div class="flex-1 min-w-0">
                   <div class="flex items-baseline gap-2 mb-0.5">
-                    <span class="text-sm font-500 text-text-0 truncate">{displayName()}</span>
+                    <Show
+                      when={isRenaming()}
+                      fallback={
+                        <span class="text-sm font-500 text-text-0 truncate">{displayName()}</span>
+                      }
+                    >
+                      <input
+                        type="text"
+                        class="bg-bg-0 border border-amber/50 rounded px-1.5 py-0.5 text-sm text-text-0 outline-none w-36"
+                        value={renameValue()}
+                        onInput={(e) => setRenameValue(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') commitRename(session.id);
+                          if (e.key === 'Escape') setRenamingId(null);
+                        }}
+                        onBlur={() => commitRename(session.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        autofocus
+                      />
+                    </Show>
                     <Show when={session.attached > 0}>
                       <span class="text-[10px] font-mono text-sky shrink-0">{session.attached} viewer{session.attached > 1 ? 's' : ''}</span>
                     </Show>
@@ -160,14 +202,25 @@ export default function SessionList() {
                   </div>
                 </div>
 
-                {/* Kill button */}
-                <button
-                  class="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-danger text-[11px] py-1 px-2 shrink-0 transition-opacity"
-                  onClick={(e) => killSession(session.id, e)}
-                  title="Kill session"
-                >
-                  End
-                </button>
+                {/* Action buttons */}
+                <div class="flex items-center gap-1 shrink-0">
+                  {/* Rename button */}
+                  <button
+                    class="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-ghost text-[11px] py-1 px-2 transition-opacity"
+                    onClick={(e) => startRename(session.id, session.name || session.id.slice(0, 8), e)}
+                    title="Rename session"
+                  >
+                    Rename
+                  </button>
+                  {/* Kill button */}
+                  <button
+                    class="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-danger text-[11px] py-1 px-2 transition-opacity"
+                    onClick={(e) => killSession(session.id, e)}
+                    title="Kill session"
+                  >
+                    End
+                  </button>
+                </div>
               </div>
             );
           }}

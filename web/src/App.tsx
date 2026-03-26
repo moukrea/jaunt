@@ -2,7 +2,7 @@ import { Show, Switch, Match, createEffect } from 'solid-js';
 import { store } from './lib/store';
 import PairingScreen from './components/PairingScreen';
 import SessionList from './components/SessionList';
-import Terminal from './components/Terminal';
+import TerminalWorkspace from './components/TerminalWorkspace';
 import FileBrowser from './components/FileBrowser';
 import Settings from './components/Settings';
 import StatusBar from './components/StatusBar';
@@ -48,7 +48,7 @@ export default function App() {
             <div class="view-enter flex-1 flex flex-col"><SessionList /></div>
           </Match>
           <Match when={store.view() === 'terminal'}>
-            <Terminal />
+            <TerminalWorkspace />
           </Match>
           <Match when={store.view() === 'files'}>
             <div class="view-enter flex-1 flex flex-col"><FileBrowser /></div>

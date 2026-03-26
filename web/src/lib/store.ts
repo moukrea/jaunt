@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { createStore, produce } from 'solid-js/store';
 import { get, set, del, keys } from 'idb-keyval';
 import type { ConnectionProfile } from './profile';
 import type { SessionInfo, DirEntry } from './protocol';
@@ -15,7 +16,27 @@ export interface HostConfig {
   lastSeen: number;
 }
 
-// Reactive signals
+// --- Tabs & Panes ---
+
+export interface Pane {
+  id: string;
+  sessionId: string;
+  sessionName?: string;
+}
+
+export type PaneLayout =
+  | { type: 'single'; pane: Pane }
+  | { type: 'hsplit'; left: PaneLayout; right: PaneLayout; ratio: number }
+  | { type: 'vsplit'; top: PaneLayout; bottom: PaneLayout; ratio: number };
+
+export interface Tab {
+  id: string;
+  label: string;
+  panes: PaneLayout;
+  focusedPaneId: string;
+}
+
+// Reactive signals for simple state
 const [view, setView] = createSignal<AppView>('pairing');
 const [connected, setConnected] = createSignal(false);
 const [hostName, setHostName] = createSignal('');
@@ -28,16 +49,270 @@ const [showHidden, setShowHidden] = createSignal(false);
 const [latency, setLatency] = createSignal(0);
 const [tier, setTier] = createSignal('Tier 0');
 const [error, setError] = createSignal<string | null>(null);
+const [activeTabId, setActiveTabId] = createSignal<string | null>(null);
+
+// Deep reactive store for tabs -- allows fine-grained updates
+// that preserve object identity (critical for <For> stability)
+const [tabStore, setTabStore] = createStore<{ tabs: Tab[] }>({ tabs: [] });
+
+// --- Tab & Pane helpers ---
+
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
+function createPaneObj(sessionId: string, sessionName?: string): Pane {
+  return { id: generateId(), sessionId, sessionName };
+}
+
+function createTabObj(sessionId: string, sessionName?: string): Tab {
+  const pane = createPaneObj(sessionId, sessionName);
+  const label = sessionName || sessionId.slice(0, 8);
+  return { id: generateId(), label, panes: { type: 'single', pane }, focusedPaneId: pane.id };
+}
+
+function tabs(): Tab[] {
+  return tabStore.tabs;
+}
+
+function addTab(sessionId: string, sessionName?: string): Tab {
+  const tab = createTabObj(sessionId, sessionName);
+  setTabStore('tabs', (prev) => [...prev, tab]);
+  setActiveTabId(tab.id);
+  setCurrentSession(sessionId);
+  setView('terminal');
+  return tab;
+}
+
+function closeTab(tabId: string): void {
+  const current = tabStore.tabs;
+  const idx = current.findIndex((t) => t.id === tabId);
+  if (idx === -1) return;
+
+  setTabStore('tabs', (prev) => prev.filter((t) => t.id !== tabId));
+
+  if (activeTabId() === tabId) {
+    const remaining = tabStore.tabs;
+    if (remaining.length > 0) {
+      const newIdx = Math.min(idx, remaining.length - 1);
+      setActiveTabId(remaining[newIdx].id);
+      const focusedPane = findFocusedPane(remaining[newIdx]);
+      setCurrentSession(focusedPane?.sessionId ?? null);
+    } else {
+      setActiveTabId(null);
+      setCurrentSession(null);
+      setView('sessions');
+    }
+  }
+}
+
+function activateTab(tabId: string): void {
+  setActiveTabId(tabId);
+  const tab = tabStore.tabs.find((t) => t.id === tabId);
+  if (tab) {
+    const pane = findFocusedPane(tab);
+    setCurrentSession(pane?.sessionId ?? null);
+  }
+}
+
+function renameTab(tabId: string, newLabel: string): void {
+  const idx = tabStore.tabs.findIndex((t) => t.id === tabId);
+  if (idx === -1) return;
+  setTabStore('tabs', idx, 'label', newLabel);
+}
+
+function getActiveTab(): Tab | undefined {
+  return tabStore.tabs.find((t) => t.id === activeTabId());
+}
+
+/** Find the focused pane in a tab */
+function findFocusedPane(tab: Tab): Pane | undefined {
+  return findPaneById(tab.panes, tab.focusedPaneId);
+}
+
+/** Recursively find a pane by id in a layout */
+function findPaneById(layout: PaneLayout, paneId: string): Pane | undefined {
+  if (layout.type === 'single') {
+    return layout.pane.id === paneId ? layout.pane : undefined;
+  }
+  if (layout.type === 'hsplit') {
+    return findPaneById(layout.left, paneId) ?? findPaneById(layout.right, paneId);
+  }
+  if (layout.type === 'vsplit') {
+    return findPaneById(layout.top, paneId) ?? findPaneById(layout.bottom, paneId);
+  }
+  return undefined;
+}
+
+/** Collect all panes in a layout */
+function collectPanes(layout: PaneLayout): Pane[] {
+  if (layout.type === 'single') return [layout.pane];
+  if (layout.type === 'hsplit') return [...collectPanes(layout.left), ...collectPanes(layout.right)];
+  if (layout.type === 'vsplit') return [...collectPanes(layout.top), ...collectPanes(layout.bottom)];
+  return [];
+}
+
+/** Focus a pane within the active tab */
+function focusPane(paneId: string): void {
+  const tabId = activeTabId();
+  if (!tabId) return;
+  const idx = tabStore.tabs.findIndex((t) => t.id === tabId);
+  if (idx === -1) return;
+  const pane = findPaneById(tabStore.tabs[idx].panes, paneId);
+  if (!pane) return;
+  setCurrentSession(pane.sessionId);
+  setTabStore('tabs', idx, 'focusedPaneId', paneId);
+}
+
+/** Split a pane within the active tab */
+function splitPane(
+  paneId: string,
+  direction: 'horizontal' | 'vertical',
+  sessionId: string,
+  sessionName?: string
+): void {
+  const tabId = activeTabId();
+  if (!tabId) return;
+  const idx = tabStore.tabs.findIndex((t) => t.id === tabId);
+  if (idx === -1) return;
+  const newPane = createPaneObj(sessionId, sessionName);
+
+  function splitLayout(layout: PaneLayout): PaneLayout {
+    if (layout.type === 'single' && layout.pane.id === paneId) {
+      if (direction === 'horizontal') {
+        return { type: 'hsplit', left: layout, right: { type: 'single', pane: newPane }, ratio: 0.5 };
+      } else {
+        return { type: 'vsplit', top: layout, bottom: { type: 'single', pane: newPane }, ratio: 0.5 };
+      }
+    }
+    if (layout.type === 'hsplit') {
+      return { ...layout, left: splitLayout(layout.left), right: splitLayout(layout.right) };
+    }
+    if (layout.type === 'vsplit') {
+      return { ...layout, top: splitLayout(layout.top), bottom: splitLayout(layout.bottom) };
+    }
+    return layout;
+  }
+
+  setTabStore('tabs', idx, produce((t: Tab) => {
+    t.panes = splitLayout(t.panes);
+    t.focusedPaneId = newPane.id;
+  }));
+  setCurrentSession(sessionId);
+}
+
+/** Close a pane within the active tab; collapses the split */
+function closePane(paneId: string): void {
+  const tabId = activeTabId();
+  if (!tabId) return;
+
+  const tab = tabStore.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  const allPanesBeforeRemove = collectPanes(tab.panes);
+  if (allPanesBeforeRemove.length <= 1) {
+    closeTab(tabId);
+    return;
+  }
+
+  const idx = tabStore.tabs.findIndex((t) => t.id === tabId);
+  if (idx === -1) return;
+
+  function removeFromLayout(layout: PaneLayout): PaneLayout | null {
+    if (layout.type === 'single') {
+      return layout.pane.id === paneId ? null : layout;
+    }
+    if (layout.type === 'hsplit') {
+      const left = removeFromLayout(layout.left);
+      const right = removeFromLayout(layout.right);
+      if (!left && !right) return null;
+      if (!left) return right;
+      if (!right) return left;
+      return { ...layout, left, right };
+    }
+    if (layout.type === 'vsplit') {
+      const top = removeFromLayout(layout.top);
+      const bottom = removeFromLayout(layout.bottom);
+      if (!top && !bottom) return null;
+      if (!top) return bottom;
+      if (!bottom) return top;
+      return { ...layout, top, bottom };
+    }
+    return layout;
+  }
+
+  setTabStore('tabs', idx, produce((t: Tab) => {
+    const newLayout = removeFromLayout(t.panes);
+    if (!newLayout) return;
+    t.panes = newLayout;
+    const remaining = collectPanes(newLayout);
+    const focusedStillExists = remaining.some((p) => p.id === t.focusedPaneId);
+    if (!focusedStillExists) {
+      t.focusedPaneId = remaining[0]?.id ?? '';
+    }
+    const fp = remaining.find((p) => p.id === t.focusedPaneId);
+    if (fp) setCurrentSession(fp.sessionId);
+  }));
+}
+
+/** Update the split ratio for a pane layout.
+ *  Uses produce for fine-grained mutation -- only the ratio property
+ *  changes, so PaneContainer's style bindings update without
+ *  recreating the terminal instances.
+ */
+function updateSplitRatio(tabId: string, childPaneId: string, newRatio: number): void {
+  const idx = tabStore.tabs.findIndex((t) => t.id === tabId);
+  if (idx === -1) return;
+
+  function mutateRatio(layout: PaneLayout): boolean {
+    if (layout.type === 'single') return false;
+    if (layout.type === 'hsplit') {
+      const leftPanes = collectPanes(layout.left);
+      const rightPanes = collectPanes(layout.right);
+      if (leftPanes.some((p) => p.id === childPaneId) || rightPanes.some((p) => p.id === childPaneId)) {
+        (layout as any).ratio = newRatio;
+        return true;
+      }
+      return mutateRatio(layout.left) || mutateRatio(layout.right);
+    }
+    if (layout.type === 'vsplit') {
+      const topPanes = collectPanes(layout.top);
+      const bottomPanes = collectPanes(layout.bottom);
+      if (topPanes.some((p) => p.id === childPaneId) || bottomPanes.some((p) => p.id === childPaneId)) {
+        (layout as any).ratio = newRatio;
+        return true;
+      }
+      return mutateRatio(layout.top) || mutateRatio(layout.bottom);
+    }
+    return false;
+  }
+
+  setTabStore('tabs', idx, produce((t: Tab) => {
+    mutateRatio(t.panes);
+  }));
+}
+
+/** Reorder tabs by moving a tab from one index to another */
+function reorderTabs(fromIndex: number, toIndex: number): void {
+  setTabStore('tabs', produce((arr: Tab[]) => {
+    const [moved] = arr.splice(fromIndex, 1);
+    arr.splice(toIndex, 0, moved);
+  }));
+}
 
 export const store = {
   // Getters
   view, connected, hostName, peerId, sessions,
   currentSession, dirEntries, currentPath, showHidden,
-  latency, tier, error,
+  latency, tier, error, tabs, activeTabId,
   // Setters
   setView, setConnected, setHostName, setPeerId, setSessions,
   setCurrentSession, setDirEntries, setCurrentPath, setShowHidden,
-  setLatency, setTier, setError,
+  setLatency, setTier, setError, setActiveTabId,
+  // Tab & Pane operations
+  addTab, closeTab, activateTab, renameTab, getActiveTab,
+  findFocusedPane, findPaneById, collectPanes,
+  focusPane, splitPane, closePane,
+  updateSplitRatio, reorderTabs,
 };
 
 // --- IndexedDB persistence ---

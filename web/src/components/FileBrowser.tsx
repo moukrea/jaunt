@@ -55,8 +55,8 @@ export default function FileBrowser() {
       if ('Ok' in resp) {
         const data = resp.Ok;
         if ('SessionCreated' in (data as any)) {
-          store.setCurrentSession((data as any).SessionCreated.id);
-          store.setView('terminal');
+          const id = (data as any).SessionCreated.id;
+          store.addTab(id, undefined);
         }
       }
     } catch (e: any) {
