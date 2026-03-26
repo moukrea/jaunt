@@ -1,11 +1,26 @@
-use cairn_p2p::{CairnConfig, Event, StorageBackend, TurnServer};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use cairn_p2p::{CairnConfig, Event, Node, Session, StorageBackend, TurnServer};
 use jaunt_protocol::messages::*;
+use tokio::sync::RwLock;
 
 use crate::approval::ApprovalStore;
 use crate::config::JauntConfig;
 use crate::files::FileBrowser;
 use crate::profile;
 use crate::snag::SnagBridge;
+
+/// Tracks a peer's PTY attachment: the target snag session, a handle
+/// to abort the output-forwarding task, and a writer for sending PTY input.
+struct PtyAttachment {
+    target: String,
+    abort_handle: tokio::task::AbortHandle,
+    writer: Arc<tokio::sync::Mutex<Option<crate::snag::SnagAttachmentWriter>>>,
+}
+
+/// Shared state for per-peer PTY attachments.
+type Attachments = Arc<RwLock<HashMap<String, PtyAttachment>>>;
 
 pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     // Check snag is available
@@ -54,6 +69,9 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
 
     // Load approval store
     let mut approval_store = ApprovalStore::load();
+
+    // Per-peer PTY attachment tracking
+    let attachments: Attachments = Arc::new(RwLock::new(HashMap::new()));
 
     // Display status
     let host_name = hostname::get()
@@ -107,34 +125,71 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                 match channel.as_str() {
                     "rpc" | "" => {
                         eprintln!("RPC from {peer_id} ({} bytes)", data.len());
-                        let response = handle_rpc(data, &snag, &file_browser);
-                        if let RpcResponse::Error { message, .. } = &response {
-                            eprintln!("RPC error: {message}");
-                        }
-                        // Send response back via cairn session
-                        match jaunt_protocol::encode_response(&response) {
-                            Ok(resp_data) => {
-                                let sessions = node.sessions().await;
-                                eprintln!("  Sessions: {:?}", sessions.keys().collect::<Vec<_>>());
-                                if let Some(session) = sessions.get(peer_id) {
-                                    match session.open_channel("rpc").await {
-                                        Ok(ch) => {
-                                            match session.send(&ch, &resp_data).await {
-                                                Ok(_) => eprintln!("  Sent {} bytes response", resp_data.len()),
-                                                Err(e) => eprintln!("  Send failed: {e}"),
-                                            }
-                                        }
-                                        Err(e) => eprintln!("  Open channel failed: {e}"),
-                                    }
-                                } else {
-                                    eprintln!("  No session for peer {peer_id}");
-                                }
+
+                        // Decode the request first so we can handle attach/detach specially
+                        let request = match jaunt_protocol::decode_request(data) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let response = RpcResponse::Error {
+                                    code: 1,
+                                    message: format!("decode error: {e}"),
+                                };
+                                send_rpc_response(&node, peer_id, &response).await;
+                                continue;
                             }
-                            Err(e) => eprintln!("  Encode response failed: {e}"),
+                        };
+
+                        match request {
+                            RpcRequest::SessionAttach { ref target } => {
+                                eprintln!("  SessionAttach target={target}");
+                                handle_session_attach(
+                                    &node,
+                                    peer_id,
+                                    target,
+                                    &snag,
+                                    &attachments,
+                                )
+                                .await;
+                            }
+                            RpcRequest::SessionDetach {} => {
+                                eprintln!("  SessionDetach");
+                                handle_session_detach(peer_id, &attachments).await;
+                                let response = RpcResponse::Ok(RpcData::Empty {});
+                                send_rpc_response(&node, peer_id, &response).await;
+                            }
+                            RpcRequest::Resize { cols, rows } => {
+                                let att = attachments.read().await;
+                                if let Some(attachment) = att.get(peer_id) {
+                                    let mut guard = attachment.writer.lock().await;
+                                    if let Some(ref mut w) = *guard {
+                                        let _ = w.send_resize(cols as u16, rows as u16).await;
+                                    }
+                                }
+                                let response = RpcResponse::Ok(RpcData::Empty {});
+                                send_rpc_response(&node, peer_id, &response).await;
+                            }
+                            _ => {
+                                // Standard RPC: handle synchronously
+                                let response =
+                                    handle_rpc_request(&request, &snag, &file_browser);
+                                if let RpcResponse::Error { message, .. } = &response {
+                                    eprintln!("  RPC error: {message}");
+                                }
+                                send_rpc_response(&node, peer_id, &response).await;
+                            }
                         }
                     }
                     "pty" => {
-                        // PTY relay: forward raw bytes to attached snag session
+                        // PTY relay: forward raw bytes to attached snag session via SnagAttachment
+                        let att = attachments.read().await;
+                        if let Some(attachment) = att.get(peer_id) {
+                            let mut guard = attachment.writer.lock().await;
+                            if let Some(ref mut w) = *guard {
+                                if let Err(e) = w.send_pty_input(data).await {
+                                    eprintln!("PTY send to {} failed: {e}", attachment.target);
+                                }
+                            }
+                        }
                     }
                     "file" => {
                         // File transfer streaming
@@ -150,6 +205,155 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Send an RPC response back to the peer on the "rpc" channel.
+async fn send_rpc_response(node: &Node, peer_id: &str, response: &RpcResponse) {
+    match jaunt_protocol::encode_response(response) {
+        Ok(resp_data) => {
+            let sessions = node.sessions().await;
+            if let Some(session) = sessions.get(peer_id) {
+                match session.open_channel("rpc").await {
+                    Ok(ch) => match session.send(&ch, &resp_data).await {
+                        Ok(_) => eprintln!("  Sent {} bytes response", resp_data.len()),
+                        Err(e) => eprintln!("  Send failed: {e}"),
+                    },
+                    Err(e) => eprintln!("  Open channel failed: {e}"),
+                }
+            } else {
+                eprintln!("  No session for peer {peer_id}");
+            }
+        }
+        Err(e) => eprintln!("  Encode response failed: {e}"),
+    }
+}
+
+/// Handle SessionAttach: respond with Ok, then spawn a background task that
+/// runs `snag output <target> --follow` and streams PTY output to the browser
+/// via the cairn session's "pty" channel.
+async fn handle_session_attach(
+    node: &Node,
+    peer_id: &str,
+    target: &str,
+    snag: &SnagBridge,
+    attachments: &Attachments,
+) {
+    // Kill any existing attachment for this peer first
+    handle_session_detach(peer_id, attachments).await;
+
+    // Verify the target session exists
+    match snag.session_info(target) {
+        Ok(_info) => {}
+        Err(e) => {
+            let response = RpcResponse::Error {
+                code: 8,
+                message: format!("session not found: {e}"),
+            };
+            send_rpc_response(node, peer_id, &response).await;
+            return;
+        }
+    }
+
+    // Send the Ok response immediately so the browser knows attach succeeded
+    let response = RpcResponse::Ok(RpcData::Empty {});
+    send_rpc_response(node, peer_id, &response).await;
+
+    // Get the cairn session handle for this peer
+    let sessions = node.sessions().await;
+    let session = match sessions.get(peer_id) {
+        Some(s) => s.clone(),
+        None => {
+            eprintln!("  No cairn session for peer {peer_id}, cannot start PTY forwarding");
+            return;
+        }
+    };
+
+    // Attach to the snag session via the daemon's Unix socket
+    let (scrollback, snag_attachment) = match crate::snag::SnagAttachment::attach(target).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  SnagAttachment::attach failed: {e}");
+            let response = RpcResponse::Error {
+                code: 8,
+                message: format!("attach failed: {e}"),
+            };
+            send_rpc_response(node, peer_id, &response).await;
+            return;
+        }
+    };
+
+    // Split into reader (for output forwarding task) and writer (for input from event loop)
+    let (reader, writer) = snag_attachment.split();
+    let writer = Arc::new(tokio::sync::Mutex::new(Some(writer)));
+
+    // Send scrollback so the terminal isn't blank
+    if !scrollback.is_empty() {
+        if let Ok(ch) = session.open_channel("pty").await {
+            let _ = session.send(&ch, scrollback.as_bytes()).await;
+            eprintln!("  Sent {} bytes scrollback", scrollback.len());
+        }
+    }
+
+    // Spawn the PTY output forwarding task
+    let peer_id_owned = peer_id.to_string();
+    let task = tokio::spawn(async move {
+        pty_output_forwarder(session, reader, &peer_id_owned).await;
+    });
+
+    let abort_handle = task.abort_handle();
+    attachments.write().await.insert(
+        peer_id.to_string(),
+        PtyAttachment {
+            target: target.to_string(),
+            abort_handle,
+            writer,
+        },
+    );
+
+    eprintln!("  PTY forwarding started for peer {peer_id} -> session {target}");
+}
+
+/// Long-running task: reads PTY output from the SnagAttachmentReader and forwards
+/// each chunk to the browser via the cairn session's "pty" channel.
+async fn pty_output_forwarder(
+    session: Session,
+    mut reader: crate::snag::SnagAttachmentReader,
+    peer_id: &str,
+) {
+    let pty_channel = match session.open_channel("pty").await {
+        Ok(ch) => ch,
+        Err(e) => {
+            eprintln!("  PTY forwarder: failed to open pty channel: {e}");
+            return;
+        }
+    };
+
+    loop {
+        match reader.read_pty_output().await {
+            Ok(Some(data)) => {
+                if let Err(e) = session.send(&pty_channel, &data).await {
+                    eprintln!("  PTY forwarder: send failed for peer {peer_id}: {e}");
+                    break;
+                }
+            }
+            Ok(None) => {
+                eprintln!("  PTY forwarder: session exited for peer {peer_id}");
+                break;
+            }
+            Err(e) => {
+                eprintln!("  PTY forwarder: read error for peer {peer_id}: {e}");
+                break;
+            }
+        }
+    }
+}
+
+/// Handle SessionDetach: abort the PTY forwarding task.
+async fn handle_session_detach(peer_id: &str, attachments: &Attachments) {
+    if let Some(attachment) = attachments.write().await.remove(peer_id) {
+        attachment.abort_handle.abort();
+        eprintln!("  Detached peer {peer_id} from session {}", attachment.target);
+    }
 }
 
 fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
@@ -178,17 +382,13 @@ fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
     cairn
 }
 
-fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>) -> RpcResponse {
-    let request = match jaunt_protocol::decode_request(data) {
-        Ok(r) => r,
-        Err(e) => {
-            return RpcResponse::Error {
-                code: 1,
-                message: format!("decode error: {e}"),
-            }
-        }
-    };
-
+/// Handle an RPC request and produce a synchronous response.
+/// SessionAttach/SessionDetach/Resize are handled separately in the event loop.
+fn handle_rpc_request(
+    request: &RpcRequest,
+    snag: &SnagBridge,
+    file_browser: &Option<FileBrowser>,
+) -> RpcResponse {
     match request {
         RpcRequest::SessionList {} => match snag.list_sessions() {
             Ok(sessions) => RpcResponse::Ok(RpcData::SessionList(sessions)),
@@ -206,21 +406,21 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
                 },
             }
         }
-        RpcRequest::SessionKill { target } => match snag.kill_session(&target) {
+        RpcRequest::SessionKill { target } => match snag.kill_session(target) {
             Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
             Err(e) => RpcResponse::Error {
                 code: 4,
                 message: e,
             },
         },
-        RpcRequest::SessionSend { target, input } => match snag.send_input(&target, &input) {
+        RpcRequest::SessionSend { target, input } => match snag.send_input(target, input) {
             Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
             Err(e) => RpcResponse::Error {
                 code: 5,
                 message: e,
             },
         },
-        RpcRequest::SessionInfo { target } => match snag.session_info(&target) {
+        RpcRequest::SessionInfo { target } => match snag.session_info(target) {
             Ok(info) => RpcResponse::Ok(RpcData::SessionInfo(info)),
             Err(e) => RpcResponse::Error {
                 code: 6,
@@ -228,7 +428,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
             },
         },
         RpcRequest::SessionRename { target, new_name } => {
-            match snag.rename_session(&target, &new_name) {
+            match snag.rename_session(target, new_name) {
                 Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
                 Err(e) => RpcResponse::Error {
                     code: 7,
@@ -240,7 +440,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
             path,
             show_hidden: _,
         } => match file_browser {
-            Some(fb) => match fb.browse(&path) {
+            Some(fb) => match fb.browse(path) {
                 Ok(data) => RpcResponse::Ok(data),
                 Err(e) => RpcResponse::Error {
                     code: 10,
@@ -253,7 +453,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
             },
         },
         RpcRequest::FilePreview { path, max_bytes } => match file_browser {
-            Some(fb) => match fb.preview(&path, max_bytes) {
+            Some(fb) => match fb.preview(path, *max_bytes) {
                 Ok(data) => RpcResponse::Ok(data),
                 Err(e) => RpcResponse::Error {
                     code: 11,
@@ -266,7 +466,7 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
             },
         },
         RpcRequest::FileDelete { path } => match file_browser {
-            Some(fb) => match fb.delete(&path) {
+            Some(fb) => match fb.delete(path) {
                 Ok(()) => RpcResponse::Ok(RpcData::Empty {}),
                 Err(e) => RpcResponse::Error {
                     code: 12,
@@ -278,12 +478,11 @@ fn handle_rpc(data: &[u8], snag: &SnagBridge, file_browser: &Option<FileBrowser>
                 message: "file browser disabled".into(),
             },
         },
+        // These are handled in the event loop, not here
         RpcRequest::SessionAttach { .. }
         | RpcRequest::SessionDetach {}
-        | RpcRequest::Resize { .. }
-        | RpcRequest::FileDownload { .. }
-        | RpcRequest::FileUpload { .. } => {
-            // Streaming operations handled separately via PTY/file channels
+        | RpcRequest::Resize { .. } => RpcResponse::Ok(RpcData::Empty {}),
+        RpcRequest::FileDownload { .. } | RpcRequest::FileUpload { .. } => {
             RpcResponse::Ok(RpcData::Empty {})
         }
     }
