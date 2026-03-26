@@ -105,20 +105,32 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                 }
 
                 match channel.as_str() {
-                    "rpc" => {
+                    "rpc" | "" => {
+                        eprintln!("RPC from {peer_id} ({} bytes)", data.len());
                         let response = handle_rpc(data, &snag, &file_browser);
                         if let RpcResponse::Error { message, .. } = &response {
                             eprintln!("RPC error: {message}");
                         }
                         // Send response back via cairn session
-                        if let Ok(resp_data) = jaunt_protocol::encode_response(&response) {
-                            let sessions = node.sessions().await;
-                            if let Some(session) = sessions.get(peer_id) {
-                                let ch = session.open_channel("rpc").await;
-                                if let Ok(ch) = ch {
-                                    let _ = session.send(&ch, &resp_data).await;
+                        match jaunt_protocol::encode_response(&response) {
+                            Ok(resp_data) => {
+                                let sessions = node.sessions().await;
+                                eprintln!("  Sessions: {:?}", sessions.keys().collect::<Vec<_>>());
+                                if let Some(session) = sessions.get(peer_id) {
+                                    match session.open_channel("rpc").await {
+                                        Ok(ch) => {
+                                            match session.send(&ch, &resp_data).await {
+                                                Ok(_) => eprintln!("  Sent {} bytes response", resp_data.len()),
+                                                Err(e) => eprintln!("  Send failed: {e}"),
+                                            }
+                                        }
+                                        Err(e) => eprintln!("  Open channel failed: {e}"),
+                                    }
+                                } else {
+                                    eprintln!("  No session for peer {peer_id}");
                                 }
                             }
+                            Err(e) => eprintln!("  Encode response failed: {e}"),
                         }
                     }
                     "pty" => {
