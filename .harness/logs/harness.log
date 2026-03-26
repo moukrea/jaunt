@@ -691,3 +691,14 @@
 {"timestamp":"2026-03-26T22:26:50Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-session-attach.mjs","duration_ms":5}
 {"timestamp":"2026-03-26T22:27:04Z","hook":"guard-writes","decision":"pass","duration_ms":17}
 {"timestamp":"2026-03-26T22:27:04Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-session-attach.mjs","duration_ms":5}
+{"timestamp":"2026-03-26T22:28:48Z","hook":"stop-gate","decision":"pass","duration_ms":10538}
+{"timestamp":"2026-03-26T22:36:40Z","hook":"classify-prompt","decision":"medium","duration_ms":16}
+{"timestamp":"2026-03-26T22:52:28Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-26T22:52:28Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TerminalPane.tsx","duration_ms":5}
+{"timestamp":"2026-03-26T22:52:36Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-26T22:52:36Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TerminalPane.tsx","duration_ms":7}
+{"timestamp":"2026-03-26T22:52:48Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-26T22:52:48Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TabBar.tsx","duration_ms":5}
+{"timestamp":"2026-03-26T22:53:53Z","hook":"stop-gate","decision":"pass","duration_ms":10234}
+{"timestamp":"2026-03-26T22:54:53Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":31}
+{"timestamp":"2026-03-26T23:04:47Z","hook":"classify-prompt","decision":"medium","duration_ms":24}
