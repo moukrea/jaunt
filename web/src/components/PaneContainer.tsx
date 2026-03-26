@@ -35,8 +35,7 @@ function HSplit(props: {
   let containerRef: HTMLDivElement | undefined;
 
   function leftPaneId(): string {
-    const panes = store.collectPanes(props.layout.left);
-    return panes[0]?.id ?? '';
+    return store.collectPanes(props.layout.left)[0]?.id ?? '';
   }
 
   function handleMouseDown(e: MouseEvent) {
@@ -48,17 +47,14 @@ function HSplit(props: {
     function onMove(ev: MouseEvent) {
       if (!containerRef) return;
       const rect = containerRef.getBoundingClientRect();
-      const deltaX = ev.clientX - startX;
-      const newRatio = Math.max(0.15, Math.min(0.85, startRatio + deltaX / rect.width));
+      const newRatio = Math.max(0.15, Math.min(0.85, startRatio + (ev.clientX - startX) / rect.width));
       store.updateSplitRatio(props.tabId, leftPaneId(), newRatio);
     }
-
     function onUp() {
       setDragging(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     }
-
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }
@@ -68,12 +64,20 @@ function HSplit(props: {
       <div style={{ width: `${props.layout.ratio * 100}%` }} class="flex min-h-0 min-w-0">
         <PaneContainer layout={props.layout.left} tabId={props.tabId} />
       </div>
+      {/* Divider with grip */}
       <div
-        class={`w-1 shrink-0 cursor-col-resize transition-colors duration-100 ${
-          dragging() ? 'bg-amber/60' : 'bg-bg-3/50 hover:bg-amber/40'
+        class={`w-1 shrink-0 cursor-col-resize relative transition-colors duration-100 group/divider ${
+          dragging() ? 'bg-amber/50' : 'bg-bg-3/40 hover:bg-amber/30'
         }`}
         onMouseDown={handleMouseDown}
-      />
+      >
+        {/* Grip dots */}
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover/divider:opacity-100 transition-opacity duration-200">
+          <div class="w-0.5 h-0.5 rounded-full bg-text-3/40" />
+          <div class="w-0.5 h-0.5 rounded-full bg-text-3/40" />
+          <div class="w-0.5 h-0.5 rounded-full bg-text-3/40" />
+        </div>
+      </div>
       <div style={{ width: `${(1 - props.layout.ratio) * 100}%` }} class="flex min-h-0 min-w-0">
         <PaneContainer layout={props.layout.right} tabId={props.tabId} />
       </div>
@@ -89,8 +93,7 @@ function VSplit(props: {
   let containerRef: HTMLDivElement | undefined;
 
   function topPaneId(): string {
-    const panes = store.collectPanes(props.layout.top);
-    return panes[0]?.id ?? '';
+    return store.collectPanes(props.layout.top)[0]?.id ?? '';
   }
 
   function handleMouseDown(e: MouseEvent) {
@@ -102,17 +105,14 @@ function VSplit(props: {
     function onMove(ev: MouseEvent) {
       if (!containerRef) return;
       const rect = containerRef.getBoundingClientRect();
-      const deltaY = ev.clientY - startY;
-      const newRatio = Math.max(0.15, Math.min(0.85, startRatio + deltaY / rect.height));
+      const newRatio = Math.max(0.15, Math.min(0.85, startRatio + (ev.clientY - startY) / rect.height));
       store.updateSplitRatio(props.tabId, topPaneId(), newRatio);
     }
-
     function onUp() {
       setDragging(false);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     }
-
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }
@@ -122,12 +122,20 @@ function VSplit(props: {
       <div style={{ height: `${props.layout.ratio * 100}%` }} class="flex min-h-0 min-w-0">
         <PaneContainer layout={props.layout.top} tabId={props.tabId} />
       </div>
+      {/* Divider with grip */}
       <div
-        class={`h-1 shrink-0 cursor-row-resize transition-colors duration-100 ${
-          dragging() ? 'bg-amber/60' : 'bg-bg-3/50 hover:bg-amber/40'
+        class={`h-1 shrink-0 cursor-row-resize relative transition-colors duration-100 group/divider ${
+          dragging() ? 'bg-amber/50' : 'bg-bg-3/40 hover:bg-amber/30'
         }`}
         onMouseDown={handleMouseDown}
-      />
+      >
+        {/* Grip dots */}
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/divider:opacity-100 transition-opacity duration-200">
+          <div class="w-0.5 h-0.5 rounded-full bg-text-3/40" />
+          <div class="w-0.5 h-0.5 rounded-full bg-text-3/40" />
+          <div class="w-0.5 h-0.5 rounded-full bg-text-3/40" />
+        </div>
+      </div>
       <div style={{ height: `${(1 - props.layout.ratio) * 100}%` }} class="flex min-h-0 min-w-0">
         <PaneContainer layout={props.layout.bottom} tabId={props.tabId} />
       </div>

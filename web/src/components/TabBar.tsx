@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from 'solid-js';
 import { store } from '../lib/store';
 import type { Tab } from '../lib/store';
+import { sendRpc } from '../lib/cairn';
 import SessionPicker from './SessionPicker';
 
 export default function TabBar() {
@@ -15,15 +16,24 @@ export default function TabBar() {
     setShowPicker(false);
   }
 
-  function startRename(tab: Tab) {
+  function startRename(tab: Tab, e?: Event) {
+    e?.stopPropagation();
     setEditingTabId(tab.id);
     setEditValue(tab.label);
   }
 
-  function commitRename(tabId: string) {
+  async function commitRename(tabId: string) {
     const val = editValue().trim();
     if (val) {
       store.renameTab(tabId, val);
+      // Also rename at the host level
+      const tab = store.tabs().find(t => t.id === tabId);
+      if (tab) {
+        const pane = store.findFocusedPane(tab);
+        if (pane) {
+          sendRpc({ SessionRename: { target: pane.sessionId, new_name: val } }).catch(() => {});
+        }
+      }
     }
     setEditingTabId(null);
   }
@@ -63,10 +73,15 @@ export default function TabBar() {
     setDragOverIdx(null);
   }
 
+  const hasTabs = () => store.tabs().length > 0;
+
   return (
-    <div class="flex items-stretch bg-bg-1 border-b border-bg-3/40 shrink-0 relative h-9">
-      {/* Tab list — scrollable */}
-      <div class="flex-1 flex items-stretch overflow-x-auto min-w-0" style="scrollbar-width: none; -ms-overflow-style: none;">
+    <div class="flex items-stretch bg-bg-1 shrink-0 relative" style="min-height: 36px">
+      {/* Tab list — scrollable, each tab is a precision strip */}
+      <div
+        class="flex-1 flex items-stretch overflow-x-auto min-w-0"
+        style="scrollbar-width: none; -ms-overflow-style: none;"
+      >
         <For each={store.tabs()}>
           {(tab, idx) => {
             const isActive = () => tab.id === store.activeTabId();
@@ -75,11 +90,11 @@ export default function TabBar() {
 
             return (
               <div
-                class={`flex items-center gap-1 px-3 min-w-0 shrink-0 cursor-pointer select-none transition-all duration-100 border-r border-bg-3/20 ${
+                class={`relative flex items-center gap-1.5 px-3.5 min-w-0 shrink-0 cursor-pointer select-none transition-all duration-150 ${
                   isActive()
                     ? 'bg-bg-0 text-text-0'
-                    : 'text-text-3 hover:text-text-2 hover:bg-bg-2/50'
-                } ${isDragOver() ? 'border-l-2 border-l-amber' : ''}`}
+                    : 'text-text-3 hover:text-text-1 hover:bg-bg-0/40'
+                } ${isDragOver() ? 'ring-1 ring-inset ring-amber/40' : ''}`}
                 draggable={!isEditing()}
                 onDragStart={(e) => handleDragStart(e, idx())}
                 onDragOver={(e) => handleDragOver(e, idx())}
@@ -89,23 +104,36 @@ export default function TabBar() {
                 onMouseDown={(e) => handleMiddleClick(e, tab.id)}
                 onDblClick={() => startRename(tab)}
               >
-                {/* Active indicator */}
+                {/* Active bottom edge — precision amber line */}
                 <Show when={isActive()}>
-                  <div class="w-1 h-1 rounded-full bg-amber shrink-0" />
+                  <div
+                    class="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-amber"
+                    style="box-shadow: 0 1px 6px #e8a24540"
+                  />
+                </Show>
+
+                {/* Separator between inactive tabs */}
+                <Show when={!isActive() && idx() > 0}>
+                  <div class="absolute left-0 top-2 bottom-2 w-px bg-bg-3/30" />
                 </Show>
 
                 {/* Tab label / rename input */}
                 <Show
                   when={isEditing()}
                   fallback={
-                    <span class={`text-xs truncate max-w-28 ${isActive() ? 'font-500' : ''}`}>
+                    <span
+                      class={`text-[11px] font-mono truncate max-w-32 leading-none ${
+                        isActive() ? 'font-500 text-text-0' : ''
+                      }`}
+                    >
                       {tab.label}
                     </span>
                   }
                 >
                   <input
                     type="text"
-                    class="bg-bg-0 border border-amber/50 rounded px-1.5 py-0.5 text-xs text-text-0 outline-none w-24"
+                    class="bg-bg-0 border border-amber/40 rounded px-1.5 py-0.5 text-[11px] font-mono text-text-0 outline-none w-28 focus:border-amber/70"
+                    style="box-shadow: 0 0 0 1px #e8a24515"
                     value={editValue()}
                     onInput={(e) => setEditValue(e.currentTarget.value)}
                     onKeyDown={(e) => {
@@ -118,12 +146,12 @@ export default function TabBar() {
                   />
                 </Show>
 
-                {/* Close button */}
+                {/* Close button — appears on hover, fades in */}
                 <button
-                  class={`ml-1 w-4 h-4 flex items-center justify-center rounded transition-all border-none cursor-pointer shrink-0 bg-transparent ${
+                  class={`ml-0.5 w-4 h-4 flex items-center justify-center rounded-sm transition-all duration-150 border-none cursor-pointer shrink-0 bg-transparent ${
                     isActive()
-                      ? 'text-text-3/60 hover:text-coral hover:bg-coral/10'
-                      : 'text-text-3/30 hover:text-coral hover:bg-coral/10'
+                      ? 'text-text-3/50 hover:text-coral hover:bg-coral/10'
+                      : 'text-transparent hover:text-coral hover:bg-coral/10'
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -131,7 +159,9 @@ export default function TabBar() {
                   }}
                   title="Close tab"
                 >
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                    <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                  </svg>
                 </button>
               </div>
             );
@@ -139,19 +169,25 @@ export default function TabBar() {
         </For>
       </div>
 
-      {/* Add tab button */}
-      <div class="relative shrink-0 flex items-center">
+      {/* Add tab — the + affordance */}
+      <div class="relative shrink-0 flex items-center border-l border-bg-3/20">
         <button
-          class="w-8 h-full flex items-center justify-center text-text-3 hover:text-amber hover:bg-bg-2 transition-colors border-none bg-transparent cursor-pointer"
+          class={`w-9 h-full flex items-center justify-center transition-all duration-150 border-none cursor-pointer ${
+            showPicker()
+              ? 'text-amber bg-bg-0'
+              : 'text-text-3 hover:text-amber hover:bg-bg-0/40 bg-transparent'
+          }`}
           onClick={() => setShowPicker(!showPicker())}
           title="Open session in new tab"
         >
-          <span class="text-sm font-500">+</span>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
         </button>
 
         {/* Session picker dropdown */}
         <Show when={showPicker()}>
-          <div class="absolute top-full right-0 mt-1">
+          <div class="absolute top-full right-0 mt-1 z-50">
             <SessionPicker
               onSelect={handleAddSession}
               onClose={() => setShowPicker(false)}
@@ -159,6 +195,16 @@ export default function TabBar() {
           </div>
         </Show>
       </div>
+
+      {/* Bottom border for the whole bar */}
+      <div class="absolute bottom-0 left-0 right-0 h-px bg-bg-3/40" />
+
+      {/* Show hint when no tabs */}
+      <Show when={!hasTabs()}>
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span class="text-[11px] text-text-3/40 font-mono tracking-wider">NO OPEN TABS</span>
+        </div>
+      </Show>
     </div>
   );
 }

@@ -17,12 +17,36 @@ export default function TerminalPane(props: TerminalPaneProps) {
   let term: XTerm | null = null;
   let fitAddon: FitAddon | null = null;
   const [attached, setAttached] = createSignal(false);
+  const [renaming, setRenaming] = createSignal(false);
+  const [renameValue, setRenameValue] = createSignal('');
 
-  // Compute focused state reactively from the store
   const isFocused = createMemo(() => {
     const tab = store.tabs().find((t) => t.id === props.tabId);
     return tab?.focusedPaneId === props.pane.id && store.activeTabId() === props.tabId;
   });
+
+  const displayName = () => props.pane.sessionName || props.pane.sessionId.slice(0, 10);
+  const shellName = () => {
+    // Try to get shell from sessions list
+    const info = store.sessions().find(s => s.id === props.pane.sessionId);
+    return info?.shell?.split('/').pop() || 'sh';
+  };
+
+  function startRename() {
+    setRenameValue(displayName());
+    setRenaming(true);
+  }
+
+  async function commitRename() {
+    const val = renameValue().trim();
+    if (val && val !== displayName()) {
+      // Update tab label
+      store.renameTab(props.tabId, val);
+      // Update at host level
+      sendRpc({ SessionRename: { target: props.pane.sessionId, new_name: val } }).catch(() => {});
+    }
+    setRenaming(false);
+  }
 
   onMount(async () => {
     if (!termDiv) return;
@@ -68,21 +92,13 @@ export default function TerminalPane(props: TerminalPaneProps) {
     term.loadAddon(fitAddon);
     term.open(termDiv);
 
-    try {
-      term.loadAddon(new WebglAddon());
-    } catch {
-      // WebGL not available
-    }
+    try { term.loadAddon(new WebglAddon()); } catch { /* WebGL not available */ }
 
     fitAddon.fit();
 
-    // Input handling -- only send if this pane is focused
     term.onData((data) => {
-      if (isFocused()) {
-        sendPtyInput(new TextEncoder().encode(data));
-      }
+      if (isFocused()) sendPtyInput(new TextEncoder().encode(data));
     });
-
     term.onBinary((data) => {
       if (isFocused()) {
         const bytes = new Uint8Array(data.length);
@@ -90,28 +106,17 @@ export default function TerminalPane(props: TerminalPaneProps) {
         sendPtyInput(bytes);
       }
     });
-
     term.onResize(({ cols, rows }) => {
-      if (isFocused()) {
-        sendResize(cols, rows);
-      }
+      if (isFocused()) sendResize(cols, rows);
     });
 
-    // Attach to session if this pane is focused
-    if (isFocused()) {
-      await attachToSession();
-    }
+    if (isFocused()) await attachToSession();
 
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon?.fit();
-    });
+    const resizeObserver = new ResizeObserver(() => fitAddon?.fit());
     resizeObserver.observe(termDiv);
 
     onCleanup(() => {
       resizeObserver.disconnect();
-      // Only send detach if this pane is currently focused (i.e. it owns
-      // the protocol-level attachment). Detaching a non-focused pane would
-      // accidentally tear down the focused pane's session attachment.
       if (attached() && isFocused()) {
         sendRpc({ SessionDetach: {} }).catch(() => {});
       }
@@ -121,39 +126,25 @@ export default function TerminalPane(props: TerminalPaneProps) {
     });
   });
 
-  // React to focus changes: attach when gaining focus, refit terminal
   createEffect(async () => {
     const focused = isFocused();
     if (!term) return;
-
     if (focused) {
-      // Refit in case the container was hidden (display:none) and is now visible
       requestAnimationFrame(() => fitAddon?.fit());
       await attachToSession();
     }
-    // When losing focus, we do NOT detach -- the next focused pane will
-    // issue its own attach which implicitly detaches the previous one
-    // at the protocol level. We just stop routing PTY data to this terminal.
   });
 
   async function attachToSession() {
     if (!term) return;
     try {
-      // Register PTY data callback for this pane
-      setPtyDataCallback((data: Uint8Array) => {
-        term?.write(data);
-      });
-
+      setPtyDataCallback((data: Uint8Array) => { term?.write(data); });
       const resp = await sendRpc({ SessionAttach: { target: props.pane.sessionId } });
       if ('Ok' in resp) {
         const data = resp.Ok;
-        if ('Output' in (data as any)) {
-          term.write((data as any).Output);
-        }
+        if ('Output' in (data as any)) term.write((data as any).Output);
         setAttached(true);
-        if (term) {
-          sendResize(term.cols, term.rows);
-        }
+        if (term) sendResize(term.cols, term.rows);
       }
     } catch (e: any) {
       term?.write(`\r\n\x1b[38;2;224;108;90m Connection failed: ${e.message}\x1b[0m\r\n`);
@@ -161,71 +152,122 @@ export default function TerminalPane(props: TerminalPaneProps) {
   }
 
   function handleClick() {
-    if (!isFocused()) {
-      store.focusPane(props.pane.id);
-    }
+    if (!isFocused()) store.focusPane(props.pane.id);
   }
-
-  const displayName = () => props.pane.sessionName || props.pane.sessionId.slice(0, 12);
 
   return (
     <div
       class="flex-1 flex flex-col min-h-0 min-w-0 group/pane"
       onClick={handleClick}
     >
-      {/* Pane header -- compact, stays out of the way */}
-      <div class={`flex items-center justify-between px-2.5 h-7 shrink-0 border-b transition-colors duration-150 ${
-        isFocused()
-          ? 'bg-bg-1 border-amber/30'
-          : 'bg-bg-1/80 border-bg-3/30'
-      }`}>
-        <div class="flex items-center gap-1.5 text-[11px] min-w-0">
-          <div class={`w-1.5 h-1.5 rounded-full shrink-0 ${attached() ? 'bg-sage pulse' : 'bg-text-3'}`} />
-          <span class={`font-mono truncate ${isFocused() ? 'text-text-1' : 'text-text-3'}`}>
-            {displayName()}
+      {/* Pane header — precision instrument strip */}
+      <div
+        class={`flex items-center justify-between px-2.5 shrink-0 transition-all duration-200 ${
+          isFocused()
+            ? 'bg-bg-1'
+            : 'bg-bg-1/60'
+        }`}
+        style={{
+          height: '28px',
+          'border-top': isFocused()
+            ? '2px solid #e8a24580'
+            : '2px solid transparent',
+          'border-bottom': `1px solid ${isFocused() ? '#e8a24520' : '#252529'}`,
+        }}
+      >
+        {/* Left: status + name + shell badge */}
+        <div class="flex items-center gap-2 min-w-0">
+          {/* Status dot */}
+          <div
+            class={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors duration-300 ${
+              attached() ? 'bg-sage' : 'bg-text-3/40'
+            }`}
+            style={attached() ? { 'box-shadow': '0 0 4px #7dba6e60' } : {}}
+          />
+
+          {/* Session name — double-click to rename */}
+          {renaming() ? (
+            <input
+              type="text"
+              class="bg-bg-0 border border-amber/40 rounded px-1.5 py-px text-[11px] font-mono text-text-0 outline-none w-28 focus:border-amber/70"
+              style="box-shadow: 0 0 0 1px #e8a24515"
+              value={renameValue()}
+              onInput={(e) => setRenameValue(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') setRenaming(false);
+              }}
+              onBlur={() => commitRename()}
+              autofocus
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              class={`text-[11px] font-mono truncate cursor-default transition-colors duration-150 ${
+                isFocused() ? 'text-text-0' : 'text-text-3'
+              }`}
+              onDblClick={(e) => { e.stopPropagation(); startRename(); }}
+              title="Double-click to rename"
+            >
+              {displayName()}
+            </span>
+          )}
+
+          {/* Shell pill badge */}
+          <span
+            class={`text-[9px] font-mono px-1.5 py-px rounded-sm tracking-wider uppercase shrink-0 transition-colors duration-150 ${
+              isFocused()
+                ? 'bg-bg-3/60 text-text-2'
+                : 'bg-bg-3/30 text-text-3/60'
+            }`}
+          >
+            {shellName()}
           </span>
         </div>
-        <div class="flex items-center gap-0.5">
+
+        {/* Right: action buttons — reveal on hover */}
+        <div class="flex items-center gap-px">
           {/* Split left-right */}
           <button
-            class="text-text-3/60 hover:text-amber bg-transparent border-none cursor-pointer p-0.5 rounded hover:bg-bg-2 transition-colors opacity-0 group-hover/pane:opacity-100"
+            class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
             on:click={(e) => {
               e.stopPropagation();
-              const event = new CustomEvent('pane-split', {
-                bubbles: true,
-                detail: { paneId: props.pane.id, direction: 'horizontal' },
-              });
-              (e.currentTarget as HTMLElement).dispatchEvent(event);
+              (e.currentTarget as HTMLElement).dispatchEvent(
+                new CustomEvent('pane-split', { bubbles: true, detail: { paneId: props.pane.id, direction: 'horizontal' } })
+              );
             }}
-            title="Split left/right"
+            title="Split left / right"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="7" y="1" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <rect x="1.5" y="1.5" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.1" />
+              <rect x="7.5" y="1.5" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.1" />
+            </svg>
           </button>
           {/* Split top-bottom */}
           <button
-            class="text-text-3/60 hover:text-amber bg-transparent border-none cursor-pointer p-0.5 rounded hover:bg-bg-2 transition-colors opacity-0 group-hover/pane:opacity-100"
+            class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
             on:click={(e) => {
               e.stopPropagation();
-              const event = new CustomEvent('pane-split', {
-                bubbles: true,
-                detail: { paneId: props.pane.id, direction: 'vertical' },
-              });
-              (e.currentTarget as HTMLElement).dispatchEvent(event);
+              (e.currentTarget as HTMLElement).dispatchEvent(
+                new CustomEvent('pane-split', { bubbles: true, detail: { paneId: props.pane.id, direction: 'vertical' } })
+              );
             }}
-            title="Split top/bottom"
+            title="Split top / bottom"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="7" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <rect x="1.5" y="1.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.1" />
+              <rect x="1.5" y="7.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.1" />
+            </svg>
           </button>
           {/* Close pane */}
           <button
-            class="text-text-3/40 hover:text-coral bg-transparent border-none cursor-pointer p-0.5 rounded hover:bg-coral/10 transition-colors opacity-0 group-hover/pane:opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              store.closePane(props.pane.id);
-            }}
+            class="w-6 h-5 flex items-center justify-center text-text-3/30 hover:text-coral bg-transparent border-none cursor-pointer rounded-sm hover:bg-coral/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
+            onClick={(e) => { e.stopPropagation(); store.closePane(props.pane.id); }}
             title="Close pane"
           >
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+              <path d="M1.5 1.5l6 6M7.5 1.5l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+            </svg>
           </button>
         </div>
       </div>
@@ -234,7 +276,7 @@ export default function TerminalPane(props: TerminalPaneProps) {
       <div
         ref={termDiv}
         class="flex-1 min-h-0 min-w-0"
-        style={{ padding: '4px 4px 2px 6px' }}
+        style={{ padding: '4px 4px 2px 8px' }}
       />
     </div>
   );

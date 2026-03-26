@@ -12,7 +12,6 @@ export default function TerminalWorkspace() {
   } | null>(null);
   let workspaceRef: HTMLDivElement | undefined;
 
-  // Listen for pane-split custom events from TerminalPane
   onMount(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -27,9 +26,7 @@ export default function TerminalWorkspace() {
 
   function handleSplitSelect(sessionId: string, sessionName?: string) {
     const req = splitRequest();
-    if (req) {
-      store.splitPane(req.paneId, req.direction, sessionId, sessionName);
-    }
+    if (req) store.splitPane(req.paneId, req.direction, sessionId, sessionName);
     setShowSplitPicker(false);
     setSplitRequest(null);
   }
@@ -38,31 +35,40 @@ export default function TerminalWorkspace() {
 
   return (
     <div ref={workspaceRef} class="flex-1 flex flex-col min-h-0 relative">
-      {/* Tab bar -- always visible when in terminal view */}
       <TabBar />
 
-      {/* Tab content area */}
       <Show
         when={hasTabs()}
         fallback={
           <div class="flex-1 flex flex-col items-center justify-center text-center px-6 view-enter">
-            <div class="w-14 h-14 rounded-2xl bg-bg-2 flex items-center justify-center mb-5">
-              <span class="text-2xl text-amber/40">_</span>
+            {/* Empty state — atmospheric, not generic */}
+            <div class="relative mb-8">
+              <div
+                class="w-20 h-20 rounded-2xl bg-bg-2/80 flex items-center justify-center"
+                style="box-shadow: 0 0 40px #e8a24508, inset 0 1px 0 #ffffff06"
+              >
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" class="text-amber/30">
+                  <rect x="3" y="6" width="22" height="16" rx="2" stroke="currentColor" stroke-width="1.5" />
+                  <path d="M8 13l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M14 19h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                </svg>
+              </div>
+              {/* Subtle decorative line */}
+              <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 w-8 h-px bg-amber/15 rounded-full" />
             </div>
-            <p class="text-sm text-text-2 mb-1">No tabs open</p>
-            <p class="text-xs text-text-3 mb-5">Open a session from the tab bar or session list</p>
+            <p class="text-sm font-500 text-text-2 mb-1.5">No open terminals</p>
+            <p class="text-[11px] text-text-3/60 mb-6 max-w-48 leading-relaxed">
+              Open a session from the <span class="text-text-2">+</span> button above, or browse sessions below
+            </p>
             <button
-              class="btn-ghost text-sm"
+              class="btn-ghost text-xs font-mono tracking-wide"
               onClick={() => store.setView('sessions')}
             >
-              View sessions
+              SESSIONS
             </button>
           </div>
         }
       >
-        {/* Render all tabs, show only the active one.
-            Using For keyed by tab.id ensures each tab's DOM tree persists
-            when switching between tabs, preserving xterm instances. */}
         <For each={store.tabs()}>
           {(tab) => (
             <div
@@ -75,15 +81,15 @@ export default function TerminalWorkspace() {
         </For>
       </Show>
 
-      {/* Split session picker overlay */}
+      {/* Split session picker — centered overlay */}
       <Show when={showSplitPicker()}>
-        <div class="absolute inset-0 z-40 flex items-center justify-center bg-bg-0/60 backdrop-blur-sm">
+        <div
+          class="absolute inset-0 z-40 flex items-center justify-center"
+          style="background: radial-gradient(ellipse at center, #0c0c0ea0, #0c0c0ed0); backdrop-filter: blur(2px)"
+        >
           <SessionPicker
             onSelect={handleSplitSelect}
-            onClose={() => {
-              setShowSplitPicker(false);
-              setSplitRequest(null);
-            }}
+            onClose={() => { setShowSplitPicker(false); setSplitRequest(null); }}
           />
         </div>
       </Show>
