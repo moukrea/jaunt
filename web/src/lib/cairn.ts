@@ -133,7 +133,7 @@ export async function connectToHost(libp2pPeerId: string, addrs: string[]): Prom
   });
 
   store.setConnected(true);
-  store.setPeerId(peerId);
+  store.setPeerId(libp2pPeerId);
 }
 
 /**

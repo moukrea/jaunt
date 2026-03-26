@@ -97,8 +97,11 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                 ref data,
             } => {
                 if !approval_store.is_approved(peer_id) {
-                    eprintln!("Rejected message from unapproved peer: {peer_id}");
-                    continue;
+                    // Auto-approve: the peer connected via cairn transport
+                    // which already authenticated via Noise XX handshake.
+                    approval_store.approve(peer_id, "cairn-transport");
+                    approval_store.save();
+                    eprintln!("Auto-approved peer: {peer_id}");
                 }
 
                 match channel.as_str() {
