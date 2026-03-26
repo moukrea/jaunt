@@ -15,26 +15,16 @@ export interface ConnectionProfile {
 }
 
 /**
- * Convert a ws:// URL to a libp2p multiaddr string.
- * e.g. "ws://192.168.1.100:54321" -> "/ip4/192.168.1.100/tcp/54321/ws"
+ * Extract WebSocket multiaddrs from the profile that a browser can dial.
+ *
+ * ws_addrs contains raw multiaddr strings from cairn's listen_addresses()
+ * (e.g., "/ip4/192.168.1.100/tcp/40073/ws", "/ip4/192.168.1.100/tcp/40071").
+ * Browsers can only use the /ws ones — plain TCP is not available in browsers.
  */
-export function wsUrlToMultiaddr(url: string): string {
-  const u = new URL(url);
-  return `/ip4/${u.hostname}/tcp/${u.port}/ws`;
-}
-
-/**
- * Extract multiaddr connection hints from a profile.
- * Prefers cairn_addrs if present, otherwise converts ws_addrs.
- */
-export function getMultiaddrs(profile: ConnectionProfile): string[] {
-  if (profile.cairn_addrs && profile.cairn_addrs.length > 0) {
-    return profile.cairn_addrs;
-  }
-  if (profile.ws_addrs && profile.ws_addrs.length > 0) {
-    return profile.ws_addrs.map(wsUrlToMultiaddr);
-  }
-  return [];
+export function getWsMultiaddrs(profile: ConnectionProfile): string[] {
+  const addrs = profile.ws_addrs ?? [];
+  // Filter to only /ws multiaddrs — browsers can't do raw TCP or QUIC
+  return addrs.filter(a => a.endsWith('/ws'));
 }
 
 export type PairingData =

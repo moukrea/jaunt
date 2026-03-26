@@ -1,5 +1,5 @@
 import { createSignal, onMount, Show } from 'solid-js';
-import { decodeProfileFromFragment, getMultiaddrs, type ConnectionProfile } from '../lib/profile';
+import { decodeProfileFromFragment, getWsMultiaddrs, type ConnectionProfile } from '../lib/profile';
 import { initNode, pairScanQr, pairEnterPin, connectToHost } from '../lib/cairn';
 import { store, saveHost } from '../lib/store';
 
@@ -69,7 +69,7 @@ export default function PairingScreen() {
     // Get the host's libp2p PeerId and listen addresses from the profile.
     // ws_addrs contains cairn multiaddrs (e.g., /ip4/x.x.x.x/tcp/PORT/ws).
     const libp2pPeerId = profile.libp2p_peer_id;
-    const addrs = getMultiaddrs(profile);
+    const addrs = getWsMultiaddrs(profile);
     if (!libp2pPeerId || addrs.length === 0) {
       throw new Error('Profile missing libp2p_peer_id or listen addresses');
     }
