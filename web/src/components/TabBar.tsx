@@ -108,7 +108,6 @@ export default function TabBar() {
                 <Show when={isActive()}>
                   <div
                     class="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-amber"
-                    style="box-shadow: 0 1px 6px #e8a24540"
                   />
                 </Show>
 
@@ -133,7 +132,6 @@ export default function TabBar() {
                   <input
                     type="text"
                     class="bg-bg-0 border border-amber/40 rounded px-1.5 py-0.5 text-[11px] font-mono text-text-0 outline-none w-28 focus:border-amber/70"
-                    style="box-shadow: 0 0 0 1px #e8a24515"
                     value={editValue()}
                     onInput={(e) => setEditValue(e.currentTarget.value)}
                     onKeyDown={(e) => {
@@ -172,6 +170,7 @@ export default function TabBar() {
       {/* Add tab — the + affordance */}
       <div class="relative shrink-0 flex items-center border-l border-bg-3/20">
         <button
+          data-testid="add-tab"
           class={`w-9 h-full flex items-center justify-center transition-all duration-150 border-none cursor-pointer ${
             showPicker()
               ? 'text-amber bg-bg-0'

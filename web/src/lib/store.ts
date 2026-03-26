@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { createStore, produce, unwrap, reconcile } from 'solid-js/store';
+import { createStore, produce, unwrap } from 'solid-js/store';
 import { get, set, del, keys } from 'idb-keyval';
 import type { ConnectionProfile } from './profile';
 import type { SessionInfo, DirEntry } from './protocol';
@@ -164,6 +164,29 @@ function focusPane(paneId: string): void {
   setTabStore('tabs', idx, 'focusedPaneId', paneId);
 }
 
+/** Rename a pane's session (updates sessionName in the layout tree) */
+function renamePaneSession(paneId: string, newName: string): void {
+  for (let i = 0; i < tabStore.tabs.length; i++) {
+    const pane = findPaneById(tabStore.tabs[i].panes, paneId);
+    if (pane) {
+      // Walk the layout to find and update the pane's sessionName.
+      // We need to clone + replace the layout since the pane is nested.
+      const rawPanes: PaneLayout = structuredClone(unwrap(tabStore.tabs[i].panes));
+      function updateName(layout: PaneLayout): void {
+        if (layout.type === 'single') {
+          if (layout.pane.id === paneId) layout.pane.sessionName = newName;
+          return;
+        }
+        if (layout.type === 'hsplit') { updateName(layout.left); updateName(layout.right); }
+        if (layout.type === 'vsplit') { updateName(layout.top); updateName(layout.bottom); }
+      }
+      updateName(rawPanes);
+      setTabStore('tabs', i, 'panes', rawPanes);
+      break;
+    }
+  }
+}
+
 /** Split a pane within the active tab */
 function splitPane(
   paneId: string,
@@ -194,12 +217,14 @@ function splitPane(
     return layout;
   }
 
-  // unwrap() strips the store proxy so splitLayout works with plain objects,
-  // avoiding mixed proxy/plain trees that break Solid's fine-grained reactivity.
+  // unwrap() strips the store proxy so splitLayout works with plain objects.
+  // We clone then assign directly (no reconcile!) so SolidJS creates a fresh
+  // proxy tree -- critical for Switch/Match in PaneContainer to detect the
+  // layout type change (e.g. single -> hsplit).
   const rawPanes: PaneLayout = structuredClone(unwrap(tabStore.tabs[idx].panes));
   const newLayout = splitLayout(rawPanes);
 
-  setTabStore('tabs', idx, 'panes', reconcile(newLayout));
+  setTabStore('tabs', idx, 'panes', newLayout);
   setTabStore('tabs', idx, 'focusedPaneId', newPane.id);
   setCurrentSession(sessionId);
 }
@@ -243,7 +268,9 @@ function closePane(paneId: string): void {
     return layout;
   }
 
-  // unwrap + structuredClone to work with plain objects, then reconcile back
+  // unwrap + structuredClone to work with plain objects, then replace directly.
+  // No reconcile -- direct assignment creates a fresh proxy tree so Switch/Match
+  // in PaneContainer detects the layout type change.
   const rawPanes: PaneLayout = structuredClone(unwrap(tabStore.tabs[idx].panes));
   const newLayout = removeFromLayout(rawPanes);
   if (!newLayout) return;
@@ -254,7 +281,7 @@ function closePane(paneId: string): void {
   const newFocusedId = focusedStillExists ? currentFocused : (remaining[0]?.id ?? '');
   const fp = remaining.find((p) => p.id === newFocusedId);
 
-  setTabStore('tabs', idx, 'panes', reconcile(newLayout));
+  setTabStore('tabs', idx, 'panes', newLayout);
   setTabStore('tabs', idx, 'focusedPaneId', newFocusedId);
   if (fp) setCurrentSession(fp.sessionId);
 }
@@ -316,7 +343,7 @@ export const store = {
   // Tab & Pane operations
   addTab, closeTab, activateTab, renameTab, getActiveTab,
   findFocusedPane, findPaneById, collectPanes,
-  focusPane, splitPane, closePane,
+  focusPane, renamePaneSession, splitPane, closePane,
   updateSplitRatio, reorderTabs,
 };
 

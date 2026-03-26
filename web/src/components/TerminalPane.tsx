@@ -1,4 +1,4 @@
-import { onMount, onCleanup, createSignal, createEffect, createMemo } from 'solid-js';
+import { onMount, onCleanup, createSignal, createEffect, createMemo, Show } from 'solid-js';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -40,9 +40,11 @@ export default function TerminalPane(props: TerminalPaneProps) {
   async function commitRename() {
     const val = renameValue().trim();
     if (val && val !== displayName()) {
+      // Update the pane's sessionName in the store (so displayName refreshes)
+      store.renamePaneSession(props.pane.id, val);
       // Update tab label
       store.renameTab(props.tabId, val);
-      // Update at host level
+      // Update at host level (uses full session ID, not truncated)
       sendRpc({ SessionRename: { target: props.pane.sessionId, new_name: val } }).catch(() => {});
     }
     setRenaming(false);
@@ -157,6 +159,7 @@ export default function TerminalPane(props: TerminalPaneProps) {
 
   return (
     <div
+      data-testid="terminal-pane"
       class="flex-1 flex flex-col min-h-0 min-w-0 group/pane"
       onClick={handleClick}
     >
@@ -182,15 +185,28 @@ export default function TerminalPane(props: TerminalPaneProps) {
             class={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors duration-300 ${
               attached() ? 'bg-sage' : 'bg-text-3/40'
             }`}
-            style={attached() ? { 'box-shadow': '0 0 4px #7dba6e60' } : {}}
           />
 
           {/* Session name — double-click to rename */}
-          {renaming() ? (
+          <Show
+            when={renaming()}
+            fallback={
+              <span
+                class={`text-[11px] font-mono truncate cursor-default transition-colors duration-150 ${
+                  isFocused() ? 'text-text-0' : 'text-text-3'
+                }`}
+                data-testid="pane-session-name"
+                onDblClick={(e) => { e.stopPropagation(); startRename(); }}
+                title="Double-click to rename"
+              >
+                {displayName()}
+              </span>
+            }
+          >
             <input
               type="text"
+              data-testid="pane-rename-input"
               class="bg-bg-0 border border-amber/40 rounded px-1.5 py-px text-[11px] font-mono text-text-0 outline-none w-28 focus:border-amber/70"
-              style="box-shadow: 0 0 0 1px #e8a24515"
               value={renameValue()}
               onInput={(e) => setRenameValue(e.currentTarget.value)}
               onKeyDown={(e) => {
@@ -201,17 +217,7 @@ export default function TerminalPane(props: TerminalPaneProps) {
               autofocus
               onClick={(e) => e.stopPropagation()}
             />
-          ) : (
-            <span
-              class={`text-[11px] font-mono truncate cursor-default transition-colors duration-150 ${
-                isFocused() ? 'text-text-0' : 'text-text-3'
-              }`}
-              onDblClick={(e) => { e.stopPropagation(); startRename(); }}
-              title="Double-click to rename"
-            >
-              {displayName()}
-            </span>
-          )}
+          </Show>
 
           {/* Shell pill badge */}
           <span
@@ -229,6 +235,7 @@ export default function TerminalPane(props: TerminalPaneProps) {
         <div class="flex items-center gap-px">
           {/* Split left-right */}
           <button
+            data-testid="split-horizontal"
             class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
             on:click={(e) => {
               e.stopPropagation();
@@ -245,6 +252,7 @@ export default function TerminalPane(props: TerminalPaneProps) {
           </button>
           {/* Split top-bottom */}
           <button
+            data-testid="split-vertical"
             class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
             on:click={(e) => {
               e.stopPropagation();

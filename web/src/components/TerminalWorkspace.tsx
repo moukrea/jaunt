@@ -45,7 +45,6 @@ export default function TerminalWorkspace() {
             <div class="relative mb-8">
               <div
                 class="w-20 h-20 rounded-2xl bg-bg-2/80 flex items-center justify-center"
-                style="box-shadow: 0 0 40px #e8a24508, inset 0 1px 0 #ffffff06"
               >
                 <svg width="28" height="28" viewBox="0 0 28 28" fill="none" class="text-amber/30">
                   <rect x="3" y="6" width="22" height="16" rx="2" stroke="currentColor" stroke-width="1.5" />

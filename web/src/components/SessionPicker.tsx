@@ -86,7 +86,7 @@ export default function SessionPicker(props: SessionPickerProps) {
     <div
       ref={containerRef}
       class="w-72 max-h-96 bg-bg-1 border border-bg-3/50 rounded-xl overflow-hidden"
-      style="animation: viewIn 0.12s cubic-bezier(0.16,1,0.3,1); box-shadow: 0 8px 40px #00000060, 0 0 0 1px #ffffff06 inset"
+      style="animation: viewIn 0.12s cubic-bezier(0.16,1,0.3,1)"
     >
       {/* Search input — always visible, auto-focused */}
       <div class="px-3 pt-3 pb-2">
@@ -128,6 +128,7 @@ export default function SessionPicker(props: SessionPickerProps) {
 
               return (
                 <button
+                  data-testid="session-pick-item"
                   class="w-full text-left px-2.5 py-2 flex items-center gap-2.5 rounded-lg hover:bg-bg-2/80 active:bg-bg-3/60 transition-all duration-100 cursor-pointer border-none bg-transparent group"
                   onClick={() => props.onSelect(session.id, session.name ?? undefined)}
                 >
@@ -135,7 +136,6 @@ export default function SessionPicker(props: SessionPickerProps) {
                   <div class="flex flex-col items-center gap-1 shrink-0 w-5">
                     <div
                       class={`w-1.5 h-1.5 rounded-full ${isRunning() ? 'bg-sage' : 'bg-text-3/30'}`}
-                      style={isRunning() ? { 'box-shadow': '0 0 4px #7dba6e40' } : {}}
                     />
                     <span class="text-[8px] font-mono text-text-3/50 uppercase leading-none">{shell()}</span>
                   </div>
