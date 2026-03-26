@@ -18,16 +18,28 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
 
-    // Collect cairn's listen addresses (multiaddr strings like /ip4/.../tcp/.../ws)
-    let listen_addrs = node.listen_addresses().await;
-    for addr in &listen_addrs {
+    // Collect cairn's /ws listen addresses, filtered to useful ones.
+    // Skip loopback (127.x), Docker bridges (172.x), keep real LAN IPs.
+    // Include 127.0.0.1 for localhost testing.
+    let all_addrs = node.listen_addresses().await;
+    let ws_addrs: Vec<String> = all_addrs
+        .iter()
+        .filter(|a| a.ends_with("/ws"))
+        .filter(|a| {
+            // Keep loopback (localhost dev) and real LAN IPs
+            // Skip Docker bridges (172.17-31.x.x) and other virtual interfaces
+            !a.contains("/172.") || a.contains("/172.16.")
+        })
+        .cloned()
+        .collect();
+    for addr in &ws_addrs {
         eprintln!("  Listen: {addr}");
     }
 
     // Generate connection profile (includes cairn listen addresses for browser clients)
     let (_conn_profile, profile_url) =
-        profile::generate_qr_profile(&node, &config, &listen_addrs).await?;
-    let pin_result = profile::generate_pin_profile(&node, &config, &listen_addrs).await;
+        profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
+    let pin_result = profile::generate_pin_profile(&node, &config, &ws_addrs).await;
     let pin = pin_result
         .as_ref()
         .map(|(_, pin)| pin.clone())
