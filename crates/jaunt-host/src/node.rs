@@ -12,29 +12,22 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     let snag = SnagBridge::new();
     snag.check_available()?;
 
-    // Start WebSocket server for browser clients
-    let ws_snag = SnagBridge::new();
-    let ws_fb = if config.files.enabled {
-        Some(FileBrowser::new(&config))
-    } else {
-        None
-    };
-    let ws_addr =
-        crate::ws::start_ws_server(ws_snag, ws_fb)
-            .await
-            .map_err(|e| format!("WS server failed: {e}"))?;
-    eprintln!("  WS:     ws://{ws_addr}");
-
     // Build cairn config and start transport
     let cairn_config = build_cairn_config(&config);
     let node = cairn_p2p::create_and_start_with_config(cairn_config)
         .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
 
-    // Generate connection profile (includes WS address for browser clients)
+    // Collect cairn's listen addresses (multiaddr strings like /ip4/.../tcp/.../ws)
+    let listen_addrs = node.listen_addresses().await;
+    for addr in &listen_addrs {
+        eprintln!("  Listen: {addr}");
+    }
+
+    // Generate connection profile (includes cairn listen addresses for browser clients)
     let (_conn_profile, profile_url) =
-        profile::generate_qr_profile(&node, &config, &ws_addr).await?;
-    let pin_result = profile::generate_pin_profile(&node, &config, &ws_addr).await;
+        profile::generate_qr_profile(&node, &config, &listen_addrs).await?;
+    let pin_result = profile::generate_pin_profile(&node, &config, &listen_addrs).await;
     let pin = pin_result
         .as_ref()
         .map(|(_, pin)| pin.clone())

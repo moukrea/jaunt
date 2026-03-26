@@ -1603,14 +1603,12 @@ version = "0.5.0"
 dependencies = [
  "cairn-p2p",
  "clap",
- "futures-util",
  "hostname",
  "jaunt-protocol",
  "rmp-serde",
  "serde",
  "serde_json",
  "tokio",
- "tokio-tungstenite",
  "toml",
 ]
 
