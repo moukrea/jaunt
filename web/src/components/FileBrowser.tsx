@@ -50,7 +50,7 @@ export default function FileBrowser() {
   async function openSessionHere() {
     try {
       const resp = await sendRpc({
-        SessionCreate: { shell: undefined, name: undefined, cwd: store.currentPath() },
+        SessionCreate: { shell: null, name: null, cwd: store.currentPath() },
       });
       if ('Ok' in resp) {
         const data = resp.Ok;

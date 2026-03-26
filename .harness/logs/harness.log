@@ -702,3 +702,31 @@
 {"timestamp":"2026-03-26T22:53:53Z","hook":"stop-gate","decision":"pass","duration_ms":10234}
 {"timestamp":"2026-03-26T22:54:53Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":31}
 {"timestamp":"2026-03-26T23:04:47Z","hook":"classify-prompt","decision":"medium","duration_ms":24}
+{"timestamp":"2026-03-26T23:05:58Z","hook":"stop-gate","decision":"pass","duration_ms":10487}
+{"timestamp":"2026-03-26T23:12:21Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-26T23:12:21Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/store.ts","duration_ms":6}
+{"timestamp":"2026-03-26T23:12:36Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-26T23:12:36Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/store.ts","duration_ms":9}
+{"timestamp":"2026-03-26T23:12:51Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-26T23:12:51Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/store.ts","duration_ms":9}
+{"timestamp":"2026-03-26T23:13:08Z","hook":"guard-writes","decision":"pass","duration_ms":4}
+{"timestamp":"2026-03-26T23:13:08Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TerminalPane.tsx","duration_ms":5}
+{"timestamp":"2026-03-26T23:13:18Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-26T23:13:18Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/SessionPicker.tsx","duration_ms":5}
+{"timestamp":"2026-03-26T23:13:23Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-26T23:13:23Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/SessionList.tsx","duration_ms":6}
+{"timestamp":"2026-03-26T23:13:57Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-26T23:13:57Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TerminalPane.tsx","duration_ms":8}
+{"timestamp":"2026-03-26T23:15:04Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-26T23:15:04Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/SessionPicker.tsx","duration_ms":6}
+{"timestamp":"2026-03-26T23:15:09Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-26T23:15:09Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/SessionList.tsx","duration_ms":6}
+{"timestamp":"2026-03-26T23:15:19Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-26T23:15:19Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/protocol.ts","duration_ms":10}
+{"timestamp":"2026-03-26T23:15:41Z","hook":"guard-writes","decision":"pass","duration_ms":4}
+{"timestamp":"2026-03-26T23:15:41Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/FileBrowser.tsx","duration_ms":6}
+{"timestamp":"2026-03-26T23:16:06Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-26T23:16:06Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-debugger/feedback_solidjs_store_patterns.md","duration_ms":4}
+{"timestamp":"2026-03-26T23:16:15Z","hook":"guard-writes","decision":"pass","duration_ms":13}
+{"timestamp":"2026-03-26T23:16:15Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-debugger/MEMORY.md","duration_ms":4}
+{"timestamp":"2026-03-26T23:16:44Z","hook":"classify-prompt","decision":"massive","duration_ms":9}

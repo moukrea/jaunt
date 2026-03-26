@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { createStore, produce } from 'solid-js/store';
+import { createStore, produce, unwrap, reconcile } from 'solid-js/store';
 import { get, set, del, keys } from 'idb-keyval';
 import type { ConnectionProfile } from './profile';
 import type { SessionInfo, DirEntry } from './protocol';
@@ -180,24 +180,27 @@ function splitPane(
   function splitLayout(layout: PaneLayout): PaneLayout {
     if (layout.type === 'single' && layout.pane.id === paneId) {
       if (direction === 'horizontal') {
-        return { type: 'hsplit', left: layout, right: { type: 'single', pane: newPane }, ratio: 0.5 };
+        return { type: 'hsplit', left: { type: 'single', pane: layout.pane }, right: { type: 'single', pane: newPane }, ratio: 0.5 };
       } else {
-        return { type: 'vsplit', top: layout, bottom: { type: 'single', pane: newPane }, ratio: 0.5 };
+        return { type: 'vsplit', top: { type: 'single', pane: layout.pane }, bottom: { type: 'single', pane: newPane }, ratio: 0.5 };
       }
     }
     if (layout.type === 'hsplit') {
-      return { ...layout, left: splitLayout(layout.left), right: splitLayout(layout.right) };
+      return { type: 'hsplit', left: splitLayout(layout.left), right: splitLayout(layout.right), ratio: layout.ratio };
     }
     if (layout.type === 'vsplit') {
-      return { ...layout, top: splitLayout(layout.top), bottom: splitLayout(layout.bottom) };
+      return { type: 'vsplit', top: splitLayout(layout.top), bottom: splitLayout(layout.bottom), ratio: layout.ratio };
     }
     return layout;
   }
 
-  setTabStore('tabs', idx, produce((t: Tab) => {
-    t.panes = splitLayout(t.panes);
-    t.focusedPaneId = newPane.id;
-  }));
+  // unwrap() strips the store proxy so splitLayout works with plain objects,
+  // avoiding mixed proxy/plain trees that break Solid's fine-grained reactivity.
+  const rawPanes: PaneLayout = structuredClone(unwrap(tabStore.tabs[idx].panes));
+  const newLayout = splitLayout(rawPanes);
+
+  setTabStore('tabs', idx, 'panes', reconcile(newLayout));
+  setTabStore('tabs', idx, 'focusedPaneId', newPane.id);
   setCurrentSession(sessionId);
 }
 
@@ -227,7 +230,7 @@ function closePane(paneId: string): void {
       if (!left && !right) return null;
       if (!left) return right;
       if (!right) return left;
-      return { ...layout, left, right };
+      return { type: 'hsplit', left, right, ratio: layout.ratio };
     }
     if (layout.type === 'vsplit') {
       const top = removeFromLayout(layout.top);
@@ -235,23 +238,25 @@ function closePane(paneId: string): void {
       if (!top && !bottom) return null;
       if (!top) return bottom;
       if (!bottom) return top;
-      return { ...layout, top, bottom };
+      return { type: 'vsplit', top, bottom, ratio: layout.ratio };
     }
     return layout;
   }
 
-  setTabStore('tabs', idx, produce((t: Tab) => {
-    const newLayout = removeFromLayout(t.panes);
-    if (!newLayout) return;
-    t.panes = newLayout;
-    const remaining = collectPanes(newLayout);
-    const focusedStillExists = remaining.some((p) => p.id === t.focusedPaneId);
-    if (!focusedStillExists) {
-      t.focusedPaneId = remaining[0]?.id ?? '';
-    }
-    const fp = remaining.find((p) => p.id === t.focusedPaneId);
-    if (fp) setCurrentSession(fp.sessionId);
-  }));
+  // unwrap + structuredClone to work with plain objects, then reconcile back
+  const rawPanes: PaneLayout = structuredClone(unwrap(tabStore.tabs[idx].panes));
+  const newLayout = removeFromLayout(rawPanes);
+  if (!newLayout) return;
+
+  const remaining = collectPanes(newLayout);
+  const currentFocused = tabStore.tabs[idx].focusedPaneId;
+  const focusedStillExists = remaining.some((p) => p.id === currentFocused);
+  const newFocusedId = focusedStillExists ? currentFocused : (remaining[0]?.id ?? '');
+  const fp = remaining.find((p) => p.id === newFocusedId);
+
+  setTabStore('tabs', idx, 'panes', reconcile(newLayout));
+  setTabStore('tabs', idx, 'focusedPaneId', newFocusedId);
+  if (fp) setCurrentSession(fp.sessionId);
 }
 
 /** Update the split ratio for a pane layout.

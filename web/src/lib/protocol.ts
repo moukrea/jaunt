@@ -3,7 +3,7 @@ import { encode, decode } from '@msgpack/msgpack';
 // RPC Request types matching jaunt-protocol Rust crate
 export type RpcRequest =
   | { SessionList: Record<string, never> }
-  | { SessionCreate: { shell?: string; name?: string; cwd?: string } }
+  | { SessionCreate: { shell?: string | null; name?: string | null; cwd?: string | null } }
   | { SessionAttach: { target: string } }
   | { SessionDetach: Record<string, never> }
   | { SessionKill: { target: string } }

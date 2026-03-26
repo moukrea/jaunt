@@ -109,10 +109,13 @@ export default function TerminalPane(props: TerminalPaneProps) {
 
     onCleanup(() => {
       resizeObserver.disconnect();
-      if (attached()) {
+      // Only send detach if this pane is currently focused (i.e. it owns
+      // the protocol-level attachment). Detaching a non-focused pane would
+      // accidentally tear down the focused pane's session attachment.
+      if (attached() && isFocused()) {
         sendRpc({ SessionDetach: {} }).catch(() => {});
-        setAttached(false);
       }
+      setAttached(false);
       setPtyDataCallback(() => {});
       term?.dispose();
     });
@@ -186,13 +189,13 @@ export default function TerminalPane(props: TerminalPaneProps) {
           {/* Split left-right */}
           <button
             class="text-text-3/60 hover:text-amber bg-transparent border-none cursor-pointer p-0.5 rounded hover:bg-bg-2 transition-colors opacity-0 group-hover/pane:opacity-100"
-            onClick={(e) => {
+            on:click={(e) => {
               e.stopPropagation();
               const event = new CustomEvent('pane-split', {
                 bubbles: true,
                 detail: { paneId: props.pane.id, direction: 'horizontal' },
               });
-              (e.target as HTMLElement).dispatchEvent(event);
+              (e.currentTarget as HTMLElement).dispatchEvent(event);
             }}
             title="Split left/right"
           >
@@ -201,13 +204,13 @@ export default function TerminalPane(props: TerminalPaneProps) {
           {/* Split top-bottom */}
           <button
             class="text-text-3/60 hover:text-amber bg-transparent border-none cursor-pointer p-0.5 rounded hover:bg-bg-2 transition-colors opacity-0 group-hover/pane:opacity-100"
-            onClick={(e) => {
+            on:click={(e) => {
               e.stopPropagation();
               const event = new CustomEvent('pane-split', {
                 bubbles: true,
                 detail: { paneId: props.pane.id, direction: 'vertical' },
               });
-              (e.target as HTMLElement).dispatchEvent(event);
+              (e.currentTarget as HTMLElement).dispatchEvent(event);
             }}
             title="Split top/bottom"
           >

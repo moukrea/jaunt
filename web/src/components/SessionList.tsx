@@ -30,7 +30,7 @@ export default function SessionList() {
   async function createSession() {
     const name = newName().trim() || undefined;
     try {
-      await sendRpc({ SessionCreate: { name, shell: undefined, cwd: undefined } });
+      await sendRpc({ SessionCreate: { name, shell: null, cwd: null } });
       setCreating(false);
       setNewName('');
       await refreshSessions();

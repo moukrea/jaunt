@@ -52,13 +52,17 @@ export default function SessionPicker(props: SessionPickerProps) {
   async function createSession() {
     const name = newName().trim() || undefined;
     try {
-      const resp = await sendRpc({ SessionCreate: { name, shell: undefined, cwd: undefined } });
+      const resp = await sendRpc({ SessionCreate: { name, shell: null, cwd: null } });
       if ('Ok' in resp) {
         const data = resp.Ok;
         if ('SessionCreated' in (data as any)) {
           const id = (data as any).SessionCreated.id;
           props.onSelect(id, name);
+          return;
         }
+      }
+      if ('Error' in resp) {
+        store.setError((resp as any).Error.message || 'Session creation failed');
       }
     } catch (e: any) {
       store.setError(e.message);
