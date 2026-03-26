@@ -65,7 +65,15 @@ export default function PairingScreen() {
 
     setPhase('connecting');
     setStatusMsg('Connecting via cairn transport...');
-    await connectToHost(peerId);
+
+    // Get the host's libp2p PeerId and listen addresses from the profile.
+    // ws_addrs contains cairn multiaddrs (e.g., /ip4/x.x.x.x/tcp/PORT/ws).
+    const libp2pPeerId = profile.libp2p_peer_id;
+    const addrs = getMultiaddrs(profile);
+    if (!libp2pPeerId || addrs.length === 0) {
+      throw new Error('Profile missing libp2p_peer_id or listen addresses');
+    }
+    await connectToHost(libp2pPeerId, addrs);
     setPhase('done');
     store.setConnected(true);
     store.setView('sessions');
@@ -93,12 +101,8 @@ export default function PairingScreen() {
         lastSeen: Date.now(),
       });
 
-      setPhase('connecting');
-      setStatusMsg('Connecting via cairn transport...');
-      await connectToHost(peerId);
-      setPhase('done');
-      store.setConnected(true);
-      store.setView('sessions');
+      setPhase('error');
+      setErrorMsg('PIN pairing requires the full URL from jaunt-host. Copy the URL shown by the host and open it in your browser instead.');
     } catch (e: any) {
       setPhase('error');
       setErrorMsg(e.message);

@@ -16,6 +16,8 @@ pub async fn generate_qr_profile(
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
 
+    let libp2p_peer_id = node.libp2p_peer_id().map(|pid| pid.to_string());
+
     let profile = ConnectionProfile {
         pairing: PairingData::Qr {
             qr_data: qr_data.payload,
@@ -26,6 +28,7 @@ pub async fn generate_qr_profile(
         turn_username: config.cairn.turn_username.clone(),
         turn_password: config.cairn.turn_password.clone(),
         ws_addrs: listen_addrs.to_vec(),
+        libp2p_peer_id,
         host_name,
     };
 
@@ -47,6 +50,8 @@ pub async fn generate_pin_profile(
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
 
+    let libp2p_peer_id = node.libp2p_peer_id().map(|pid| pid.to_string());
+
     let profile = ConnectionProfile {
         pairing: PairingData::Pin {
             pin: pin_data.pin.clone(),
@@ -57,6 +62,7 @@ pub async fn generate_pin_profile(
         turn_username: config.cairn.turn_username.clone(),
         turn_password: config.cairn.turn_password.clone(),
         ws_addrs: listen_addrs.to_vec(),
+        libp2p_peer_id,
         host_name,
     };
 

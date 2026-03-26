@@ -66,24 +66,27 @@ export async function pairFromLink(uri: string): Promise<string> {
 }
 
 /**
- * Connect to the host via cairn's transport layer.
+ * Connect to the host via cairn's libp2p transport.
  *
- * 1. Starts the libp2p transport (WebSocket + WebRTC in browser).
- * 2. Calls node.connect(peerId) which dials the host using connection
- *    hints stored during pairing (multiaddrs like /ip4/x.x.x.x/tcp/PORT/ws).
+ * 1. Starts the libp2p transport (WebSocket in browser).
+ * 2. Calls node.connectTransport() which dials the host's /ws multiaddr,
+ *    performs a Noise XX handshake, and establishes a Double Ratchet session.
  * 3. Opens an "rpc" channel and a "pty" channel on the session.
  * 4. Registers message handlers to route incoming data to the right callbacks.
+ *
+ * @param libp2pPeerId - The host's libp2p PeerId (from the connection profile)
+ * @param addrs - The host's listen multiaddrs (from the connection profile)
  */
-export async function connectToHost(peerId: string): Promise<void> {
+export async function connectToHost(libp2pPeerId: string, addrs: string[]): Promise<void> {
   if (!node) throw new Error('Node not initialized');
 
   console.log('[jaunt] Starting cairn transport...');
   await node.startTransport();
-  console.log('[jaunt] Transport started, listen addrs:', node.listenAddresses);
+  console.log('[jaunt] Transport started');
 
-  console.log('[jaunt] Connecting to peer:', peerId);
-  session = await node.connect(peerId);
-  console.log('[jaunt] Connected, session state:', session.state);
+  console.log('[jaunt] Connecting to host:', libp2pPeerId, 'addrs:', addrs);
+  session = await (node as any).connectTransport(libp2pPeerId, addrs);
+  console.log('[jaunt] Connected via cairn transport');
 
   // Open channels for RPC and PTY data
   rpcChannel = session.openChannel('rpc');

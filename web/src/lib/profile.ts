@@ -9,6 +9,8 @@ export interface ConnectionProfile {
   ws_addrs?: string[];
   /** Cairn transport multiaddrs (e.g. /ip4/x.x.x.x/tcp/port/ws). */
   cairn_addrs?: string[];
+  /** Host's libp2p PeerId for connectTransport(). */
+  libp2p_peer_id?: string;
   host_name: string;
 }
 
