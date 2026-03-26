@@ -22,7 +22,7 @@ export default function PairingScreen() {
         setPhase('decoding');
         setStatusMsg('Reading connection profile...');
         const profile = decodeProfileFromFragment(fragment);
-        console.log('[jaunt] profile decoded:', profile.host_name, 'addrs:', getMultiaddrs(profile));
+        console.log('[jaunt] profile decoded:', profile.host_name, 'addrs:', getWsMultiaddrs(profile));
         await pairFromProfile(profile);
       } catch (e: any) {
         console.error('[jaunt] pairing error:', e);
