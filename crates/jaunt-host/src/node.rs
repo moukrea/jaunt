@@ -18,23 +18,23 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
 
-    // Collect cairn's /ws listen addresses, filtered to useful ones.
-    // Skip loopback (127.x), Docker bridges (172.x), keep real LAN IPs.
-    // Include 127.0.0.1 for localhost testing.
+    // Collect listen addresses. Print all useful ones (skip Docker bridges).
+    // Profile only includes /ws (for browser clients), but the host accepts
+    // TCP, QUIC, and WS — native clients use the best available transport.
     let all_addrs = node.listen_addresses().await;
-    let ws_addrs: Vec<String> = all_addrs
-        .iter()
-        .filter(|a| a.ends_with("/ws"))
-        .filter(|a| {
-            // Keep loopback (localhost dev) and real LAN IPs
-            // Skip Docker bridges (172.17-31.x.x) and other virtual interfaces
-            !a.contains("/172.") || a.contains("/172.16.")
-        })
-        .cloned()
-        .collect();
-    for addr in &ws_addrs {
+    let is_useful = |a: &&String| -> bool {
+        !a.contains("/172.") || a.contains("/172.16.")
+    };
+    let useful_addrs: Vec<&String> = all_addrs.iter().filter(is_useful).collect();
+    for addr in &useful_addrs {
         eprintln!("  Listen: {addr}");
     }
+    // Profile gets only /ws addrs (browser transport constraint)
+    let ws_addrs: Vec<String> = useful_addrs
+        .iter()
+        .filter(|a| a.ends_with("/ws"))
+        .map(|a| a.to_string())
+        .collect();
 
     // Generate connection profile (includes cairn listen addresses for browser clients)
     let (_conn_profile, profile_url) =
