@@ -411,6 +411,69 @@ async fn handle_session_detach(peer_id: &str, attachments: &Attachments) {
     }
 }
 
+/// Interactive pairing command: generates a pairing profile, displays it,
+/// and waits for a peer to connect. Auto-approves the first connecting peer.
+pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
+    let cairn_config = build_cairn_config(&config);
+    let node = cairn_p2p::create_and_start_with_config(cairn_config)
+        .await
+        .map_err(|e| format!("failed to create cairn node: {e}"))?;
+
+    let all_addrs = node.listen_addresses().await;
+    let is_useful = |a: &&String| -> bool { !a.contains("/172.") || a.contains("/172.16.") };
+    let ws_addrs: Vec<String> = all_addrs.iter().filter(is_useful).filter(|a| a.ends_with("/ws")).map(|a| a.to_string()).collect();
+
+    let (_conn_profile, profile_url) = profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
+    let pin_result = profile::generate_pin_profile(&node, &config, &ws_addrs).await;
+    let pin = pin_result.as_ref().map(|(_, pin)| pin.clone()).unwrap_or_default();
+
+    let peer_id_str = node.libp2p_peer_id().map(|p| p.to_string()).unwrap_or_default();
+    let ws_addr = ws_addrs.iter().find(|a| !a.contains("/127.0.0.1/")).or(ws_addrs.first()).cloned().unwrap_or_default();
+
+    eprintln!();
+    eprintln!("  ┌─────────────────────────────────────┐");
+    eprintln!("  │          JAUNT PAIRING MODE          │");
+    eprintln!("  └─────────────────────────────────────┘");
+    eprintln!();
+    eprintln!("  PIN:     {pin}");
+    eprintln!("  Host:    {ws_addr}");
+    eprintln!("  PeerId:  {}", &peer_id_str[..20.min(peer_id_str.len())]);
+    eprintln!("  URL:     {profile_url}");
+    eprintln!();
+    eprintln!("  Waiting for a device to connect...");
+    eprintln!("  Press Ctrl+C to cancel.");
+    eprintln!();
+
+    let mut approval_store = ApprovalStore::load();
+
+    loop {
+        let event = match node.recv_event().await {
+            Some(e) => e,
+            None => break,
+        };
+
+        match event {
+            Event::MessageReceived { ref peer_id, .. } => {
+                if !approval_store.is_approved(peer_id) {
+                    approval_store.approve(peer_id, "paired");
+                    approval_store.save();
+                    eprintln!("  ✓ Device paired: {peer_id}");
+                    eprintln!();
+                    eprintln!("  The device can now connect to this host.");
+                    eprintln!("  Run `jaunt-host serve` to start accepting connections.");
+                    break;
+                }
+            }
+            Event::StateChanged { ref peer_id, ref state } => {
+                eprintln!("  Peer {}: {state}", &peer_id[..16.min(peer_id.len())]);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
     let mut cairn = CairnConfig::default();
 

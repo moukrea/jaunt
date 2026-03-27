@@ -18,6 +18,8 @@ struct Cli {
 enum Command {
     /// Start the host daemon (default)
     Serve,
+    /// Generate a pairing profile and wait for a peer to connect
+    Pair,
     /// Manage paired devices
     Devices {
         #[command(subcommand)]
@@ -40,6 +42,7 @@ async fn main() {
 
     let result = match cli.command {
         None | Some(Command::Serve) => node::run_host(config).await,
+        Some(Command::Pair) => node::run_pair(config).await,
         Some(Command::Devices { action }) => match action {
             DeviceAction::List => {
                 let store = approval::ApprovalStore::load();
