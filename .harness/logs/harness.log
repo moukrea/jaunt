@@ -736,3 +736,57 @@
 {"timestamp":"2026-03-26T23:41:37Z","hook":"stop-gate","decision":"pass","duration_ms":10578}
 {"timestamp":"2026-03-26T23:42:37Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
 {"timestamp":"2026-03-27T06:07:39Z","hook":"classify-prompt","decision":"complex","duration_ms":15}
+{"timestamp":"2026-03-27T06:21:56Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":24}
+{"timestamp":"2026-03-27T06:40:25Z","hook":"classify-prompt","decision":"simple","duration_ms":9}
+{"timestamp":"2026-03-27T06:42:11Z","hook":"stop-gate","decision":"pass","duration_ms":9614}
+{"timestamp":"2026-03-27T06:43:11Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":21}
+{"timestamp":"2026-03-27T18:11:56Z","hook":"classify-prompt","decision":"medium","duration_ms":20}
+{"timestamp":"2026-03-27T18:13:10Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-27T18:13:10Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TabBar.tsx","duration_ms":7}
+{"timestamp":"2026-03-27T18:13:31Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-27T18:13:31Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TabBar.tsx","duration_ms":6}
+{"timestamp":"2026-03-27T18:13:46Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-27T18:13:46Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/TabBar.tsx","duration_ms":9}
+{"timestamp":"2026-03-27T18:14:04Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-27T18:14:04Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PaneContainer.tsx","duration_ms":8}
+{"timestamp":"2026-03-27T18:14:10Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-27T18:14:10Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PaneContainer.tsx","duration_ms":7}
+{"timestamp":"2026-03-27T18:15:41Z","hook":"stop-gate","decision":"pass","duration_ms":10871}
+{"timestamp":"2026-03-27T18:16:41Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":30}
+{"timestamp":"2026-03-27T18:47:50Z","hook":"classify-prompt","decision":"simple","duration_ms":10}
+{"timestamp":"2026-03-27T18:52:07Z","hook":"guard-writes","decision":"pass","duration_ms":14}
+{"timestamp":"2026-03-27T18:52:07Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T18:52:12Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":35}
+{"timestamp":"2026-03-27T18:52:17Z","hook":"guard-writes","decision":"pass","duration_ms":14}
+{"timestamp":"2026-03-27T18:52:17Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":5}
+{"timestamp":"2026-03-27T18:52:29Z","hook":"guard-writes","decision":"pass","duration_ms":14}
+{"timestamp":"2026-03-27T18:52:29Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":5}
+{"timestamp":"2026-03-27T18:52:33Z","hook":"guard-writes","decision":"pass","duration_ms":14}
+{"timestamp":"2026-03-27T18:52:33Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T18:52:37Z","hook":"guard-writes","decision":"pass","duration_ms":20}
+{"timestamp":"2026-03-27T18:52:37Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":5}
+{"timestamp":"2026-03-27T18:52:40Z","hook":"guard-writes","decision":"pass","duration_ms":15}
+{"timestamp":"2026-03-27T18:52:40Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T18:52:44Z","hook":"guard-writes","decision":"pass","duration_ms":28}
+{"timestamp":"2026-03-27T18:52:44Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":15}
+{"timestamp":"2026-03-27T18:52:47Z","hook":"guard-writes","decision":"pass","duration_ms":16}
+{"timestamp":"2026-03-27T18:52:47Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T18:55:04Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-27T18:58:14Z","hook":"guard-writes","decision":"pass","duration_ms":15}
+{"timestamp":"2026-03-27T18:58:14Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":10}
+{"timestamp":"2026-03-27T19:00:36Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":12}
+{"timestamp":"2026-03-27T19:04:05Z","hook":"guard-writes","decision":"pass","duration_ms":13}
+{"timestamp":"2026-03-27T19:04:05Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":11}
+{"timestamp":"2026-03-27T19:05:53Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":12}
+{"timestamp":"2026-03-27T19:06:57Z","hook":"guard-writes","decision":"pass","duration_ms":17}
+{"timestamp":"2026-03-27T19:06:57Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":5}
+{"timestamp":"2026-03-27T19:07:08Z","hook":"guard-writes","decision":"pass","duration_ms":15}
+{"timestamp":"2026-03-27T19:07:08Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T19:07:22Z","hook":"guard-writes","decision":"pass","duration_ms":18}
+{"timestamp":"2026-03-27T19:07:22Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T19:10:45Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":11}
+{"timestamp":"2026-03-27T19:12:52Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":13}
+{"timestamp":"2026-03-27T19:13:36Z","hook":"guard-writes","decision":"pass","duration_ms":16}
+{"timestamp":"2026-03-27T19:13:36Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":5}
+{"timestamp":"2026-03-27T19:13:52Z","hook":"guard-writes","decision":"pass","duration_ms":17}
+{"timestamp":"2026-03-27T19:13:52Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-full.mjs","duration_ms":5}
