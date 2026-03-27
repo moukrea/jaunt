@@ -109,6 +109,9 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     eprintln!("  Host:    {host_name}");
     eprintln!("  Tier:    {}", config.tier_label());
     eprintln!("  PIN:     {pin}");
+    if let Some(ref ip) = lan_ip {
+        eprintln!("  Address: {ip}");
+    }
     if let (Some(ref ip), Some(ref addr)) = (&lan_ip, &pairing_addr) {
         eprintln!("  Pair:    http://{}:{}", ip, addr.port());
     }

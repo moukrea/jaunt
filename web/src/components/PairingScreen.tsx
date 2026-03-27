@@ -113,27 +113,32 @@ export default function PairingScreen() {
 
   async function handlePinPair() {
     const p = pin().trim();
+    const addr = hostAddr().trim();
     if (!p) return;
+    if (!addr) {
+      setErrorMsg('Enter the host address shown by jaunt-host');
+      setPhase('error');
+      return;
+    }
+
     try {
       setPhase('initializing');
-      setStatusMsg('Starting P2P node...');
-      await initNode();
+      setStatusMsg('Fetching connection profile...');
 
-      setPhase('pairing');
-      setStatusMsg('Verifying PIN...');
-      const peerId = await pairEnterPin(p);
+      // Fetch profile from the pairing HTTP endpoint on the host.
+      // Default port is 9867 unless the user included a port.
+      const host = addr.includes(':') ? addr : `${addr}:9867`;
+      const resp = await fetch(`http://${host}/pair?pin=${encodeURIComponent(p)}`);
 
-      store.setHostName('Host');
-      await saveHost({
-        peerId,
-        hostName: 'Host',
-        cairnConfig: {},
-        pairedAt: Date.now(),
-        lastSeen: Date.now(),
-      });
+      if (resp.status === 403) {
+        throw new Error('Invalid PIN');
+      }
+      if (!resp.ok) {
+        throw new Error(`Pairing server returned ${resp.status}`);
+      }
 
-      setPhase('error');
-      setErrorMsg('PIN pairing requires the full URL from jaunt-host. Copy the URL shown by the host and open it in your browser instead.');
+      const profile: ConnectionProfile = await resp.json();
+      await pairFromProfile(profile);
     } catch (e: any) {
       setPhase('error');
       setErrorMsg(e.message);
@@ -198,7 +203,7 @@ export default function PairingScreen() {
               <span class="text-[10px] font-700 text-amber">2</span>
             </div>
             <div class="text-xs text-text-2">
-              Enter the PIN shown by your host
+              Enter the PIN and host IP shown by jaunt-host
             </div>
           </div>
 
@@ -215,10 +220,26 @@ export default function PairingScreen() {
             disabled={isWorking()}
           />
 
+          <input
+            type="text"
+            inputMode="url"
+            autocomplete="off"
+            spellcheck={false}
+            placeholder="192.168.1.100"
+            class="w-full bg-bg-0 border-2 border-bg-3 rounded-xl px-4 py-3 text-sm font-mono text-center text-text-0 placeholder:text-text-3/50 outline-none transition-all duration-200 focus:border-amber/60 focus:shadow-[0_0_0_3px_rgba(232,162,69,0.08)] mt-3"
+            value={hostAddr()}
+            onInput={(e) => setHostAddr(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handlePinPair()}
+            disabled={isWorking()}
+          />
+          <div class="text-[11px] text-text-3 mt-1.5 text-center">
+            Host address (IP or hostname) -- port 9867 is used by default
+          </div>
+
           <button
             class="w-full btn-primary mt-4 py-3.5 text-base disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handlePinPair}
-            disabled={isWorking() || !pin().trim()}
+            disabled={isWorking() || !pin().trim() || !hostAddr().trim()}
           >
             {isWorking() ? (
               <span class="flex items-center justify-center gap-2.5">
