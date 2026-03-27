@@ -1,9 +1,17 @@
 import { createSignal, For, Show } from 'solid-js';
 import { store } from '../lib/store';
-import type { Tab } from '../lib/store';
+import type { Tab, Pane } from '../lib/store';
 import { sendRpc } from '../lib/cairn';
 import { useIsMobile } from '../lib/hooks';
 import SessionPicker from './SessionPicker';
+
+const selectArrowSvg = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 4 4-4' fill='none' stroke='%235a5955' stroke-width='1.2'/%3E%3C/svg%3E\")";
+const selectStyle = {
+  'background-image': selectArrowSvg,
+  'background-repeat': 'no-repeat',
+  'background-position': 'right 6px center',
+  'padding-right': '18px',
+};
 
 export default function TabBar() {
   const isMobile = useIsMobile();
@@ -82,40 +90,8 @@ export default function TabBar() {
       <Show
         when={!isMobile()}
         fallback={
-          /* Mobile: dropdown select for tabs */
-          <div class="flex-1 flex items-center px-2 gap-2 min-w-0">
-            <Show
-              when={hasTabs()}
-              fallback={
-                <span class="text-[11px] text-text-3/40 font-mono tracking-wider flex-1">NO OPEN TABS</span>
-              }
-            >
-              <select
-                data-testid="mobile-tab-select"
-                class="flex-1 bg-bg-0 border border-bg-3/50 rounded-md px-2 py-1 text-[11px] font-mono text-text-0 outline-none min-w-0 appearance-none"
-                style={{
-                  'background-image': "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 4 4-4' fill='none' stroke='%235a5955' stroke-width='1.2'/%3E%3C/svg%3E\")",
-                  'background-repeat': 'no-repeat',
-                  'background-position': 'right 8px center',
-                  'padding-right': '20px',
-                }}
-                value={store.activeTabId() ?? ''}
-                onChange={(e) => {
-                  const tabId = e.currentTarget.value;
-                  if (tabId) store.activateTab(tabId);
-                }}
-              >
-                <For each={store.tabs()}>
-                  {(tab) => (
-                    <option value={tab.id}>{tab.label}</option>
-                  )}
-                </For>
-              </select>
-              <span class="text-[9px] font-mono text-text-3/60 shrink-0">
-                {store.tabs().length} tab{store.tabs().length !== 1 ? 's' : ''}
-              </span>
-            </Show>
-          </div>
+          /* Mobile: tab + pane selectors on one row */
+          <MobileTabRow hasTabs={hasTabs()} />
         }
       >
         {/* Desktop: tab list — scrollable, each tab is a precision strip */}
@@ -245,6 +221,57 @@ export default function TabBar() {
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span class="text-[11px] text-text-3/40 font-mono tracking-wider">NO OPEN TABS</span>
         </div>
+      </Show>
+    </div>
+  );
+}
+
+/** Mobile: tab selector + pane selector on one compact row */
+function MobileTabRow(props: { hasTabs: boolean }) {
+  const activeTab = () => store.tabs().find(t => t.id === store.activeTabId());
+  const activePanes = () => activeTab() ? store.collectPanes(activeTab()!.panes) : [];
+  const hasManyPanes = () => activePanes().length > 1;
+  const focusedPaneId = () => activeTab()?.focusedPaneId ?? activePanes()[0]?.id;
+
+  function paneName(pane: Pane) {
+    return pane.sessionName || pane.sessionId.slice(0, 8);
+  }
+
+  return (
+    <div class="flex-1 flex items-center px-2 gap-1.5 min-w-0">
+      <Show
+        when={props.hasTabs}
+        fallback={
+          <span class="text-[11px] text-text-3/40 font-mono tracking-wider flex-1">NO OPEN TABS</span>
+        }
+      >
+        {/* Tab selector */}
+        <select
+          data-testid="mobile-tab-select"
+          class="bg-bg-0 border border-bg-3/50 rounded-md px-2 py-1 text-[11px] font-mono text-text-0 outline-none min-w-0 appearance-none"
+          style={{ ...selectStyle, 'flex': hasManyPanes() ? '1' : '2' }}
+          value={store.activeTabId() ?? ''}
+          onChange={(e) => { if (e.currentTarget.value) store.activateTab(e.currentTarget.value); }}
+        >
+          <For each={store.tabs()}>
+            {(tab) => <option value={tab.id}>{tab.label}</option>}
+          </For>
+        </select>
+
+        {/* Pane selector — only when active tab has multiple panes */}
+        <Show when={hasManyPanes()}>
+          <select
+            data-testid="mobile-pane-select"
+            class="flex-1 bg-bg-0 border border-bg-3/50 rounded-md px-2 py-1 text-[11px] font-mono text-text-0 outline-none min-w-0 appearance-none"
+            style={selectStyle}
+            value={focusedPaneId()}
+            onChange={(e) => store.focusPane(e.currentTarget.value)}
+          >
+            <For each={activePanes()}>
+              {(pane, idx) => <option value={pane.id}>P{idx() + 1} {paneName(pane)}</option>}
+            </For>
+          </select>
+        </Show>
       </Show>
     </div>
   );
