@@ -89,6 +89,26 @@
       "peer_id": "12D3KooWLt51xRybhJ26srByzdHta5jAQ9GwRvjECyE1C43X2aQi",
       "name": "cairn-transport",
       "approved_at": "2026-03-26T23:17:18Z"
+    },
+    {
+      "peer_id": "12D3KooWFqQsWxXek7j92eRdaD5KUoK6B4Dhof9P8bn2bDtHnXyZ",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:22:17Z"
+    },
+    {
+      "peer_id": "12D3KooWJbD1AeaJtgBCoUMsMBwa9rE9wmGQcPuc3Vjmg7VtKYno",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:22:52Z"
+    },
+    {
+      "peer_id": "12D3KooWEB3k8WiSeueNbqrKNJF6uMLiLmAN18qoVr2BaFYFjsSA",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:40:23Z"
+    },
+    {
+      "peer_id": "12D3KooWDBietjRQdYtqz1B2sFC5nuZtYHtDzsKFaLuUANn5FvYE",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:41:32Z"
     }
   ]
 }

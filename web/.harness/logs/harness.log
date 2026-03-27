@@ -180,3 +180,13 @@
 {"timestamp":"2026-03-26T22:25:42Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":12}
 {"timestamp":"2026-03-26T22:26:00Z","hook":"guard-writes","decision":"pass","duration_ms":18}
 {"timestamp":"2026-03-26T22:26:00Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tests/e2e-session-attach.mjs","duration_ms":6}
+{"timestamp":"2026-03-26T23:19:13Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-26T23:19:15Z","hook":"post-edit","decision":"errors","detail":"TabBar.tsx: 19 error line(s)","duration_ms":1573}
+{"timestamp":"2026-03-26T23:20:03Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-26T23:20:05Z","hook":"post-edit","decision":"errors","detail":"TerminalPane.tsx: 19 error line(s)","duration_ms":1526}
+{"timestamp":"2026-03-26T23:20:44Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-26T23:20:46Z","hook":"post-edit","decision":"errors","detail":"SessionPicker.tsx: 19 error line(s)","duration_ms":1548}
+{"timestamp":"2026-03-26T23:21:19Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-26T23:21:20Z","hook":"post-edit","decision":"errors","detail":"TerminalWorkspace.tsx: 19 error line(s)","duration_ms":1589}
+{"timestamp":"2026-03-26T23:21:47Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-26T23:21:49Z","hook":"post-edit","decision":"errors","detail":"PaneContainer.tsx: 19 error line(s)","duration_ms":1636}

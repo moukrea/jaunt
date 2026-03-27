@@ -1,0 +1,24 @@
+{
+  "devices": [
+    {
+      "peer_id": "12D3KooWSDZrJzFf9ypzus2A9Mmmq774Z887Vt6s7bSVq2nY6Gtf",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:35:22Z"
+    },
+    {
+      "peer_id": "12D3KooWMnz2fLEHmGyJz3BErJ3AYaxJFg6YQHkdqB6VET1oxc9J",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:38:02Z"
+    },
+    {
+      "peer_id": "12D3KooWLARdLWRCzcvNtML4yUhFm9AA17rVQHEB8gkeTCJ4w3rE",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:38:48Z"
+    },
+    {
+      "peer_id": "12D3KooWQ44PP9D3rad29fw1AyCjPDfYcmZynmujrDmau2Cbd3bP",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-26T23:40:45Z"
+    }
+  ]
+}

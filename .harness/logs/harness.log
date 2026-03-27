@@ -730,3 +730,9 @@
 {"timestamp":"2026-03-26T23:16:15Z","hook":"guard-writes","decision":"pass","duration_ms":13}
 {"timestamp":"2026-03-26T23:16:15Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-debugger/MEMORY.md","duration_ms":4}
 {"timestamp":"2026-03-26T23:16:44Z","hook":"classify-prompt","decision":"massive","duration_ms":9}
+{"timestamp":"2026-03-26T23:22:57Z","hook":"stop-gate","decision":"pass","duration_ms":10580}
+{"timestamp":"2026-03-26T23:23:57Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":25}
+{"timestamp":"2026-03-26T23:28:03Z","hook":"classify-prompt","decision":"medium","duration_ms":11}
+{"timestamp":"2026-03-26T23:41:37Z","hook":"stop-gate","decision":"pass","duration_ms":10578}
+{"timestamp":"2026-03-26T23:42:37Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-27T06:07:39Z","hook":"classify-prompt","decision":"complex","duration_ms":15}
