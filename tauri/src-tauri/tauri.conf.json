@@ -9,7 +9,6 @@
     "beforeDevCommand": ""
   },
   "app": {
-    "title": "Jaunt",
     "windows": [
       {
         "title": "Jaunt",
