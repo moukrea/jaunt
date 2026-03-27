@@ -4,6 +4,17 @@ import { get, set, del, keys } from 'idb-keyval';
 import type { ConnectionProfile } from './profile';
 import type { SessionInfo, DirEntry } from './protocol';
 
+// --- Saved Connection (for session persistence across page reloads) ---
+
+export interface SavedConnection {
+  hostLibp2pPeerId: string;
+  hostAddrs: string[];
+  /** Ed25519 private key seed (32 bytes as number array) for the libp2p identity. */
+  libp2pSeed: number[];
+  hostName: string;
+  connectedAt: number;
+}
+
 // --- App State ---
 
 export type AppView = 'pairing' | 'sessions' | 'terminal' | 'files' | 'settings';
@@ -50,6 +61,8 @@ const [latency, setLatency] = createSignal(0);
 const [tier, setTier] = createSignal('Tier 0');
 const [error, setError] = createSignal<string | null>(null);
 const [activeTabId, setActiveTabId] = createSignal<string | null>(null);
+const [reconnecting, setReconnecting] = createSignal(false);
+const [reconnectHostName, setReconnectHostName] = createSignal('');
 
 // Deep reactive store for tabs -- allows fine-grained updates
 // that preserve object identity (critical for <For> stability)
@@ -336,10 +349,12 @@ export const store = {
   view, connected, hostName, peerId, sessions,
   currentSession, dirEntries, currentPath, showHidden,
   latency, tier, error, tabs, activeTabId,
+  reconnecting, reconnectHostName,
   // Setters
   setView, setConnected, setHostName, setPeerId, setSessions,
   setCurrentSession, setDirEntries, setCurrentPath, setShowHidden,
   setLatency, setTier, setError, setActiveTabId,
+  setReconnecting, setReconnectHostName,
   // Tab & Pane operations
   addTab, closeTab, activateTab, renameTab, getActiveTab,
   findFocusedPane, findPaneById, collectPanes,
@@ -379,4 +394,28 @@ export async function saveSettings(settings: Record<string, string>): Promise<vo
 
 export async function loadSettings(): Promise<Record<string, string>> {
   return (await get('settings')) || {};
+}
+
+// --- Saved connection persistence (session resumption across page reloads) ---
+
+const SAVED_CONNECTION_KEY = 'jaunt:connection';
+const CONNECTION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export async function saveConnection(conn: SavedConnection): Promise<void> {
+  await set(SAVED_CONNECTION_KEY, conn);
+}
+
+export async function loadConnection(): Promise<SavedConnection | null> {
+  const saved = await get(SAVED_CONNECTION_KEY) as SavedConnection | undefined;
+  if (!saved) return null;
+  // Check expiry
+  if (Date.now() - saved.connectedAt > CONNECTION_EXPIRY_MS) {
+    await del(SAVED_CONNECTION_KEY);
+    return null;
+  }
+  return saved;
+}
+
+export async function clearConnection(): Promise<void> {
+  await del(SAVED_CONNECTION_KEY);
 }

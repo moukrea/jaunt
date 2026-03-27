@@ -1,7 +1,8 @@
 import { Node, NodeSession, NodeChannel } from 'cairn-p2p';
 import type { CairnConfig } from 'cairn-p2p';
 import type { ConnectionProfile } from './profile';
-import { store } from './store';
+import { store, saveConnection, clearConnection } from './store';
+import type { SavedConnection } from './store';
 import { encodeRequest, decodeResponse } from './protocol';
 import type { RpcRequest, RpcResponse } from './protocol';
 
