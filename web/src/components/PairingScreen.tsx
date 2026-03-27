@@ -1,9 +1,9 @@
 import { createSignal, onMount, Show } from 'solid-js';
 import { decodeProfileFromFragment, getWsMultiaddrs, type ConnectionProfile } from '../lib/profile';
-import { initNode, pairScanQr, pairEnterPin, connectToHost } from '../lib/cairn';
-import { store, saveHost } from '../lib/store';
+import { initNode, pairScanQr, pairEnterPin, connectToHost, tryResumeConnection } from '../lib/cairn';
+import { store, saveHost, loadConnection, clearConnection } from '../lib/store';
 
-type PairingPhase = 'idle' | 'decoding' | 'initializing' | 'pairing' | 'connecting' | 'done' | 'error';
+type PairingPhase = 'idle' | 'decoding' | 'initializing' | 'pairing' | 'connecting' | 'resuming' | 'done' | 'error';
 
 const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -17,7 +17,9 @@ export default function PairingScreen() {
   onMount(async () => {
     const fragment = window.location.hash.slice(1);
     console.log('[jaunt] onMount, fragment length:', fragment.length);
+
     if (fragment) {
+      // URL fragment present -- use the connection profile from the URL
       try {
         setPhase('decoding');
         setStatusMsg('Reading connection profile...');
@@ -29,6 +31,34 @@ export default function PairingScreen() {
         setPhase('error');
         setErrorMsg(e.message);
       }
+      return;
+    }
+
+    // No URL fragment -- try to resume a saved connection
+    try {
+      const saved = await loadConnection();
+      if (saved) {
+        console.log('[jaunt] Found saved connection to', saved.hostName, '- attempting resume');
+        setPhase('resuming');
+        store.setReconnecting(true);
+        store.setReconnectHostName(saved.hostName);
+        setStatusMsg(`Reconnecting to ${saved.hostName}...`);
+
+        const ok = await tryResumeConnection(saved);
+        store.setReconnecting(false);
+
+        if (ok) {
+          setPhase('done');
+          store.setView('sessions');
+        } else {
+          console.log('[jaunt] Resume failed, showing pairing screen');
+          setPhase('idle');
+        }
+      }
+    } catch (e: any) {
+      console.error('[jaunt] resume check error:', e);
+      store.setReconnecting(false);
+      setPhase('idle');
     }
   });
 

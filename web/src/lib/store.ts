@@ -13,6 +13,14 @@ export interface SavedConnection {
   libp2pSeed: number[];
   hostName: string;
   connectedAt: number;
+  /** Hex-encoded 16-byte session ID for resumption. */
+  sessionId?: string;
+  /** Exported DoubleRatchet state (JSON-serializable object). */
+  ratchetState?: object;
+  /** Next sequence number to send. */
+  sequenceTx?: number;
+  /** Last sequence number received. */
+  sequenceRx?: number;
 }
 
 // --- App State ---

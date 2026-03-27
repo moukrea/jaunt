@@ -1,7 +1,7 @@
 import { Node, NodeSession, NodeChannel } from 'cairn-p2p';
 import type { CairnConfig } from 'cairn-p2p';
 import type { ConnectionProfile } from './profile';
-import { store, saveConnection, clearConnection } from './store';
+import { store, saveConnection, loadConnection, clearConnection } from './store';
 import type { SavedConnection } from './store';
 import { encodeRequest, decodeResponse } from './protocol';
 import type { RpcRequest, RpcResponse } from './protocol';
@@ -53,6 +53,40 @@ export async function initNode(profile?: Partial<ConnectionProfile>): Promise<No
 }
 
 /**
+ * Initialize a cairn node with a specific libp2p identity seed.
+ * Used for session resumption -- the host identifies the browser by its PeerId.
+ */
+export async function initNodeWithIdentity(
+  libp2pSeed: Uint8Array,
+  profile?: Partial<ConnectionProfile>,
+): Promise<Node> {
+  const config: Partial<CairnConfig> = {};
+
+  if (profile?.signal_server) {
+    config.signalingServers = [profile.signal_server];
+  }
+  if (profile?.turn_server && profile?.turn_username && profile?.turn_password) {
+    config.turnServers = [{
+      url: profile.turn_server,
+      username: profile.turn_username,
+      credential: profile.turn_password,
+    }];
+  }
+
+  config.storageBackend = 'memory';
+
+  node = await Node.createWithIdentity(config, libp2pSeed);
+
+  if (profile?.signal_server) {
+    store.setTier('Tier 1');
+  } else {
+    store.setTier('Tier 0');
+  }
+
+  return node;
+}
+
+/**
  * Pair by scanning QR data. The QR payload contains the host's peer ID
  * and connection hints (multiaddrs), which cairn stores internally for
  * use during connect().
@@ -73,27 +107,11 @@ export async function pairFromLink(uri: string): Promise<string> {
 }
 
 /**
- * Connect to the host via cairn's libp2p transport.
- *
- * 1. Starts the libp2p transport (WebSocket in browser).
- * 2. Calls node.connectTransport() which dials the host's /ws multiaddr,
- *    performs a Noise XX handshake, and establishes a Double Ratchet session.
- * 3. Opens an "rpc" channel and a "pty" channel on the session.
- * 4. Registers message handlers to route incoming data to the right callbacks.
- *
- * @param libp2pPeerId - The host's libp2p PeerId (from the connection profile)
- * @param addrs - The host's listen multiaddrs (from the connection profile)
+ * Wire a session to the UI: open channels, register message handlers,
+ * and monitor state changes.
  */
-export async function connectToHost(libp2pPeerId: string, addrs: string[]): Promise<void> {
-  if (!node) throw new Error('Node not initialized');
-
-  console.log('[jaunt] Starting cairn transport...');
-  await node.startTransport();
-  console.log('[jaunt] Transport started');
-
-  console.log('[jaunt] Connecting to host:', libp2pPeerId, 'addrs:', addrs);
-  session = await (node as any).connectTransport(libp2pPeerId, addrs);
-  console.log('[jaunt] Connected via cairn transport');
+function wireSession(s: NodeSession): void {
+  session = s;
 
   // Open a single channel (cairn strips channel names, so everything arrives
   // on the same callback regardless). We use tag-based routing.
@@ -160,9 +178,149 @@ export async function connectToHost(libp2pPeerId: string, addrs: string[]): Prom
     console.error('[jaunt] Session error:', error.code, error.message);
     store.setError(error.message);
   });
+}
+
+/**
+ * Save the current session's ratchet state to the existing SavedConnection
+ * record in IndexedDB. Called after a successful connect or resume.
+ */
+async function persistSessionState(libp2pPeerId: string, addrs: string[], hostName: string): Promise<void> {
+  if (!node || !session) return;
+
+  const libp2pSeed = node.libp2pPrivateKeySeed;
+  if (!libp2pSeed) return;
+
+  // Get session ID and ratchet state
+  const sessionId = (session as any).sessionId as Uint8Array | null;
+  const ratchet = (session as any).ratchet;
+  const sequenceTx = (session as any).sequenceTx as number ?? 0;
+  const sequenceRx = (session as any).sequenceRx as number ?? 0;
+
+  const conn: SavedConnection = {
+    hostLibp2pPeerId: libp2pPeerId,
+    hostAddrs: addrs,
+    libp2pSeed: Array.from(libp2pSeed),
+    hostName,
+    connectedAt: Date.now(),
+  };
+
+  if (sessionId && ratchet) {
+    conn.sessionId = bytesToHex(sessionId);
+    conn.ratchetState = ratchet.exportStateObject();
+    conn.sequenceTx = sequenceTx;
+    conn.sequenceRx = sequenceRx;
+  }
+
+  await saveConnection(conn);
+  console.log('[jaunt] Session state saved to IndexedDB (sessionId:', conn.sessionId?.substring(0, 8), ')');
+}
+
+/**
+ * Connect to the host via cairn's libp2p transport.
+ *
+ * 1. Starts the libp2p transport (WebSocket in browser).
+ * 2. Calls node.connectTransport() which dials the host's /ws multiaddr,
+ *    performs a Noise XX handshake, and establishes a Double Ratchet session.
+ * 3. Opens an "rpc" channel and a "pty" channel on the session.
+ * 4. Registers message handlers to route incoming data to the right callbacks.
+ *
+ * @param libp2pPeerId - The host's libp2p PeerId (from the connection profile)
+ * @param addrs - The host's listen multiaddrs (from the connection profile)
+ */
+export async function connectToHost(libp2pPeerId: string, addrs: string[]): Promise<void> {
+  if (!node) throw new Error('Node not initialized');
+
+  console.log('[jaunt] Starting cairn transport...');
+  await node.startTransport();
+  console.log('[jaunt] Transport started');
+
+  console.log('[jaunt] Connecting to host:', libp2pPeerId, 'addrs:', addrs);
+  const s = await (node as any).connectTransport(libp2pPeerId, addrs);
+  console.log('[jaunt] Connected via cairn transport');
+
+  wireSession(s);
 
   store.setConnected(true);
   store.setPeerId(libp2pPeerId);
+
+  // Persist the session state for future resumption
+  await persistSessionState(libp2pPeerId, addrs, store.hostName());
+}
+
+/**
+ * Try to resume a saved connection.
+ *
+ * First attempts SESSION_RESUME (single round-trip) using the saved ratchet state.
+ * If that fails (SESSION_EXPIRED), falls back to a full Noise XX handshake.
+ * If even that fails, returns false so the caller can show the pairing screen.
+ *
+ * @param saved - The saved connection data from IndexedDB
+ * @returns true if reconnected successfully, false if a new pairing is needed
+ */
+export async function tryResumeConnection(saved: SavedConnection): Promise<boolean> {
+  try {
+    // Restore node with the same identity
+    const libp2pSeed = new Uint8Array(saved.libp2pSeed);
+    await initNodeWithIdentity(libp2pSeed);
+
+    if (!node) throw new Error('Node not initialized');
+
+    console.log('[jaunt] Starting cairn transport for resume...');
+    await node.startTransport();
+    console.log('[jaunt] Transport started');
+
+    // Try resume first if we have ratchet state
+    if (saved.sessionId && saved.ratchetState) {
+      try {
+        console.log('[jaunt] Attempting session resume...');
+        const sessionIdBytes = hexToBytes(saved.sessionId);
+        const s = await (node as any).tryResumeTransport(
+          saved.hostLibp2pPeerId,
+          saved.hostAddrs,
+          {
+            sessionId: sessionIdBytes,
+            ratchetState: saved.ratchetState,
+            sequenceTx: saved.sequenceTx ?? 0,
+            sequenceRx: saved.sequenceRx ?? 0,
+          },
+        );
+        console.log('[jaunt] Session resumed successfully');
+        wireSession(s);
+        store.setConnected(true);
+        store.setPeerId(saved.hostLibp2pPeerId);
+        store.setHostName(saved.hostName);
+
+        // Update persisted state
+        await persistSessionState(saved.hostLibp2pPeerId, saved.hostAddrs, saved.hostName);
+        return true;
+      } catch (e: any) {
+        console.warn('[jaunt] Session resume failed:', e.message, '- falling back to full handshake');
+      }
+    }
+
+    // Fall back to full handshake
+    try {
+      console.log('[jaunt] Attempting full handshake...');
+      const s = await (node as any).connectTransport(saved.hostLibp2pPeerId, saved.hostAddrs);
+      console.log('[jaunt] Full handshake succeeded');
+      wireSession(s);
+      store.setConnected(true);
+      store.setPeerId(saved.hostLibp2pPeerId);
+      store.setHostName(saved.hostName);
+
+      // Persist the new session state
+      await persistSessionState(saved.hostLibp2pPeerId, saved.hostAddrs, saved.hostName);
+      return true;
+    } catch (e: any) {
+      console.warn('[jaunt] Full handshake also failed:', e.message);
+      await clearConnection();
+      return false;
+    }
+  } catch (e: any) {
+    console.error('[jaunt] Resume connection error:', e);
+    await clearConnection();
+    return false;
+  }
 }
 
 /**
@@ -256,4 +414,18 @@ export async function disconnect(): Promise<void> {
     node = null;
   }
   store.setConnected(false);
+}
+
+// --- Helpers ---
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return bytes;
 }
