@@ -41,7 +41,11 @@ export async function initNode(profile?: Partial<ConnectionProfile>): Promise<No
 
   config.storageBackend = 'memory';
 
-  node = await Node.create(config);
+  // Always use createWithIdentity so that libp2pPrivateKeySeed is available
+  // for session persistence. Node.create() generates a random identity whose
+  // seed cannot be extracted in the browser, breaking auto-reconnect.
+  const seed = crypto.getRandomValues(new Uint8Array(32));
+  node = await Node.createWithIdentity(config, seed);
 
   if (profile?.signal_server) {
     store.setTier('Tier 1');
