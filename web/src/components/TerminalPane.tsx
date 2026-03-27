@@ -10,6 +10,8 @@ import type { Pane } from '../lib/store';
 interface TerminalPaneProps {
   pane: Pane;
   tabId: string;
+  onSplit?: (paneId: string, direction: 'horizontal' | 'vertical') => void;
+  isMobile?: boolean;
 }
 
 export default function TerminalPane(props: TerminalPaneProps) {
@@ -231,53 +233,51 @@ export default function TerminalPane(props: TerminalPaneProps) {
           </span>
         </div>
 
-        {/* Right: action buttons — reveal on hover */}
-        <div class="flex items-center gap-px">
-          {/* Split left-right */}
-          <button
-            data-testid="split-horizontal"
-            class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
-            on:click={(e) => {
-              e.stopPropagation();
-              (e.currentTarget as HTMLElement).dispatchEvent(
-                new CustomEvent('pane-split', { bubbles: true, detail: { paneId: props.pane.id, direction: 'horizontal' } })
-              );
-            }}
-            title="Split left / right"
-          >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              <rect x="1.5" y="1.5" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.1" />
-              <rect x="7.5" y="1.5" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.1" />
-            </svg>
-          </button>
-          {/* Split top-bottom */}
-          <button
-            data-testid="split-vertical"
-            class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
-            on:click={(e) => {
-              e.stopPropagation();
-              (e.currentTarget as HTMLElement).dispatchEvent(
-                new CustomEvent('pane-split', { bubbles: true, detail: { paneId: props.pane.id, direction: 'vertical' } })
-              );
-            }}
-            title="Split top / bottom"
-          >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              <rect x="1.5" y="1.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.1" />
-              <rect x="1.5" y="7.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.1" />
-            </svg>
-          </button>
-          {/* Close pane */}
-          <button
-            class="w-6 h-5 flex items-center justify-center text-text-3/30 hover:text-coral bg-transparent border-none cursor-pointer rounded-sm hover:bg-coral/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
-            onClick={(e) => { e.stopPropagation(); store.closePane(props.pane.id); }}
-            title="Close pane"
-          >
-            <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-              <path d="M1.5 1.5l6 6M7.5 1.5l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-            </svg>
-          </button>
-        </div>
+        {/* Right: action buttons — reveal on hover (hidden on mobile) */}
+        <Show when={!props.isMobile}>
+          <div class="flex items-center gap-px">
+            {/* Split left-right */}
+            <button
+              data-testid="split-horizontal"
+              class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onSplit?.(props.pane.id, 'horizontal');
+              }}
+              title="Split left / right"
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <rect x="1.5" y="1.5" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.1" />
+                <rect x="7.5" y="1.5" width="4" height="10" rx="1" stroke="currentColor" stroke-width="1.1" />
+              </svg>
+            </button>
+            {/* Split top-bottom */}
+            <button
+              data-testid="split-vertical"
+              class="w-6 h-5 flex items-center justify-center text-text-3/40 hover:text-amber bg-transparent border-none cursor-pointer rounded-sm hover:bg-amber/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onSplit?.(props.pane.id, 'vertical');
+              }}
+              title="Split top / bottom"
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <rect x="1.5" y="1.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.1" />
+                <rect x="1.5" y="7.5" width="10" height="4" rx="1" stroke="currentColor" stroke-width="1.1" />
+              </svg>
+            </button>
+            {/* Close pane */}
+            <button
+              class="w-6 h-5 flex items-center justify-center text-text-3/30 hover:text-coral bg-transparent border-none cursor-pointer rounded-sm hover:bg-coral/8 transition-all duration-150 opacity-0 group-hover/pane:opacity-100"
+              onClick={(e) => { e.stopPropagation(); store.closePane(props.pane.id); }}
+              title="Close pane"
+            >
+              <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                <path d="M1.5 1.5l6 6M7.5 1.5l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+        </Show>
       </div>
 
       {/* Terminal surface */}

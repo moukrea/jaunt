@@ -2,9 +2,11 @@ import { createSignal, For, Show } from 'solid-js';
 import { store } from '../lib/store';
 import type { Tab } from '../lib/store';
 import { sendRpc } from '../lib/cairn';
+import { useIsMobile } from '../lib/hooks';
 import SessionPicker from './SessionPicker';
 
 export default function TabBar() {
+  const isMobile = useIsMobile();
   const [showPicker, setShowPicker] = createSignal(false);
   const [editingTabId, setEditingTabId] = createSignal<string | null>(null);
   const [editValue, setEditValue] = createSignal('');
@@ -77,95 +79,135 @@ export default function TabBar() {
 
   return (
     <div class="flex items-stretch bg-bg-1 shrink-0 relative" style="min-height: 36px">
-      {/* Tab list — scrollable, each tab is a precision strip */}
-      <div
-        class="flex-1 flex items-stretch overflow-x-auto min-w-0"
-        style="scrollbar-width: none; -ms-overflow-style: none;"
-      >
-        <For each={store.tabs()}>
-          {(tab, idx) => {
-            const isActive = () => tab.id === store.activeTabId();
-            const isEditing = () => editingTabId() === tab.id;
-            const isDragOver = () => dragOverIdx() === idx();
-
-            return (
-              <div
-                class={`relative flex items-center gap-1.5 px-3.5 min-w-0 shrink-0 cursor-pointer select-none transition-all duration-150 ${
-                  isActive()
-                    ? 'bg-bg-0 text-text-0'
-                    : 'text-text-3 hover:text-text-1 hover:bg-bg-0/40'
-                } ${isDragOver() ? 'ring-1 ring-inset ring-amber/40' : ''}`}
-                draggable={!isEditing()}
-                onDragStart={(e) => handleDragStart(e, idx())}
-                onDragOver={(e) => handleDragOver(e, idx())}
-                onDrop={(e) => handleDrop(e, idx())}
-                onDragEnd={handleDragEnd}
-                onClick={() => store.activateTab(tab.id)}
-                onMouseDown={(e) => handleMiddleClick(e, tab.id)}
-                onDblClick={() => startRename(tab)}
+      <Show
+        when={!isMobile()}
+        fallback={
+          /* Mobile: dropdown select for tabs */
+          <div class="flex-1 flex items-center px-2 gap-2 min-w-0">
+            <Show
+              when={hasTabs()}
+              fallback={
+                <span class="text-[11px] text-text-3/40 font-mono tracking-wider flex-1">NO OPEN TABS</span>
+              }
+            >
+              <select
+                data-testid="mobile-tab-select"
+                class="flex-1 bg-bg-0 border border-bg-3/50 rounded-md px-2 py-1 text-[11px] font-mono text-text-0 outline-none min-w-0 appearance-none"
+                style={{
+                  'background-image': "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 4 4-4' fill='none' stroke='%235a5955' stroke-width='1.2'/%3E%3C/svg%3E\")",
+                  'background-repeat': 'no-repeat',
+                  'background-position': 'right 8px center',
+                  'padding-right': '20px',
+                }}
+                value={store.activeTabId() ?? ''}
+                onChange={(e) => {
+                  const tabId = e.currentTarget.value;
+                  if (tabId) store.activateTab(tabId);
+                }}
               >
-                {/* Active bottom edge — precision amber line */}
-                <Show when={isActive()}>
-                  <div
-                    class="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-amber"
-                  />
-                </Show>
+                <For each={store.tabs()}>
+                  {(tab) => (
+                    <option value={tab.id}>{tab.label}</option>
+                  )}
+                </For>
+              </select>
+              <span class="text-[9px] font-mono text-text-3/60 shrink-0">
+                {store.tabs().length} tab{store.tabs().length !== 1 ? 's' : ''}
+              </span>
+            </Show>
+          </div>
+        }
+      >
+        {/* Desktop: tab list — scrollable, each tab is a precision strip */}
+        <div
+          class="flex-1 flex items-stretch overflow-x-auto min-w-0"
+          style="scrollbar-width: none; -ms-overflow-style: none;"
+        >
+          <For each={store.tabs()}>
+            {(tab, idx) => {
+              const isActive = () => tab.id === store.activeTabId();
+              const isEditing = () => editingTabId() === tab.id;
+              const isDragOver = () => dragOverIdx() === idx();
 
-                {/* Separator between inactive tabs */}
-                <Show when={!isActive() && idx() > 0}>
-                  <div class="absolute left-0 top-2 bottom-2 w-px bg-bg-3/30" />
-                </Show>
-
-                {/* Tab label / rename input */}
-                <Show
-                  when={isEditing()}
-                  fallback={
-                    <span
-                      class={`text-[11px] font-mono truncate max-w-32 leading-none ${
-                        isActive() ? 'font-500 text-text-0' : ''
-                      }`}
-                    >
-                      {tab.label}
-                    </span>
-                  }
-                >
-                  <input
-                    type="text"
-                    class="bg-bg-0 border border-amber/40 rounded px-1.5 py-0.5 text-[11px] font-mono text-text-0 outline-none w-28 focus:border-amber/70"
-                    value={editValue()}
-                    onInput={(e) => setEditValue(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitRename(tab.id);
-                      if (e.key === 'Escape') setEditingTabId(null);
-                    }}
-                    onBlur={() => commitRename(tab.id)}
-                    autofocus
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </Show>
-
-                {/* Close button — appears on hover, fades in */}
-                <button
-                  class={`ml-0.5 w-4 h-4 flex items-center justify-center rounded-sm transition-all duration-150 border-none cursor-pointer shrink-0 bg-transparent ${
+              return (
+                <div
+                  class={`relative flex items-center gap-1.5 px-3.5 min-w-0 shrink-0 cursor-pointer select-none transition-all duration-150 ${
                     isActive()
-                      ? 'text-text-3/50 hover:text-coral hover:bg-coral/10'
-                      : 'text-transparent hover:text-coral hover:bg-coral/10'
-                  }`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    store.closeTab(tab.id);
-                  }}
-                  title="Close tab"
+                      ? 'bg-bg-0 text-text-0'
+                      : 'text-text-3 hover:text-text-1 hover:bg-bg-0/40'
+                  } ${isDragOver() ? 'ring-1 ring-inset ring-amber/40' : ''}`}
+                  draggable={!isEditing()}
+                  onDragStart={(e) => handleDragStart(e, idx())}
+                  onDragOver={(e) => handleDragOver(e, idx())}
+                  onDrop={(e) => handleDrop(e, idx())}
+                  onDragEnd={handleDragEnd}
+                  onClick={() => store.activateTab(tab.id)}
+                  onMouseDown={(e) => handleMiddleClick(e, tab.id)}
+                  onDblClick={() => startRename(tab)}
                 >
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                    <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-                  </svg>
-                </button>
-              </div>
-            );
-          }}
-        </For>
-      </div>
+                  {/* Active bottom edge — precision amber line */}
+                  <Show when={isActive()}>
+                    <div
+                      class="absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-amber"
+                    />
+                  </Show>
+
+                  {/* Separator between inactive tabs */}
+                  <Show when={!isActive() && idx() > 0}>
+                    <div class="absolute left-0 top-2 bottom-2 w-px bg-bg-3/30" />
+                  </Show>
+
+                  {/* Tab label / rename input */}
+                  <Show
+                    when={isEditing()}
+                    fallback={
+                      <span
+                        class={`text-[11px] font-mono truncate max-w-32 leading-none ${
+                          isActive() ? 'font-500 text-text-0' : ''
+                        }`}
+                      >
+                        {tab.label}
+                      </span>
+                    }
+                  >
+                    <input
+                      type="text"
+                      class="bg-bg-0 border border-amber/40 rounded px-1.5 py-0.5 text-[11px] font-mono text-text-0 outline-none w-28 focus:border-amber/70"
+                      value={editValue()}
+                      onInput={(e) => setEditValue(e.currentTarget.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitRename(tab.id);
+                        if (e.key === 'Escape') setEditingTabId(null);
+                      }}
+                      onBlur={() => commitRename(tab.id)}
+                      autofocus
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Show>
+
+                  {/* Close button — appears on hover, fades in */}
+                  <button
+                    class={`ml-0.5 w-4 h-4 flex items-center justify-center rounded-sm transition-all duration-150 border-none cursor-pointer shrink-0 bg-transparent ${
+                      isActive()
+                        ? 'text-text-3/50 hover:text-coral hover:bg-coral/10'
+                        : 'text-transparent hover:text-coral hover:bg-coral/10'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      store.closeTab(tab.id);
+                    }}
+                    title="Close tab"
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                      <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
 
       {/* Add tab — the + affordance */}
       <div class="relative shrink-0 flex items-center border-l border-bg-3/20">
@@ -198,8 +240,8 @@ export default function TabBar() {
       {/* Bottom border for the whole bar */}
       <div class="absolute bottom-0 left-0 right-0 h-px bg-bg-3/40" />
 
-      {/* Show hint when no tabs */}
-      <Show when={!hasTabs()}>
+      {/* Show hint when no tabs (desktop only) */}
+      <Show when={!hasTabs() && !isMobile()}>
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span class="text-[11px] text-text-3/40 font-mono tracking-wider">NO OPEN TABS</span>
         </div>

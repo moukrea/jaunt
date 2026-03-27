@@ -1,28 +1,23 @@
-import { Show, For, createSignal, onMount, onCleanup } from 'solid-js';
+import { Show, For, createSignal } from 'solid-js';
 import { store } from '../lib/store';
+import { useIsMobile } from '../lib/hooks';
 import TabBar from './TabBar';
 import PaneContainer from './PaneContainer';
 import SessionPicker from './SessionPicker';
+import MobileKeys from './MobileKeys';
 
 export default function TerminalWorkspace() {
+  const isMobile = useIsMobile();
   const [showSplitPicker, setShowSplitPicker] = createSignal(false);
   const [splitRequest, setSplitRequest] = createSignal<{
     paneId: string;
     direction: 'horizontal' | 'vertical';
   } | null>(null);
-  let workspaceRef: HTMLDivElement | undefined;
 
-  onMount(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.paneId && detail?.direction) {
-        setSplitRequest({ paneId: detail.paneId, direction: detail.direction });
-        setShowSplitPicker(true);
-      }
-    };
-    workspaceRef?.addEventListener('pane-split', handler);
-    onCleanup(() => workspaceRef?.removeEventListener('pane-split', handler));
-  });
+  function handleSplit(paneId: string, direction: 'horizontal' | 'vertical') {
+    setSplitRequest({ paneId, direction });
+    setShowSplitPicker(true);
+  }
 
   function handleSplitSelect(sessionId: string, sessionName?: string) {
     const req = splitRequest();
@@ -34,7 +29,7 @@ export default function TerminalWorkspace() {
   const hasTabs = () => store.tabs().length > 0;
 
   return (
-    <div ref={workspaceRef} class="flex-1 flex flex-col min-h-0 relative">
+    <div class="flex-1 flex flex-col min-h-0 relative">
       <TabBar />
 
       <Show
@@ -74,10 +69,15 @@ export default function TerminalWorkspace() {
               class="flex-1 flex min-h-0 min-w-0"
               style={{ display: store.activeTabId() === tab.id ? 'flex' : 'none' }}
             >
-              <PaneContainer layout={tab.panes} tabId={tab.id} />
+              <PaneContainer layout={tab.panes} tabId={tab.id} onSplit={handleSplit} />
             </div>
           )}
         </For>
+      </Show>
+
+      {/* Mobile special keys bar */}
+      <Show when={isMobile() && hasTabs()}>
+        <MobileKeys />
       </Show>
 
       {/* Split session picker — centered overlay */}
