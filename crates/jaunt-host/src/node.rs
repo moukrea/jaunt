@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use crate::approval::ApprovalStore;
 use crate::config::JauntConfig;
 use crate::files::FileBrowser;
+use crate::pairing_server;
 use crate::profile;
 use crate::snag::SnagBridge;
 
@@ -52,13 +53,29 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .collect();
 
     // Generate connection profile (includes cairn listen addresses for browser clients)
-    let (_conn_profile, profile_url) =
+    let (conn_profile, profile_url) =
         profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
     let pin_result = profile::generate_pin_profile(&node, &config, &ws_addrs).await;
     let pin = pin_result
         .as_ref()
         .map(|(_, pin)| pin.clone())
         .unwrap_or_default();
+
+    // Start the pairing HTTP server so browsers can fetch the profile via PIN
+    let pairing_addr = match pairing_server::start_pairing_server(Arc::new(RwLock::new(
+        pairing_server::PairingState {
+            pin: pin.clone(),
+            profile: conn_profile,
+        },
+    )))
+    .await
+    {
+        Ok(addr) => Some(addr),
+        Err(e) => {
+            eprintln!("  Warning: pairing server failed to start: {e}");
+            None
+        }
+    };
 
     // Initialize file browser for cairn RPC handler
     let file_browser = if config.files.enabled {
@@ -78,10 +95,23 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
 
+    // Find the primary LAN IP for the pairing display
+    let lan_ip = ws_addrs
+        .iter()
+        .find(|a| !a.contains("/127.") && a.ends_with("/ws"))
+        .and_then(|a| {
+            // Extract IP from multiaddr like /ip4/192.168.1.119/tcp/35833/ws
+            let parts: Vec<&str> = a.split('/').collect();
+            parts.get(2).map(|ip| ip.to_string())
+        });
+
     eprintln!("Jaunt host daemon started");
     eprintln!("  Host:    {host_name}");
     eprintln!("  Tier:    {}", config.tier_label());
     eprintln!("  PIN:     {pin}");
+    if let (Some(ref ip), Some(ref addr)) = (&lan_ip, &pairing_addr) {
+        eprintln!("  Pair:    http://{}:{}", ip, addr.port());
+    }
     eprintln!("  URL:     {profile_url}");
     eprintln!("  Devices: {}", approval_store.list().len());
     eprintln!();
@@ -411,8 +441,7 @@ async fn handle_session_detach(peer_id: &str, attachments: &Attachments) {
     }
 }
 
-/// Interactive pairing command: generates a pairing profile, displays it,
-/// and waits for a peer to connect. Auto-approves the first connecting peer.
+/// Interactive pairing: displays PIN + URL, waits for a peer, approves it.
 pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
     let cairn_config = build_cairn_config(&config);
     let node = cairn_p2p::create_and_start_with_config(cairn_config)
@@ -428,7 +457,6 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
     let pin = pin_result.as_ref().map(|(_, pin)| pin.clone()).unwrap_or_default();
 
     let peer_id_str = node.libp2p_peer_id().map(|p| p.to_string()).unwrap_or_default();
-    let ws_addr = ws_addrs.iter().find(|a| !a.contains("/127.0.0.1/")).or(ws_addrs.first()).cloned().unwrap_or_default();
 
     eprintln!();
     eprintln!("  ┌─────────────────────────────────────┐");
@@ -436,41 +464,32 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
     eprintln!("  └─────────────────────────────────────┘");
     eprintln!();
     eprintln!("  PIN:     {pin}");
-    eprintln!("  Host:    {ws_addr}");
-    eprintln!("  PeerId:  {}", &peer_id_str[..20.min(peer_id_str.len())]);
+    eprintln!("  PeerId:  {}...", &peer_id_str[..24.min(peer_id_str.len())]);
     eprintln!("  URL:     {profile_url}");
     eprintln!();
     eprintln!("  Waiting for a device to connect...");
-    eprintln!("  Press Ctrl+C to cancel.");
     eprintln!();
 
     let mut approval_store = ApprovalStore::load();
 
     loop {
-        let event = match node.recv_event().await {
-            Some(e) => e,
-            None => break,
-        };
-
-        match event {
-            Event::MessageReceived { ref peer_id, .. } => {
+        match node.recv_event().await {
+            Some(Event::MessageReceived { ref peer_id, .. }) => {
                 if !approval_store.is_approved(peer_id) {
                     approval_store.approve(peer_id, "paired");
                     approval_store.save();
-                    eprintln!("  ✓ Device paired: {peer_id}");
-                    eprintln!();
-                    eprintln!("  The device can now connect to this host.");
-                    eprintln!("  Run `jaunt-host serve` to start accepting connections.");
-                    break;
                 }
+                eprintln!("  ✓ Device paired: {}...", &peer_id[..24.min(peer_id.len())]);
+                eprintln!("  Run `jaunt-host serve` to start accepting connections.");
+                break;
             }
-            Event::StateChanged { ref peer_id, ref state } => {
-                eprintln!("  Peer {}: {state}", &peer_id[..16.min(peer_id.len())]);
+            Some(Event::StateChanged { ref peer_id, ref state }) => {
+                eprintln!("  Peer {}...: {state}", &peer_id[..16.min(peer_id.len())]);
             }
+            None => break,
             _ => {}
         }
     }
-
     Ok(())
 }
 

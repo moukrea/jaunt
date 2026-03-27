@@ -805,3 +805,17 @@
 {"timestamp":"2026-03-27T20:07:58Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-architect/MEMORY.md","duration_ms":5}
 {"timestamp":"2026-03-27T20:09:42Z","hook":"stop-gate","decision":"pass","duration_ms":12966}
 {"timestamp":"2026-03-27T20:10:42Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":23}
+{"timestamp":"2026-03-27T20:29:40Z","hook":"classify-prompt","decision":"medium","duration_ms":15}
+{"timestamp":"2026-03-27T20:31:08Z","hook":"stop-gate","decision":"pass","duration_ms":12804}
+{"timestamp":"2026-03-27T20:32:08Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":29}
+{"timestamp":"2026-03-27T20:54:30Z","hook":"classify-prompt","decision":"simple","duration_ms":12}
+{"timestamp":"2026-03-27T21:35:17Z","hook":"stop-gate","decision":"pass","duration_ms":17165}
+{"timestamp":"2026-03-27T21:37:10Z","hook":"classify-prompt","decision":"simple","duration_ms":21}
+{"timestamp":"2026-03-27T21:42:32Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-27T21:42:32Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.plans/remaining-issues.md","duration_ms":7}
+{"timestamp":"2026-03-27T21:42:55Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-27T21:42:56Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-architect/project_remaining_issues.md","duration_ms":5}
+{"timestamp":"2026-03-27T21:43:02Z","hook":"guard-writes","decision":"pass","duration_ms":10}
+{"timestamp":"2026-03-27T21:43:02Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-architect/MEMORY.md","duration_ms":6}
+{"timestamp":"2026-03-27T21:45:36Z","hook":"stop-gate","decision":"pass","duration_ms":12235}
+{"timestamp":"2026-03-27T21:46:37Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":33}

@@ -9,6 +9,7 @@ const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 export default function PairingScreen() {
   const [pin, setPin] = createSignal('');
+  const [hostAddr, setHostAddr] = createSignal('');
   const [phase, setPhase] = createSignal<PairingPhase>('idle');
   const [statusMsg, setStatusMsg] = createSignal('');
   const [errorMsg, setErrorMsg] = createSignal('');

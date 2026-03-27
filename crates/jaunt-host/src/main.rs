@@ -2,6 +2,7 @@ mod approval;
 mod config;
 mod files;
 mod node;
+mod pairing_server;
 mod profile;
 mod snag;
 
