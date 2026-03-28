@@ -1,4 +1,4 @@
-import { Switch, Match, Show, createSignal } from 'solid-js';
+import { Switch, Match, Show, createSignal, createMemo } from 'solid-js';
 import { store } from '../lib/store';
 import type { PaneLayout } from '../lib/store';
 import { useIsMobile } from '../lib/hooks';
@@ -12,6 +12,9 @@ interface PaneContainerProps {
 
 export default function PaneContainer(props: PaneContainerProps) {
   const isMobile = useIsMobile();
+  // Memoize layout type to ensure Switch/Match re-evaluates when the
+  // layout changes from single→hsplit/vsplit in nested splits.
+  const layoutType = createMemo(() => props.layout.type);
 
   return (
     <Show
@@ -19,17 +22,17 @@ export default function PaneContainer(props: PaneContainerProps) {
       fallback={<MobilePaneView layout={props.layout} tabId={props.tabId} />}
     >
       <Switch>
-        <Match when={props.layout.type === 'single'}>
+        <Match when={layoutType() === 'single'}>
           <TerminalPane
             pane={(props.layout as Extract<PaneLayout, { type: 'single' }>).pane}
             tabId={props.tabId}
             onSplit={props.onSplit}
           />
         </Match>
-        <Match when={props.layout.type === 'hsplit'}>
+        <Match when={layoutType() === 'hsplit'}>
           <HSplit layout={props.layout as Extract<PaneLayout, { type: 'hsplit' }>} tabId={props.tabId} onSplit={props.onSplit} />
         </Match>
-        <Match when={props.layout.type === 'vsplit'}>
+        <Match when={layoutType() === 'vsplit'}>
           <VSplit layout={props.layout as Extract<PaneLayout, { type: 'vsplit' }>} tabId={props.tabId} onSplit={props.onSplit} />
         </Match>
       </Switch>
