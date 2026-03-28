@@ -33,12 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout cairn (local dependency)
-        uses: actions/checkout@v4
-        with:
-          repository: moukrea/cairn
-          path: cairn
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -50,10 +44,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'tauri/src-tauri -> target'
-
-      - name: Build cairn-p2p for web
-        working-directory: cairn/packages/ts/cairn-p2p
-        run: npm ci && npm run build
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-latest'
@@ -142,19 +132,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout cairn (local dependency)
-        uses: actions/checkout@v4
-        with:
-          repository: moukrea/cairn
-          path: cairn
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Build cairn-p2p for web
-        working-directory: cairn/packages/ts/cairn-p2p
-        run: npm ci && npm run build
 
       - uses: actions/setup-java@v4
         with:
