@@ -29,7 +29,9 @@ fn encode_frame(msg_type: u8, payload: &[u8]) -> Vec<u8> {
 
 /// Read a single snag protocol frame from the stream.
 /// Returns (msg_type, payload) or None on EOF.
-async fn read_frame(reader: &mut (impl AsyncReadExt + Unpin)) -> Result<Option<(u8, Vec<u8>)>, String> {
+async fn read_frame(
+    reader: &mut (impl AsyncReadExt + Unpin),
+) -> Result<Option<(u8, Vec<u8>)>, String> {
     let mut header = [0u8; HEADER_SIZE];
     match reader.read_exact(&mut header).await {
         Ok(_) => {}
@@ -83,7 +85,10 @@ impl SnagAttachment {
             .write_all(&frame)
             .await
             .map_err(|e| format!("send attach: {e}"))?;
-        writer.flush().await.map_err(|e| format!("flush attach: {e}"))?;
+        writer
+            .flush()
+            .await
+            .map_err(|e| format!("flush attach: {e}"))?;
 
         // Read the response
         let (msg_type, payload) = read_frame(&mut reader)
@@ -95,7 +100,9 @@ impl SnagAttachment {
             let resp: serde_json::Value =
                 rmp_serde::from_slice(&payload).unwrap_or(serde_json::Value::Null);
             // The Ok response contains ResponseData::Output(scrollback) or ResponseData::Empty
-            if let Some(serde_json::Value::String(text)) = resp.get("Ok").and_then(|v| v.get("Output")) {
+            if let Some(serde_json::Value::String(text)) =
+                resp.get("Ok").and_then(|v| v.get("Output"))
+            {
                 text.clone()
             } else {
                 String::new()
@@ -168,8 +175,12 @@ impl SnagAttachment {
     /// Split into reader and writer halves.
     pub fn split(self) -> (SnagAttachmentReader, SnagAttachmentWriter) {
         (
-            SnagAttachmentReader { reader: self.reader },
-            SnagAttachmentWriter { writer: self.writer },
+            SnagAttachmentReader {
+                reader: self.reader,
+            },
+            SnagAttachmentWriter {
+                writer: self.writer,
+            },
         )
     }
 
@@ -192,8 +203,14 @@ impl SnagAttachmentWriter {
     pub async fn send_pty_input(&mut self, data: &[u8]) -> Result<(), String> {
         use tokio::io::AsyncWriteExt;
         let frame = encode_frame(MSG_PTY_INPUT, data);
-        self.writer.write_all(&frame).await.map_err(|e| format!("send pty input: {e}"))?;
-        self.writer.flush().await.map_err(|e| format!("flush pty input: {e}"))?;
+        self.writer
+            .write_all(&frame)
+            .await
+            .map_err(|e| format!("send pty input: {e}"))?;
+        self.writer
+            .flush()
+            .await
+            .map_err(|e| format!("flush pty input: {e}"))?;
         Ok(())
     }
 
@@ -205,8 +222,14 @@ impl SnagAttachmentWriter {
         }))
         .map_err(|e| format!("encode resize: {e}"))?;
         let frame = encode_frame(MSG_RESIZE, &payload);
-        self.writer.write_all(&frame).await.map_err(|e| format!("send resize: {e}"))?;
-        self.writer.flush().await.map_err(|e| format!("flush resize: {e}"))?;
+        self.writer
+            .write_all(&frame)
+            .await
+            .map_err(|e| format!("send resize: {e}"))?;
+        self.writer
+            .flush()
+            .await
+            .map_err(|e| format!("flush resize: {e}"))?;
         Ok(())
     }
 }

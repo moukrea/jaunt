@@ -38,9 +38,7 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     // Profile only includes /ws (for browser clients), but the host accepts
     // TCP, QUIC, and WS — native clients use the best available transport.
     let all_addrs = node.listen_addresses().await;
-    let is_useful = |a: &&String| -> bool {
-        !a.contains("/172.") || a.contains("/172.16.")
-    };
+    let is_useful = |a: &&String| -> bool { !a.contains("/172.") || a.contains("/172.16.") };
     let useful_addrs: Vec<&String> = all_addrs.iter().filter(is_useful).collect();
     for addr in &useful_addrs {
         eprintln!("  Listen: {addr}");
@@ -185,14 +183,8 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                         match request {
                             RpcRequest::SessionAttach { ref target } => {
                                 eprintln!("  SessionAttach target={target}");
-                                handle_session_attach(
-                                    &node,
-                                    peer_id,
-                                    target,
-                                    &snag,
-                                    &attachments,
-                                )
-                                .await;
+                                handle_session_attach(&node, peer_id, target, &snag, &attachments)
+                                    .await;
                             }
                             RpcRequest::SessionDetach {} => {
                                 eprintln!("  SessionDetach");
@@ -212,8 +204,7 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                                 send_rpc_response(&node, peer_id, &response).await;
                             }
                             _ => {
-                                let response =
-                                    handle_rpc_request(&request, &snag, &file_browser);
+                                let response = handle_rpc_request(&request, &snag, &file_browser);
                                 if let RpcResponse::Error { message, .. } = &response {
                                     eprintln!("  RPC error: {message}");
                                 }
@@ -237,7 +228,10 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                         // Legacy fallback: try routing by channel name
                         match channel.as_str() {
                             "rpc" => {
-                                eprintln!("RPC from {peer_id} ({} bytes, legacy channel)", data.len());
+                                eprintln!(
+                                    "RPC from {peer_id} ({} bytes, legacy channel)",
+                                    data.len()
+                                );
                                 let request = match jaunt_protocol::decode_request(data) {
                                     Ok(r) => r,
                                     Err(e) => {
@@ -258,7 +252,10 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                                     let mut guard = attachment.writer.lock().await;
                                     if let Some(ref mut w) = *guard {
                                         if let Err(e) = w.send_pty_input(data).await {
-                                            eprintln!("PTY send to {} failed: {e}", attachment.target);
+                                            eprintln!(
+                                                "PTY send to {} failed: {e}",
+                                                attachment.target
+                                            );
                                         }
                                     }
                                 }
@@ -296,7 +293,9 @@ async fn send_rpc_response(node: &Node, peer_id: &str, response: &RpcResponse) {
             if let Some(session) = sessions.get(peer_id) {
                 match session.open_channel("rpc").await {
                     Ok(ch) => match session.send(&ch, &tagged).await {
-                        Ok(_) => eprintln!("  Sent {} bytes response (tagged RPC)", resp_data.len()),
+                        Ok(_) => {
+                            eprintln!("  Sent {} bytes response (tagged RPC)", resp_data.len())
+                        }
                         Err(e) => eprintln!("  Send failed: {e}"),
                     },
                     Err(e) => eprintln!("  Open channel failed: {e}"),
@@ -440,7 +439,10 @@ async fn pty_output_forwarder(
 async fn handle_session_detach(peer_id: &str, attachments: &Attachments) {
     if let Some(attachment) = attachments.write().await.remove(peer_id) {
         attachment.abort_handle.abort();
-        eprintln!("  Detached peer {peer_id} from session {}", attachment.target);
+        eprintln!(
+            "  Detached peer {peer_id} from session {}",
+            attachment.target
+        );
     }
 }
 
@@ -453,13 +455,25 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
 
     let all_addrs = node.listen_addresses().await;
     let is_useful = |a: &&String| -> bool { !a.contains("/172.") || a.contains("/172.16.") };
-    let ws_addrs: Vec<String> = all_addrs.iter().filter(is_useful).filter(|a| a.ends_with("/ws")).map(|a| a.to_string()).collect();
+    let ws_addrs: Vec<String> = all_addrs
+        .iter()
+        .filter(is_useful)
+        .filter(|a| a.ends_with("/ws"))
+        .map(|a| a.to_string())
+        .collect();
 
-    let (_conn_profile, profile_url) = profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
+    let (_conn_profile, profile_url) =
+        profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
     let pin_result = profile::generate_pin_profile(&node, &config, &ws_addrs).await;
-    let pin = pin_result.as_ref().map(|(_, pin)| pin.clone()).unwrap_or_default();
+    let pin = pin_result
+        .as_ref()
+        .map(|(_, pin)| pin.clone())
+        .unwrap_or_default();
 
-    let peer_id_str = node.libp2p_peer_id().map(|p| p.to_string()).unwrap_or_default();
+    let peer_id_str = node
+        .libp2p_peer_id()
+        .map(|p| p.to_string())
+        .unwrap_or_default();
 
     eprintln!();
     eprintln!("  ┌─────────────────────────────────────┐");
@@ -467,7 +481,10 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
     eprintln!("  └─────────────────────────────────────┘");
     eprintln!();
     eprintln!("  PIN:     {pin}");
-    eprintln!("  PeerId:  {}...", &peer_id_str[..24.min(peer_id_str.len())]);
+    eprintln!(
+        "  PeerId:  {}...",
+        &peer_id_str[..24.min(peer_id_str.len())]
+    );
     eprintln!("  URL:     {profile_url}");
     eprintln!();
     eprintln!("  Waiting for a device to connect...");
@@ -482,11 +499,17 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
                     approval_store.approve(peer_id, "paired");
                     approval_store.save();
                 }
-                eprintln!("  ✓ Device paired: {}...", &peer_id[..24.min(peer_id.len())]);
+                eprintln!(
+                    "  ✓ Device paired: {}...",
+                    &peer_id[..24.min(peer_id.len())]
+                );
                 eprintln!("  Run `jaunt-host serve` to start accepting connections.");
                 break;
             }
-            Some(Event::StateChanged { ref peer_id, ref state }) => {
+            Some(Event::StateChanged {
+                ref peer_id,
+                ref state,
+            }) => {
                 eprintln!("  Peer {}...: {state}", &peer_id[..16.min(peer_id.len())]);
             }
             None => break,

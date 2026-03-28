@@ -86,9 +86,7 @@ mod tests {
     #[test]
     fn profile_roundtrip_custom_url() {
         let profile = ConnectionProfile {
-            pairing: PairingData::Pin {
-                pin: "A1B2".into(),
-            },
+            pairing: PairingData::Pin { pin: "A1B2".into() },
             signal_server: None,
             signal_auth_token: None,
             turn_server: None,
