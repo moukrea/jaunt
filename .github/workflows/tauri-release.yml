@@ -165,20 +165,36 @@ jobs:
         working-directory: tauri/src-tauri
         run: cargo tauri android init
 
-      - name: Build Android APK
+      - name: Generate signing keystore
+        run: |
+          keytool -genkey -v \
+            -keystore /tmp/jaunt-release.keystore \
+            -alias jaunt \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass jaunt-release -keypass jaunt-release \
+            -dname "CN=Jaunt, O=moukrea"
+
+      - name: Build Android APK (release, signed)
         working-directory: tauri/src-tauri
-        run: cargo tauri android build --apk --debug
+        run: cargo tauri android build --apk --split-per-abi
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          TAURI_SIGNING_STORE_PATH: /tmp/jaunt-release.keystore
+          TAURI_SIGNING_STORE_PASSWORD: jaunt-release
+          TAURI_SIGNING_KEY_ALIAS: jaunt
+          TAURI_SIGNING_KEY_PASSWORD: jaunt-release
 
       - name: Collect Android artifacts
         run: |
           mkdir -p dist
-          find tauri/src-tauri/gen/android -name '*.apk' -exec cp {} dist/ \; 2>/dev/null || true
-          for f in dist/*.apk; do
-            [ -f "$f" ] || continue
-            mv "$f" "dist/jaunt-app-${{ github.ref_name }}-android.apk"
-          done
+          # Collect per-ABI APKs (arm64-v8a is the most common for real devices)
+          find tauri/src-tauri/gen/android -name '*arm64*release*.apk' -exec cp {} "dist/jaunt-app-${{ github.ref_name }}-android-arm64.apk" \; 2>/dev/null || true
+          find tauri/src-tauri/gen/android -name '*x86_64*release*.apk' -exec cp {} "dist/jaunt-app-${{ github.ref_name }}-android-x86_64.apk" \; 2>/dev/null || true
+          # Fallback: grab any release APK
+          if [ ! -f "dist/jaunt-app-${{ github.ref_name }}-android-arm64.apk" ]; then
+            find tauri/src-tauri/gen/android -name '*release*.apk' -exec cp {} "dist/jaunt-app-${{ github.ref_name }}-android.apk" \; 2>/dev/null || true
+          fi
+          ls -lh dist/*.apk 2>/dev/null || echo "No APKs found"
 
       - name: Upload to release
         env:
