@@ -1,6 +1,6 @@
 [package]
 name = "jaunt-host"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Jaunt host daemon — bridge cairn P2P to local snag sessions"
 license = "MIT"
