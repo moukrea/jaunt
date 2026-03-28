@@ -931,3 +931,24 @@
 {"timestamp":"2026-03-28T15:23:00Z","hook":"stop-gate","decision":"pass","duration_ms":21747}
 {"timestamp":"2026-03-28T15:24:00Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":26}
 {"timestamp":"2026-03-28T16:14:11Z","hook":"classify-prompt","decision":"simple","duration_ms":16}
+{"timestamp":"2026-03-28T16:46:54Z","hook":"stop-gate","decision":"pass","duration_ms":17365}
+{"timestamp":"2026-03-28T16:47:54Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-28T16:58:45Z","hook":"classify-prompt","decision":"medium","duration_ms":19}
+{"timestamp":"2026-03-28T17:00:06Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T17:00:06Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":6}
+{"timestamp":"2026-03-28T17:00:16Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T17:00:17Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T17:00:30Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-28T17:00:30Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T17:00:58Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T17:00:58Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-28T17:02:18Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T17:02:18Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-28T17:02:37Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T17:02:37Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":5}
+{"timestamp":"2026-03-28T17:02:57Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T17:02:57Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T17:03:07Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T17:03:07Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":6}
+{"timestamp":"2026-03-28T17:03:19Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T17:03:19Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":6}

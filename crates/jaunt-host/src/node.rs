@@ -59,36 +59,30 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .map(|(_, pin)| pin.clone())
         .unwrap_or_default();
 
-    // Publish PIN→PeerId mapping on the DHT for zero-infrastructure discovery.
-    // Clients compute HMAC("jaunt-pin-v1", PIN) as the DHT key and look up the PeerId.
+    // Register as a Kademlia PROVIDER under a PIN-derived key.
+    // Clients compute the same key, call get_providers(), and get our PeerId.
+    // Provider records are the core IPFS DHT mechanism — they work reliably.
     if let Some(sender) = node.swarm_sender().cloned() {
-        if let Some(peer_id) = node.libp2p_peer_id() {
-            let pin_key = {
-                use hmac::{Hmac, Mac};
-                use sha2::Sha256;
-                type HmacSha256 = Hmac<Sha256>;
-                let mut mac = HmacSha256::new_from_slice(b"jaunt-pin-v1").expect("HMAC key");
-                mac.update(pin.as_bytes());
-                mac.finalize().into_bytes().to_vec()
-            };
-            let peer_id_str = peer_id.to_string();
-            let sender_clone = sender;
-            tokio::spawn(async move {
-                // Wait for DHT bootstrap to complete
-                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                match sender_clone
-                    .kad_put_record(pin_key, peer_id_str.into_bytes())
-                    .await
-                {
-                    Ok(()) => eprintln!("  DHT: PIN rendezvous published"),
-                    Err(e) => eprintln!("  DHT: PIN rendezvous failed: {e}"),
-                }
-            });
-        }
+        let pin_key = {
+            use hmac::{Hmac, Mac};
+            use sha2::Sha256;
+            type HmacSha256 = Hmac<Sha256>;
+            let mut mac = HmacSha256::new_from_slice(b"jaunt-pin-v1").expect("HMAC key");
+            mac.update(pin.as_bytes());
+            mac.finalize().into_bytes().to_vec()
+        };
+        tokio::spawn(async move {
+            // Wait for DHT bootstrap to complete
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            match sender.kad_start_providing(pin_key).await {
+                Ok(()) => eprintln!("  DHT: PIN discoverable (provider record published)"),
+                Err(e) => eprintln!("  DHT: PIN publish failed: {e}"),
+            }
+        });
     }
 
     // Start the pairing HTTP server so browsers can fetch the profile via PIN
-    let pairing_addr = match pairing_server::start_pairing_server(Arc::new(RwLock::new(
+    let _pairing_addr = match pairing_server::start_pairing_server(Arc::new(RwLock::new(
         pairing_server::PairingState {
             pin: pin.clone(),
             profile: conn_profile,
@@ -131,17 +125,27 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
             parts.get(2).map(|ip| ip.to_string())
         });
 
+    let peer_id_display = node
+        .libp2p_peer_id()
+        .map(|p| p.to_string())
+        .unwrap_or_default();
+
     eprintln!("Jaunt host daemon started");
     eprintln!("  Host:    {host_name}");
     eprintln!("  Tier:    {}", config.tier_label());
-    eprintln!("  PIN:     {pin}");
-    if let Some(ref ip) = lan_ip {
-        eprintln!("  Address: {ip}");
-    }
-    if let (Some(ref ip), Some(ref addr)) = (&lan_ip, &pairing_addr) {
-        eprintln!("  Pair:    http://{}:{}", ip, addr.port());
-    }
+    eprintln!();
+    eprintln!("  ┌─ Connect from anywhere ─────────────────────┐");
+    eprintln!("  │                                              │");
+    eprintln!("  │  PeerId: {peer_id_display}");
+    eprintln!("  │                                              │");
+    eprintln!("  │  Copy this PeerId and paste it in the Jaunt  │");
+    eprintln!("  │  app on your phone or browser.               │");
+    eprintln!("  └──────────────────────────────────────────────┘");
+    eprintln!();
     eprintln!("  URL:     {profile_url}");
+    if let Some(ref ip) = lan_ip {
+        eprintln!("  LAN:     {ip} (same network only)");
+    }
     eprintln!("  Devices: {}", approval_store.list().len());
     eprintln!();
     eprintln!("Waiting for connections...");

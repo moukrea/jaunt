@@ -131,36 +131,33 @@ export default function PairingScreen() {
         return;
       }
 
-      // Strategy 2: PIN-only — look up the host's PeerId on the DHT
-      // The host publishes HMAC("jaunt-pin-v1", PIN) → PeerId on the DHT.
-      // We compute the same key, query the DHT, get the PeerId, and connect.
+      // Strategy 2: PIN → DHT provider lookup → PeerId → connect
+      // The host registers as a Kademlia provider under HMAC("jaunt-pin-v1", PIN).
+      // We query get_providers() to find the host, then connect via peer routing.
       setPhase('initializing');
       setStatusMsg('Starting P2P node...');
       await initNode();
 
-      setPhase('pairing');
-      setStatusMsg('Looking up host on P2P network...');
-
-      // Start transport so we can query the DHT
       const { getNode } = await import('../lib/cairn');
       const cairnNode = getNode();
       if (!cairnNode) throw new Error('Node not initialized');
+
+      setPhase('pairing');
+      setStatusMsg('Joining P2P network...');
       await cairnNode.startTransport();
 
-      // Wait a few seconds for DHT bootstrap
-      await new Promise(r => setTimeout(r, 5000));
+      // Give DHT bootstrap a moment
+      setStatusMsg('Searching for host on P2P network...');
+      await new Promise(r => setTimeout(r, 3000));
 
-      // Look up the PIN on the DHT
       const hostPeerId = await (cairnNode as any).lookupPinOnDht(p);
       if (!hostPeerId) {
-        throw new Error('Host not found on P2P network. Make sure jaunt-host is running and connected to the internet.');
+        throw new Error('Host not found. Make sure jaunt-host is running and has internet access. It takes ~10 seconds for the host to become discoverable after starting.');
       }
 
       store.setHostName('Host');
-
       setPhase('connecting');
       setStatusMsg('Connecting to host...');
-      // Connect via DHT — no addresses needed, peer routing finds the host
       await connectToHost(hostPeerId, []);
       setPhase('done');
       store.setConnected(true);
