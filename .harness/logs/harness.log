@@ -829,3 +829,34 @@
 {"timestamp":"2026-03-27T23:04:36Z","hook":"stop-gate","decision":"loop-prevention","duration_ms":4}
 {"timestamp":"2026-03-27T23:05:36Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":34}
 {"timestamp":"2026-03-28T07:22:32Z","hook":"classify-prompt","decision":"simple","duration_ms":24}
+{"timestamp":"2026-03-28T07:24:28Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":32}
+{"timestamp":"2026-03-28T07:27:27Z","hook":"classify-prompt","decision":"simple","duration_ms":11}
+{"timestamp":"2026-03-28T07:28:04Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T07:28:04Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/web.yml","duration_ms":4}
+{"timestamp":"2026-03-28T07:28:28Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T07:28:28Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":5}
+{"timestamp":"2026-03-28T07:28:36Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T07:28:36Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":4}
+{"timestamp":"2026-03-28T07:29:31Z","hook":"stop-gate","decision":"pass","duration_ms":14145}
+{"timestamp":"2026-03-28T07:30:31Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":22}
+{"timestamp":"2026-03-28T07:38:35Z","hook":"classify-prompt","decision":"simple","duration_ms":20}
+{"timestamp":"2026-03-28T07:39:47Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T07:39:47Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/cairn/packages/ts/cairn-p2p/package.json","duration_ms":4}
+{"timestamp":"2026-03-28T07:40:37Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T07:40:37Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/web/package.json","duration_ms":5}
+{"timestamp":"2026-03-28T07:40:47Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T07:40:47Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/web.yml","duration_ms":5}
+{"timestamp":"2026-03-28T07:40:57Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T07:40:57Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":5}
+{"timestamp":"2026-03-28T07:41:04Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-28T07:41:04Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":5}
+{"timestamp":"2026-03-28T07:47:58Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T07:47:58Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-28T08:12:22Z","hook":"stop-gate","decision":"pass","duration_ms":13459}
+{"timestamp":"2026-03-28T08:13:22Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":36}
+{"timestamp":"2026-03-28T08:16:20Z","hook":"classify-prompt","decision":"simple","duration_ms":12}
+{"timestamp":"2026-03-28T08:17:43Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T08:17:43Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-28T08:56:12Z","hook":"stop-gate","decision":"pass","duration_ms":37752}
+{"timestamp":"2026-03-28T08:57:12Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":26}
+{"timestamp":"2026-03-28T08:58:20Z","hook":"classify-prompt","decision":"simple","duration_ms":13}
