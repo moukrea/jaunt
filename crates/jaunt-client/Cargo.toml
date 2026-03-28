@@ -1,6 +1,6 @@
 [package]
 name = "jaunt-client"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 description = "Jaunt CLI client — connect to remote hosts via cairn P2P"
 license = "MIT"
