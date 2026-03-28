@@ -239,8 +239,22 @@ export async function connectToHost(libp2pPeerId: string, addrs: string[]): Prom
   console.log('[jaunt] Transport started');
 
   console.log('[jaunt] Connecting to host:', libp2pPeerId, 'addrs:', addrs);
-  const s = await (node as any).connectTransport(libp2pPeerId, addrs);
-  console.log('[jaunt] Connected via cairn transport');
+  let s: any;
+  try {
+    // Try direct addresses first (works on same LAN)
+    s = await (node as any).connectTransport(libp2pPeerId, addrs);
+    console.log('[jaunt] Connected via direct addresses');
+  } catch (directErr: any) {
+    console.log('[jaunt] Direct connection failed:', directErr.message, '— trying DHT discovery...');
+    // Fall back to PeerId-only discovery via DHT (works over internet)
+    try {
+      s = await (node as any).connectTransport(libp2pPeerId, []);
+      console.log('[jaunt] Connected via DHT discovery');
+    } catch (dhtErr: any) {
+      console.error('[jaunt] DHT discovery also failed:', dhtErr.message);
+      throw directErr; // Throw the original error
+    }
+  }
 
   wireSession(s);
 

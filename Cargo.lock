@@ -379,7 +379,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 [[package]]
 name = "cairn-p2p"
 version = "0.3.0"
-source = "git+https://github.com/moukrea/cairn.git?branch=main#cb4d2935d6725f6a61a3354e921b041f0f8f0d40"
+source = "git+https://github.com/moukrea/cairn.git?branch=main#4ead19a1db2bc07db76ba4bcaed76b6b8c1fdaf4"
 dependencies = [
  "aes-gcm",
  "argon2",
