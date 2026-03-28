@@ -433,6 +433,7 @@
 {"timestamp":"2026-03-25T21:29:50Z","hook":"guard-writes","decision":"pass","duration_ms":8}
 {"timestamp":"2026-03-25T21:29:50Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
 {"timestamp":"2026-03-25T21:52:38Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":19}
+<<<<<<< Updated upstream
 {"timestamp":"2026-03-25T21:56:09Z","hook":"stop-gate","decision":"pass","duration_ms":2754}
 {"timestamp":"2026-03-25T21:56:09Z","hook":"classify-prompt","decision":"simple","duration_ms":14}
 {"timestamp":"2026-03-25T21:56:09Z","hook":"classify-prompt","decision":"simple","duration_ms":14}
@@ -915,3 +916,18 @@
 {"timestamp":"2026-03-28T15:15:47Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
 {"timestamp":"2026-03-28T15:17:02Z","hook":"guard-writes","decision":"pass","duration_ms":7}
 {"timestamp":"2026-03-28T15:17:02Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+=======
+{"timestamp":"2026-03-27T21:47:13Z","hook":"guard-writes","decision":"pass","duration_ms":13}
+{"timestamp":"2026-03-27T21:47:13Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/worktrees/agent-a3a2fa3f/tests/e2e-reconnect.mjs","duration_ms":5}
+{"timestamp":"2026-03-27T21:47:29Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":53}
+{"timestamp":"2026-03-27T21:48:06Z","hook":"guard-writes","decision":"pass","duration_ms":12}
+{"timestamp":"2026-03-27T21:48:06Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/worktrees/agent-a3a2fa3f/tests/e2e-reconnect.mjs","duration_ms":6}
+{"timestamp":"2026-03-27T21:49:44Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-27T21:49:44Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-27T21:49:59Z","hook":"guard-writes","decision":"pass","duration_ms":5}
+{"timestamp":"2026-03-27T21:49:59Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-27T21:50:36Z","hook":"failure-tracker","decision":"track","detail":"count=1 sig=Exit code ","duration_ms":9}
+>>>>>>> Stashed changes
+{"timestamp":"2026-03-28T15:23:00Z","hook":"stop-gate","decision":"pass","duration_ms":21747}
+{"timestamp":"2026-03-28T15:24:00Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":26}
+{"timestamp":"2026-03-28T16:14:11Z","hook":"classify-prompt","decision":"simple","duration_ms":16}
