@@ -1604,12 +1604,14 @@ version = "0.7.0"
 dependencies = [
  "cairn-p2p",
  "clap",
+ "hmac",
  "hostname",
  "jaunt-protocol",
  "nix 0.29.0",
  "rmp-serde",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "toml",
 ]

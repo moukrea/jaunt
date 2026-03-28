@@ -100,10 +100,11 @@ export default function PairingScreen() {
     // Get the host's libp2p PeerId and listen addresses from the profile.
     // ws_addrs contains cairn multiaddrs (e.g., /ip4/x.x.x.x/tcp/PORT/ws).
     const libp2pPeerId = profile.libp2p_peer_id;
-    const addrs = getWsMultiaddrs(profile);
-    if (!libp2pPeerId || addrs.length === 0) {
-      throw new Error('Profile missing libp2p_peer_id or listen addresses');
+    if (!libp2pPeerId) {
+      throw new Error('Profile missing libp2p_peer_id');
     }
+    // Try direct addresses first (LAN), fall back to DHT discovery (internet)
+    const addrs = getWsMultiaddrs(profile);
     await connectToHost(libp2pPeerId, addrs);
     setPhase('done');
     store.setConnected(true);
@@ -115,30 +116,55 @@ export default function PairingScreen() {
     const p = pin().trim();
     const addr = hostAddr().trim();
     if (!p) return;
-    if (!addr) {
-      setErrorMsg('Enter the host address shown by jaunt-host');
-      setPhase('error');
-      return;
-    }
 
     try {
+      // Strategy 1: If host address provided, fetch profile via HTTP
+      if (addr) {
+        setPhase('initializing');
+        setStatusMsg('Fetching connection profile...');
+        const host = addr.includes(':') ? addr : `${addr}:9867`;
+        const resp = await fetch(`http://${host}/pair?pin=${encodeURIComponent(p)}`);
+        if (resp.status === 403) throw new Error('Invalid PIN');
+        if (!resp.ok) throw new Error(`Pairing server returned ${resp.status}`);
+        const profile: ConnectionProfile = await resp.json();
+        await pairFromProfile(profile);
+        return;
+      }
+
+      // Strategy 2: PIN-only — look up the host's PeerId on the DHT
+      // The host publishes HMAC("jaunt-pin-v1", PIN) → PeerId on the DHT.
+      // We compute the same key, query the DHT, get the PeerId, and connect.
       setPhase('initializing');
-      setStatusMsg('Fetching connection profile...');
+      setStatusMsg('Starting P2P node...');
+      await initNode();
 
-      // Fetch profile from the pairing HTTP endpoint on the host.
-      // Default port is 9867 unless the user included a port.
-      const host = addr.includes(':') ? addr : `${addr}:9867`;
-      const resp = await fetch(`http://${host}/pair?pin=${encodeURIComponent(p)}`);
+      setPhase('pairing');
+      setStatusMsg('Looking up host on P2P network...');
 
-      if (resp.status === 403) {
-        throw new Error('Invalid PIN');
+      // Start transport so we can query the DHT
+      const { getNode } = await import('../lib/cairn');
+      const cairnNode = getNode();
+      if (!cairnNode) throw new Error('Node not initialized');
+      await cairnNode.startTransport();
+
+      // Wait a few seconds for DHT bootstrap
+      await new Promise(r => setTimeout(r, 5000));
+
+      // Look up the PIN on the DHT
+      const hostPeerId = await (cairnNode as any).lookupPinOnDht(p);
+      if (!hostPeerId) {
+        throw new Error('Host not found on P2P network. Make sure jaunt-host is running and connected to the internet.');
       }
-      if (!resp.ok) {
-        throw new Error(`Pairing server returned ${resp.status}`);
-      }
 
-      const profile: ConnectionProfile = await resp.json();
-      await pairFromProfile(profile);
+      store.setHostName('Host');
+
+      setPhase('connecting');
+      setStatusMsg('Connecting to host...');
+      // Connect via DHT — no addresses needed, peer routing finds the host
+      await connectToHost(hostPeerId, []);
+      setPhase('done');
+      store.setConnected(true);
+      store.setView('sessions');
     } catch (e: any) {
       setPhase('error');
       setErrorMsg(e.message);
@@ -203,7 +229,7 @@ export default function PairingScreen() {
               <span class="text-[10px] font-700 text-amber">2</span>
             </div>
             <div class="text-xs text-text-2">
-              Enter the PIN and host IP shown by jaunt-host
+              Enter the PIN shown by your host
             </div>
           </div>
 
@@ -220,26 +246,10 @@ export default function PairingScreen() {
             disabled={isWorking()}
           />
 
-          <input
-            type="text"
-            inputMode="url"
-            autocomplete="off"
-            spellcheck={false}
-            placeholder="192.168.1.100"
-            class="w-full bg-bg-0 border-2 border-bg-3 rounded-xl px-4 py-3 text-sm font-mono text-center text-text-0 placeholder:text-text-3/50 outline-none transition-all duration-200 focus:border-amber/60 focus:shadow-[0_0_0_3px_rgba(232,162,69,0.08)] mt-3"
-            value={hostAddr()}
-            onInput={(e) => setHostAddr(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handlePinPair()}
-            disabled={isWorking()}
-          />
-          <div class="text-[11px] text-text-3 mt-1.5 text-center">
-            Host address (IP or hostname) -- port 9867 is used by default
-          </div>
-
           <button
             class="w-full btn-primary mt-4 py-3.5 text-base disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handlePinPair}
-            disabled={isWorking() || !pin().trim() || !hostAddr().trim()}
+            disabled={isWorking() || !pin().trim()}
           >
             {isWorking() ? (
               <span class="flex items-center justify-center gap-2.5">

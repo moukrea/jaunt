@@ -299,6 +299,36 @@
       "peer_id": "12D3KooWPyyY5hYEE4KkP88MTf7jTVEMN99QAK1Q8w48JsbFhuYq",
       "name": "cairn-transport",
       "approved_at": "2026-03-28T08:55:46Z"
+    },
+    {
+      "peer_id": "12D3KooWErZPTkMqshVxycQ4Y8tCkNgmzVbyqB9GkUNespYd9jg4",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T10:27:52Z"
+    },
+    {
+      "peer_id": "12D3KooWQfxvi6pC4AQAFnbuYyDTmfFupQDpvYdgcvBnL2XaAkG3",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T11:32:57Z"
+    },
+    {
+      "peer_id": "12D3KooWJjXzUUmazugGrKuJC7zXkRZuTAFsgNGx79hqnXjetCzm",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T12:11:14Z"
+    },
+    {
+      "peer_id": "12D3KooWRqFV7YMiJSme5hfPPc9enfVgici6KndouVZTjnvgbncK",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T13:27:03Z"
+    },
+    {
+      "peer_id": "12D3KooWLG7avwXRsYsrk6voUVgYYxLfL43nFS2TEbTZaBhX4T1H",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T14:15:40Z"
+    },
+    {
+      "peer_id": "12D3KooWETscjYRjRo2WvPN6aw83MaHFZnXzCMif12GnLRDJSDeq",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T15:02:45Z"
     }
   ]
 }

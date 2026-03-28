@@ -20,6 +20,8 @@ rmp-serde = "1"
 toml = "0.8"
 hostname = "0.4"
 nix = { version = "0.29", features = ["user"] }
+hmac = "0.12"
+sha2 = "0.10"
 
 [package.metadata.deb]
 maintainer = "moukrea <contact@moukrea.dev>"

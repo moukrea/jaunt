@@ -59,6 +59,35 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .map(|(_, pin)| pin.clone())
         .unwrap_or_default();
 
+    // Publish PIN→PeerId mapping on the DHT for zero-infrastructure discovery.
+    // Clients compute HMAC("jaunt-pin-v1", PIN) as the DHT key and look up the PeerId.
+    if let Some(sender) = node.swarm_sender().cloned() {
+        if let Some(peer_id) = node.libp2p_peer_id() {
+            let pin_key = {
+                use hmac::{Hmac, Mac};
+                use sha2::Sha256;
+                type HmacSha256 = Hmac<Sha256>;
+                let mut mac =
+                    HmacSha256::new_from_slice(b"jaunt-pin-v1").expect("HMAC key");
+                mac.update(pin.as_bytes());
+                mac.finalize().into_bytes().to_vec()
+            };
+            let peer_id_str = peer_id.to_string();
+            let sender_clone = sender;
+            tokio::spawn(async move {
+                // Wait for DHT bootstrap to complete
+                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                match sender_clone
+                    .kad_put_record(pin_key, peer_id_str.into_bytes())
+                    .await
+                {
+                    Ok(()) => eprintln!("  DHT: PIN rendezvous published"),
+                    Err(e) => eprintln!("  DHT: PIN rendezvous failed: {e}"),
+                }
+            });
+        }
+    }
+
     // Start the pairing HTTP server so browsers can fetch the profile via PIN
     let pairing_addr = match pairing_server::start_pairing_server(Arc::new(RwLock::new(
         pairing_server::PairingState {

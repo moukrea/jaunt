@@ -860,3 +860,58 @@
 {"timestamp":"2026-03-28T08:56:12Z","hook":"stop-gate","decision":"pass","duration_ms":37752}
 {"timestamp":"2026-03-28T08:57:12Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":26}
 {"timestamp":"2026-03-28T08:58:20Z","hook":"classify-prompt","decision":"simple","duration_ms":13}
+{"timestamp":"2026-03-28T09:28:09Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T09:28:09Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":5}
+{"timestamp":"2026-03-28T09:28:24Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T09:28:24Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":5}
+{"timestamp":"2026-03-28T10:28:02Z","hook":"stop-gate","decision":"pass","duration_ms":15383}
+{"timestamp":"2026-03-28T10:29:02Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":45}
+{"timestamp":"2026-03-28T11:31:04Z","hook":"classify-prompt","decision":"simple","duration_ms":18}
+{"timestamp":"2026-03-28T11:31:44Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T11:31:44Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":5}
+{"timestamp":"2026-03-28T11:32:10Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T11:32:10Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/tauri/src-tauri/Cargo.toml","duration_ms":5}
+{"timestamp":"2026-03-28T11:33:15Z","hook":"stop-gate","decision":"pass","duration_ms":24826}
+{"timestamp":"2026-03-28T11:34:15Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":22}
+{"timestamp":"2026-03-28T11:34:33Z","hook":"classify-prompt","decision":"simple","duration_ms":10}
+{"timestamp":"2026-03-28T12:11:22Z","hook":"stop-gate","decision":"pass","duration_ms":12422}
+{"timestamp":"2026-03-28T12:12:22Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":22}
+{"timestamp":"2026-03-28T12:49:31Z","hook":"classify-prompt","decision":"simple","duration_ms":11}
+{"timestamp":"2026-03-28T12:50:32Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T12:50:32Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.github/workflows/tauri-release.yml","duration_ms":6}
+{"timestamp":"2026-03-28T13:27:12Z","hook":"stop-gate","decision":"pass","duration_ms":13648}
+{"timestamp":"2026-03-28T13:30:35Z","hook":"classify-prompt","decision":"medium","duration_ms":11}
+{"timestamp":"2026-03-28T13:37:53Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T13:37:53Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":7}
+{"timestamp":"2026-03-28T13:38:01Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T13:38:01Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":9}
+{"timestamp":"2026-03-28T13:39:30Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T13:39:31Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/lib/cairn.ts","duration_ms":5}
+{"timestamp":"2026-03-28T13:39:57Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T13:39:57Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":6}
+{"timestamp":"2026-03-28T14:15:52Z","hook":"stop-gate","decision":"pass","duration_ms":17957}
+{"timestamp":"2026-03-28T14:16:52Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":34}
+{"timestamp":"2026-03-28T15:00:57Z","hook":"classify-prompt","decision":"simple","duration_ms":22}
+{"timestamp":"2026-03-28T15:02:52Z","hook":"stop-gate","decision":"pass","duration_ms":15342}
+{"timestamp":"2026-03-28T15:03:52Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":22}
+{"timestamp":"2026-03-28T15:10:29Z","hook":"classify-prompt","decision":"simple","duration_ms":17}
+{"timestamp":"2026-03-28T15:11:23Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T15:11:24Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":6}
+{"timestamp":"2026-03-28T15:11:40Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T15:11:40Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T15:12:04Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T15:12:04Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T15:12:17Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T15:12:17Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T15:13:44Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T15:13:44Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
+{"timestamp":"2026-03-28T15:14:03Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T15:14:03Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/crates/jaunt-host/Cargo.toml","duration_ms":4}
+{"timestamp":"2026-03-28T15:15:02Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T15:15:02Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/transport/libp2p-node.ts","duration_ms":5}
+{"timestamp":"2026-03-28T15:15:29Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T15:15:29Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":5}
+{"timestamp":"2026-03-28T15:15:47Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T15:15:47Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":5}
+{"timestamp":"2026-03-28T15:17:02Z","hook":"guard-writes","decision":"pass","duration_ms":7}
+{"timestamp":"2026-03-28T15:17:02Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
