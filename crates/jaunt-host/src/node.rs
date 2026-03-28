@@ -197,7 +197,7 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
                                 if let Some(attachment) = att.get(peer_id) {
                                     let mut guard = attachment.writer.lock().await;
                                     if let Some(ref mut w) = *guard {
-                                        let _ = w.send_resize(cols as u16, rows as u16).await;
+                                        let _ = w.send_resize(cols, rows).await;
                                     }
                                 }
                                 let response = RpcResponse::Ok(RpcData::Empty {});

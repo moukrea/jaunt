@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use jaunt_protocol::messages::*;
 use std::path::PathBuf;
 use std::process::Command;
