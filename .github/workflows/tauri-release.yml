@@ -174,27 +174,59 @@ jobs:
             -storepass jaunt-release -keypass jaunt-release \
             -dname "CN=Jaunt, O=moukrea"
 
-      - name: Build Android APK (release, signed)
+      - name: Build Android APK (release)
         working-directory: tauri/src-tauri
         run: cargo tauri android build --apk --split-per-abi
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          TAURI_SIGNING_STORE_PATH: /tmp/jaunt-release.keystore
-          TAURI_SIGNING_STORE_PASSWORD: jaunt-release
-          TAURI_SIGNING_KEY_ALIAS: jaunt
-          TAURI_SIGNING_KEY_PASSWORD: jaunt-release
 
-      - name: Collect Android artifacts
+      - name: Sign APKs with apksigner
         run: |
+          # Find the Android SDK build-tools apksigner
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -1)
+          echo "Using apksigner: $APKSIGNER"
+
+          # zipalign + sign each unsigned APK
+          ZIPALIGN=$(find $ANDROID_HOME/build-tools -name "zipalign" | sort -V | tail -1)
+
           mkdir -p dist
-          # Collect per-ABI APKs (arm64-v8a is the most common for real devices)
-          find tauri/src-tauri/gen/android -name '*arm64*release*.apk' -exec cp {} "dist/jaunt-app-${{ github.ref_name }}-android-arm64.apk" \; 2>/dev/null || true
-          find tauri/src-tauri/gen/android -name '*x86_64*release*.apk' -exec cp {} "dist/jaunt-app-${{ github.ref_name }}-android-x86_64.apk" \; 2>/dev/null || true
-          # Fallback: grab any release APK
-          if [ ! -f "dist/jaunt-app-${{ github.ref_name }}-android-arm64.apk" ]; then
-            find tauri/src-tauri/gen/android -name '*release*.apk' -exec cp {} "dist/jaunt-app-${{ github.ref_name }}-android.apk" \; 2>/dev/null || true
-          fi
-          ls -lh dist/*.apk 2>/dev/null || echo "No APKs found"
+          for apk in $(find tauri/src-tauri/gen/android -name '*release-unsigned.apk'); do
+            basename=$(basename "$apk" | sed 's/-unsigned//')
+            aligned="/tmp/aligned-$basename"
+
+            # Zipalign
+            "$ZIPALIGN" -v -p 4 "$apk" "$aligned"
+
+            # Sign
+            "$APKSIGNER" sign \
+              --ks /tmp/jaunt-release.keystore \
+              --ks-key-alias jaunt \
+              --ks-pass pass:jaunt-release \
+              --key-pass pass:jaunt-release \
+              --out "dist/$basename" \
+              "$aligned"
+
+            echo "Signed: dist/$basename ($(du -h "dist/$basename" | cut -f1))"
+          done
+
+      - name: Rename APKs for release
+        run: |
+          cd dist
+          for f in *.apk; do
+            [ -f "$f" ] || continue
+            if echo "$f" | grep -q "arm64"; then
+              mv "$f" "jaunt-app-${{ github.ref_name }}-android-arm64.apk"
+            elif echo "$f" | grep -q "x86_64"; then
+              mv "$f" "jaunt-app-${{ github.ref_name }}-android-x86_64.apk"
+            elif echo "$f" | grep -q "arm-"; then
+              mv "$f" "jaunt-app-${{ github.ref_name }}-android-arm.apk"
+            elif echo "$f" | grep -q "x86-"; then
+              mv "$f" "jaunt-app-${{ github.ref_name }}-android-x86.apk"
+            else
+              mv "$f" "jaunt-app-${{ github.ref_name }}-android.apk"
+            fi
+          done
+          ls -lh *.apk 2>/dev/null || echo "No APKs"
 
       - name: Upload to release
         env:
