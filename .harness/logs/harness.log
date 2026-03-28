@@ -957,3 +957,10 @@
 {"timestamp":"2026-03-28T18:21:20Z","hook":"classify-prompt","decision":"simple","duration_ms":16}
 {"timestamp":"2026-03-28T18:22:43Z","hook":"guard-writes","decision":"pass","duration_ms":8}
 {"timestamp":"2026-03-28T18:22:43Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
+{"timestamp":"2026-03-28T18:25:43Z","hook":"stop-gate","decision":"block","detail":"verification timed out","duration_ms":30031}
+{"timestamp":"2026-03-28T18:25:52Z","hook":"stop-gate","decision":"loop-prevention","duration_ms":9}
+{"timestamp":"2026-03-28T18:25:52Z","hook":"classify-prompt","decision":"medium","duration_ms":14}
+{"timestamp":"2026-03-28T18:26:15Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T18:26:15Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/cairn/packages/ts/cairn-p2p/src/node.ts","duration_ms":6}
+{"timestamp":"2026-03-28T18:27:17Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-28T18:27:17Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}

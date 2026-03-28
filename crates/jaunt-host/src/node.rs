@@ -69,7 +69,14 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
             type HmacSha256 = Hmac<Sha256>;
             let mut mac = HmacSha256::new_from_slice(b"jaunt-pin-v1").expect("HMAC key");
             mac.update(pin.as_bytes());
-            mac.finalize().into_bytes().to_vec()
+            let hash = mac.finalize().into_bytes();
+            // Wrap in identity multihash format: [0x00 (identity), 0x20 (32 bytes), ...hash]
+            // This matches js-libp2p's CID.multihash.bytes used by findProviders()
+            let mut mh = Vec::with_capacity(2 + hash.len());
+            mh.push(0x00); // identity hash function code
+            mh.push(hash.len() as u8); // digest length
+            mh.extend_from_slice(&hash);
+            mh
         };
         tokio::spawn(async move {
             // Wait for DHT bootstrap to complete
