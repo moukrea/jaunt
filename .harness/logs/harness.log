@@ -819,3 +819,13 @@
 {"timestamp":"2026-03-27T21:43:02Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.claude/agent-memory/harness-architect/MEMORY.md","duration_ms":6}
 {"timestamp":"2026-03-27T21:45:36Z","hook":"stop-gate","decision":"pass","duration_ms":12235}
 {"timestamp":"2026-03-27T21:46:37Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":33}
+{"timestamp":"2026-03-27T22:08:45Z","hook":"classify-prompt","decision":"simple","duration_ms":14}
+{"timestamp":"2026-03-27T22:09:58Z","hook":"stop-gate","decision":"pass","duration_ms":11591}
+{"timestamp":"2026-03-27T22:10:58Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":27}
+{"timestamp":"2026-03-27T22:56:28Z","hook":"classify-prompt","decision":"medium","duration_ms":16}
+{"timestamp":"2026-03-27T23:02:31Z","hook":"guard-writes","decision":"pass","duration_ms":6}
+{"timestamp":"2026-03-27T23:02:31Z","hook":"post-edit","decision":"skip","detail":"unsupported file type: /home/emeric/code/jaunt/.plans/final-gaps.md","duration_ms":5}
+{"timestamp":"2026-03-27T23:04:28Z","hook":"stop-gate","decision":"block","detail":"Tests failing. Output of `npm test`:","duration_ms":23314}
+{"timestamp":"2026-03-27T23:04:36Z","hook":"stop-gate","decision":"loop-prevention","duration_ms":4}
+{"timestamp":"2026-03-27T23:05:36Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":34}
+{"timestamp":"2026-03-28T07:22:32Z","hook":"classify-prompt","decision":"simple","duration_ms":24}
