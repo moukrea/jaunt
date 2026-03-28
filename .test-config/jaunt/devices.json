@@ -339,6 +339,11 @@
       "peer_id": "12D3KooWCfvLj2GpGrRzVuLUTGDJ8zBVQ5j7tPQYe7qAJqT3Lj2u",
       "name": "cairn-transport",
       "approved_at": "2026-03-28T16:46:45Z"
+    },
+    {
+      "peer_id": "12D3KooWBeZKk62s8JcwuniB6XxPNPGo96DGW9eYkoo1XD3oodtY",
+      "name": "cairn-transport",
+      "approved_at": "2026-03-28T17:44:24Z"
     }
   ]
 }

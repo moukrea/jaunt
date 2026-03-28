@@ -134,13 +134,13 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     eprintln!("  Host:    {host_name}");
     eprintln!("  Tier:    {}", config.tier_label());
     eprintln!();
-    eprintln!("  ┌─ Connect from anywhere ─────────────────────┐");
-    eprintln!("  │                                              │");
+    eprintln!("  ┌─ Connect from anywhere ──────────────────────┐");
+    eprintln!("  │  PIN:    {pin:<42}│");
     eprintln!("  │  PeerId: {peer_id_display}");
-    eprintln!("  │                                              │");
-    eprintln!("  │  Copy this PeerId and paste it in the Jaunt  │");
-    eprintln!("  │  app on your phone or browser.               │");
-    eprintln!("  └──────────────────────────────────────────────┘");
+    eprintln!("  │                                               │");
+    eprintln!("  │  Enter the PIN in the Jaunt app to connect.   │");
+    eprintln!("  │  Works over the internet — no IP needed.      │");
+    eprintln!("  └───────────────────────────────────────────────┘");
     eprintln!();
     eprintln!("  URL:     {profile_url}");
     if let Some(ref ip) = lan_ip {

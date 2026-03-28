@@ -952,3 +952,8 @@
 {"timestamp":"2026-03-28T17:03:07Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":6}
 {"timestamp":"2026-03-28T17:03:19Z","hook":"guard-writes","decision":"pass","duration_ms":7}
 {"timestamp":"2026-03-28T17:03:19Z","hook":"post-edit","decision":"skip","detail":"no tsc for /home/emeric/code/jaunt/web/src/components/PairingScreen.tsx","duration_ms":6}
+{"timestamp":"2026-03-28T17:44:37Z","hook":"stop-gate","decision":"pass","duration_ms":22355}
+{"timestamp":"2026-03-28T17:45:37Z","hook":"notify","decision":"sent","detail":"Linux","duration_ms":32}
+{"timestamp":"2026-03-28T18:21:20Z","hook":"classify-prompt","decision":"simple","duration_ms":16}
+{"timestamp":"2026-03-28T18:22:43Z","hook":"guard-writes","decision":"pass","duration_ms":8}
+{"timestamp":"2026-03-28T18:22:43Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":6}
