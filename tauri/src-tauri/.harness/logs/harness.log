@@ -1,0 +1,2 @@
+{"timestamp":"2026-03-28T08:21:22Z","hook":"guard-writes","decision":"pass","duration_ms":11}
+{"timestamp":"2026-03-28T08:21:22Z","hook":"post-edit","decision":"skip","detail":"rust files use LSP","duration_ms":5}
