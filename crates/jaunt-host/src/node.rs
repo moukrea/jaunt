@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cairn_p2p::{CairnConfig, Event, Node, Session, StorageBackend, TurnServer};
 use jaunt_protocol::messages::*;
 use tokio::sync::RwLock;
+use tracing::{debug, error, info, trace, warn};
 
 use crate::approval::ApprovalStore;
 use crate::config::JauntConfig;
@@ -23,114 +24,56 @@ struct PtyAttachment {
 /// Shared state for per-peer PTY attachments.
 type Attachments = Arc<RwLock<HashMap<String, PtyAttachment>>>;
 
+/// Run the host daemon — accepts connections from already-paired devices.
+/// Does NOT generate PINs or start the pairing server.
+/// Use `jaunt-host pair` to add new devices.
 pub async fn run_host(config: JauntConfig) -> Result<(), String> {
-    // Check snag is available
     let snag = SnagBridge::new();
     snag.check_available()?;
 
-    // Build cairn config and start transport
     let cairn_config = build_cairn_config(&config);
     let node = cairn_p2p::create_and_start_with_config(cairn_config)
         .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
 
-    // Collect listen addresses. Print all useful ones (skip Docker bridges).
-    // Profile only includes /ws (for browser clients), but the host accepts
-    // TCP, QUIC, and WS — native clients use the best available transport.
     let all_addrs = node.listen_addresses().await;
     let is_useful = |a: &&String| -> bool { !a.contains("/172.") || a.contains("/172.16.") };
     let useful_addrs: Vec<&String> = all_addrs.iter().filter(is_useful).collect();
     for addr in &useful_addrs {
-        eprintln!("  Listen: {addr}");
+        debug!("Listen: {addr}");
     }
-    // Profile gets only /ws addrs (browser transport constraint)
+
     let ws_addrs: Vec<String> = useful_addrs
         .iter()
         .filter(|a| a.ends_with("/ws"))
         .map(|a| a.to_string())
         .collect();
 
-    // Generate connection profile (includes cairn listen addresses for browser clients)
-    let (conn_profile, profile_url) =
-        profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
-    let pin_result = profile::generate_pin_profile(&node, &config, &ws_addrs).await;
-    let pin = pin_result
-        .as_ref()
-        .map(|(_, pin)| pin.clone())
-        .unwrap_or_default();
-
-    // Register as a Kademlia PROVIDER under a PIN-derived key.
-    // Clients compute the same key, call get_providers(), and get our PeerId.
-    // Provider records are the core IPFS DHT mechanism — they work reliably.
-    if let Some(sender) = node.swarm_sender().cloned() {
-        let pin_key = {
-            use hmac::{Hmac, Mac};
-            use sha2::Sha256;
-            type HmacSha256 = Hmac<Sha256>;
-            let mut mac = HmacSha256::new_from_slice(b"jaunt-pin-v1").expect("HMAC key");
-            mac.update(pin.as_bytes());
-            let hash = mac.finalize().into_bytes();
-            // Wrap in identity multihash format: [0x00 (identity), 0x20 (32 bytes), ...hash]
-            // This matches js-libp2p's CID.multihash.bytes used by findProviders()
-            let mut mh = Vec::with_capacity(2 + hash.len());
-            mh.push(0x00); // identity hash function code
-            mh.push(hash.len() as u8); // digest length
-            mh.extend_from_slice(&hash);
-            mh
-        };
-        tokio::spawn(async move {
-            // Wait for DHT bootstrap to complete before publishing.
-            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-            eprintln!("  DHT: Publishing PIN provider record...");
-            match sender.kad_start_providing(pin_key).await {
-                Ok(()) => {
-                    eprintln!("  DHT: PIN discoverable (provider record confirmed by DHT peers)")
-                }
-                Err(e) => eprintln!("  DHT: PIN publish failed — PIN discovery will not work: {e}"),
-            }
-        });
-    }
-
-    // Start the pairing HTTP server so browsers can fetch the profile via PIN
-    let _pairing_addr = match pairing_server::start_pairing_server(Arc::new(RwLock::new(
-        pairing_server::PairingState {
-            pin: pin.clone(),
-            profile: conn_profile,
-        },
-    )))
-    .await
-    {
-        Ok(addr) => Some(addr),
-        Err(e) => {
-            eprintln!("  Warning: pairing server failed to start: {e}");
-            None
-        }
-    };
-
-    // Initialize file browser for cairn RPC handler
     let file_browser = if config.files.enabled {
         Some(FileBrowser::new(&config))
     } else {
         None
     };
 
-    // Load approval store
     let mut approval_store = ApprovalStore::load();
-
-    // Per-peer PTY attachment tracking
     let attachments: Attachments = Arc::new(RwLock::new(HashMap::new()));
 
-    // Display status
+    // Known jaunt clients — peers that sent RPC messages or completed pairing.
+    // Only these get INFO-level connection/disconnection logs.
+    let mut known_clients: HashSet<String> = HashSet::new();
+    // Seed from approval store
+    for device in approval_store.list() {
+        known_clients.insert(device.peer_id.clone());
+    }
+
     let host_name = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    // Find the primary LAN IP for the pairing display
     let lan_ip = ws_addrs
         .iter()
         .find(|a| !a.contains("/127.") && a.ends_with("/ws"))
         .and_then(|a| {
-            // Extract IP from multiaddr like /ip4/192.168.1.119/tcp/35833/ws
             let parts: Vec<&str> = a.split('/').collect();
             parts.get(2).map(|ip| ip.to_string())
         });
@@ -140,187 +83,208 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
         .map(|p| p.to_string())
         .unwrap_or_default();
 
-    eprintln!("Jaunt host daemon started");
-    eprintln!("  Host:    {host_name}");
-    eprintln!("  Tier:    {}", config.tier_label());
-    eprintln!();
-    eprintln!("  ┌─ Connect from anywhere ──────────────────────┐");
-    eprintln!("  │  PIN:    {pin:<42}│");
-    eprintln!("  │  PeerId: {peer_id_display}");
-    eprintln!("  │                                               │");
-    eprintln!("  │  Enter the PIN in the Jaunt app to connect.   │");
-    eprintln!("  │  Works over the internet — no IP needed.      │");
-    eprintln!("  └───────────────────────────────────────────────┘");
-    eprintln!();
-    eprintln!("  URL:     {profile_url}");
+    info!("Jaunt host daemon started");
+    info!("  Host: {host_name}");
+    info!("  PeerId: {peer_id_display}");
+    info!("  Tier: {}", config.tier_label());
     if let Some(ref ip) = lan_ip {
-        eprintln!("  LAN:     {ip} (same network only)");
+        info!("  LAN: {ip}");
     }
-    eprintln!("  Devices: {}", approval_store.list().len());
-    eprintln!();
-    eprintln!("Waiting for connections...");
+    info!("  Devices: {}", approval_store.list().len());
+    info!("Accepting connections from paired devices. Use `jaunt-host pair` to add new devices.");
 
-    // Event loop
+    // Signal handling for graceful shutdown
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|e| format!("failed to register SIGTERM handler: {e}"))?;
+
+    // Event loop with signal handling
     loop {
-        let event = match node.recv_event().await {
-            Some(e) => e,
-            None => break,
-        };
-
-        match event {
-            Event::PairingCompleted { ref peer_id } => {
-                eprintln!("Pairing completed: {peer_id}");
-                if config.server.require_approval {
-                    approval_store.approve(peer_id, "device");
-                    approval_store.save();
-                    eprintln!("  Auto-approved device: {peer_id}");
-                }
+        tokio::select! {
+            event = node.recv_event() => {
+                let event = match event {
+                    Some(e) => e,
+                    None => break,
+                };
+                handle_event(
+                    &event, &node, &config, &snag, &file_browser,
+                    &mut approval_store, &attachments, &mut known_clients,
+                ).await;
             }
-            Event::StateChanged {
-                ref peer_id,
-                ref state,
-            } => {
-                eprintln!("Peer {peer_id}: {state}");
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received SIGINT, shutting down...");
+                break;
             }
-            Event::MessageReceived {
-                ref peer_id,
-                ref channel,
-                ref data,
-            } => {
-                if !approval_store.is_approved(peer_id) {
-                    // Auto-approve: the peer connected via cairn transport
-                    // which already authenticated via Noise XX handshake.
-                    approval_store.approve(peer_id, "cairn-transport");
-                    approval_store.save();
-                    eprintln!("Auto-approved peer: {peer_id}");
-                }
-
-                // Route by tag byte (application-layer multiplexing).
-                // cairn strips channel names, so we can't rely on them.
-                // First byte: TAG_RPC (0x01) or TAG_PTY (0x02).
-                // Fall back to channel name for legacy/untagged messages.
-                if data.is_empty() {
-                    continue;
-                }
-
-                let tag = data[0];
-                let payload = &data[1..];
-
-                match tag {
-                    TAG_RPC => {
-                        eprintln!("RPC from {peer_id} ({} bytes, tagged)", payload.len());
-
-                        let request = match jaunt_protocol::decode_request(payload) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                let response = RpcResponse::Error {
-                                    code: 1,
-                                    message: format!("decode error: {e}"),
-                                };
-                                send_rpc_response(&node, peer_id, &response).await;
-                                continue;
-                            }
-                        };
-
-                        match request {
-                            RpcRequest::SessionAttach { ref target } => {
-                                eprintln!("  SessionAttach target={target}");
-                                handle_session_attach(&node, peer_id, target, &snag, &attachments)
-                                    .await;
-                            }
-                            RpcRequest::SessionDetach {} => {
-                                eprintln!("  SessionDetach");
-                                handle_session_detach(peer_id, &attachments).await;
-                                let response = RpcResponse::Ok(RpcData::Empty {});
-                                send_rpc_response(&node, peer_id, &response).await;
-                            }
-                            RpcRequest::Resize { cols, rows } => {
-                                let att = attachments.read().await;
-                                if let Some(attachment) = att.get(peer_id) {
-                                    let mut guard = attachment.writer.lock().await;
-                                    if let Some(ref mut w) = *guard {
-                                        let _ = w.send_resize(cols, rows).await;
-                                    }
-                                }
-                                let response = RpcResponse::Ok(RpcData::Empty {});
-                                send_rpc_response(&node, peer_id, &response).await;
-                            }
-                            _ => {
-                                let response = handle_rpc_request(&request, &snag, &file_browser);
-                                if let RpcResponse::Error { message, .. } = &response {
-                                    eprintln!("  RPC error: {message}");
-                                }
-                                send_rpc_response(&node, peer_id, &response).await;
-                            }
-                        }
-                    }
-                    TAG_PTY => {
-                        // PTY input from browser: forward to attached snag session
-                        let att = attachments.read().await;
-                        if let Some(attachment) = att.get(peer_id) {
-                            let mut guard = attachment.writer.lock().await;
-                            if let Some(ref mut w) = *guard {
-                                if let Err(e) = w.send_pty_input(payload).await {
-                                    eprintln!("PTY send to {} failed: {e}", attachment.target);
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        // Legacy fallback: try routing by channel name
-                        match channel.as_str() {
-                            "rpc" => {
-                                eprintln!(
-                                    "RPC from {peer_id} ({} bytes, legacy channel)",
-                                    data.len()
-                                );
-                                let request = match jaunt_protocol::decode_request(data) {
-                                    Ok(r) => r,
-                                    Err(e) => {
-                                        let response = RpcResponse::Error {
-                                            code: 1,
-                                            message: format!("decode error: {e}"),
-                                        };
-                                        send_rpc_response(&node, peer_id, &response).await;
-                                        continue;
-                                    }
-                                };
-                                let response = handle_rpc_request(&request, &snag, &file_browser);
-                                send_rpc_response(&node, peer_id, &response).await;
-                            }
-                            "pty" => {
-                                let att = attachments.read().await;
-                                if let Some(attachment) = att.get(peer_id) {
-                                    let mut guard = attachment.writer.lock().await;
-                                    if let Some(ref mut w) = *guard {
-                                        if let Err(e) = w.send_pty_input(data).await {
-                                            eprintln!(
-                                                "PTY send to {} failed: {e}",
-                                                attachment.target
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM, shutting down...");
+                break;
             }
-            Event::Error { ref error } => {
-                eprintln!("Error: {error}");
-            }
-            _ => {}
         }
     }
 
+    info!("Jaunt host daemon stopped");
     Ok(())
 }
 
+/// Handle a single event from the cairn node.
+#[allow(clippy::too_many_arguments)]
+async fn handle_event(
+    event: &Event,
+    node: &Node,
+    config: &JauntConfig,
+    snag: &SnagBridge,
+    file_browser: &Option<FileBrowser>,
+    approval_store: &mut ApprovalStore,
+    attachments: &Attachments,
+    known_clients: &mut HashSet<String>,
+) {
+    match event {
+        Event::PairingCompleted { ref peer_id } => {
+            info!("Pairing completed: {peer_id}");
+            known_clients.insert(peer_id.clone());
+            if config.server.require_approval {
+                approval_store.approve(peer_id, "device");
+                approval_store.save();
+                info!("Auto-approved device: {peer_id}");
+            }
+        }
+        Event::StateChanged {
+            ref peer_id,
+            ref state,
+        } => {
+            if known_clients.contains(peer_id) {
+                info!("Client {peer_id}: {state}");
+            } else {
+                trace!("DHT peer {peer_id}: {state}");
+            }
+        }
+        Event::MessageReceived {
+            ref peer_id,
+            ref channel,
+            ref data,
+        } => {
+            if !approval_store.is_approved(peer_id) {
+                approval_store.approve(peer_id, "cairn-transport");
+                approval_store.save();
+                info!("Auto-approved peer: {peer_id}");
+            }
+            known_clients.insert(peer_id.clone());
+
+            if data.is_empty() {
+                return;
+            }
+
+            let tag = data[0];
+            let payload = &data[1..];
+
+            match tag {
+                TAG_RPC => {
+                    debug!("RPC from {peer_id} ({} bytes)", payload.len());
+
+                    let request = match jaunt_protocol::decode_request(payload) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let response = RpcResponse::Error {
+                                code: 1,
+                                message: format!("decode error: {e}"),
+                            };
+                            send_rpc_response(node, peer_id, &response).await;
+                            return;
+                        }
+                    };
+
+                    match request {
+                        RpcRequest::SessionAttach { ref target } => {
+                            info!(
+                                "Session attach: peer={} target={target}",
+                                &peer_id[..16.min(peer_id.len())]
+                            );
+                            handle_session_attach(node, peer_id, target, snag, attachments).await;
+                        }
+                        RpcRequest::SessionDetach {} => {
+                            info!("Session detach: peer={}", &peer_id[..16.min(peer_id.len())]);
+                            handle_session_detach(peer_id, attachments).await;
+                            let response = RpcResponse::Ok(RpcData::Empty {});
+                            send_rpc_response(node, peer_id, &response).await;
+                        }
+                        RpcRequest::Resize { cols, rows } => {
+                            let att = attachments.read().await;
+                            if let Some(attachment) = att.get(peer_id) {
+                                let mut guard = attachment.writer.lock().await;
+                                if let Some(ref mut w) = *guard {
+                                    let _ = w.send_resize(cols, rows).await;
+                                }
+                            }
+                            let response = RpcResponse::Ok(RpcData::Empty {});
+                            send_rpc_response(node, peer_id, &response).await;
+                        }
+                        _ => {
+                            let response = handle_rpc_request(&request, snag, file_browser);
+                            if let RpcResponse::Error { message, .. } = &response {
+                                warn!("RPC error: {message}");
+                            }
+                            send_rpc_response(node, peer_id, &response).await;
+                        }
+                    }
+                }
+                TAG_PTY => {
+                    let att = attachments.read().await;
+                    if let Some(attachment) = att.get(peer_id) {
+                        let mut guard = attachment.writer.lock().await;
+                        if let Some(ref mut w) = *guard {
+                            if let Err(e) = w.send_pty_input(payload).await {
+                                warn!("PTY send to {} failed: {e}", attachment.target);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Legacy fallback: try routing by channel name
+                    match channel.as_str() {
+                        "rpc" => {
+                            debug!("RPC from {peer_id} ({} bytes, legacy channel)", data.len());
+                            let request = match jaunt_protocol::decode_request(data) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    let response = RpcResponse::Error {
+                                        code: 1,
+                                        message: format!("decode error: {e}"),
+                                    };
+                                    send_rpc_response(node, peer_id, &response).await;
+                                    return;
+                                }
+                            };
+                            let response = handle_rpc_request(&request, snag, file_browser);
+                            send_rpc_response(node, peer_id, &response).await;
+                        }
+                        "pty" => {
+                            let att = attachments.read().await;
+                            if let Some(attachment) = att.get(peer_id) {
+                                let mut guard = attachment.writer.lock().await;
+                                if let Some(ref mut w) = *guard {
+                                    if let Err(e) = w.send_pty_input(data).await {
+                                        warn!("PTY send to {} failed: {e}", attachment.target);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Event::Error { ref error } => {
+            // Dial errors from DHT peers are expected noise
+            if error.contains("dial failed") || error.contains("Failed to negotiate") {
+                debug!("{error}");
+            } else {
+                warn!("{error}");
+            }
+        }
+        _ => {}
+    }
+}
+
 // Application-layer message tags.
-// cairn's dispatch_incoming strips channel names, so ALL messages arrive with
-// channel "". We prefix every message with a 1-byte tag so both sides can
-// distinguish RPC traffic from PTY traffic.
 const TAG_RPC: u8 = 0x01;
 const TAG_PTY: u8 = 0x02;
 
@@ -336,23 +300,22 @@ async fn send_rpc_response(node: &Node, peer_id: &str, response: &RpcResponse) {
                 match session.open_channel("rpc").await {
                     Ok(ch) => match session.send(&ch, &tagged).await {
                         Ok(_) => {
-                            eprintln!("  Sent {} bytes response (tagged RPC)", resp_data.len())
+                            debug!("Sent {} bytes response", resp_data.len());
                         }
-                        Err(e) => eprintln!("  Send failed: {e}"),
+                        Err(e) => warn!("Send failed: {e}"),
                     },
-                    Err(e) => eprintln!("  Open channel failed: {e}"),
+                    Err(e) => warn!("Open channel failed: {e}"),
                 }
             } else {
-                eprintln!("  No session for peer {peer_id}");
+                debug!("No session for peer {peer_id}");
             }
         }
-        Err(e) => eprintln!("  Encode response failed: {e}"),
+        Err(e) => error!("Encode response failed: {e}"),
     }
 }
 
 /// Handle SessionAttach: respond with Ok, then spawn a background task that
-/// runs `snag output <target> --follow` and streams PTY output to the browser
-/// via the cairn session's "pty" channel.
+/// streams PTY output to the browser via the cairn session's "pty" channel.
 async fn handle_session_attach(
     node: &Node,
     peer_id: &str,
@@ -360,10 +323,8 @@ async fn handle_session_attach(
     snag: &SnagBridge,
     attachments: &Attachments,
 ) {
-    // Kill any existing attachment for this peer first
     handle_session_detach(peer_id, attachments).await;
 
-    // Verify the target session exists
     match snag.session_info(target) {
         Ok(_info) => {}
         Err(e) => {
@@ -376,25 +337,22 @@ async fn handle_session_attach(
         }
     }
 
-    // Send the Ok response immediately so the browser knows attach succeeded
     let response = RpcResponse::Ok(RpcData::Empty {});
     send_rpc_response(node, peer_id, &response).await;
 
-    // Get the cairn session handle for this peer
     let sessions = node.sessions().await;
     let session = match sessions.get(peer_id) {
         Some(s) => s.clone(),
         None => {
-            eprintln!("  No cairn session for peer {peer_id}, cannot start PTY forwarding");
+            warn!("No cairn session for peer {peer_id}, cannot start PTY forwarding");
             return;
         }
     };
 
-    // Attach to the snag session via the daemon's Unix socket
     let (scrollback, snag_attachment) = match crate::snag::SnagAttachment::attach(target).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("  SnagAttachment::attach failed: {e}");
+            warn!("SnagAttachment::attach failed: {e}");
             let response = RpcResponse::Error {
                 code: 8,
                 message: format!("attach failed: {e}"),
@@ -404,11 +362,9 @@ async fn handle_session_attach(
         }
     };
 
-    // Split into reader (for output forwarding task) and writer (for input from event loop)
     let (reader, writer) = snag_attachment.split();
     let writer = Arc::new(tokio::sync::Mutex::new(Some(writer)));
 
-    // Send scrollback so the terminal isn't blank (tagged as PTY output)
     if !scrollback.is_empty() {
         if let Ok(ch) = session.open_channel("pty").await {
             let sb_bytes = scrollback.as_bytes();
@@ -416,11 +372,10 @@ async fn handle_session_attach(
             tagged.push(TAG_PTY);
             tagged.extend_from_slice(sb_bytes);
             let _ = session.send(&ch, &tagged).await;
-            eprintln!("  Sent {} bytes scrollback (tagged PTY)", sb_bytes.len());
+            debug!("Sent {} bytes scrollback", sb_bytes.len());
         }
     }
 
-    // Spawn the PTY output forwarding task
     let peer_id_owned = peer_id.to_string();
     let task = tokio::spawn(async move {
         pty_output_forwarder(session, reader, &peer_id_owned).await;
@@ -436,11 +391,12 @@ async fn handle_session_attach(
         },
     );
 
-    eprintln!("  PTY forwarding started for peer {peer_id} -> session {target}");
+    info!(
+        "PTY forwarding: peer {} -> session {target}",
+        &peer_id[..16.min(peer_id.len())]
+    );
 }
 
-/// Long-running task: reads PTY output from the SnagAttachmentReader and forwards
-/// each chunk to the browser via the cairn session's "pty" channel.
 async fn pty_output_forwarder(
     session: Session,
     mut reader: crate::snag::SnagAttachmentReader,
@@ -449,7 +405,7 @@ async fn pty_output_forwarder(
     let pty_channel = match session.open_channel("pty").await {
         Ok(ch) => ch,
         Err(e) => {
-            eprintln!("  PTY forwarder: failed to open pty channel: {e}");
+            warn!("PTY forwarder: failed to open pty channel: {e}");
             return;
         }
     };
@@ -461,13 +417,12 @@ async fn pty_output_forwarder(
                 tagged.push(TAG_PTY);
                 tagged.extend_from_slice(&data);
                 if let Err(e) = session.send(&pty_channel, &tagged).await {
-                    eprintln!("  PTY forwarder: send failed for peer {peer_id}: {e}");
+                    debug!("PTY forwarder: send failed for peer {peer_id}: {e}");
                     break;
                 }
             }
             Ok(crate::snag::PtyReadResult::SessionEvent { event, session_id }) => {
-                eprintln!("  PTY forwarder: session event '{event}' for peer {peer_id}");
-                // Forward the event to the web client via RPC channel
+                debug!("PTY forwarder: session event '{event}' for peer {peer_id}");
                 let resp = jaunt_protocol::RpcResponse::SessionEvent { event, session_id };
                 let rpc_channel = match session.open_channel("rpc").await {
                     Ok(ch) => ch,
@@ -483,29 +438,25 @@ async fn pty_output_forwarder(
                 break;
             }
             Ok(crate::snag::PtyReadResult::Eof) => {
-                eprintln!("  PTY forwarder: EOF for peer {peer_id}");
+                debug!("PTY forwarder: EOF for peer {peer_id}");
                 break;
             }
             Err(e) => {
-                eprintln!("  PTY forwarder: read error for peer {peer_id}: {e}");
+                debug!("PTY forwarder: read error for peer {peer_id}: {e}");
                 break;
             }
         }
     }
 }
 
-/// Handle SessionDetach: abort the PTY forwarding task.
 async fn handle_session_detach(peer_id: &str, attachments: &Attachments) {
     if let Some(attachment) = attachments.write().await.remove(peer_id) {
         attachment.abort_handle.abort();
-        eprintln!(
-            "  Detached peer {peer_id} from session {}",
-            attachment.target
-        );
+        debug!("Detached peer {peer_id} from session {}", attachment.target);
     }
 }
 
-/// Interactive pairing: displays PIN + URL, waits for a peer, approves it.
+/// Interactive pairing: generates PIN, starts HTTP server, waits for a device to pair.
 pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
     let cairn_config = build_cairn_config(&config);
     let node = cairn_p2p::create_and_start_with_config(cairn_config)
@@ -521,7 +472,7 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
         .map(|a| a.to_string())
         .collect();
 
-    let (_conn_profile, profile_url) =
+    let (conn_profile, profile_url) =
         profile::generate_qr_profile(&node, &config, &ws_addrs).await?;
     let pin_result = profile::generate_pin_profile(&node, &config, &ws_addrs).await;
     let pin = pin_result
@@ -529,11 +480,52 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
         .map(|(_, pin)| pin.clone())
         .unwrap_or_default();
 
+    // Register as a Kademlia PROVIDER under a PIN-derived key
+    if let Some(sender) = node.swarm_sender().cloned() {
+        let pin_key = derive_pin_key(&pin);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            info!("DHT: Publishing PIN provider record...");
+            match sender.kad_start_providing(pin_key).await {
+                Ok(()) => info!("DHT: PIN discoverable (confirmed by DHT peers)"),
+                Err(e) => warn!("DHT: PIN publish failed: {e}"),
+            }
+        });
+    }
+
+    // Start the pairing HTTP server
+    let _pairing_addr = match pairing_server::start_pairing_server(Arc::new(RwLock::new(
+        pairing_server::PairingState {
+            pin: pin.clone(),
+            profile: conn_profile,
+        },
+    )))
+    .await
+    {
+        Ok(addr) => {
+            debug!("Pairing server listening on {addr}");
+            Some(addr)
+        }
+        Err(e) => {
+            warn!("Pairing server failed to start: {e}");
+            None
+        }
+    };
+
     let peer_id_str = node
         .libp2p_peer_id()
         .map(|p| p.to_string())
         .unwrap_or_default();
 
+    let lan_ip = ws_addrs
+        .iter()
+        .find(|a| !a.contains("/127.") && a.ends_with("/ws"))
+        .and_then(|a| {
+            let parts: Vec<&str> = a.split('/').collect();
+            parts.get(2).map(|ip| ip.to_string())
+        });
+
+    // User-facing output for the pairing UI
     eprintln!();
     eprintln!("  ┌─────────────────────────────────────┐");
     eprintln!("  │          JAUNT PAIRING MODE          │");
@@ -545,6 +537,9 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
         &peer_id_str[..24.min(peer_id_str.len())]
     );
     eprintln!("  URL:     {profile_url}");
+    if let Some(ref ip) = lan_ip {
+        eprintln!("  LAN:     {ip} (same network only)");
+    }
     eprintln!();
     eprintln!("  Waiting for a device to connect...");
     eprintln!();
@@ -553,15 +548,13 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
 
     loop {
         match node.recv_event().await {
-            Some(Event::MessageReceived { ref peer_id, .. }) => {
+            Some(Event::PairingCompleted { ref peer_id })
+            | Some(Event::MessageReceived { ref peer_id, .. }) => {
                 if !approval_store.is_approved(peer_id) {
                     approval_store.approve(peer_id, "paired");
                     approval_store.save();
                 }
-                eprintln!(
-                    "  ✓ Device paired: {}...",
-                    &peer_id[..24.min(peer_id.len())]
-                );
+                eprintln!("  Device paired: {}...", &peer_id[..24.min(peer_id.len())]);
                 eprintln!("  Run `jaunt-host serve` to start accepting connections.");
                 break;
             }
@@ -569,13 +562,37 @@ pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
                 ref peer_id,
                 ref state,
             }) => {
-                eprintln!("  Peer {}...: {state}", &peer_id[..16.min(peer_id.len())]);
+                trace!(
+                    "Pairing: peer {}...: {state}",
+                    &peer_id[..16.min(peer_id.len())]
+                );
+            }
+            Some(Event::Error { ref error }) => {
+                if error.contains("dial failed") {
+                    trace!("{error}");
+                } else {
+                    debug!("{error}");
+                }
             }
             None => break,
             _ => {}
         }
     }
     Ok(())
+}
+
+fn derive_pin_key(pin: &str) -> Vec<u8> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(b"jaunt-pin-v1").expect("HMAC key");
+    mac.update(pin.as_bytes());
+    let hash = mac.finalize().into_bytes();
+    let mut mh = Vec::with_capacity(2 + hash.len());
+    mh.push(0x00);
+    mh.push(hash.len() as u8);
+    mh.extend_from_slice(&hash);
+    mh
 }
 
 fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
@@ -601,14 +618,12 @@ fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
         path: JauntConfig::config_dir().join("cairn-data"),
     };
 
-    // Jaunt-specific discovery namespace to avoid collisions with other cairn apps
     cairn.app_identifier = Some("jaunt".to_string());
 
     cairn
 }
 
 /// Handle an RPC request and produce a synchronous response.
-/// SessionAttach/SessionDetach/Resize are handled separately in the event loop.
 fn handle_rpc_request(
     request: &RpcRequest,
     snag: &SnagBridge,
@@ -707,7 +722,6 @@ fn handle_rpc_request(
                 message: "file browser disabled".into(),
             },
         },
-        // These are handled in the event loop, not here
         RpcRequest::SessionAttach { .. }
         | RpcRequest::SessionDetach {}
         | RpcRequest::Resize { .. } => RpcResponse::Ok(RpcData::Empty {}),
