@@ -601,6 +601,9 @@ fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
         path: JauntConfig::config_dir().join("cairn-data"),
     };
 
+    // Jaunt-specific discovery namespace to avoid collisions with other cairn apps
+    cairn.app_identifier = Some("jaunt".to_string());
+
     cairn
 }
 
