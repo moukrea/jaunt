@@ -465,10 +465,7 @@ async fn pty_output_forwarder(
             Ok(crate::snag::PtyReadResult::SessionEvent { event, session_id }) => {
                 eprintln!("  PTY forwarder: session event '{event}' for peer {peer_id}");
                 // Forward the event to the web client via RPC channel
-                let resp = jaunt_protocol::RpcResponse::SessionEvent {
-                    event,
-                    session_id,
-                };
+                let resp = jaunt_protocol::RpcResponse::SessionEvent { event, session_id };
                 let rpc_channel = match session.open_channel("rpc").await {
                     Ok(ch) => ch,
                     Err(_) => break,
@@ -661,19 +658,14 @@ fn handle_rpc_request(
                 },
             }
         }
-        RpcRequest::SessionPreview { target, lines } => {
-            match snag.session_output(target, *lines) {
-                Ok(text) => RpcResponse::Ok(RpcData::Output(text)),
-                Err(e) => RpcResponse::Error {
-                    code: 13,
-                    message: e,
-                },
-            }
-        }
-        RpcRequest::FileBrowse {
-            path,
-            show_hidden,
-        } => match file_browser {
+        RpcRequest::SessionPreview { target, lines } => match snag.session_output(target, *lines) {
+            Ok(text) => RpcResponse::Ok(RpcData::Output(text)),
+            Err(e) => RpcResponse::Error {
+                code: 13,
+                message: e,
+            },
+        },
+        RpcRequest::FileBrowse { path, show_hidden } => match file_browser {
             Some(fb) => match fb.browse(path, Some(*show_hidden)) {
                 Ok(data) => RpcResponse::Ok(data),
                 Err(e) => RpcResponse::Error {
@@ -749,6 +741,6 @@ fn handle_rpc_request(
                 code: 10,
                 message: "file browser disabled".into(),
             },
-        }
+        },
     }
 }

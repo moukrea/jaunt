@@ -1,4 +1,5 @@
 /target
+/.cargo/
 web/node_modules
 web/dist
 tauri/src-tauri/target

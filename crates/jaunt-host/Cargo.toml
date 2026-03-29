@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 jaunt-protocol = { path = "../jaunt-protocol" }
-cairn-p2p = { path = "../../../cairn/packages/rs/cairn-p2p" }
+cairn-p2p = { git = "https://github.com/moukrea/cairn.git", branch = "main" }
 tokio = { version = "1", features = ["rt", "macros", "signal", "sync", "time", "process", "io-util", "net"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

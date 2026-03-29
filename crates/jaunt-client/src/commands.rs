@@ -355,11 +355,9 @@ async fn attach_loop(
                                     .map_err(|e| format!("flush: {e}"))?;
                             }
                             TAG_RPC => {
-                                if let Ok(resp) = jaunt_protocol::decode_response(&data[1..]) {
-                                    if let RpcResponse::SessionEvent { event, session_id } = resp {
-                                        eprintln!("\r\nSession {session_id}: {event}");
-                                        break;
-                                    }
+                                if let Ok(RpcResponse::SessionEvent { event, session_id }) = jaunt_protocol::decode_response(&data[1..]) {
+                                    eprintln!("\r\nSession {session_id}: {event}");
+                                    break;
                                 }
                             }
                             _ => {}
