@@ -32,18 +32,17 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
     snag.check_available()?;
 
     let cairn_config = build_cairn_config(&config);
+    info!("Starting P2P transport...");
     let node = cairn_p2p::create_and_start_with_config(cairn_config)
         .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
 
     let all_addrs = node.listen_addresses().await;
-    let is_useful = |a: &&String| -> bool { !a.contains("/172.") || a.contains("/172.16.") };
-    let useful_addrs: Vec<&String> = all_addrs.iter().filter(is_useful).collect();
-    for addr in &useful_addrs {
+    for addr in &all_addrs {
         debug!("Listen: {addr}");
     }
 
-    let ws_addrs: Vec<String> = useful_addrs
+    let ws_addrs: Vec<String> = all_addrs
         .iter()
         .filter(|a| a.ends_with("/ws"))
         .map(|a| a.to_string())
@@ -459,15 +458,14 @@ async fn handle_session_detach(peer_id: &str, attachments: &Attachments) {
 /// Interactive pairing: generates PIN, starts HTTP server, waits for a device to pair.
 pub async fn run_pair(config: JauntConfig) -> Result<(), String> {
     let cairn_config = build_cairn_config(&config);
+    info!("Starting P2P transport...");
     let node = cairn_p2p::create_and_start_with_config(cairn_config)
         .await
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
 
     let all_addrs = node.listen_addresses().await;
-    let is_useful = |a: &&String| -> bool { !a.contains("/172.") || a.contains("/172.16.") };
     let ws_addrs: Vec<String> = all_addrs
         .iter()
-        .filter(is_useful)
         .filter(|a| a.ends_with("/ws"))
         .map(|a| a.to_string())
         .collect();
@@ -620,7 +618,65 @@ fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
 
     cairn.app_identifier = Some("jaunt".to_string());
 
+    // Filter listen addresses to skip Docker bridge interfaces (172.17-31.x.x).
+    // These waste startup time (mDNS on 25+ bridges) and are never useful for P2P.
+    if let Ok(addrs) = get_non_docker_listen_addrs() {
+        if !addrs.is_empty() {
+            cairn.listen_addresses = Some(addrs);
+        }
+    }
+
     cairn
+}
+
+/// Enumerate network interfaces and generate listen addresses, skipping Docker bridges.
+/// Docker uses 172.17.0.0/16 through 172.31.0.0/16 by default.
+fn get_non_docker_listen_addrs() -> Result<Vec<String>, String> {
+    use std::net::IpAddr;
+
+    let mut addrs = Vec::new();
+    let ifaces = nix::ifaddrs::getifaddrs().map_err(|e| format!("getifaddrs: {e}"))?;
+    let mut seen = std::collections::HashSet::new();
+
+    for iface in ifaces {
+        let ip = match iface.address.and_then(|a| {
+            a.as_sockaddr_in()
+                .map(|s| IpAddr::V4(s.ip()))
+                .or_else(|| a.as_sockaddr_in6().map(|s| IpAddr::V6(s.ip())))
+        }) {
+            Some(ip) => ip,
+            None => continue,
+        };
+
+        // Skip Docker bridge ranges: 172.17.0.0/12 minus 172.16.0.0/16 (valid private)
+        if let IpAddr::V4(v4) = ip {
+            let octets = v4.octets();
+            if octets[0] == 172 && octets[1] >= 17 && octets[1] <= 31 {
+                continue;
+            }
+        }
+
+        // Skip link-local IPv6 (fe80::)
+        if let IpAddr::V6(v6) = ip {
+            if (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                continue;
+            }
+        }
+
+        if !seen.insert(ip) {
+            continue;
+        }
+
+        let ip_str = match ip {
+            IpAddr::V4(v4) => format!("/ip4/{v4}"),
+            IpAddr::V6(v6) => format!("/ip6/{v6}"),
+        };
+        addrs.push(format!("{ip_str}/tcp/0"));
+        addrs.push(format!("{ip_str}/udp/0/quic-v1"));
+        addrs.push(format!("{ip_str}/tcp/0/ws"));
+    }
+
+    Ok(addrs)
 }
 
 /// Handle an RPC request and produce a synchronous response.
