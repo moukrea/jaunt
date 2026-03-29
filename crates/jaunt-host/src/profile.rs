@@ -32,6 +32,19 @@ pub async fn generate_qr_profile(
         host_name,
     };
 
+    if let Some(ref web_url) = config.server.web_url {
+        if web_url.contains("localhost") || web_url.contains("127.0.0.1") {
+            eprintln!(
+                "  WARNING: web_url is set to '{}' — this URL is not reachable from other devices.",
+                web_url
+            );
+            eprintln!(
+                "           Remove the web_url setting from your config or set it to '{}'.",
+                DEFAULT_WEB_URL
+            );
+        }
+    }
+
     let url = encode_profile_url(&profile, config.server.web_url.as_deref());
     Ok((profile, url))
 }
