@@ -78,9 +78,11 @@ export default function PairingScreen() {
       // cairn stores the hints internally for use during connect().
       peerId = await pairScanQr(new Uint8Array(profile.pairing.Qr.qr_data));
     } else if ('Pin' in profile.pairing) {
-      peerId = await pairEnterPin(profile.pairing.Pin.pin);
+      // Pass the profile's libp2p_peer_id so cairn records the correct
+      // peer ID for this pairing (instead of relying on DHT lookup).
+      peerId = await pairEnterPin(profile.pairing.Pin.pin, profile.libp2p_peer_id);
     } else if ('Link' in profile.pairing) {
-      peerId = await pairEnterPin(profile.pairing.Link.uri);
+      peerId = await pairEnterPin(profile.pairing.Link.uri, profile.libp2p_peer_id);
     } else {
       throw new Error('Unknown pairing type');
     }
