@@ -79,11 +79,14 @@ pub async fn run_host(config: JauntConfig) -> Result<(), String> {
             mh
         };
         tokio::spawn(async move {
-            // Wait for DHT bootstrap to complete
+            // Wait for DHT bootstrap to complete before publishing.
             tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            eprintln!("  DHT: Publishing PIN provider record...");
             match sender.kad_start_providing(pin_key).await {
-                Ok(()) => eprintln!("  DHT: PIN discoverable (provider record published)"),
-                Err(e) => eprintln!("  DHT: PIN publish failed: {e}"),
+                Ok(()) => {
+                    eprintln!("  DHT: PIN discoverable (provider record confirmed by DHT peers)")
+                }
+                Err(e) => eprintln!("  DHT: PIN publish failed — PIN discovery will not work: {e}"),
             }
         });
     }
