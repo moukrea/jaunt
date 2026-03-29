@@ -27,6 +27,10 @@ pub enum RpcRequest {
         target: String,
         new_name: String,
     },
+    SessionPreview {
+        target: String,
+        lines: u32,
+    },
     Resize {
         cols: u16,
         rows: u16,

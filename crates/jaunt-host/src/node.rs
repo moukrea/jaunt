@@ -658,6 +658,15 @@ fn handle_rpc_request(
                 },
             }
         }
+        RpcRequest::SessionPreview { target, lines } => {
+            match snag.session_output(target, *lines) {
+                Ok(text) => RpcResponse::Ok(RpcData::Output(text)),
+                Err(e) => RpcResponse::Error {
+                    code: 13,
+                    message: e,
+                },
+            }
+        }
         RpcRequest::FileBrowse {
             path,
             show_hidden: _,

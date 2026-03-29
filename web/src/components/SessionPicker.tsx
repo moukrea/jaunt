@@ -14,8 +14,11 @@ export default function SessionPicker(props: SessionPickerProps) {
   const [newName, setNewName] = createSignal('');
   const [search, setSearch] = createSignal('');
   const [localSessions, setLocalSessions] = createSignal<SessionInfo[]>([]);
+  const [previewText, setPreviewText] = createSignal('');
+  const [previewTarget, setPreviewTarget] = createSignal<string | null>(null);
   let containerRef: HTMLDivElement | undefined;
   let searchRef: HTMLInputElement | undefined;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
   const filtered = createMemo(() => {
     const q = search().toLowerCase();
@@ -82,12 +85,38 @@ export default function SessionPicker(props: SessionPickerProps) {
     }
   }
 
+  async function fetchPreview(sessionId: string) {
+    try {
+      const resp = await sendRpc({ SessionPreview: { target: sessionId, lines: 15 } });
+      if ('Ok' in resp && 'Output' in (resp.Ok as any)) {
+        if (previewTarget() === sessionId) {
+          setPreviewText((resp.Ok as any).Output);
+        }
+      }
+    } catch { /* ignore preview errors */ }
+  }
+
+  function handleHover(sessionId: string) {
+    if (previewTarget() === sessionId) return;
+    setPreviewTarget(sessionId);
+    setPreviewText('');
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => fetchPreview(sessionId), 150);
+  }
+
+  function handleHoverEnd() {
+    clearTimeout(previewTimer);
+    setPreviewTarget(null);
+    setPreviewText('');
+  }
+
   return (
     <div
       ref={containerRef}
-      class="w-72 max-h-96 bg-bg-1 border border-bg-3/50 rounded-xl overflow-hidden"
+      class="flex gap-2"
       style="animation: viewIn 0.12s cubic-bezier(0.16,1,0.3,1)"
     >
+    <div class="w-72 max-h-96 bg-bg-1 border border-bg-3/50 rounded-xl overflow-hidden">
       {/* Search input — always visible, auto-focused */}
       <div class="px-3 pt-3 pb-2">
         <div class="relative">
@@ -131,6 +160,8 @@ export default function SessionPicker(props: SessionPickerProps) {
                   data-testid="session-pick-item"
                   class="w-full text-left px-2.5 py-2 flex items-center gap-2.5 rounded-lg hover:bg-bg-2/80 active:bg-bg-3/60 transition-all duration-100 cursor-pointer border-none bg-transparent group"
                   onClick={() => props.onSelect(session.id, session.name ?? undefined)}
+                  onMouseEnter={() => handleHover(session.id)}
+                  onMouseLeave={handleHoverEnd}
                 >
                   {/* Status indicator */}
                   <div class="flex flex-col items-center gap-1 shrink-0 w-5">
@@ -202,6 +233,20 @@ export default function SessionPicker(props: SessionPickerProps) {
           </div>
         </Show>
       </div>
+    </div>
+    {/* Preview panel — shown on hover */}
+    <Show when={previewTarget()}>
+      <div class="w-72 h-64 bg-bg-0 border border-bg-3/50 rounded-xl overflow-hidden flex flex-col">
+        <div class="px-3 py-1.5 border-b border-bg-3/30 text-[10px] font-mono text-text-3/60 uppercase tracking-wider">
+          Preview
+        </div>
+        <div class="flex-1 overflow-auto px-2 py-1">
+          <pre class="text-[10px] font-mono text-text-2/80 whitespace-pre-wrap m-0 leading-relaxed">
+            {previewText() || '...'}
+          </pre>
+        </div>
+      </div>
+    </Show>
     </div>
   );
 }

@@ -422,6 +422,18 @@ impl SnagBridge {
         })
     }
 
+    pub fn session_output(&self, target: &str, lines: u32) -> Result<String, String> {
+        let output = Command::new(&self.snag_path)
+            .args(["output", target, "--lines", &lines.to_string()])
+            .output()
+            .map_err(|e| format!("snag output failed: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("snag output failed: {stderr}"));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
     pub fn rename_session(&self, target: &str, new_name: &str) -> Result<(), String> {
         let output = Command::new(&self.snag_path)
             .args(["rename", target, new_name])

@@ -10,6 +10,7 @@ export type RpcRequest =
   | { SessionSend: { target: string; input: string } }
   | { SessionInfo: { target: string } }
   | { SessionRename: { target: string; new_name: string } }
+  | { SessionPreview: { target: string; lines: number } }
   | { Resize: { cols: number; rows: number } }
   | { FileBrowse: { path: string; show_hidden: boolean } }
   | { FilePreview: { path: string; max_bytes: number } }
