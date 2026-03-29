@@ -124,7 +124,7 @@ async fn main() {
             match action {
                 ConnectAction::Sessions => commands::cmd_sessions(&client_config, &host_info).await,
                 ConnectAction::Attach { session } => {
-                    commands::cmd_attach(&host_info, &session).await
+                    commands::cmd_attach(&client_config, &host_info, &session).await
                 }
                 ConnectAction::Send { session, command } => {
                     commands::cmd_send(&client_config, &host_info, &session, &command).await
@@ -133,7 +133,9 @@ async fn main() {
                     commands::cmd_files(&client_config, &host_info, &path).await
                 }
                 ConnectAction::New { name } => {
-                    commands::cmd_new_session(&client_config, &host_info, name.as_deref()).await
+                    commands::cmd_new_session(&client_config, &host_info, name.as_deref())
+                        .await
+                        .map(|_| ())
                 }
                 ConnectAction::Kill { session } => {
                     commands::cmd_kill_session(&client_config, &host_info, &session).await

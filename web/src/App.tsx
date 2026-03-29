@@ -6,6 +6,7 @@ import TerminalWorkspace from './components/TerminalWorkspace';
 import FileBrowser from './components/FileBrowser';
 import Settings from './components/Settings';
 import StatusBar from './components/StatusBar';
+import HostSwitcher from './components/HostSwitcher';
 
 export default function App() {
   return (
@@ -17,7 +18,7 @@ export default function App() {
           <div class="flex items-center gap-2.5">
             <span class="text-amber font-mono text-xs font-500 tracking-wider">JAUNT</span>
             <span class="text-text-3">/</span>
-            <span class="text-sm font-500 text-text-0 truncate max-w-40">{store.hostName()}</span>
+            <HostSwitcher />
           </div>
           <div class="flex items-center gap-3">
             <span class="text-[10px] font-mono text-text-3 tracking-wide">{store.tier()}</span>

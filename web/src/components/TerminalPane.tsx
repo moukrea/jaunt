@@ -3,7 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
-import { sendRpc, sendPtyInput, sendResize, setPtyDataCallback } from '../lib/cairn';
+import { sendRpc, sendPtyInput, sendResize, setPtyDataCallback, setSessionEventCallback } from '../lib/cairn';
 import { store } from '../lib/store';
 import type { Pane } from '../lib/store';
 
@@ -116,6 +116,17 @@ export default function TerminalPane(props: TerminalPaneProps) {
 
     if (isFocused()) await attachToSession();
 
+    // Handle unsolicited session events (killed, stolen)
+    setSessionEventCallback((event, sessionId) => {
+      if (sessionId === props.pane.sessionId && term) {
+        const msg = event === 'stolen'
+          ? '\r\n\x1b[38;2;232;162;69m[Session stolen by another client]\x1b[0m\r\n'
+          : '\r\n\x1b[38;2;224;108;90m[Session killed]\x1b[0m\r\n';
+        term.write(msg);
+        setAttached(false);
+      }
+    });
+
     const resizeObserver = new ResizeObserver(() => fitAddon?.fit());
     resizeObserver.observe(termDiv);
 
@@ -126,6 +137,7 @@ export default function TerminalPane(props: TerminalPaneProps) {
       }
       setAttached(false);
       setPtyDataCallback(() => {});
+      setSessionEventCallback(null);
       term?.dispose();
     });
   });

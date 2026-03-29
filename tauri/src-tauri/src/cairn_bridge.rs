@@ -1,6 +1,37 @@
-use cairn_p2p::{CairnConfig, Node};
+use cairn_p2p::{CairnConfig, Event, Node};
 use jaunt_protocol::messages::*;
 use jaunt_protocol::profile::*;
+
+/// Tag byte for RPC messages (must match jaunt-host).
+const TAG_RPC: u8 = 0x01;
+
+/// Encode an RPC request with TAG_RPC prefix.
+fn encode_tagged_request(request: &RpcRequest) -> Result<Vec<u8>, String> {
+    let payload = jaunt_protocol::encode_request(request).map_err(|e| format!("encode: {e}"))?;
+    let mut tagged = Vec::with_capacity(1 + payload.len());
+    tagged.push(TAG_RPC);
+    tagged.extend_from_slice(&payload);
+    Ok(tagged)
+}
+
+/// Decode a response, stripping the TAG_RPC prefix if present.
+fn decode_response(data: &[u8]) -> Result<RpcResponse, String> {
+    let payload = if !data.is_empty() && data[0] == TAG_RPC {
+        &data[1..]
+    } else {
+        data
+    };
+    jaunt_protocol::decode_response(payload).map_err(|e| format!("decode: {e}"))
+}
+
+/// Wait for an RPC response from the host.
+async fn recv_rpc_response(node: &Node) -> Result<RpcResponse, String> {
+    match node.recv_event().await {
+        Some(Event::MessageReceived { data, .. }) => decode_response(&data),
+        Some(_) => Err("unexpected event from host".to_string()),
+        None => Err("connection closed".to_string()),
+    }
+}
 
 /// Pair with a host using a PIN code
 pub async fn pair_pin(pin: &str) -> Result<String, String> {
@@ -73,19 +104,27 @@ pub async fn get_sessions(peer_id: &str) -> Result<String, String> {
         .await
         .map_err(|e| format!("channel failed: {e}"))?;
 
-    let req = RpcRequest::SessionList {};
-    let data = jaunt_protocol::encode_request(&req).map_err(|e| format!("encode: {e}"))?;
+    let data = encode_tagged_request(&RpcRequest::SessionList {})?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send: {e}"))?;
 
-    // Return as JSON for the frontend
-    Ok("[]".to_string())
+    match recv_rpc_response(&node).await? {
+        RpcResponse::Ok(RpcData::SessionList(sessions)) => {
+            serde_json::to_string(&sessions).map_err(|e| format!("json: {e}"))
+        }
+        RpcResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response".to_string()),
+    }
 }
 
 /// Send a command to a session on the host
-pub async fn send_command(peer_id: &str, session_target: &str, command: &str) -> Result<(), String> {
+pub async fn send_command(
+    peer_id: &str,
+    session_target: &str,
+    command: &str,
+) -> Result<(), String> {
     let node = create_node()?;
     let session = node
         .connect(peer_id)
@@ -96,17 +135,20 @@ pub async fn send_command(peer_id: &str, session_target: &str, command: &str) ->
         .await
         .map_err(|e| format!("channel failed: {e}"))?;
 
-    let req = RpcRequest::SessionSend {
+    let data = encode_tagged_request(&RpcRequest::SessionSend {
         target: session_target.to_string(),
         input: command.to_string(),
-    };
-    let data = jaunt_protocol::encode_request(&req).map_err(|e| format!("encode: {e}"))?;
+    })?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send: {e}"))?;
 
-    Ok(())
+    match recv_rpc_response(&node).await? {
+        RpcResponse::Ok(_) => Ok(()),
+        RpcResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response".to_string()),
+    }
 }
 
 /// Create a new session on the host
@@ -121,18 +163,21 @@ pub async fn create_session(peer_id: &str, name: Option<&str>) -> Result<String,
         .await
         .map_err(|e| format!("channel failed: {e}"))?;
 
-    let req = RpcRequest::SessionCreate {
+    let data = encode_tagged_request(&RpcRequest::SessionCreate {
         shell: None,
         name: name.map(|s| s.to_string()),
         cwd: None,
-    };
-    let data = jaunt_protocol::encode_request(&req).map_err(|e| format!("encode: {e}"))?;
+    })?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send: {e}"))?;
 
-    Ok("created".to_string())
+    match recv_rpc_response(&node).await? {
+        RpcResponse::Ok(RpcData::SessionCreated { id }) => Ok(id),
+        RpcResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response".to_string()),
+    }
 }
 
 /// Kill a session on the host
@@ -147,16 +192,19 @@ pub async fn kill_session(peer_id: &str, session_target: &str) -> Result<(), Str
         .await
         .map_err(|e| format!("channel failed: {e}"))?;
 
-    let req = RpcRequest::SessionKill {
+    let data = encode_tagged_request(&RpcRequest::SessionKill {
         target: session_target.to_string(),
-    };
-    let data = jaunt_protocol::encode_request(&req).map_err(|e| format!("encode: {e}"))?;
+    })?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send: {e}"))?;
 
-    Ok(())
+    match recv_rpc_response(&node).await? {
+        RpcResponse::Ok(_) => Ok(()),
+        RpcResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response".to_string()),
+    }
 }
 
 fn create_node() -> Result<Node, String> {

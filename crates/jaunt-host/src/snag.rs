@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use jaunt_protocol::messages::*;
 use std::path::PathBuf;
 use std::process::Command;
@@ -9,6 +8,7 @@ use tokio::net::UnixStream;
 // These match snag's protocol/types.rs and codec.rs exactly.
 
 const MSG_SESSION_ATTACH: u8 = 0x06;
+#[allow(dead_code)]
 const MSG_SESSION_DETACH: u8 = 0x07;
 const MSG_RESIZE: u8 = 0x0E;
 const MSG_PTY_INPUT: u8 = 0x10;
@@ -61,6 +61,7 @@ pub struct SnagAttachment {
     reader: tokio::io::ReadHalf<UnixStream>,
 }
 
+#[allow(dead_code)]
 impl SnagAttachment {
     /// Connect to the snag daemon and attach to a session.
     /// Returns the initial scrollback text and the attachment handle.
@@ -235,23 +236,50 @@ impl SnagAttachmentWriter {
     }
 }
 
+/// What `read_pty_output` returned from the snag daemon.
+pub enum PtyReadResult {
+    /// Raw PTY output bytes.
+    Data(Vec<u8>),
+    /// Session lifecycle event (e.g. "exited", "stolen").
+    SessionEvent { event: String, session_id: String },
+    /// EOF — connection closed.
+    Eof,
+}
+
 /// Reader half of a SnagAttachment — for reading PTY output.
 pub struct SnagAttachmentReader {
     reader: tokio::io::ReadHalf<UnixStream>,
 }
 
 impl SnagAttachmentReader {
-    /// Read the next PTY output chunk. Returns None on EOF or session exit.
-    pub async fn read_pty_output(&mut self) -> Result<Option<Vec<u8>>, String> {
+    /// Read the next PTY output chunk, session event, or EOF.
+    pub async fn read_pty_output(&mut self) -> Result<PtyReadResult, String> {
         match read_frame(&mut self.reader).await? {
-            Some((MSG_PTY_OUTPUT, payload)) => Ok(Some(payload)),
-            Some((MSG_SESSION_EVENT, _)) => Ok(None),
+            Some((MSG_PTY_OUTPUT, payload)) => Ok(PtyReadResult::Data(payload)),
+            Some((MSG_SESSION_EVENT, payload)) => {
+                // Decode the event to extract type (exited/stolen) and session_id
+                let resp: serde_json::Value =
+                    rmp_serde::from_slice(&payload).unwrap_or(serde_json::Value::Null);
+                let event = resp
+                    .get("SessionEvent")
+                    .and_then(|v| v.get("event"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("exited")
+                    .to_string();
+                let session_id = resp
+                    .get("SessionEvent")
+                    .and_then(|v| v.get("session_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                Ok(PtyReadResult::SessionEvent { event, session_id })
+            }
             Some((MSG_OK, _)) => Box::pin(self.read_pty_output()).await,
             Some((msg_type, _)) => {
                 eprintln!("  SnagReader: unexpected msg_type=0x{msg_type:02x}");
                 Box::pin(self.read_pty_output()).await
             }
-            None => Ok(None),
+            None => Ok(PtyReadResult::Eof),
         }
     }
 }
@@ -393,6 +421,18 @@ impl SnagBridge {
             fg_process: v["fg_process"].as_str().map(|s| s.to_string()),
             attached: v["attached"].as_u64().unwrap_or(0) as usize,
         })
+    }
+
+    pub fn session_output(&self, target: &str, lines: u32) -> Result<String, String> {
+        let output = Command::new(&self.snag_path)
+            .args(["output", target, "--lines", &lines.to_string()])
+            .output()
+            .map_err(|e| format!("snag output failed: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("snag output failed: {stderr}"));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     pub fn rename_session(&self, target: &str, new_name: &str) -> Result<(), String> {

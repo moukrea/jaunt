@@ -453,7 +453,7 @@ async fn pty_output_forwarder(
 
     loop {
         match reader.read_pty_output().await {
-            Ok(Some(data)) => {
+            Ok(crate::snag::PtyReadResult::Data(data)) => {
                 let mut tagged = Vec::with_capacity(1 + data.len());
                 tagged.push(TAG_PTY);
                 tagged.extend_from_slice(&data);
@@ -462,8 +462,25 @@ async fn pty_output_forwarder(
                     break;
                 }
             }
-            Ok(None) => {
-                eprintln!("  PTY forwarder: session exited for peer {peer_id}");
+            Ok(crate::snag::PtyReadResult::SessionEvent { event, session_id }) => {
+                eprintln!("  PTY forwarder: session event '{event}' for peer {peer_id}");
+                // Forward the event to the web client via RPC channel
+                let resp = jaunt_protocol::RpcResponse::SessionEvent { event, session_id };
+                let rpc_channel = match session.open_channel("rpc").await {
+                    Ok(ch) => ch,
+                    Err(_) => break,
+                };
+                let Ok(encoded) = jaunt_protocol::encode_response(&resp) else {
+                    break;
+                };
+                let mut tagged = Vec::with_capacity(1 + encoded.len());
+                tagged.push(TAG_RPC);
+                tagged.extend_from_slice(&encoded);
+                let _ = session.send(&rpc_channel, &tagged).await;
+                break;
+            }
+            Ok(crate::snag::PtyReadResult::Eof) => {
+                eprintln!("  PTY forwarder: EOF for peer {peer_id}");
                 break;
             }
             Err(e) => {
@@ -581,6 +598,9 @@ fn build_cairn_config(config: &JauntConfig) -> CairnConfig {
         path: JauntConfig::config_dir().join("cairn-data"),
     };
 
+    // Jaunt-specific discovery namespace to avoid collisions with other cairn apps
+    cairn.app_identifier = Some("jaunt".to_string());
+
     cairn
 }
 
@@ -638,11 +658,15 @@ fn handle_rpc_request(
                 },
             }
         }
-        RpcRequest::FileBrowse {
-            path,
-            show_hidden: _,
-        } => match file_browser {
-            Some(fb) => match fb.browse(path) {
+        RpcRequest::SessionPreview { target, lines } => match snag.session_output(target, *lines) {
+            Ok(text) => RpcResponse::Ok(RpcData::Output(text)),
+            Err(e) => RpcResponse::Error {
+                code: 13,
+                message: e,
+            },
+        },
+        RpcRequest::FileBrowse { path, show_hidden } => match file_browser {
+            Some(fb) => match fb.browse(path, Some(*show_hidden)) {
                 Ok(data) => RpcResponse::Ok(data),
                 Err(e) => RpcResponse::Error {
                     code: 10,
@@ -684,8 +708,39 @@ fn handle_rpc_request(
         RpcRequest::SessionAttach { .. }
         | RpcRequest::SessionDetach {}
         | RpcRequest::Resize { .. } => RpcResponse::Ok(RpcData::Empty {}),
-        RpcRequest::FileDownload { .. } | RpcRequest::FileUpload { .. } => {
-            RpcResponse::Ok(RpcData::Empty {})
-        }
+        RpcRequest::FileDownload { path } => match file_browser {
+            Some(fb) => match fb.validate_path(&std::path::PathBuf::from(path)) {
+                Ok(canonical) => match std::fs::read(&canonical) {
+                    Ok(content) => RpcResponse::Ok(RpcData::FileReady {
+                        size: content.len() as u64,
+                    }),
+                    Err(e) => RpcResponse::Error {
+                        code: 14,
+                        message: format!("read failed: {e}"),
+                    },
+                },
+                Err(e) => RpcResponse::Error {
+                    code: 10,
+                    message: e,
+                },
+            },
+            None => RpcResponse::Error {
+                code: 10,
+                message: "file browser disabled".into(),
+            },
+        },
+        RpcRequest::FileUpload { path, size: _ } => match file_browser {
+            Some(fb) => match fb.validate_path(&std::path::PathBuf::from(path)) {
+                Ok(_) => RpcResponse::Ok(RpcData::FileReady { size: 0 }),
+                Err(e) => RpcResponse::Error {
+                    code: 10,
+                    message: e,
+                },
+            },
+            None => RpcResponse::Error {
+                code: 10,
+                message: "file browser disabled".into(),
+            },
+        },
     }
 }

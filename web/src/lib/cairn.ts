@@ -17,9 +17,10 @@ let rpcChannel: NodeChannel | null = null;
 const TAG_RPC = 0x01;
 const TAG_PTY = 0x02;
 
-// Callbacks for PTY data and RPC responses
+// Callbacks for PTY data, RPC responses, and unsolicited session events
 let onPtyData: ((data: Uint8Array) => void) | null = null;
 let pendingRpcResolve: ((resp: RpcResponse) => void) | null = null;
+let onSessionEvent: ((event: string, sessionId: string) => void) | null = null;
 
 /**
  * Initialize a cairn node with optional infrastructure config from the profile.
@@ -131,18 +132,22 @@ function wireSession(s: NodeSession): void {
     if (tag === TAG_RPC) {
       // RPC response
       console.log('[jaunt] RPC received:', payload.length, 'bytes (tagged)');
-      if (pendingRpcResolve) {
-        try {
-          const resp = decodeResponse(payload);
-          console.log('[jaunt] Decoded response:', JSON.stringify(resp).substring(0, 200));
+      try {
+        const resp = decodeResponse(payload);
+        console.log('[jaunt] Decoded response:', JSON.stringify(resp).substring(0, 200));
+        // Check for unsolicited session events (exited, stolen)
+        if ('SessionEvent' in resp) {
+          const { event, session_id } = (resp as { SessionEvent: { event: string; session_id: string } }).SessionEvent;
+          if (onSessionEvent) onSessionEvent(event, session_id);
+        } else if (pendingRpcResolve) {
           const resolve = pendingRpcResolve;
           pendingRpcResolve = null;
           resolve(resp);
-        } catch (e) {
-          console.error('[jaunt] RPC decode failed:', e);
+        } else {
+          console.warn('[jaunt] RPC response received but no pending resolve');
         }
-      } else {
-        console.warn('[jaunt] RPC response received but no pending resolve');
+      } catch (e) {
+        console.error('[jaunt] RPC decode failed:', e);
       }
     } else if (tag === TAG_PTY) {
       // PTY output
@@ -408,6 +413,13 @@ export function sendResize(cols: number, rows: number): void {
  */
 export function setPtyDataCallback(cb: (data: Uint8Array) => void): void {
   onPtyData = cb;
+}
+
+/**
+ * Register a callback for unsolicited session events (exited, stolen).
+ */
+export function setSessionEventCallback(cb: ((event: string, sessionId: string) => void) | null): void {
+  onSessionEvent = cb;
 }
 
 export function getNode(): Node | null {
