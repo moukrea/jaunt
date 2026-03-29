@@ -49,7 +49,11 @@ enum DeviceAction {
 fn init_logging(daemon: bool) {
     use tracing_subscriber::{fmt, EnvFilter};
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // Only show jaunt_host logs at INFO. Suppress cairn/libp2p noise (they flood
+    // with interface discovery, listen addrs, mDNS, dial failures at INFO/WARN).
+    // Users can override with RUST_LOG env var for debugging.
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("error,jaunt_host=info"));
 
     if daemon {
         // Daemon mode: log to file
