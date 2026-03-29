@@ -169,6 +169,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "asn1_der"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4858a9d740c5007a9069007c3b4e91152d0506f13c1b31dd49051fd537656156"
+
+[[package]]
 name = "async-io"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -379,7 +385,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 [[package]]
 name = "cairn-p2p"
 version = "0.4.0"
-source = "git+https://github.com/moukrea/cairn.git?branch=main#1c043c618fdffb636243e8b32607a70d75979e43"
+source = "git+https://github.com/moukrea/cairn.git?branch=main#ebf3eb44b53981d8899141b838dadf15a1c0686d"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1612,7 +1618,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jaunt-client"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "cairn-p2p",
  "clap",
@@ -1627,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "jaunt-host"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "cairn-p2p",
  "clap",
@@ -1645,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "jaunt-protocol"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "base64",
  "rmp-serde",
@@ -1868,12 +1874,14 @@ version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0c7892c221730ba55f7196e98b0b8ba5e04b4155651736036628e9f73ed6fc3"
 dependencies = [
+ "asn1_der",
  "bs58",
  "ed25519-dalek",
  "hkdf",
  "multihash",
  "quick-protobuf",
  "rand 0.8.5",
+ "ring 0.17.14",
  "sha2",
  "thiserror 2.0.18",
  "tracing",

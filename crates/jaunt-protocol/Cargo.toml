@@ -1,6 +1,6 @@
 [package]
 name = "jaunt-protocol"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 description = "Shared protocol types for Jaunt"
 license = "MIT"
