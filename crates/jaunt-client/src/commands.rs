@@ -1,8 +1,14 @@
 use cairn_p2p::{CairnConfig, Event, StorageBackend, TurnServer};
 use jaunt_protocol::messages::*;
 use jaunt_protocol::profile::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::config::{ClientConfig, HostEntry};
+
+/// Tag byte for RPC messages (must match jaunt-host).
+const TAG_RPC: u8 = 0x01;
+/// Tag byte for PTY data (must match jaunt-host).
+const TAG_PTY: u8 = 0x02;
 
 fn build_cairn_config_for_host(host: &HostEntry, client_config: &ClientConfig) -> CairnConfig {
     let mut config = CairnConfig::default();
@@ -44,6 +50,43 @@ fn build_cairn_config_for_host(host: &HostEntry, client_config: &ClientConfig) -
     };
 
     config
+}
+
+/// Encode an RPC request with TAG_RPC prefix for the host's tagged protocol.
+fn encode_tagged_request(request: &RpcRequest) -> Result<Vec<u8>, String> {
+    let payload = jaunt_protocol::encode_request(request).map_err(|e| format!("encode: {e}"))?;
+    let mut tagged = Vec::with_capacity(1 + payload.len());
+    tagged.push(TAG_RPC);
+    tagged.extend_from_slice(&payload);
+    Ok(tagged)
+}
+
+/// Decode a response, stripping the TAG_RPC prefix if present.
+fn decode_response(data: &[u8]) -> Result<RpcResponse, String> {
+    let payload = if !data.is_empty() && data[0] == TAG_RPC {
+        &data[1..]
+    } else {
+        data
+    };
+    jaunt_protocol::decode_response(payload).map_err(|e| format!("decode response: {e}"))
+}
+
+/// Wait for an RPC response with a timeout.
+async fn recv_rpc_response(
+    node: &cairn_p2p::Node,
+    timeout_secs: u64,
+) -> Result<RpcResponse, String> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        node.recv_event(),
+    )
+    .await
+    {
+        Ok(Some(Event::MessageReceived { data, .. })) => decode_response(&data),
+        Ok(Some(_)) => Err("unexpected event from host".to_string()),
+        Ok(None) => Err("connection closed".to_string()),
+        Err(_) => Err("timeout waiting for host response".to_string()),
+    }
 }
 
 pub async fn cmd_pair_pin(
@@ -181,56 +224,167 @@ pub async fn cmd_sessions(config: &ClientConfig, host: &HostEntry) -> Result<(),
         .await
         .map_err(|e| format!("channel open failed: {e}"))?;
 
-    let request = RpcRequest::SessionList {};
-    let data = jaunt_protocol::encode_request(&request).map_err(|e| format!("encode: {e}"))?;
+    let data = encode_tagged_request(&RpcRequest::SessionList {})?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send failed: {e}"))?;
 
-    if let Some(Event::MessageReceived { data, .. }) = node.recv_event().await {
-        match jaunt_protocol::decode_response(&data) {
-            Ok(RpcResponse::Ok(RpcData::SessionList(sessions))) => {
-                if sessions.is_empty() {
-                    println!("No sessions on {}", host.host_name);
-                } else {
+    match recv_rpc_response(&node, 10).await? {
+        RpcResponse::Ok(RpcData::SessionList(sessions)) => {
+            if sessions.is_empty() {
+                println!("No sessions on {}", host.host_name);
+            } else {
+                println!(
+                    "{:<16}  {:<12}  {:<6}  {:<10}  CWD",
+                    "ID", "NAME", "SHELL", "STATE"
+                );
+                for s in &sessions {
+                    let name = s.name.as_deref().unwrap_or("-");
+                    let shell = s.shell.rsplit('/').next().unwrap_or(&s.shell);
                     println!(
-                        "{:<16}  {:<12}  {:<6}  {:<10}  CWD",
-                        "ID", "NAME", "SHELL", "STATE"
+                        "{:<16}  {:<12}  {:<6}  {:<10}  {}",
+                        &s.id[..8.min(s.id.len())],
+                        name,
+                        shell,
+                        s.state,
+                        s.cwd
                     );
-                    for s in &sessions {
-                        let name = s.name.as_deref().unwrap_or("-");
-                        let shell = s.shell.rsplit('/').next().unwrap_or(&s.shell);
-                        println!(
-                            "{:<16}  {:<12}  {:<6}  {:<10}  {}",
-                            &s.id[..8.min(s.id.len())],
-                            name,
-                            shell,
-                            s.state,
-                            s.cwd
-                        );
-                    }
                 }
             }
-            Ok(RpcResponse::Error { message, .. }) => return Err(message),
-            _ => {}
+        }
+        RpcResponse::Error { message, .. } => return Err(message),
+        other => {
+            eprintln!("warning: unexpected response: {:?}", other);
         }
     }
     Ok(())
 }
 
-pub async fn cmd_attach(host: &HostEntry, _session: &str) -> Result<(), String> {
-    println!(
-        "Attaching to session on {}... (streaming PTY not yet implemented in CLI client)",
-        host.host_name
-    );
+pub async fn cmd_attach(
+    config: &ClientConfig,
+    host: &HostEntry,
+    target: &str,
+) -> Result<(), String> {
+    let cairn_config = build_cairn_config_for_host(host, config);
+    let node = cairn_p2p::create_with_config(cairn_config)
+        .map_err(|e| format!("failed to create cairn node: {e}"))?;
+
+    let session = node
+        .connect(&host.peer_id)
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+
+    let channel = session
+        .open_channel("rpc")
+        .await
+        .map_err(|e| format!("channel open failed: {e}"))?;
+
+    // Send SessionAttach RPC
+    let data = encode_tagged_request(&RpcRequest::SessionAttach {
+        target: target.to_string(),
+    })?;
+    session
+        .send(&channel, &data)
+        .await
+        .map_err(|e| format!("send failed: {e}"))?;
+
+    // Wait for attach response
+    match recv_rpc_response(&node, 10).await? {
+        RpcResponse::Ok(_) => {} // Success — scrollback may come as PTY data
+        RpcResponse::Error { message, .. } => return Err(format!("attach failed: {message}")),
+        _ => return Err("unexpected response to attach".to_string()),
+    }
+
+    // Enable raw terminal mode
+    crossterm::terminal::enable_raw_mode()
+        .map_err(|e| format!("failed to enable raw mode: {e}"))?;
+
+    // Send initial terminal size
+    if let Ok((cols, rows)) = crossterm::terminal::size() {
+        let resize_data = encode_tagged_request(&RpcRequest::Resize { cols, rows })?;
+        let _ = session.send(&channel, &resize_data).await;
+    }
+
+    // Run the bidirectional I/O loop
+    let result = attach_loop(&node, &session, &channel).await;
+
+    // Always restore terminal
+    let _ = crossterm::terminal::disable_raw_mode();
+
+    // Best-effort detach
+    if let Ok(detach_data) = encode_tagged_request(&RpcRequest::SessionDetach {}) {
+        let _ = session.send(&channel, &detach_data).await;
+    }
+
+    result
+}
+
+async fn attach_loop(
+    node: &cairn_p2p::Node,
+    session: &cairn_p2p::Session,
+    channel: &cairn_p2p::Channel,
+) -> Result<(), String> {
+    let mut stdin = tokio::io::stdin();
+    let mut stdout = tokio::io::stdout();
+    let mut buf = [0u8; 4096];
+
+    let mut sigwinch =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())
+            .map_err(|e| format!("signal handler: {e}"))?;
+
+    loop {
+        tokio::select! {
+            n = stdin.read(&mut buf) => {
+                let n = n.map_err(|e| format!("stdin: {e}"))?;
+                if n == 0 { break; }
+                let mut tagged = Vec::with_capacity(1 + n);
+                tagged.push(TAG_PTY);
+                tagged.extend_from_slice(&buf[..n]);
+                session.send(channel, &tagged).await
+                    .map_err(|e| format!("send: {e}"))?;
+            }
+            event = node.recv_event() => {
+                match event {
+                    Some(Event::MessageReceived { data, .. }) if !data.is_empty() => {
+                        match data[0] {
+                            TAG_PTY => {
+                                stdout.write_all(&data[1..]).await
+                                    .map_err(|e| format!("stdout: {e}"))?;
+                                stdout.flush().await
+                                    .map_err(|e| format!("flush: {e}"))?;
+                            }
+                            TAG_RPC => {
+                                if let Ok(resp) = jaunt_protocol::decode_response(&data[1..]) {
+                                    if let RpcResponse::SessionEvent { event, session_id } = resp {
+                                        eprintln!("\r\nSession {session_id}: {event}");
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    None => break,
+                    _ => {}
+                }
+            }
+            _ = sigwinch.recv() => {
+                if let Ok((cols, rows)) = crossterm::terminal::size() {
+                    if let Ok(resize_data) = encode_tagged_request(&RpcRequest::Resize { cols, rows }) {
+                        let _ = session.send(channel, &resize_data).await;
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
 pub async fn cmd_send(
     config: &ClientConfig,
     host: &HostEntry,
-    session: &str,
+    session_target: &str,
     command: &str,
 ) -> Result<(), String> {
     let cairn_config = build_cairn_config_for_host(host, config);
@@ -247,16 +401,24 @@ pub async fn cmd_send(
         .await
         .map_err(|e| format!("channel open failed: {e}"))?;
 
-    let request = RpcRequest::SessionSend {
-        target: session.to_string(),
+    let data = encode_tagged_request(&RpcRequest::SessionSend {
+        target: session_target.to_string(),
         input: command.to_string(),
-    };
-    let data = jaunt_protocol::encode_request(&request).map_err(|e| format!("encode: {e}"))?;
+    })?;
     conn.send(&channel, &data)
         .await
         .map_err(|e| format!("send failed: {e}"))?;
 
-    println!("Sent command to {session} on {}", host.host_name);
+    // Read confirmation from host
+    match recv_rpc_response(&node, 10).await? {
+        RpcResponse::Ok(_) => {
+            println!("Sent command to {session_target} on {}", host.host_name);
+        }
+        RpcResponse::Error { message, .. } => return Err(message),
+        other => {
+            eprintln!("warning: unexpected response: {:?}", other);
+        }
+    }
     Ok(())
 }
 
@@ -275,34 +437,33 @@ pub async fn cmd_files(config: &ClientConfig, host: &HostEntry, path: &str) -> R
         .await
         .map_err(|e| format!("channel open failed: {e}"))?;
 
-    let request = RpcRequest::FileBrowse {
+    let data = encode_tagged_request(&RpcRequest::FileBrowse {
         path: path.to_string(),
         show_hidden: false,
-    };
-    let data = jaunt_protocol::encode_request(&request).map_err(|e| format!("encode: {e}"))?;
+    })?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send failed: {e}"))?;
 
-    if let Some(Event::MessageReceived { data, .. }) = node.recv_event().await {
-        match jaunt_protocol::decode_response(&data) {
-            Ok(RpcResponse::Ok(RpcData::DirListing { path, entries })) => {
-                println!("{path}:");
-                for e in &entries {
-                    if e.hidden {
-                        continue;
-                    }
-                    let type_char = match &e.entry_type {
-                        EntryType::Directory => "d",
-                        EntryType::File => "-",
-                        EntryType::Symlink { .. } => "l",
-                    };
-                    println!("  {type_char} {:>10}  {}", e.size, e.name);
+    match recv_rpc_response(&node, 10).await? {
+        RpcResponse::Ok(RpcData::DirListing { path, entries }) => {
+            println!("{path}:");
+            for e in &entries {
+                if e.hidden {
+                    continue;
                 }
+                let type_char = match &e.entry_type {
+                    EntryType::Directory => "d",
+                    EntryType::File => "-",
+                    EntryType::Symlink { .. } => "l",
+                };
+                println!("  {type_char} {:>10}  {}", e.size, e.name);
             }
-            Ok(RpcResponse::Error { message, .. }) => return Err(message),
-            _ => {}
+        }
+        RpcResponse::Error { message, .. } => return Err(message),
+        other => {
+            eprintln!("warning: unexpected response: {:?}", other);
         }
     }
     Ok(())
@@ -312,7 +473,7 @@ pub async fn cmd_new_session(
     config: &ClientConfig,
     host: &HostEntry,
     name: Option<&str>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let cairn_config = build_cairn_config_for_host(host, config);
     let node = cairn_p2p::create_with_config(cairn_config)
         .map_err(|e| format!("failed to create cairn node: {e}"))?;
@@ -327,25 +488,27 @@ pub async fn cmd_new_session(
         .await
         .map_err(|e| format!("channel open failed: {e}"))?;
 
-    let request = RpcRequest::SessionCreate {
+    let data = encode_tagged_request(&RpcRequest::SessionCreate {
         shell: None,
         name: name.map(|s| s.to_string()),
         cwd: None,
-    };
-    let data = jaunt_protocol::encode_request(&request).map_err(|e| format!("encode: {e}"))?;
+    })?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send failed: {e}"))?;
 
-    if let Some(Event::MessageReceived { data, .. }) = node.recv_event().await {
-        match jaunt_protocol::decode_response(&data) {
-            Ok(RpcResponse::Ok(RpcData::SessionCreated { id })) => println!("{id}"),
-            Ok(RpcResponse::Error { message, .. }) => return Err(message),
-            _ => {}
+    match recv_rpc_response(&node, 10).await? {
+        RpcResponse::Ok(RpcData::SessionCreated { id }) => {
+            println!("{id}");
+            Ok(id)
+        }
+        RpcResponse::Error { message, .. } => Err(message),
+        other => {
+            eprintln!("warning: unexpected response: {:?}", other);
+            Err("unexpected response from host".to_string())
         }
     }
-    Ok(())
 }
 
 pub async fn cmd_kill_session(
@@ -367,16 +530,23 @@ pub async fn cmd_kill_session(
         .await
         .map_err(|e| format!("channel open failed: {e}"))?;
 
-    let request = RpcRequest::SessionKill {
+    let data = encode_tagged_request(&RpcRequest::SessionKill {
         target: session_target.to_string(),
-    };
-    let data = jaunt_protocol::encode_request(&request).map_err(|e| format!("encode: {e}"))?;
+    })?;
     session
         .send(&channel, &data)
         .await
         .map_err(|e| format!("send failed: {e}"))?;
 
-    println!("Killed session {session_target} on {}", host.host_name);
+    match recv_rpc_response(&node, 10).await? {
+        RpcResponse::Ok(_) => {
+            println!("Killed session {session_target} on {}", host.host_name);
+        }
+        RpcResponse::Error { message, .. } => return Err(message),
+        other => {
+            eprintln!("warning: unexpected response: {:?}", other);
+        }
+    }
     Ok(())
 }
 
