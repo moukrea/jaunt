@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use jaunt_protocol::messages::*;
 use std::path::PathBuf;
 use std::process::Command;
@@ -9,6 +8,7 @@ use tokio::net::UnixStream;
 // These match snag's protocol/types.rs and codec.rs exactly.
 
 const MSG_SESSION_ATTACH: u8 = 0x06;
+#[allow(dead_code)]
 const MSG_SESSION_DETACH: u8 = 0x07;
 const MSG_RESIZE: u8 = 0x0E;
 const MSG_PTY_INPUT: u8 = 0x10;
@@ -61,6 +61,7 @@ pub struct SnagAttachment {
     reader: tokio::io::ReadHalf<UnixStream>,
 }
 
+#[allow(dead_code)]
 impl SnagAttachment {
     /// Connect to the snag daemon and attach to a session.
     /// Returns the initial scrollback text and the attachment handle.

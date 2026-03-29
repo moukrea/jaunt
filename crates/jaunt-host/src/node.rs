@@ -672,9 +672,9 @@ fn handle_rpc_request(
         }
         RpcRequest::FileBrowse {
             path,
-            show_hidden: _,
+            show_hidden,
         } => match file_browser {
-            Some(fb) => match fb.browse(path) {
+            Some(fb) => match fb.browse(path, Some(*show_hidden)) {
                 Ok(data) => RpcResponse::Ok(data),
                 Err(e) => RpcResponse::Error {
                     code: 10,
@@ -716,8 +716,39 @@ fn handle_rpc_request(
         RpcRequest::SessionAttach { .. }
         | RpcRequest::SessionDetach {}
         | RpcRequest::Resize { .. } => RpcResponse::Ok(RpcData::Empty {}),
-        RpcRequest::FileDownload { .. } | RpcRequest::FileUpload { .. } => {
-            RpcResponse::Ok(RpcData::Empty {})
+        RpcRequest::FileDownload { path } => match file_browser {
+            Some(fb) => match fb.validate_path(&std::path::PathBuf::from(path)) {
+                Ok(canonical) => match std::fs::read(&canonical) {
+                    Ok(content) => RpcResponse::Ok(RpcData::FileReady {
+                        size: content.len() as u64,
+                    }),
+                    Err(e) => RpcResponse::Error {
+                        code: 14,
+                        message: format!("read failed: {e}"),
+                    },
+                },
+                Err(e) => RpcResponse::Error {
+                    code: 10,
+                    message: e,
+                },
+            },
+            None => RpcResponse::Error {
+                code: 10,
+                message: "file browser disabled".into(),
+            },
+        },
+        RpcRequest::FileUpload { path, size: _ } => match file_browser {
+            Some(fb) => match fb.validate_path(&std::path::PathBuf::from(path)) {
+                Ok(_) => RpcResponse::Ok(RpcData::FileReady { size: 0 }),
+                Err(e) => RpcResponse::Error {
+                    code: 10,
+                    message: e,
+                },
+            },
+            None => RpcResponse::Error {
+                code: 10,
+                message: "file browser disabled".into(),
+            },
         }
     }
 }

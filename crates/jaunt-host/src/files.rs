@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub struct FileBrowser {
     roots: Vec<PathBuf>,
     write_enabled: bool,
+    default_show_hidden: bool,
 }
 
 impl FileBrowser {
@@ -13,10 +14,11 @@ impl FileBrowser {
         Self {
             roots: config.resolve_roots(),
             write_enabled: config.files.write,
+            default_show_hidden: config.files.show_hidden,
         }
     }
 
-    fn validate_path(&self, path: &Path) -> Result<PathBuf, String> {
+    pub fn validate_path(&self, path: &Path) -> Result<PathBuf, String> {
         let canonical = std::fs::canonicalize(path).map_err(|e| format!("invalid path: {e}"))?;
         for root in &self.roots {
             if let Ok(root_canonical) = std::fs::canonicalize(root) {
@@ -28,7 +30,8 @@ impl FileBrowser {
         Err("path outside allowed roots".to_string())
     }
 
-    pub fn browse(&self, path: &str) -> Result<RpcData, String> {
+    pub fn browse(&self, path: &str, show_hidden: Option<bool>) -> Result<RpcData, String> {
+        let show_hidden = show_hidden.unwrap_or(self.default_show_hidden);
         let path = PathBuf::from(path);
         let canonical = self.validate_path(&path)?;
 
@@ -60,7 +63,10 @@ impl FileBrowser {
                     };
                     (size, modified, permissions, ft)
                 }
-                Err(_) => (0, 0, 0, EntryType::File),
+                Err(e) => {
+                    eprintln!("warning: metadata read failed for {}: {e}", name);
+                    (0, 0, 0, EntryType::File)
+                }
             };
 
             result.push(DirEntry {
@@ -73,6 +79,9 @@ impl FileBrowser {
             });
         }
 
+        if !show_hidden {
+            result.retain(|e| !e.hidden);
+        }
         result.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(RpcData::DirListing {
