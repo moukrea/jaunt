@@ -640,9 +640,9 @@ fn get_non_docker_listen_addrs() -> Result<Vec<String>, String> {
 
     for iface in ifaces {
         let ip = match iface.address.and_then(|a| {
-            a.as_sockaddr_in().map(|s| IpAddr::V4(s.ip())).or_else(|| {
-                a.as_sockaddr_in6().map(|s| IpAddr::V6(s.ip()))
-            })
+            a.as_sockaddr_in()
+                .map(|s| IpAddr::V4(s.ip()))
+                .or_else(|| a.as_sockaddr_in6().map(|s| IpAddr::V6(s.ip())))
         }) {
             Some(ip) => ip,
             None => continue,
