@@ -71,9 +71,14 @@ jobs:
         run: cargo install tauri-cli --version "^2"
 
       - name: Set Tauri version from tag
+        shell: bash
         run: |
           VERSION="${{ github.ref_name }}"
-          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" tauri/src-tauri/tauri.conf.json
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" tauri/src-tauri/tauri.conf.json
+          else
+            sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" tauri/src-tauri/tauri.conf.json
+          fi
 
       - name: Build Tauri app
         working-directory: tauri/src-tauri
