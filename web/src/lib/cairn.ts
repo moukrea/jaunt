@@ -101,9 +101,9 @@ export async function pairScanQr(data: Uint8Array): Promise<string> {
   return await node.pairScanQr(data);
 }
 
-export async function pairEnterPin(pin: string): Promise<string> {
+export async function pairEnterPin(pin: string, remotePeerId?: string): Promise<string> {
   if (!node) throw new Error('Node not initialized');
-  return await node.pairEnterPin(pin);
+  return await node.pairEnterPin(pin, remotePeerId);
 }
 
 export async function pairFromLink(uri: string): Promise<string> {
