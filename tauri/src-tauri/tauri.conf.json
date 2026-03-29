@@ -1,6 +1,6 @@
 {
   "productName": "Jaunt",
-  "version": "0.10.3",
+  "version": "0.11.0",
   "identifier": "dev.moukrea.jaunt",
   "build": {
     "frontendDist": "../../web/dist",
