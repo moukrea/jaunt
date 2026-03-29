@@ -1,0 +1,22 @@
+[Unit]
+Description=Jaunt host daemon — P2P remote shell access
+Documentation=https://github.com/moukrea/jaunt
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/jaunt-host serve
+ExecStop=/usr/bin/jaunt-host stop
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/jaunt %h/.local/share/jaunt
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target
