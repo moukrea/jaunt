@@ -98,11 +98,16 @@ jobs:
             sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$crate_toml"
           done
 
+          # Update Tauri config version
+          if [ -f tauri/src-tauri/tauri.conf.json ]; then
+            sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" tauri/src-tauri/tauri.conf.json
+          fi
+
           # Regenerate Cargo.lock
           cargo generate-lockfile
 
           # Stage changes
-          git add Cargo.toml crates/*/Cargo.toml Cargo.lock
+          git add Cargo.toml crates/*/Cargo.toml Cargo.lock tauri/src-tauri/tauri.conf.json
 
           # Commit
           git commit -m "chore(release): bump version to $NEW_VERSION"
