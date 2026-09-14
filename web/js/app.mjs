@@ -59,7 +59,10 @@ function makeMachine(machine) {
     path: machine.lastPath || '~', pathDraft: null, listing: null, listingVersion: 0, remoteClipboard: '', fileError: ''};
   a.link = new Link(machine, persist); machines.set(machine.room, a);
   a.link.addEventListener('status', () => {
-    for (const t of a.terms.values()) t.term.options.disableStdin = a.link.state !== 'online' || !t.session.alive;
+    for (const t of a.terms.values()) {
+      if (a.link.state !== 'online') t.attached = false;
+      updateTermInput(a, t);
+    }
     render();
   });
   a.link.addEventListener('error', e => toast(`${machine.name}: ${e.detail}`, true));
@@ -90,7 +93,7 @@ function syncSessions(a) {
   for (const [id, t] of a.terms) {
     const s = a.sessions.find(s => s.id === id);
     if (!s) { t.term.dispose(); t.node.remove(); a.terms.delete(id); }
-    else { t.session = s; t.term.options.disableStdin = a.link.state !== 'online' || !s.alive; }
+    else { t.session = s; updateTermInput(a, t); }
   }
   if (!a.sessions.some(s => s.id === a.active)) a.active = a.sessions[0]?.id || '';
 }
@@ -112,7 +115,7 @@ function handleMessage(a, message) {
     t.offset = message.offset + raw.length;
     t.term.write(raw.subarray(skip));
   } else if (message.type === 'terminal.exit') {
-    const t = a.terms.get(message.id); if (t) { t.session.alive = false; t.term.options.disableStdin = true; }
+    const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
     render();
   } else if (message.type === 'notification') {
     toast(`${message.title}${message.body ? ' — ' + message.body : ''}`, false,
@@ -131,7 +134,7 @@ function renderConnection() {
   $('latency').textContent = a?.link.latency != null ? `${a.link.latency} ms` : '';
   $('connection-banner').hidden = !a || state === 'online';
   $('connection-banner').textContent = state === 'offline'
-    ? 'Not connected. Reconnect in Settings, or pair again if this device was revoked.'
+    ? (a?.link.message || 'Not connected. Open Settings and choose Reconnect to use the saved pairing.')
     : 'Reconnecting without a new pairing. Remote shells stay alive while the host daemon is running.';
 }
 function renderMachines() {
@@ -191,6 +194,7 @@ function createTerm(a, session) {
   a.terms.set(session.id, t);
   const area = node.querySelector('textarea');
   if (area) { area.setAttribute('autocorrect', 'off'); area.setAttribute('autocapitalize', 'off'); area.spellcheck = false; area.setAttribute('aria-label', `Terminal ${session.name}`); }
+  updateTermInput(a, t);
   let initialFit = false;
   term.onRender(() => { if (!initialFit && !node.hidden) { initialFit = true; requestAnimationFrame(fitActive); } });
   term.onData(data => {
@@ -232,17 +236,23 @@ function createTerm(a, session) {
   }, true);
   return t;
 }
+function updateTermInput(a, t) {
+  const disabled = a.link.state !== 'online' || !t.session.alive || !t.attached;
+  t.term.options.disableStdin = disabled;
+  const area = t.node.querySelector('textarea');
+  if (area) area.disabled = disabled;
+}
 async function attachTerm(a, t) {
   if (a.link.state !== 'online') return;
   const generation = a.link.generation;
   if (t.attaching?.generation === generation) return t.attaching.promise;
-  t.attached = false;
+  t.attached = false; updateTermInput(a, t);
   const promise = (async () => {
     await a.link.request('session.attach', {id: t.session.id, after: t.offset});
     // xterm writes are asynchronous: drain replay before allowing parser responses/input.
     await new Promise(resolve => t.term.write('', resolve));
     if (generation !== a.link.generation || a.link.state !== 'online') return;
-    t.generation = generation; t.attached = true;
+    t.generation = generation; t.attached = true; updateTermInput(a, t);
     if (a === current() && a.active === t.session.id) {
       fitActive();
       await a.link.send({type: 'terminal.resize', id: t.session.id, cols: t.term.cols, rows: t.term.rows});

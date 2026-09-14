@@ -90,6 +90,7 @@ async def scrollback(page):
     text=await page.get_by_label('Terminal scrollback').input_value();await page.locator('#modal-close').click();return text
 
 async def terminal_command(page,text):
+    await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
     await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.type(text);await page.keyboard.press('Enter')
 
 async def main():
@@ -129,6 +130,19 @@ async def main():
         await page.reload();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
         await expect(page.locator('#tabs')).to_contain_text('Workspace');assert json.loads(h.cli('status'))['pid']==original
         passed('reload uses remembered identity and preserves sessions')
+        # Suspend only our isolated host: the relay still answers WebSocket pings.
+        # The UI must detect missing authenticated host replies, not trust relay pongs.
+        h.host.send_signal(signal.SIGSTOP)
+        try:
+            await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=90000)
+        finally:
+            h.host.send_signal(signal.SIGCONT)
+        await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=45000)
+        assert json.loads(h.cli('status'))['pid']==original
+        await terminal_command(page,"printf 'HOST_RESUMED\\n' > host-resumed.txt")
+        await until(lambda:(h.work/'host-resumed.txt').exists())
+        assert (h.work/'host-resumed.txt').read_text()=='HOST_RESUMED\n'
+        passed('host silence detected despite live relay pongs; remembered session resumes')
         # Drop the relay process: real TCP/WebSocket connections close, not merely
         # a browser offline indicator. Host stays alive and re-registers its room.
         h.kill_relay()
@@ -193,8 +207,14 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*.png'))));await page.wait_for_timeout(300)
-        assert 'screenshot.png' in await scrollback(page);passed('PNG conversion/upload and quoted-path insertion, native clipboard truthfully unavailable')
+        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        for _ in range(50):
+            if 'screenshot.png' in await scrollback(page):break
+            await asyncio.sleep(.1)
+        else:raise AssertionError('Uploaded image path never reached terminal scrollback')
+        passed('PNG conversion/upload and quoted-path insertion, native clipboard truthfully unavailable')
         # Ctrl+C clears the unsubmitted image path; it must not execute on upload.
+        await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
         await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
         h.cli('clip',input='Shared remote clipboard\n'+('abcé'*20000))
         await page.locator('#copy-button').click();await page.get_by_role('button',name='Read remote clipboard',exact=True).click()
