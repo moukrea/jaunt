@@ -28,6 +28,13 @@ de l’hôte dans le statut du navigateur. Le client suit désormais séparémen
 réception de messages authentifiés de l’hôte. Un test suspend le processus hôte
 isolé tout en laissant le relais actif et exige déconnexion puis reprise.
 La recette publique complète après cette correction reste à terminer.
+La panne supplémentaire de sortie PTY venait d’une exception WebSocket brute
+pendant un envoi : elle terminait la tâche de lecture du terminal. Le transport
+normalise désormais les interruptions en ConnectionError et ferme le canal
+inutilisable. Deux tests avec un vrai PTY couvrent ConnectionClosedError et un
+timeout d’envoi, puis exigent replay et nouvelle sortie avec le même PID.
+La suite Python passe à 36 tests. La release corrective prévue est beta.2 ;
+la beta.1 publique reste immuable.
 
 ## Exécutions réellement observées
 

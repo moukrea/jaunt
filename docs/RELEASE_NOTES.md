@@ -1,7 +1,7 @@
-# Jaunt 0.1.0-beta.1
+# Jaunt 0.1.0-beta.2
 
-First from-scratch Jaunt host and mobile-first web client. Arbitrary POSIX PTYs, remembered encrypted pairing, reconnect, files, resumable network transfers, conditional native image clipboard, PWA notifications and a project-owned blind relay.
+Fix interrupted WebSocket sends so the PTY output pump keeps running after network loss. The shell, replay buffer and remembered identities survive the interruption. Upgrade retains host and device identities; active ordinary shells still block a restart unless explicitly authorized with `JAUNT_ALLOW_RESTART=1`.
 
-This is a beta, not an externally audited secure-access product. Read README.md and SECURITY.md. Native image paste needs an accessible host desktop clipboard; headless hosts use image upload plus a quoted path. Plain PTYs do not survive daemon restarts; use tmux when appropriate.
+The web client separately checks authenticated host liveness, waits for terminal attachment before accepting input, and preserves disconnect reasons. Real PTY and browser regression tests cover recovery.
 
-Install only against a deployed Jaunt Page with a configured relay. No public relay or production/hardware test is implied by publishing these sources.
+This beta has no independent protocol/security audit. Native image paste requires an accessible host desktop clipboard; headless hosts support image upload plus a quoted path without Enter. Physical phone camera, network switching and locked-screen push have not been tested by the agent. See docs/VALIDATION.md for observed results and remaining limits.

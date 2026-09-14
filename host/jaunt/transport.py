@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
@@ -8,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from urllib.parse import urlparse
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 log = logging.getLogger("jaunt")
 
@@ -35,7 +37,8 @@ class Transport:
 
     async def send(self, value: dict) -> None:
         async with self.lock:
-            if not self.ws or not self.ready.is_set():
+            ws = self.ws
+            if not ws or not self.ready.is_set():
                 raise ConnectionError("Relay is disconnected")
             raw = json.dumps(value, separators=(",", ":"))
             if len(raw.encode()) > 131_000:
@@ -43,7 +46,16 @@ class Transport:
             loop = asyncio.get_running_loop()
             await asyncio.sleep(max(0, self.next_send - loop.time()))
             self.next_send = loop.time() + max(0.008, len(raw) / (1.5 * 1024 * 1024))
-            await asyncio.wait_for(self.ws.send(raw), 12)
+            try:
+                await asyncio.wait_for(ws.send(raw), 12)
+            except (ConnectionClosed, OSError) as exc:
+                # Keep callers such as the PTY output pump alive across an outage.
+                # A failed encrypted send also invalidates this transport/channel.
+                if self.ws is ws:
+                    self.ready.clear()
+                with contextlib.suppress(ConnectionClosed, OSError):
+                    await ws.close()
+                raise ConnectionError("Relay send interrupted") from exc
 
     async def route(self, peer: str, value: dict) -> None:
         await self.send({"type": "route", "to": peer, "data": value})
