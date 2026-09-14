@@ -1,0 +1,9 @@
+{
+  "ui": "branch UI injected before deployment; public relay and release-installed beta.2 host",
+  "clipboard": "isolated Xvfb/X11, real xclip",
+  "pngBytesEqual": true,
+  "ptyInputHex": "16",
+  "enterSent": false,
+  "actualClaudeOrCodexAttachmentVerified": false,
+  "physicalAndroidTested": false
+}

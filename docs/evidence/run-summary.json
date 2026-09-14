@@ -1,14 +1,20 @@
 {
   "date": "2026-09-14",
-  "pytest": 34,
+  "release": "v0.1.0-beta.2",
+  "pytest": 36,
   "node": 17,
   "miniflare": 1,
-  "browser": 18,
-  "installerOnlineDependencies": 8,
-  "productionDeployed": false,
-  "cloudflareAuthorization": "missing",
-  "physicalPhoneTested": false,
+  "browserPython": 20,
+  "browserWorker": 20,
+  "installer": 8,
+  "publicRecipe": 11,
+  "productionDeployed": true,
+  "cloudflareAuthorization": "maintainer OAuth",
+  "physicalPhoneTestedByAgent": false,
+  "androidScreenshotPaste": "empty API fallback and automatic native forwarding implemented; physical handset confirmation pending",
   "securityAudit": "not performed",
-  "browserWorker": 19,
-  "ci": "https://github.com/moukrea/jaunt/actions/runs/34849935562"
+  "ci": "https://github.com/moukrea/jaunt/actions/runs/34855112550",
+  "pages": "https://moukrea.github.io/jaunt/",
+  "browserWorkerLocal": 22,
+  "nativeClipboardTest": "real X11/PTY before UI deployment; identical PNG and Ctrl+V only"
 }

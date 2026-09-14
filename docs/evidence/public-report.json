@@ -1,0 +1,18 @@
+{
+  "page": "https://moukrea.github.io/jaunt/",
+  "passed": [
+    "public wheel installed without editable source; enabled user service owns the connected daemon",
+    "public Page pairing; real Cloudflare WebSockets and authenticated encrypted channel",
+    "arbitrary shell command proven in terminal and guest file; second tab and return to first",
+    "public upload and download of multichunk Unicode/binary file; exact byte comparison",
+    "image uploaded with quoted path and no Enter; native clipboard correctly unavailable on headless VM",
+    "public Page reload reconnects remembered device without QR",
+    "real guest network interruption; same shell PID and session return without new pairing",
+    "public installer upgrade refuses to silently destroy active ordinary shells",
+    "explicitly authorized upgrade restarts service and retains host/device identities",
+    "revoked public browser loses shell access",
+    "no uncaught public browser errors"
+  ],
+  "physicalPhone": false,
+  "protocolAudit": false
+}

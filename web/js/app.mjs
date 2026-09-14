@@ -227,11 +227,12 @@ function createTerm(a, session) {
     return true;
   });
   node.addEventListener('paste', event => {
-    const files = Array.from(event.clipboardData?.files || []);
-    if (files.length) { event.preventDefault(); event.stopImmediatePropagation(); attachFiles(a, t, files).catch(report); }
+    const files = clipboardFiles(event.clipboardData);
+    if (files.length) { event.preventDefault(); event.stopImmediatePropagation(); pasteFiles(a, t, files).catch(report); }
     else {
       const text = event.clipboardData?.getData('text/plain');
-      if (text != null) { event.preventDefault(); event.stopImmediatePropagation(); insertText(a, t, text).catch(report); }
+      if (text) { event.preventDefault(); event.stopImmediatePropagation(); insertText(a, t, text).catch(report); }
+      else { event.preventDefault(); event.stopImmediatePropagation(); showPastePanel(a, t); }
     }
   }, true);
   return t;
@@ -425,6 +426,7 @@ function transferItem(a, name, direction, total) {
 }
 function progressFor(item) { return value => { Object.assign(item, value); renderTransfers(); }; }
 function renderTransfers() {
+  $('file-transfers').hidden = transfers.length === 0;
   $('transfer-count').textContent = transfers.filter(t => !t.done).length || '';
   $('transfer-list').replaceChildren(...transfers.map(t => {
     const fraction = t.total ? Math.min(1, t.offset / t.total) : t.done && !t.error ? 1 : 0;
@@ -534,21 +536,94 @@ function compose(initial = '', label = 'Compose text') {
       }, 'button primary'))));
   area.focus();
 }
+function clipboardFiles(data) {
+  const files = Array.from(data?.files || []);
+  if (files.length) return files;
+  return Array.from(data?.items || []).filter(item => item.kind === 'file')
+    .map(item => item.getAsFile()).filter(Boolean);
+}
+async function pasteFiles(a, t, files) {
+  // The destination is captured before any async clipboard read or upload.
+  // Unsupported hosts keep the explicit upload/path choice, never a fake paste.
+  if (files.length !== 1 || !files[0].type.startsWith('image/') || !a.info?.clipboard?.image) {
+    await attachFiles(a, t, files); return;
+  }
+  closeModal();
+  const file = await toPNG(files[0]);
+  const result = await putFile(a, file, {attachment: true});
+  if (!a.sessions.some(s => s.id === t.session.id && s.alive)) {
+    throw new Error('Image uploaded, but the destination shell has closed. Find its path in Transfers.');
+  }
+  await a.link.request('clipboard.image', {path: result.path, session: t.session.id, paste: true});
+  toast(`Image copied to the host clipboard; Ctrl+V sent to ${t.session.name}.`);
+  selected = a.machine.room; view = 'terminal'; await selectSession(a, t.session.id);
+}
+function showPastePanel(a, t) {
+  const zone = el('div', {class: 'paste-zone', contentEditable: 'true', role: 'textbox',
+    'aria-label': 'Paste text or image', 'aria-multiline': 'true',
+    'data-placeholder': 'Long-press here and choose Paste', spellcheck: false});
+  let busy = false;
+  const accept = async files => {
+    if (busy || !files.length) return;
+    busy = true; zone.replaceChildren();
+    try { await pasteFiles(a, t, files); } catch (error) { busy = false; report(error); }
+  };
+  const receive = event => {
+    const data = event.clipboardData || event.dataTransfer;
+    if (!data) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const files = clipboardFiles(data);
+    if (files.length) { accept(files); return; }
+    // Some mobile keyboards expose an image as HTML instead of FileList.
+    // Parse inertly; never insert clipboard HTML or fetch an external image URL.
+    const html = data.getData('text/html');
+    const doc = html ? new DOMParser().parseFromString(html, 'text/html') : null;
+    const source = doc?.querySelector('img')?.getAttribute('src') || '';
+    const embedded = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(source);
+    if (embedded) {
+      try {
+        if (embedded[2].length > 44 * 1024 * 1024) throw new Error('Clipboard image exceeds 32 MiB. Use Attach instead.');
+        const bytes = Uint8Array.from(atob(embedded[2]), c => c.charCodeAt(0));
+        accept([new File([bytes], `clipboard-${Date.now()}.png`, {type: embedded[1]})]);
+      } catch (error) { report(error); }
+      return;
+    }
+    zone.textContent = data.getData('text/plain');
+    if (!zone.textContent) toast('The browser did not provide image data. Choose the screenshot with Choose image.');
+  };
+  zone.addEventListener('paste', receive);
+  zone.addEventListener('beforeinput', event => { if (event.dataTransfer) receive(event); });
+  const choose = el('input', {type: 'file', accept: 'image/*', hidden: true});
+  choose.onchange = () => { const files = Array.from(choose.files); choose.value = ''; accept(files); };
+  const note = a.info?.clipboard?.image
+    ? `An image will be uploaded, copied to the host clipboard and pasted with Ctrl+V into ${t.session.name}. No Enter is sent.`
+    : 'This host has no desktop image clipboard. Images use Upload & insert path, without Enter.';
+  modal('Paste text or image', el('div', {},
+    el('p', {class: 'modal-copy', text: 'The clipboard API returned no usable content. Long-press in the area below and choose Paste, or choose your screenshot.'}),
+    zone, el('p', {class: 'modal-copy', text: note}), choose,
+    el('div', {class: 'modal-actions'}, button('Choose image', () => choose.click(), 'button', 'image'),
+      button('Insert text', async () => { const text = zone.innerText; if (!text) throw new Error('Paste text or choose an image first.'); closeModal(); await insertText(a, t, text); }, 'button primary'))));
+  zone.focus();
+}
 async function pasteDevice() {
   const a = online(), t = activeTerm(a);
   if (!t) throw new Error('Open a shell first.');
+  let files = [], text = '';
   try {
-    if (navigator.clipboard.read) {
-      const items = await navigator.clipboard.read(), files = [];
+    if (navigator.clipboard?.read) {
+      const items = await navigator.clipboard.read();
       for (const item of items) for (const type of item.types.filter(v => v.startsWith('image/'))) {
         files.push(new File([await item.getType(type)], `clipboard-${Date.now()}.png`, {type})); break;
       }
-      if (files.length) { await attachFiles(a, t, files); return; }
-      for (const item of items) if (item.types.includes('text/plain')) { await insertText(a, t, await (await item.getType('text/plain')).text()); return; }
-      throw new Error('No text or image in the clipboard.');
-    }
-    await insertText(a, t, await navigator.clipboard.readText());
-  } catch { compose('', 'Paste text'); toast('Your browser did not allow clipboard access. Paste into the text field, or use Attach to choose a photo.'); }
+      if (!files.length) for (const item of items) if (item.types.includes('text/plain')) {
+        text = await (await item.getType('text/plain')).text(); if (text) break;
+      }
+    } else if (navigator.clipboard?.readText) text = await navigator.clipboard.readText();
+  } catch { /* A user-triggered rich paste remains possible without async read permission. */ }
+  // Do not swallow upload/host errors as if they were clipboard permission errors.
+  if (files.length) await pasteFiles(a, t, files);
+  else if (text) await insertText(a, t, text);
+  else showPastePanel(a, t);
 }
 function copyMenu() {
   const a = checked(current()), t = activeTerm(a);

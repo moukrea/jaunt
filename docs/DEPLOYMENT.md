@@ -21,8 +21,8 @@ Les versions des outils de déploiement sont épinglées et le lockfile réellem
 
 ## Release hôte puis Pages
 
-1. Passer la CI. Créer le tag `v0.1.0-beta.1` (version Python correspondante `0.1.0b1`). Le workflow release construit le wheel et publie `host-manifest.json`, `SHA256SUMS` et le wheel. La release bêta est explicitement marquée prerelease.
-2. Définir les variables repository `JAUNT_RELAY_URL` (WSS réel), `JAUNT_RELEASE_TAG` (`v0.1.0-beta.1`) et éventuellement `JAUNT_PAGE_URL` (défaut URL du repo). Ni token hôte ni secret de pairing dans les variables publiques.
+1. Passer la CI. Créer le tag `v0.1.0-beta.2` (version Python correspondante `0.1.0b2`). Le workflow release construit le wheel et publie `host-manifest.json`, `SHA256SUMS` et le wheel. La release bêta est explicitement marquée prerelease.
+2. Définir les variables repository `JAUNT_RELAY_URL` (WSS réel), `JAUNT_RELEASE_TAG` (`v0.1.0-beta.2`) et éventuellement `JAUNT_PAGE_URL` (défaut URL du repo). Ni token hôte ni secret de pairing dans les variables publiques.
 3. Activer Pages en mode GitHub Actions. `pages.yml` construit le web, valide la configuration, copie l'installateur et publie.
 4. Le workflow Pages ne doit pas être lancé avec une release inexistante. Le prompt agent impose cet ordre.
 
@@ -41,7 +41,7 @@ Sources primaires : https://developers.cloudflare.com/durable-objects/best-pract
 ## Déploiement observé du 14 septembre 2026
 
 Pages : https://moukrea.github.io/jaunt/ ; relais :
-`wss://jaunt-relay.moukrea.workers.dev` ; release : `v0.1.0-beta.1`.
+`wss://jaunt-relay.moukrea.workers.dev` ; release : `v0.1.0-beta.2`.
 Le Worker a été déployé avec l’OAuth Wrangler autorisé par le propriétaire,
 stocké chiffré localement avec une clé dans le trousseau système.
 `CLOUDFLARE_ACCOUNT_ID` est renseigné dans GitHub ; le workflow relais Actions
