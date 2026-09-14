@@ -37,7 +37,7 @@ export class Link extends EventTarget {
     this.lastSeen = 0; this.lastHostSeen = 0; this.latency = null;
   }
   emit(type, value) { this.dispatchEvent(new CustomEvent(type, {detail: value})); }
-  status(state, message = '') { this.state = state; this.emit('status', {state, message}); }
+  status(state, message = '') { this.state = state; this.message = message; this.emit('status', {state, message}); }
   start() { this.enabled = true; this.connect(); }
   stop(message = '') {
     this.enabled = false; clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);

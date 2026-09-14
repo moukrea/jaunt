@@ -90,6 +90,7 @@ async def scrollback(page):
     text=await page.get_by_label('Terminal scrollback').input_value();await page.locator('#modal-close').click();return text
 
 async def terminal_command(page,text):
+    await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
     await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.type(text);await page.keyboard.press('Enter')
 
 async def main():
@@ -138,8 +139,6 @@ async def main():
             h.host.send_signal(signal.SIGCONT)
         await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=45000)
         assert json.loads(h.cli('status'))['pid']==original
-        # The encrypted welcome precedes asynchronous terminal replay/attachment.
-        await page.wait_for_timeout(300)
         await terminal_command(page,"printf 'HOST_RESUMED\\n' > host-resumed.txt")
         await until(lambda:(h.work/'host-resumed.txt').exists())
         assert (h.work/'host-resumed.txt').read_text()=='HOST_RESUMED\n'
@@ -210,6 +209,7 @@ async def main():
         await until(lambda:bool(list((h.state/'attachments').glob('*.png'))));await page.wait_for_timeout(300)
         assert 'screenshot.png' in await scrollback(page);passed('PNG conversion/upload and quoted-path insertion, native clipboard truthfully unavailable')
         # Ctrl+C clears the unsubmitted image path; it must not execute on upload.
+        await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
         await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
         h.cli('clip',input='Shared remote clipboard\n'+('abcé'*20000))
         await page.locator('#copy-button').click();await page.get_by_role('button',name='Read remote clipboard',exact=True).click()
