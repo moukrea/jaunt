@@ -1,0 +1,26 @@
+{
+  "passed": [
+    "invalid pairing rejected by UI",
+    "URL pairing, encrypted authentication, secret removed from URL",
+    "real PTY command executed; result proven from file and terminal",
+    "multiple arbitrary shell sessions",
+    "reload uses remembered identity and preserves sessions",
+    "relay loss/restart \u2192 automatic fresh encrypted channel, no new QR, same PTY",
+    "late file refresh preserves path draft and pending navigation intent",
+    "in-flight upload resumes after abrupt relay loss, final bytes verified",
+    "multi-chunk binary/Unicode upload with exact byte comparison",
+    "download bytes identical to uploaded file",
+    "remote directory creation",
+    "PNG conversion/upload and quoted-path insertion, native clipboard truthfully unavailable",
+    "chunked remote clipboard >64 KiB",
+    "encrypted local vault, lock, bad password rejected, unlock and reconnect",
+    "local jsQR fallback scans generated QR image; no physical camera claimed",
+    "independent mobile pairing, shared sessions, 360px/390px/landscape/keyboard-height layout",
+    "revoked device disconnected; shell sessions retained",
+    "all precached resources, jsQR license and installer served beneath /jaunt/",
+    "no uncaught browser exceptions"
+  ],
+  "uncaughtErrors": [],
+  "tested": "Chromium desktop and emulated mobile; not a physical handset",
+  "relay": "workerd"
+}

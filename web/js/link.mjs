@@ -1,0 +1,210 @@
+import {b64, unb64, random, ephemeral, proof, verify, transcript, channel} from './crypto.mjs';
+
+export function parsePairing(value) {
+  let encoded = value.trim();
+  if (encoded.startsWith('JAUNT1.')) encoded = encoded.slice(7);
+  else if (encoded.includes('#pair=')) encoded = new URLSearchParams(encoded.split('#')[1]).get('pair');
+  if (!encoded || encoded.length > 6000) throw new Error('Paste a complete Jaunt pairing string or link.');
+  let p;
+  try { p = JSON.parse(new TextDecoder().decode(unb64(encoded))); }
+  catch { throw new Error('This is not a valid Jaunt pairing code.'); }
+  if (p.v !== 1 || !/^[A-Za-z0-9_-]{24}$/.test(p.h) || !/^[A-Za-z0-9_-]{16}$/.test(p.p)) {
+    throw new Error('Unsupported or incomplete pairing code.');
+  }
+  for (const key of ['t', 's']) if (unb64(p[key]).length !== 32) throw new Error('Invalid pairing capability.');
+  const url = new URL(p.r);
+  if (!['wss:', 'ws:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('Invalid relay address.');
+  }
+  if (url.protocol === 'ws:' && !(['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname))) {
+    throw new Error('An encrypted wss:// relay is required.');
+  }
+  return {room: p.h, relay: p.r.replace(/\/$/, ''), relayToken: p.t, pairId: p.p, pairSecret: p.s,
+    name: String(p.n || 'Remote machine').slice(0, 80), deviceId: random(16), secret: random(),
+    deviceName: /Android/.test(navigator.userAgent) ? 'Android browser' : 'Web browser',
+    pending: true, added: Date.now()};
+}
+
+export class Link extends EventTarget {
+  constructor(machine, persist) {
+    super();
+    this.machine = machine; this.persist = persist;
+    this.state = 'offline'; this.channel = null; this.ws = null;
+    this.generation = 0; this.pending = new Map(); this.enabled = false;
+    this.delay = 500; this.timer = null; this.nextAuth = 'device'; this.stage = '';
+    this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve();
+    this.lastSeen = 0; this.latency = null;
+  }
+  emit(type, value) { this.dispatchEvent(new CustomEvent(type, {detail: value})); }
+  status(state, message = '') { this.state = state; this.emit('status', {state, message}); }
+  start() { this.enabled = true; this.connect(); }
+  stop(message = '') {
+    this.enabled = false; clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);
+    this.generation++; this.channel = null; this.ws?.close(); this.ws = null;
+    this.rejectPending(); this.status('offline', message);
+  }
+  rejectPending() {
+    for (const [id, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error('Connection interrupted; operation was not replayed.')); }
+    this.pending.clear();
+  }
+  reconnect() {
+    if (!this.enabled) return;
+    clearTimeout(this.timer); this.ws?.close(); this.connect();
+  }
+  connect() {
+    if (!this.enabled) return;
+    clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);
+    this.ws?.close();
+    const generation = ++this.generation;
+    this.channel = null; this.stage = ''; this.rejectPending();
+    this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve();
+    this.status('connecting');
+    const ws = this.ws = new WebSocket(`${this.machine.relay}/v1/room/${this.machine.room}`);
+    ws.onopen = () => {
+      if (generation !== this.generation) return;
+      this.lastSeen = Date.now();
+      ws.send(JSON.stringify({type: 'auth', role: 'client', token: this.machine.relayToken}));
+      this.heartbeat = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - this.lastSeen > 55000) { ws.close(); return; }
+        ws.send('ping');
+        if (this.state === 'online') this.send({type: 'ping', at: Date.now()}).catch(() => {});
+      }, 20000);
+    };
+    ws.onmessage = event => {
+      this.receiveQueue = this.receiveQueue.then(async () => {
+        if (generation !== this.generation) return;
+        this.lastSeen = Date.now();
+        if (event.data === 'pong') return;
+        if (typeof event.data !== 'string' || event.data.length > 160000) throw new Error('Invalid relay frame');
+        const m = JSON.parse(event.data);
+        if (m.type === 'ready') {
+          if (m.hostOnline) await this.handshake();
+          else this.status('waiting', 'Waiting for the host');
+        } else if (m.type === 'host.online') {
+          this.rejectPending(); await this.handshake();
+        } else if (m.type === 'host.offline') {
+          clearTimeout(this.handshakeTimer); this.channel = null; this.rejectPending(); this.status('waiting', 'Host offline — waiting for reconnection');
+        } else if (m.type === 'route') {
+          await this.receive(m.data);
+        }
+      }).catch(error => {
+        if (generation !== this.generation) return;
+        this.emit('error', error.message);
+        this.stop('Secure channel could not be verified.');
+      });
+    };
+    ws.onclose = () => {
+      if (generation !== this.generation) return;
+      clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);
+      this.channel = null; this.rejectPending();
+      if (this.enabled) {
+        this.status('reconnecting', 'Reconnecting automatically');
+        this.timer = setTimeout(() => this.connect(), this.delay * (0.8 + Math.random() * 0.4));
+        this.delay = Math.min(this.delay * 1.7, 30000);
+      }
+    };
+    ws.onerror = () => { /* close event drives retries; never invent an authentication error */ };
+  }
+  plain(data) {
+    if (this.ws?.readyState !== WebSocket.OPEN) throw new Error('Connection is offline');
+    this.ws.send(JSON.stringify({type: 'route', data}));
+  }
+  async handshake() {
+    this.status('authenticating', 'Verifying encrypted channel');
+    this.channel = null;
+    this.keypair = await ephemeral();
+    this.auth = this.nextAuth;
+    this.hello = {type: 'hello', v: 1, auth: this.auth, id: this.machine.deviceId,
+      pair: this.auth === 'pair' ? this.machine.pairId : '', nonce: random(), pub: this.keypair.publicKey};
+    this.stage = 'challenge';
+    this.plain(this.hello);
+    clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = setTimeout(() => this.ws?.close(), 25000);
+  }
+  async receive(m) {
+    if (m.type === 'error') {
+      if (m.code === 'unknown-device' && this.machine.pending && this.auth === 'device') {
+        this.nextAuth = 'pair'; this.delay = 150; this.ws.close(); return;
+      }
+      if (m.code === 'unknown-device' || m.code === 'pair-expired') {
+        this.stop(m.message); this.emit('error', m.message); return;
+      }
+      throw new Error(m.message || 'Host refused the connection');
+    }
+    if (m.type === 'challenge' && this.stage === 'challenge') {
+      const secret = unb64(this.auth === 'pair' ? this.machine.pairSecret : this.machine.secret);
+      const tx = transcript(this.machine.room, this.hello, m.nonce, m.pub);
+      if (!await verify(secret, 'server', tx, m.mac)) throw new Error('Host identity verification failed. Do not continue.');
+      this.channel = await channel(this.keypair.privateKey, m.pub, secret, tx);
+      this.keypair = null;
+      this.stage = 'encrypted';
+      this.plain({type: 'proof', mac: await proof(secret, 'client', tx)});
+      return;
+    }
+    if (m.type !== 'box' || !this.channel) throw new Error('Unexpected unencrypted data');
+    const value = await this.channel.open(m);
+    if (value.type === 'pair.ready') {
+      await this.send({type: 'enroll', name: this.machine.deviceName, secret: this.machine.secret});
+    } else if (value.type === 'welcome') {
+      clearTimeout(this.handshakeTimer); this.delay = 500; this.nextAuth = 'device';
+      this.machine.pending = false;
+      this.machine.name = value.machine.name;
+      delete this.machine.pairSecret; delete this.machine.pairId;
+      await this.persist();
+      this.status('online'); this.emit('welcome', value);
+      this.send({type: 'ping', at: Date.now()}).catch(() => {});
+    } else if (value.type === 'reply') {
+      const pending = this.pending.get(value.id);
+      if (pending) {
+        clearTimeout(pending.timer); this.pending.delete(value.id);
+        if (value.ok) pending.resolve(value.result); else pending.reject(new Error(value.error));
+      }
+    } else if (value.type === 'pong') {
+      this.latency = Math.max(0, Date.now() - value.at); this.emit('latency', this.latency);
+    } else if (value.type === 'revoked') {
+      this.stop('Access revoked on the host'); this.emit('revoked', null);
+    } else if (value.type === 'error') {
+      this.emit('error', value.message);
+    } else this.emit('message', value);
+  }
+  send(value) {
+    const generation = this.generation;
+    const current = this.channel;
+    const task = this.sendQueue.catch(() => {}).then(async () => {
+      if (!current || current !== this.channel || generation !== this.generation) throw new Error('Connection is offline');
+      while (this.ws?.bufferedAmount > 1024 * 1024) {
+        await new Promise(resolve => setTimeout(resolve, 15));
+        if (generation !== this.generation || this.ws?.readyState !== WebSocket.OPEN) throw new Error('Connection interrupted');
+      }
+      const frame = await current.seal(value);
+      if (generation !== this.generation || current !== this.channel) throw new Error('Connection changed');
+      this.plain(frame);
+    });
+    this.sendQueue = task;
+    return task;
+  }
+  request(method, params = {}, timeout = 45000) {
+    if (this.state !== 'online') return Promise.reject(new Error('Wait for the encrypted connection.'));
+    const id = random(12);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Host response timed out.')); }, timeout);
+      this.pending.set(id, {resolve, reject, timer});
+      this.send({type: 'rpc', id, method, params}).catch(error => {
+        clearTimeout(timer); this.pending.delete(id); reject(error);
+      });
+    });
+  }
+  async waitOnline(signal) {
+    if (signal?.aborted) throw new Error('Transfer cancelled');
+    if (this.state === 'online') return;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { cleanup(); reject(new Error('Host remained offline. Retry when it is available.')); }, 120000);
+      const change = () => { if (this.state === 'online') { cleanup(); resolve(); } };
+      const abort = () => { cleanup(); reject(new Error('Transfer cancelled')); };
+      const cleanup = () => { clearTimeout(timer); this.removeEventListener('status', change); signal?.removeEventListener('abort', abort); };
+      this.addEventListener('status', change); signal?.addEventListener('abort', abort, {once: true});
+    });
+  }
+}

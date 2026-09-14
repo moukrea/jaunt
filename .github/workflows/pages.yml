@@ -1,0 +1,62 @@
+name: Pages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: vars.JAUNT_RELAY_URL != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm ci
+      - run: npm run prepare-web
+        env:
+          JAUNT_PRODUCTION: '1'
+          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
+          JAUNT_RELEASE_TAG: ${{ vars.JAUNT_RELEASE_TAG }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      - run: python scripts/check_project.py
+      - name: Require published host assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).release")
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern host-manifest.json --pattern SHA256SUMS --pattern 'jaunt_host-*.whl' --dir /tmp/jaunt-release
+          python - <<'PYVERIFY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('/tmp/jaunt-release')
+          manifest=json.loads((root/'host-manifest.json').read_text())
+          name=manifest['wheel']
+          assert pathlib.Path(name).name==name
+          assert hashlib.sha256((root/name).read_bytes()).hexdigest()==manifest['sha256']
+          rows=(root/'SHA256SUMS').read_text().splitlines()
+          assert len(rows)==2
+          verified=set()
+          for row in rows:
+              digest,filename=row.split('  ',1)
+              assert filename in {name,'host-manifest.json'}
+              assert hashlib.sha256((root/filename).read_bytes()).hexdigest()==digest
+              verified.add(filename)
+          assert verified=={name,'host-manifest.json'}
+          PYVERIFY
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - uses: actions/deploy-pages@v4
+        id: deployment

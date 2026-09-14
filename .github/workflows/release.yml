@@ -1,119 +1,46 @@
-name: Release
-
+name: Host release
 on:
   push:
-    branches: [main]
-
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
 permissions:
-  contents: read
-
+  contents: write
 jobs:
-  lint:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+  release:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-  test:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Run tests
-        run: cargo test --workspace
-
-  build:
-    needs: [lint, test]
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
-    uses: ./.github/workflows/build.yml
-    with:
-      upload-artifacts: true
-      create-archives: false
-
-  version-bump:
-    needs: [lint, test, build]
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
-
-      - name: Install git-cliff
-        shell: bash
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: pytest -q
+      - run: python scripts/build_release.py
+      - name: Publish verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          GIT_CLIFF_VERSION="2.7.0"
-          curl -sSfL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar xz
-          sudo mv git-cliff-${GIT_CLIFF_VERSION}/git-cliff /usr/local/bin/
-
-      - name: Configure git user
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump version and release
-        shell: bash
-        run: |
-          # Get current version from workspace Cargo.toml
-          CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-
-          # Determine next version (bare semver, no v prefix)
-          BUMPED_VERSION=$(git-cliff --config .github/cliff.toml --bumped-version)
-          BUMPED_VERSION="${BUMPED_VERSION#v}"
-
-          # Exit early if no bump needed
-          if [ "$BUMPED_VERSION" = "$CURRENT_VERSION" ]; then
-            echo "No version-bumping commits found, skipping"
-            exit 0
+          python - "$TAG" <<'PY'
+          import sys,tomllib
+          from packaging.version import Version
+          configured=tomllib.load(open('pyproject.toml','rb'))['project']['version']
+          assert Version(sys.argv[1].removeprefix('v'))==Version(configured), 'Tag/package version mismatch'
+          PY
+          FLAGS=()
+          if [[ "$TAG" == *-* ]]; then FLAGS+=(--prerelease); fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to silently replace immutable artifacts.' >&2
+            exit 1
           fi
-
-          NEW_VERSION="$BUMPED_VERSION"
-          echo "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
-
-          # Update workspace Cargo.toml
-          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
-
-          # Update crate Cargo.toml files
-          for crate_toml in crates/*/Cargo.toml; do
-            sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$crate_toml"
-          done
-
-          # Update Tauri config version
-          if [ -f tauri/src-tauri/tauri.conf.json ]; then
-            sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" tauri/src-tauri/tauri.conf.json
-          fi
-
-          # Regenerate Cargo.lock
-          cargo generate-lockfile
-
-          # Stage changes
-          git add Cargo.toml crates/*/Cargo.toml Cargo.lock tauri/src-tauri/tauri.conf.json
-
-          # Commit
-          git commit -m "chore(release): bump version to $NEW_VERSION"
-
-          # Create annotated tag
-          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
-
-          # Push commit and tag
-          git push origin main --tags
+          gh release create "$TAG" dist/*.whl dist/host-manifest.json dist/SHA256SUMS --verify-tag --title "Jaunt $TAG" --notes-file docs/RELEASE_NOTES.md "${FLAGS[@]}"

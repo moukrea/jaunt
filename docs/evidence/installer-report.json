@@ -1,0 +1,13 @@
+{
+  "passed": [
+    "tampered release checksum rejected before installing",
+    "wheel installed in private runtime; actual daemon connects to relay",
+    "installed wheel imported, not editable project source",
+    "installer host produces usable pairing capability",
+    "upgrade preserves host identity and remembered device records",
+    "doctor reads installed runtime state",
+    "installer refuses upgrade with active real shell, preserving daemon and runtime",
+    "explicit restart ends plain shell, preserves identity/devices and reconnects browser"
+  ],
+  "mode": "Local mirror, fresh PyPI dependencies, no service manager"
+}

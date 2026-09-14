@@ -1,90 +1,112 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0c0c0e" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Jaunt</title>
-  <link rel="manifest" href="./manifest.json" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: #0c0c0e;
-      color: #c8c5bd;
-      font-family: 'DM Sans', system-ui, sans-serif;
-      font-feature-settings: 'kern' 1;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      overscroll-behavior: none;
-    }
-    #app { min-height: 100dvh; display: flex; flex-direction: column; }
-
-    /* Custom scrollbar */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #2a2a30; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #3a3a42; }
-
-    /* Smooth page transitions */
-    .view-enter { animation: viewIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
-    @keyframes viewIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Stagger children */
-    .stagger > * { animation: staggerIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
-    .stagger > *:nth-child(1) { animation-delay: 0.03s; }
-    .stagger > *:nth-child(2) { animation-delay: 0.06s; }
-    .stagger > *:nth-child(3) { animation-delay: 0.09s; }
-    .stagger > *:nth-child(4) { animation-delay: 0.12s; }
-    .stagger > *:nth-child(5) { animation-delay: 0.15s; }
-    .stagger > *:nth-child(6) { animation-delay: 0.18s; }
-    .stagger > *:nth-child(7) { animation-delay: 0.21s; }
-    .stagger > *:nth-child(8) { animation-delay: 0.24s; }
-    @keyframes staggerIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Pulse for live indicator */
-    @keyframes livePulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    .pulse { animation: livePulse 2s ease-in-out infinite; }
-
-    /* Spinner */
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner {
-      width: 18px; height: 18px;
-      border: 2px solid #2a2a30;
-      border-top-color: #e8a245;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-    }
-
-    /* Noise texture overlay */
-    .noise::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      opacity: 0.018;
-      pointer-events: none;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      background-size: 256px;
-      z-index: 9999;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#121314">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="description" content="Your own shell, anywhere. Encrypted remote terminals, files and image transfers, designed for your phone.">
+  <title>Jaunt — Your machine. Within reach.</title>
+  <link rel="icon" type="image/png" href="./assets/favicon.png">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./vendor/xterm.css">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./js/app.mjs"></script>
 </head>
-<body class="noise">
-  <div id="app"></div>
-  <script type="module" src="/src/index.tsx"></script>
+<body>
+<div id="app" class="app">
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="sidebar" class="sidebar" aria-label="Machines and navigation">
+    <a class="brand" href="./" aria-label="Jaunt home"><img src="./assets/jaunt.png" alt="" width="33" height="33"><span>jaunt</span><span class="version">BETA</span></a>
+    <div class="sidebar-section"><span>WORKSPACE</span><span class="tiny-pill" id="machine-count">0</span></div>
+    <div id="machine-list" class="machine-list"></div>
+    <button class="add-machine" id="add-machine"><span data-icon="plus"></span>Pair a machine</button>
+    <div class="sidebar-rule"></div>
+    <nav class="desktop-nav" aria-label="Workspace views">
+      <button data-view="terminal" class="nav-item selected"><span data-icon="terminal"></span>Terminals<span id="session-count" class="nav-count"></span></button>
+      <button data-view="files" class="nav-item"><span data-icon="folder"></span>Files</button>
+      <button data-view="transfers" class="nav-item"><span data-icon="transfer"></span>Transfers<span id="transfer-count" class="nav-count"></span></button>
+    </nav>
+    <div class="sidebar-bottom">
+      <button id="settings-button" class="nav-item"><span data-icon="settings"></span>Settings<span class="shortcut">⌘ ,</span></button>
+      <button id="lock-button" class="nav-item" hidden><span data-icon="lock"></span>Lock this device</button>
+      <div class="trust-note"><span data-icon="shield" data-size="16"></span><span>Private by design.<br><small>Your keys stay with you.</small></span></div>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-button mobile-only" id="menu-button" aria-label="Open machines"><span data-icon="menu"></span></button>
+      <div class="breadcrumb"><span id="breadcrumb-prefix">Workspace</span><span class="breadcrumb-separator">/</span><strong id="machine-title">Overview</strong></div>
+      <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection"><i></i><span>Not connected</span></span><button id="new-session-top" class="button primary small" hidden><span data-icon="plus" data-size="16"></span><span>New shell</span></button></div>
+    </header>
+    <div id="connection-banner" class="connection-banner" role="status" hidden></div>
+    <section id="welcome" class="welcome">
+      <div class="welcome-content">
+        <div class="intro">
+          <div class="eyebrow"><span class="small-dash"></span> YOUR WORKSPACE, UNTETHERED</div>
+          <h1>Your machine.<br><span>Within reach.</span></h1>
+          <p>A real terminal. Your files. The session you left running.<br class="desktop-only"> All in your pocket, without opening a port.</p>
+          <div class="feature-line"><span><span data-icon="terminal" data-size="17"></span>Any shell</span><span><span data-icon="shield" data-size="17"></span>End-to-end encrypted</span><span><span data-icon="refresh" data-size="17"></span>Pick up where you left off</span></div>
+          <div class="install-block">
+            <div class="install-caption"><span class="step-index">01</span><strong>On your machine</strong><span>Linux · macOS · WSL</span></div>
+            <div class="command"><code id="install-command">curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash</code><button id="copy-install" class="icon-button" aria-label="Copy installation command"><span data-icon="copy" data-size="18"></span></button></div>
+            <p class="fine-print">Installs in your account. No root, VPN, or SSH configuration.</p>
+            <div id="deployment-note" class="deployment-note" hidden></div>
+          </div>
+        </div>
+        <div class="pair-card">
+          <div class="pair-heading"><span class="step-index">02</span><strong>Bring it here</strong><span data-icon="qr" data-size="20"></span></div>
+          <p>Scan the QR from your terminal, or paste its pairing string.</p>
+          <button id="scan-welcome" class="scan-button"><span data-icon="qr" data-size="28"></span><strong>Scan QR code</strong><small>Camera access stays on this device</small></button>
+          <div class="divider"><span>or use a pairing string</span></div>
+          <label class="sr-only" for="pair-code">Pairing string or link</label>
+          <textarea id="pair-code" class="pair-code" rows="3" placeholder="JAUNT1.eyJ2Ijox…" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+          <button id="pair-submit" class="button primary wide">Pair machine<span data-icon="arrowRight" data-size="18"></span></button>
+          <div class="pair-footnote"><span data-icon="lock" data-size="14"></span>One pairing. Remembered on this device.</div>
+        </div>
+      </div>
+      <footer class="welcome-footer"><span>Shells run on your machine. The browser is your window.</span><a href="https://github.com/moukrea/jaunt" target="_blank" rel="noopener noreferrer">Open source<span data-icon="external" data-size="14"></span></a></footer>
+    </section>
+    <section id="workspace" class="workspace" hidden>
+      <div id="terminal-view" class="terminal-view">
+        <div class="tabs-row"><div id="tabs" class="tabs" role="tablist" aria-label="Shell sessions"></div><button id="new-session-tab" class="icon-button" aria-label="Create shell"><span data-icon="plus" data-size="18"></span></button></div>
+        <div id="terminal-stage" class="terminal-stage">
+          <div id="terminal-empty" class="terminal-empty"><span class="empty-icon" data-icon="terminal" data-size="32"></span><h2>A shell of your own.</h2><p>Create a fresh terminal, or attach to a running tmux session.<br>Closing this page won't close your shell.</p><button id="new-session-empty" class="button primary"><span data-icon="plus" data-size="17"></span>New shell</button></div>
+          <div id="terminal-containers" class="terminal-containers"></div>
+          <div id="drop-target" class="drop-target" hidden><span data-icon="upload" data-size="32"></span><strong>Drop to send to this machine</strong><span>Files and images travel through the encrypted channel.</span></div>
+        </div>
+        <div class="terminal-footer"><span id="terminal-meta">No active shell</span><span class="terminal-hint">Sessions live on the host</span><button id="rename-session" class="text-button" hidden>Rename</button></div>
+        <div class="keybar" id="keybar" aria-label="Terminal keys">
+          <button data-key="\u001b">Esc</button><button data-key="\u0009">Tab</button><button id="ctrl-key" aria-pressed="false">Ctrl</button><button id="alt-key" aria-pressed="false">Alt</button>
+          <span class="key-divider"></span><button data-key="\u001b[D" aria-label="Left arrow"><span data-icon="arrowLeft" data-size="17"></span></button><button data-key="\u001b[B" aria-label="Down arrow"><span data-icon="arrowDown" data-size="17"></span></button><button data-key="\u001b[A" aria-label="Up arrow"><span data-icon="arrowUp" data-size="17"></span></button><button data-key="\u001b[C" aria-label="Right arrow"><span data-icon="arrowRight" data-size="17"></span></button>
+          <span class="key-divider"></span><button data-key="/">/</button><button data-key="-">-</button><button data-key="\u0003">Ctrl C</button><button data-key="\u0004">Ctrl D</button><button data-key="\u001b[H">Home</button><button data-key="\u001b[F">End</button>
+        </div>
+        <div class="actionbar"><div class="actionbar-group"><button id="attach-button" class="tool-button"><span data-icon="attach" data-size="18"></span><span>Attach</span></button><button id="paste-button" class="tool-button"><span data-icon="paste" data-size="18"></span><span>Paste</span></button><button id="copy-button" class="tool-button"><span data-icon="copy" data-size="18"></span><span>Copy</span></button><button id="compose-button" class="tool-button"><span data-icon="edit" data-size="18"></span><span>Compose</span></button></div><button id="keyboard-button" class="icon-button" aria-label="Focus terminal keyboard"><span data-icon="keyboard"></span></button></div>
+      </div>
+      <section id="files-view" class="side-view files-view" hidden aria-label="Remote files">
+        <div class="pane-heading"><div><div class="eyebrow">ON THE HOST</div><h2>Files</h2></div><button id="close-files" class="icon-button desktop-only" aria-label="Close file panel"><span data-icon="close"></span></button></div>
+        <div class="file-toolbar"><button id="file-up" class="icon-button" aria-label="Parent directory"><span data-icon="arrowUp" data-size="17"></span></button><form id="file-path-form"><input id="file-path" aria-label="Directory path" value="~" spellcheck="false" autocapitalize="off"></form><button id="file-refresh" class="icon-button" aria-label="Refresh files"><span data-icon="refresh" data-size="17"></span></button></div>
+        <div class="file-actions"><button id="file-upload" class="button small"><span data-icon="upload" data-size="16"></span>Upload</button><button id="file-mkdir" class="button small"><span data-icon="plus" data-size="16"></span>Folder</button><label class="checkbox-label"><input type="checkbox" id="show-hidden">Hidden</label></div>
+        <div id="file-list" class="file-list"></div><div id="file-status" class="pane-footer">Connect to a machine to browse files.</div>
+      </section>
+      <section id="transfers-view" class="wide-view" hidden>
+        <div class="wide-view-heading"><div class="eyebrow">BETWEEN DEVICES</div><h2>Transfers</h2><p>Direct to the host. Encrypted in transit. Never stored on the relay.</p></div><div id="transfer-list" class="transfer-list"></div>
+      </section>
+      <section id="settings-view" class="wide-view" hidden>
+        <div class="wide-view-heading"><div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>Settings</h2><p>Device security, terminal preferences, and notifications.</p></div><div id="settings-content"></div>
+      </section>
+    </section>
+    <nav id="mobile-nav" class="mobile-nav" aria-label="Views"><button data-view="terminal" class="selected"><span data-icon="terminal"></span><span>Shell</span></button><button data-view="files"><span data-icon="folder"></span><span>Files</span></button><button data-view="transfers"><span data-icon="transfer"></span><span>Transfers</span></button><button data-view="settings"><span data-icon="settings"></span><span>Settings</span></button></nav>
+  </main>
+</div>
+<div id="lock-screen" class="lock-screen" hidden><div class="lock-card"><img src="./assets/jaunt.png" width="65" height="65" alt="Jaunt"><div class="eyebrow">YOUR WORKSPACE IS LOCKED</div><h1>Welcome back.</h1><p>Unlock this device to reconnect.<br>Your remote shells keep running.</p><form id="unlock-form"><label class="sr-only" for="unlock-password">Passphrase or PIN</label><input id="unlock-password" type="password" autocomplete="current-password" placeholder="Passphrase or PIN" required><button class="button primary wide" type="submit">Unlock workspace<span data-icon="arrowRight" data-size="17"></span></button><div id="unlock-error" class="form-error" role="alert"></div></form><button id="forget-vault" class="text-button muted">Forgot it? Reset this device</button></div></div>
+<dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="modal-close" class="icon-button" aria-label="Close dialog"><span data-icon="close"></span></button></div><div id="modal-content"></div></dialog>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<input id="attachment-input" type="file" multiple hidden>
+<input id="upload-input" type="file" multiple hidden>
+<noscript><div class="fatal-note">Jaunt requires JavaScript and a modern browser with Web Crypto.</div></noscript>
 </body>
 </html>

@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-14",
+  "pytest": 34,
+  "node": 17,
+  "miniflare": 1,
+  "browser": 18,
+  "installerOnlineDependencies": 8,
+  "productionDeployed": false,
+  "cloudflareAuthorization": "missing",
+  "physicalPhoneTested": false,
+  "securityAudit": "not performed",
+  "browserWorker": 19,
+  "ci": "https://github.com/moukrea/jaunt/actions/runs/34849935562"
+}

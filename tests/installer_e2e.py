@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Exercise install.sh against a real local release mirror and real relay.
+
+The explicit OFFLINE_TEST flag reuses installed runtime dependencies. The normal
+installer downloads them from PyPI. This test does not validate external networks
+or a real systemd/launchd service manager.
+"""
+from __future__ import annotations
+import functools,http.server,json,os,shutil,socket,subprocess,sys,tempfile,threading,time
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+
+def freeport():
+    with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
+
+def main():
+    checks=[]
+    def passed(s):checks.append(s);print('PASS',s,flush=True)
+    with tempfile.TemporaryDirectory(prefix='jaunt-install-test-') as tmp:
+        t=Path(tmp);mirror=t/'mirror';mirror.mkdir();relayport=freeport()
+        shutil.copytree(ROOT/'web',mirror,dirs_exist_ok=True)
+        for p in (ROOT/'dist').iterdir():shutil.copy2(p,mirror/p.name)
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def log_message(self,*_):pass
+        server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(mirror)))
+        threading.Thread(target=server.serve_forever,daemon=True).start();url=f'http://127.0.0.1:{server.server_port}'
+        config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':'v0.1.0-beta.1','page':url+'/'}
+        (mirror/'config.json').write_text(json.dumps(config))
+        env={**os.environ,'JAUNT_DEV_INSTALL':'1','JAUNT_TEST_SYSTEM_SITE':'1','JAUNT_PIP_NO_DEPS':'1',
+             'JAUNT_PREFIX':str(t/'runtime'),'JAUNT_BIN_DIR':str(t/'bin'),'JAUNT_STATE':str(t/'state'),
+             'JAUNT_PAGE_URL':url,'JAUNT_RELEASE_BASE':url,'JAUNT_NO_SERVICE':'1','JAUNT_SKIP_PAIR':'1',
+             'PIP_NO_INDEX':'1','PIP_DISABLE_PIP_VERSION_CHECK':'1'}
+        env.pop('PYTHONPATH',None) # The wheel, not the source tree, must be imported.
+        # This tool environment itself is a venv; nested --system-site-packages
+        # inherits its base interpreter rather than the outer venv dependencies.
+        # Share dependency directories only, never ROOT/host; verify wheel origin below.
+        import websockets, cryptography, qrcode
+        env['PYTHONPATH']=os.pathsep.join(sorted({str(Path(m.__file__).resolve().parents[1]) for m in (websockets,cryptography,qrcode)}))
+        online=os.environ.get('JAUNT_INSTALLER_ONLINE')=='1'
+        if online:
+            for key in ('JAUNT_TEST_SYSTEM_SITE','JAUNT_PIP_NO_DEPS','PIP_NO_INDEX','PYTHONPATH'):
+                env.pop(key,None)
+        log=(t/'relay.log').open('w')
+        relay=subprocess.Popen([sys.executable,str(ROOT/'scripts/dev_relay.py'),'--port',str(relayport)],stdout=log,stderr=log)
+        exe=t/'bin/jaunt'
+        def install(extra=None):return subprocess.run(['bash',str(ROOT/'install.sh')],env={**env,**(extra or {})},capture_output=True,text=True,timeout=180)
+        def cli(*args):return subprocess.check_output([str(exe),*args],env=env,text=True,timeout=30)
+        try:
+            # Checksum failure must precede any runtime switch or host modification.
+            manifest=json.loads((mirror/'host-manifest.json').read_text());correct=manifest['sha256'];manifest['sha256']='0'*64
+            (mirror/'host-manifest.json').write_text(json.dumps(manifest));bad=install()
+            assert bad.returncode and 'checksum mismatch' in bad.stderr.lower(),bad.stdout+bad.stderr
+            assert not exe.exists();passed('tampered release checksum rejected before installing')
+            manifest['sha256']=correct;(mirror/'host-manifest.json').write_text(json.dumps(manifest))
+            result=install();assert result.returncode==0,result.stdout+result.stderr
+            deadline=time.time()+10
+            while time.time()<deadline:
+                status=json.loads(cli('status'))
+                if status['connected']:break
+                time.sleep(.1)
+            assert status['connected'];room=status['machine']['room'];pid=status['pid']
+            assert cli('--version').strip()=='0.1.0b1';passed('wheel installed in private runtime; actual daemon connects to relay')
+            py=t/'runtime/current/bin/python'
+            origin=subprocess.check_output([str(py),'-c','import jaunt;print(jaunt.__file__)'],env=env,text=True).strip()
+            assert Path(origin).resolve().is_relative_to(t/'runtime/versions') and '/site-packages/' in origin
+            passed('installed wheel imported, not editable project source')
+            pairing=json.loads(cli('pair','--json'));assert pairing['code'].startswith('JAUNT1.')
+            passed('installer host produces usable pairing capability')
+            # Populate a remembered device; no shell is running, so upgrade is safe.
+            cli('stop');time.sleep(.7)
+            state=t/'state/host.json';data=json.loads(state.read_text());data['devices']['installation-test']={'name':'fixture','secret':'not-a-real-test-secret','created':1,'lastSeen':1};state.write_text(json.dumps(data));state.chmod(0o600)
+            cli('start');result=install();assert result.returncode==0,result.stdout+result.stderr
+            now=json.loads(cli('status'));assert now['machine']['room']==room
+            assert 'installation-test' in json.loads(state.read_text())['devices']
+            passed('upgrade preserves host identity and remembered device records')
+            assert json.loads(cli('doctor'))['running'];passed('doctor reads installed runtime state')
+            from playwright.sync_api import sync_playwright, expect
+            with sync_playwright() as pw:
+                browser=pw.chromium.launch(args=['--no-sandbox'])
+                page=browser.new_page()
+                page.goto(json.loads(cli('pair','--json'))['url'])
+                expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
+                page.locator('#new-session-top').click()
+                page.get_by_label('Working directory').fill(str(t))
+                page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
+                expect(page.locator('#tabs')).to_contain_text('Shell 1')
+                before=json.loads(cli('status'));pointer=(t/'runtime/current').resolve()
+                assert before['sessions'][0]['alive']
+                refused=install()
+                assert refused.returncode and 'plain shells are running' in refused.stderr
+                after=json.loads(cli('status'))
+                assert after['pid']==before['pid'] and after['sessions'][0]['pid']==before['sessions'][0]['pid']
+                assert after['sessions'][0]['alive'] and (t/'runtime/current').resolve()==pointer
+                passed('installer refuses upgrade with active real shell, preserving daemon and runtime')
+                devices=set(json.loads((t/'state/host.json').read_text())['devices'])
+                approved=install({'JAUNT_ALLOW_RESTART':'1'})
+                assert approved.returncode==0,approved.stdout+approved.stderr
+                after=json.loads(cli('status'))
+                assert after['pid']!=before['pid'] and after['sessions']==[]
+                assert after['machine']['room']==room
+                assert set(json.loads((t/'state/host.json').read_text())['devices'])==devices
+                expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
+                passed('explicit restart ends plain shell, preserves identity/devices and reconnects browser')
+                browser.close()
+        finally:
+            if exe.exists():subprocess.run([str(exe),'stop'],env=env,capture_output=True,timeout=15)
+            relay.kill();relay.wait(timeout=5);server.shutdown();log.close()
+    out=ROOT/'test-results';out.mkdir(exist_ok=True)
+    (out/'installer-report.json').write_text(json.dumps({'passed':checks,'mode':('Local mirror, fresh PyPI dependencies, no service manager' if online else 'Offline local mirror, runtime dependencies inherited for test only; no service manager')},indent=2)+'\n')
+    print(f'{len(checks)} installer checks passed.',flush=True)
+if __name__=='__main__':main()
