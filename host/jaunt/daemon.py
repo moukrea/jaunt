@@ -11,6 +11,8 @@ import platform
 import re
 import shutil
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -174,13 +176,16 @@ class Host:
         self.clipboard = Clipboard()
         self.last_notification = 0.0
         self.lockfile = None
+        self.update_process = None
+        self.last_update_check = -float("inf")
 
     def info(self) -> dict:
+        from .updates import status as update_status
         return {"name": self.state.data["name"], "room": self.state.data["room"],
                 "version": __version__, "platform": platform.system(), "user": getpass.getuser(),
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
-                "replayBytes": 2 * 1024 * 1024}
+                "replayBytes": 2 * 1024 * 1024, "updates": update_status(self.state.root)}
 
     async def send(self, peer: str, data: dict) -> None:
         item = self.peers.get(peer)
@@ -299,6 +304,14 @@ class Host:
             else:
                 await self.revoke(p["id"])
             return {"revoked": True}
+        if method == "updates.status":
+            from .updates import status
+            return status(self.state.root)
+        if method == "updates.configure":
+            from .updates import configure
+            return configure(p.get("automatic"))
+        if method == "updates.install":
+            return self.launch_update(allow_restart=p.get("allowRestart") is True)
         if method == "notifications.subscribe":
             validate_subscription(p)
             self.state.data["push"][peer.device_id] = p
@@ -407,6 +420,8 @@ class Host:
                     await self.broadcast({"type": "clipboard.available"})
                 else:
                     result = await self.clipboard.get_text()
+            elif method == "updates.install":
+                result = self.launch_update(allow_restart=p.get("allowRestart") is True)
             elif method == "upgrade.stop":
                 result = self.stop_for_upgrade(p.get("allowRestart", False))
             elif method == "stop":
@@ -428,6 +443,29 @@ class Host:
         while True:
             await asyncio.sleep(60)
             self.files.cleanup()
+            if self.update_process is not None:
+                self.update_process.poll()
+            from .updates import installation
+            config = installation(self.state.root)
+            if config.get("automatic", False) and time.monotonic() - self.last_update_check >= 900:
+                self.launch_update(automatic=True)
+
+    def launch_update(self, *, automatic: bool = False, allow_restart: bool = False) -> dict:
+        from .updates import installation
+        if not installation(self.state.root):
+            raise ValueError("Use the public installer once to enable automatic updates")
+        if self.update_process is not None and self.update_process.poll() is None:
+            return {"state": "checking"}
+        args = [sys.executable, "-m", "jaunt.updates"]
+        if automatic:
+            args.append("--automatic")
+        elif allow_restart is True:
+            args.append("--allow-restart")
+        env = os.environ.copy(); env["JAUNT_STATE"] = str(self.state.root)
+        self.update_process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.last_update_check = time.monotonic()
+        return {"state": "checking"}
 
     async def run(self) -> None:
         relay_url(self.state.data["relay"], self.state.data["room"])

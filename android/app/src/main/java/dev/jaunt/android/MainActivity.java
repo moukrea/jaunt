@@ -19,6 +19,7 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
     static final String ORIGIN="https://moukrea.github.io", HOME=ORIGIN+"/jaunt/";
     private WebView web;
+    private UpdateManager updater;
     private android.widget.TextView loading;
     private final Handler mainHandler=new Handler(Looper.getMainLooper());
     private boolean appReady;
@@ -32,7 +33,7 @@ public class MainActivity extends Activity {
     private boolean foreground;
     interface Reply { void done(Object value, String error); }
     @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
+        super.onCreate(state);updater=new UpdateManager(this);
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::goBack);
         web=new WebView(this);
         android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.addView(web,new android.widget.FrameLayout.LayoutParams(-1,-1));
@@ -91,14 +92,15 @@ public class MainActivity extends Activity {
         acceptIntent(getIntent());web.loadUrl(HOME);
     }
     private static boolean isHome(Uri uri){return "https".equals(uri.getScheme())&&"moukrea.github.io".equals(uri.getHost())&&uri.getPath()!=null&&uri.getPath().startsWith("/jaunt/");}
-    @Override protected void onResume(){super.onResume();foreground=true;NotificationService.uiVisible=true;}
+    @Override protected void onResume(){super.onResume();foreground=true;NotificationService.uiVisible=true;if(appReady)updater.check(false); }
     @Override protected void onPause(){foreground=false;NotificationService.uiVisible=false;super.onPause();}
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);acceptIntent(intent);if(web!=null)web.evaluateJavascript("window.dispatchEvent(new Event('jaunt-native-open'))",null);}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);acceptIntent(intent);if(intent.getBooleanExtra("checkUpdate",false))updater.check(true);if(web!=null)web.evaluateJavascript("window.dispatchEvent(new Event('jaunt-native-open'))",null);}
     @SuppressWarnings("deprecation") private void acceptIntent(Intent intent){if(Intent.ACTION_SEND.equals(intent.getAction()))sharedImage=intent.getParcelableExtra(Intent.EXTRA_STREAM);}
     private void dispatch(String method,JSONObject p,Reply reply){
         try{
             switch(method){
-                case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);return;
+                case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);updater.check(getIntent().getBooleanExtra("checkUpdate",false));getIntent().removeExtra("checkUpdate");return;
+                case "app.updates":updater.check(true);reply.done(true,null);return;
                 case "clipboard.read":{
                     if(!foreground)throw new SecurityException("Open Jaunt before reading the clipboard.");
                     ClipboardManager manager=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData clip=manager.getPrimaryClip();
@@ -139,6 +141,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(request,result,data);
         IntentResult scan=IntentIntegrator.parseActivityResult(request,result,data);
         if(scan!=null){if(scanReply!=null){scanReply.done(scan.getContents(),null);scanReply=null;}return;}
+        if(request==44){updater.installPending();return;}
         if(request==40&&chooser!=null){chooser.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data));chooser=null;}
         if(request==41&&saveReply!=null){Reply reply=saveReply;saveReply=null;if(result!=RESULT_OK||data==null){reply.done(null,"Save cancelled");return;}Uri uri=data.getData();io.execute(()->{try{OutputStream out=getContentResolver().openOutputStream(uri,"wt");if(out==null)throw new IOException();String token=UUID.randomUUID().toString();writes.put(token,out);reply.done(new JSONObject().put("token",token),null);}catch(Exception e){reply.done(null,"Android could not create this file.");}});}
     }

@@ -3,7 +3,9 @@ import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {$, el, modal, closeModal, button, toast} from './ui.mjs';
 let jsqrPromise;
 async function decoder() {
-  if ('BarcodeDetector' in window) {
+  // Some Android WebViews expose BarcodeDetector but crash without Google Play Services.
+  // The APK uses ZXing for its camera and bundled jsQR for gallery images.
+  if (!isAndroid && 'BarcodeDetector' in window) {
     const formats = await BarcodeDetector.getSupportedFormats();
     if (formats.includes('qr_code')) {
       const d = new BarcodeDetector({formats: ['qr_code']});

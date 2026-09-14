@@ -131,6 +131,8 @@ def main() -> None:
     sub.add_parser("daemon", help="Run in the foreground (used by the service)")
     sub.add_parser("stop", help="Stop the host; plain PTYs will close")
     sub.add_parser("status")
+    update = sub.add_parser("update", help="Check and apply a verified host release; active ordinary shells are preserved")
+    update.add_argument("--allow-restart", action="store_true", help="Explicitly authorize closing active ordinary shells")
     sub.add_parser("doctor", help="Diagnose relay, runtime, clipboard and persistence")
     pair = sub.add_parser("pair", help="Show a one-use, ten-minute QR and pairing string")
     pair.add_argument("--json", action="store_true")
@@ -150,7 +152,10 @@ def main() -> None:
     service.add_argument("action", choices=["install", "stop", "uninstall"])
     args = parser.parse_args()
     try:
-        if args.command == "init":
+        if args.command == "update":
+            start()
+            print(json.dumps(control("updates.install", {"allowRestart": args.allow_restart}), indent=2))
+        elif args.command == "init":
             try:
                 control("status")
             except (OSError, ValueError):

@@ -125,6 +125,14 @@ if tmp.is_symlink():tmp.unlink()
 os.symlink(target,tmp);os.replace(tmp,prefix/'current')
 wrapper=bindir/'jaunt';wrapper.write_text('#!/bin/sh\nexec '+shlex.quote(str(prefix/'current/bin/python'))+' -m jaunt.cli "$@"\n');wrapper.chmod(0o755)
 PY
+"$TARGET/bin/python" - "$PREFIX" "$BIN" "$PAGE" "$REPO" "$TAG" "${JAUNT_NO_SERVICE:-0}" <<'PYUPDATE'
+import sys
+from jaunt.state import state_dir, atomic_json
+from jaunt.updates import installation
+prefix,bindir,page,repo,tag,no_service=sys.argv[1:]
+old=installation()
+atomic_json(state_dir()/'installation.json', {'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)})
+PYUPDATE
 RELAY="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["relay"])' "$TMP/config.json")"
 "$BIN/jaunt" init --relay "$RELAY" --page "${PAGE%/}/"
 export PATH="$BIN:$PATH"

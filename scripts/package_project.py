@@ -18,10 +18,10 @@ ROOT_FILES = (
     'LICENSE', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md', '.gitignore',
     'pyproject.toml', 'requirements-dev.txt', 'package.json', 'install.sh',
 )
-SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs')
-EXCLUDE_DIRS = {'__pycache__', '.pytest_cache', '.dev-state', 'node_modules', '.wrangler', '.venv', 'evidence'}
-EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.sock'}
-EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'public-report.json', 'native-clipboard-report.json', 'run-summary.json',
+SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs', 'android')
+EXCLUDE_DIRS = {'__pycache__', '.pytest_cache', '.dev-state', 'node_modules', '.wrangler', '.venv', 'evidence', '.gradle', '.kotlin', 'build'}
+EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.sock', '.apk', '.aab', '.jks', '.keystore'}
+EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'public-report.json', 'native-clipboard-report.json', 'run-summary.json', 'android-report.json', 'android-dependency-audit.json',
             'desktop-welcome.png', 'desktop-terminal.png', 'desktop-files.png',
             'mobile-welcome.png', 'mobile-terminal.png')
 
@@ -40,9 +40,9 @@ def collect() -> dict[str, bytes]:
                 raise ValueError(f'Refusing symlink in handoff: {relative}')
             if not path.is_file() or any(part in EXCLUDE_DIRS for part in relative.parts):
                 continue
-            if path.suffix in EXCLUDE_SUFFIXES or path.name.startswith('.env'):
+            if path.suffix in EXCLUDE_SUFFIXES or path.name.startswith('.env') or path.name == 'local.properties':
                 continue
-            if path.name in {'host.json', 'control.sock', 'state.json'}:
+            if path.name in {'host.json', 'control.sock', 'state.json', 'installation.json', 'update-status.json'}:
                 raise ValueError(f'Unexpected runtime state: {relative}')
             files[relative.as_posix()] = path.read_bytes()
     for name in EVIDENCE:
@@ -66,14 +66,14 @@ def collect() -> dict[str, bytes]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT.parent / 'Jaunt-0.1.0-beta.2.zip')
+    parser.add_argument('--output', type=Path, default=ROOT.parent / 'Jaunt-0.1.0-beta.3.zip')
     output = parser.parse_args().output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     files = collect()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name, content in sorted(files.items()):
             item = zipfile.ZipInfo('jaunt/' + name, date_time=(2026, 9, 14, 0, 0, 0))
-            executable = name.endswith('.sh') or (name.startswith('scripts/') and name.endswith('.py'))
+            executable = name == 'android/gradlew' or name.endswith('.sh') or (name.startswith('scripts/') and name.endswith('.py'))
             item.create_system = 3
             item.external_attr = (stat.S_IFREG | (0o755 if executable else 0o644)) << 16
             item.compress_type = zipfile.ZIP_DEFLATED

@@ -31,3 +31,8 @@ android/local.properties
 *.keystore
 *.apk
 *.aab
+
+# Private updater state
+installation.json
+update-status.json
+update.lock

@@ -35,7 +35,7 @@ function drawer(open = false) { $('sidebar').classList.toggle('open', open); $('
 function setView(value) {
   view = value; drawer(); render();
   if (view === 'files' && current()?.link.state === 'online') listFiles(current()).catch(report);
-  if (view === 'settings') renderSettings();
+  if (view === 'settings') { renderSettings(); const a = current(); if (a?.link.state === 'online' && a.info?.updates?.supported) a.link.request('updates.status').then(value => { a.info.updates = value; if (view === 'settings') renderSettings(); }).catch(report); }
 }
 function showPair() {
   const input = el('textarea', {class: 'pair-code', rows: 4, placeholder: 'JAUNT1.… or the complete pairing link', spellcheck: false, autocapitalize: 'off', 'aria-label': 'Pairing code'});
@@ -686,6 +686,9 @@ function renderSettings() {
   if (a) {
     groups.push(settingsGroup('SELECTED MACHINE',
       settingsRow(a.machine.name, `${a.info?.platform || 'Remote host'} · ${a.info?.version || 'Connecting'} · ${a.link.state}`, button('Reconnect', () => { a.link.start(); })),
+      ...(a.info?.updates?.supported ? [settingsRow('Automatic host updates', a.info.updates.message || 'Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.', button(a.info.updates.automatic ? 'Disable auto-update' : 'Enable auto-update', async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
+        settingsRow('Host version', a.info.version, button('Check for updates', async () => { await a.link.request('updates.install'); toast('Checking for a verified update. Active ordinary shells will be preserved.'); })),
+        settingsRow('Update and restart now', 'This explicitly closes active ordinary shells. Pairings and files are preserved.', button('Update and restart', () => confirmAction('Close active shells and update?', 'This may terminate the running commands in ordinary shells on this host. Continue only if you are ready to close them.', 'Close shells and update', async () => { await a.link.request('updates.install', {allowRestart: true}); toast('Checking the release before restarting the host.'); }, true), 'button danger'))] : []),
       settingsRow('Host clipboard', a.info?.clipboard?.backend || 'Unknown until connected', button('Open', () => showClipboard(a))),
       settingsRow('Authorized devices', 'Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.', button('Manage', () => manageDevices(a))),
       settingsRow('Forget this machine', 'Removes its saved key from this browser. Revoke it on the host first when possible.', button('Forget', () => forgetMachine(a), 'button danger'))));
@@ -705,7 +708,7 @@ function renderSettings() {
     if (installedPrompt) { await installedPrompt.prompt(); await installedPrompt.userChoice; installedPrompt = null; renderSettings(); }
     else modal('Install Jaunt on your phone', el('div', {}, el('p', {class: 'modal-copy', text: 'Open the browser menu and choose “Install app” or “Add to Home screen”. On iPhone/iPad, use Safari → Share → Add to Home Screen. This is the web app; a native Android client is not included in this release.'})));
   });
-  groups.push(settingsGroup('JAUNT', settingsRow(isAndroid ? 'Jaunt for Android' : 'Installable web app', isAndroid ? 'Installed APK · bundled interface and native Android integrations.' : 'A focused window on your home screen, with the same remembered machines.', isAndroid ? null : install),
+  groups.push(settingsGroup('JAUNT', settingsRow(isAndroid ? 'Jaunt for Android' : 'Installable web app', isAndroid ? 'Installed APK · bundled interface and native Android integrations.' : 'A focused window on your home screen, with the same remembered machines.', isAndroid ? button('Check for updates', () => nativeCall('app.updates')) : install),
     el('p', {class: 'settings-notice', text: 'Jaunt 0.1.0 beta · Host-authenticated encrypted channels · Open source. The custom protocol has automated tests, not an independent security audit. The relay transports ciphertext but can see routing metadata and interrupt availability. Never pair an untrusted device.'})));
   content.replaceChildren(...groups);
 }

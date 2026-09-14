@@ -26,7 +26,7 @@ public class NotificationService extends Service {
     @Override public void onCreate(){super.onCreate();NotificationManager manager=getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel(CONNECTION,"Background connection",NotificationManager.IMPORTANCE_LOW));
         manager.createNotificationChannel(new NotificationChannel(EVENTS,"Shell notifications",NotificationManager.IMPORTANCE_DEFAULT));
-        serial.scheduleWithFixedDelay(()->{for(Connection c:new ArrayList<>(connections.values()))c.tick();},20,20,TimeUnit.SECONDS);
+        serial.scheduleWithFixedDelay(()->{for(Connection c:new ArrayList<>(connections.values()))c.tick();new UpdateManager(NotificationService.this).check(false);},20,20,TimeUnit.SECONDS);
     }
     private PendingIntent open(String room,String session){Intent intent=new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("host",room).putExtra("session",session);return PendingIntent.getActivity(this,Objects.hash(room,session),intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);}
     private Notification ongoing(String text){PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,NotificationService.class).setAction("stop"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);

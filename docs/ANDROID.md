@@ -38,3 +38,9 @@ The Android test APK contains an isolated clipboard fixture for the emulator. It
 ## Validation
 
 See `docs/evidence/android-report.json` for observed results. Physical Android camera, keyboard/IME differences, vendor battery restrictions, real Wi-Fi/mobile handoff and deep-idle notification behavior still require physical-device validation. Emulator screen-off testing is reported separately. No claim is made that an actual Claude Code/Codex build displayed an attachment merely because clipboard bytes and Ctrl+V delivery passed.
+
+## Application updates
+
+The release APK checks GitHub automatically when opened (at most once per six hours); an enabled background connection also checks and can notify you about an update. Settings → Check for updates forces a check. Jaunt downloads the APK only after you choose Download and install, verifies SHA-256 against the release checksum file, verifies the application ID and signing certificate against the installed app, and refuses version downgrades. Android's own installer then asks for confirmation. On the first update, Android may require “Allow from this source” for Jaunt. A normal sideloaded app cannot silently bypass this OS confirmation.
+
+Updates retain app data and pairing keys. Uninstalling the app removes them. The update APK is shared with Android's installer through a private FileProvider grant, not a publicly readable directory. Debug builds do not automatically install release updates.
