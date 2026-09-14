@@ -11,3 +11,5 @@ This is an installable Android APK with a bundled WebView interface and native i
 The host must remain running; the public one-command installer configures its user service. Android force-stop, battery restrictions, host/network outages and OS scheduling can delay or prevent notifications. This does not promise guaranteed delivery during deep idle. The protocol has not undergone an independent security audit.
 
 The validation report distinguishes emulator testing from physical-phone testing and exact clipboard/Ctrl+V delivery from recognition as an attachment inside a particular Claude Code/Codex version. See `docs/ANDROID.md` and `docs/VALIDATION.md` in the tagged source.
+
+The APK checks for updates automatically. Settings also offers an immediate check. Downloads are verified against release checksums and the installed signing identity before Android asks for installation confirmation. Updates preserve app data and pairings; uninstalling removes them.
