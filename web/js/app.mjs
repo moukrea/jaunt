@@ -134,7 +134,7 @@ function renderConnection() {
   $('latency').textContent = a?.link.latency != null ? `${a.link.latency} ms` : '';
   $('connection-banner').hidden = !a || state === 'online';
   $('connection-banner').textContent = state === 'offline'
-    ? (a.link.message || 'Not connected. Open Settings and choose Reconnect to use the saved pairing.')
+    ? (a?.link.message || 'Not connected. Open Settings and choose Reconnect to use the saved pairing.')
     : 'Reconnecting without a new pairing. Remote shells stay alive while the host daemon is running.';
 }
 function renderMachines() {
