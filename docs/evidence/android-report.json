@@ -17,5 +17,12 @@
   "signedReleaseGalleryQRPairing": true,
   "nativeCameraPermissionAndScannerLaunch": true,
   "physicalCameraQRDecoded": false,
-  "signedReleaseColdStarts": 3
+  "signedReleaseColdStarts": 3,
+  "publicAPK": "android-v0.1.0-beta.2",
+  "publicSignedAPKCommand": true,
+  "publicSignedAPKNativeImageClipboard": true,
+  "publicSignedAPKScreenOffNotification": true,
+  "publicAPKUpdateViaAndroidInstaller": true,
+  "publicAPKUpdatePreservedPairingAndShell": true,
+  "publicAPKUpdateDiscoveryTrigger": "Settings check; no six-hour wait claimed"
 }

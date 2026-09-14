@@ -1,3 +1,5 @@
+This release regulates rapid terminal input to avoid overflowing the host’s bounded input queue. Pending input is discarded if the encrypted channel changes; commands are never replayed after reconnection.
+
 Install the signed `.apk` asset below on Android 8 or newer. Allow installation from your browser when Android asks, open Jaunt, then scan the QR produced by `jaunt pair` on your host. No Android, GitHub or Cloudflare account is required to connect.
 
 This is an installable Android APK with a bundled WebView interface and native integrations, not a PWA and not an entirely rewritten Android UI:
