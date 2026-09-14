@@ -140,6 +140,37 @@ async def main():
         await until(lambda:(h.work/'reconnect.txt').exists());passed('relay loss/restart → automatic fresh encrypted channel, no new QR, same PTY')
         await page.locator('[data-view="files"]').first.click();await page.get_by_label('Directory path').fill(str(h.work));await page.get_by_label('Directory path').press('Enter')
         await expect(page.locator('#file-list')).to_contain_text('proof.txt')
+        target=h.work/'navigation-target';target.mkdir();(target/'navigation-proof.txt').write_text('fixture')
+        await page.evaluate("""async () => {
+          const {Link} = await import('./js/link.mjs');
+          const original = Link.prototype.request;
+          window.__restoreFileRequests = () => { Link.prototype.request = original; window.__fileObserver.disconnect(); };
+          // Delay delivery of a REAL encrypted RPC reply; do not mock its result.
+          Link.prototype.request = async function(method, ...args) {
+            const result = await original.call(this, method, ...args);
+            if (method === 'files.list') await new Promise(resolve => setTimeout(resolve, 250));
+            return result;
+          };
+          window.__fileRenders = 0;
+          window.__fileObserver = new MutationObserver(() => window.__fileRenders++);
+          window.__fileObserver.observe(document.querySelector('#file-list'), {childList: true});
+        }""")
+        try:
+            await page.get_by_label('Directory path').fill(str(target))
+            # A refresh dispatched AFTER typing must also preserve the draft.
+            await page.locator('#file-refresh').click()
+            await page.wait_for_function('() => window.__fileRenders > 0')
+            await expect(page.get_by_label('Directory path')).to_have_value(str(target))
+            await page.get_by_label('Directory path').press('Enter')
+            # Refresh while navigation is awaiting its reply must use the new path.
+            await page.locator('#file-refresh').click()
+            await expect(page.locator('#file-list')).to_contain_text('navigation-proof.txt')
+            await expect(page.get_by_label('Directory path')).to_have_value(str(target))
+        finally:
+            await page.evaluate('window.__restoreFileRequests()')
+        await page.get_by_label('Directory path').fill(str(h.work));await page.get_by_label('Directory path').press('Enter')
+        await expect(page.locator('#file-list')).to_contain_text('proof.txt')
+        passed('late file refresh preserves path draft and pending navigation intent')
         payload=('é日本語\n'*200000).encode()+bytes(range(256));filename='épreuve fichier.bin'
         async with page.expect_file_chooser() as chooser:await page.locator('#file-upload').click()
         await (await chooser.value).set_files({'name':filename,'mimeType':'application/octet-stream','buffer':payload})

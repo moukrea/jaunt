@@ -29,7 +29,7 @@ le test installateur vérifie séparément la provenance du wheel installé.
 | `python scripts/build_release.py` | Wheel, manifeste et SHA256SUMS construits |
 | `python -m playwright install chromium` | Chromium de test réellement téléchargé |
 | `python tests/browser_e2e.py` | **18 scénarios réussis**, relais Python de référence, site servi sous `/jaunt/` |
-| `JAUNT_E2E_RELAY=workerd python tests/browser_e2e.py` | **18 scénarios réussis**, navigateur → Worker/workerd réel → hôte → PTY/fichiers |
+| `JAUNT_E2E_RELAY=workerd python tests/browser_e2e.py` | **19 scénarios réussis**, navigateur → Worker/workerd réel → hôte → PTY/fichiers |
 | `python tests/installer_e2e.py` | **8 contrôles réussis** en mode miroir offline |
 | `JAUNT_INSTALLER_ONLINE=1 python tests/installer_e2e.py` | **8 contrôles réussis**, miroir de release loopback, dépendances PyPI installées dans des environnements privés neufs |
 | `npm audit` | **0 vulnérabilité connue** dans le graphe résolu |
@@ -153,3 +153,11 @@ Le premier essai tuait uniquement le parent Node : les sockets workerd restaient
 temporaires ouvertes. Le harness a été corrigé pour tuer son propre groupe de
 processus isolé ; il vérifie toujours la déconnexion effective avant redémarrage.
 Cette correction concerne uniquement l’injection de panne dans le test.
+
+La CI Worker a ensuite reproduit une seconde course de navigation : une requête
+de rafraîchissement démarrée après la saisie pouvait encore la remplacer.
+La correction conserve désormais le brouillon par machine et enregistre le
+répertoire demandé dès l’envoi. Un 19e scénario retarde les véritables réponses
+RPC chiffrées, déclenche un rafraîchissement après la saisie puis pendant la
+navigation, et vérifie le champ et les fichiers obtenus. Il passe sous workerd.
+La CSP est inchangée : le polling Playwright utilise une fonction, sans unsafe-eval.

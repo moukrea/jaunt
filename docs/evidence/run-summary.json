@@ -9,6 +9,6 @@
   "cloudflareAuthorization": "missing",
   "physicalPhoneTested": false,
   "securityAudit": "not performed",
-  "browserWorker": 18,
+  "browserWorker": 19,
   "ci": "https://github.com/moukrea/jaunt/actions/runs/34849935562"
 }

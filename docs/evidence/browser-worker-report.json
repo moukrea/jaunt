@@ -6,6 +6,7 @@
     "multiple arbitrary shell sessions",
     "reload uses remembered identity and preserves sessions",
     "relay loss/restart \u2192 automatic fresh encrypted channel, no new QR, same PTY",
+    "late file refresh preserves path draft and pending navigation intent",
     "in-flight upload resumes after abrupt relay loss, final bytes verified",
     "multi-chunk binary/Unicode upload with exact byte comparison",
     "download bytes identical to uploaded file",

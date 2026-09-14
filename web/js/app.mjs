@@ -56,7 +56,7 @@ async function pairMachine(value) {
 }
 function makeMachine(machine) {
   const a = {machine, link: null, info: null, sessions: [], terms: new Map(), active: machine.lastSession || '',
-    path: machine.lastPath || '~', listing: null, listingVersion: 0, remoteClipboard: '', fileError: ''};
+    path: machine.lastPath || '~', pathDraft: null, listing: null, listingVersion: 0, remoteClipboard: '', fileError: ''};
   a.link = new Link(machine, persist); machines.set(machine.room, a);
   a.link.addEventListener('status', () => {
     for (const t of a.terms.values()) t.term.options.disableStdin = a.link.state !== 'online' || !t.session.alive;
@@ -331,22 +331,25 @@ function renameSession() {
   }, 'button primary')))); input.focus(); input.select();
 }
 
-let filePathRevision = 0;
 async function listFiles(a, path = a.path, append = false) {
   if (a.link.state !== 'online') throw new Error('Files are available when the host is connected.');
-  const version = ++a.listingVersion, pathRevision = filePathRevision;
+  const version = ++a.listingVersion;
+  // Remember navigation intent before the reply: a concurrent refresh must use
+  // the requested folder, not the previously rendered folder.
+  if (arguments.length > 1 && !append) a.pathDraft = null;
+  a.path = path;
   const result = await a.link.request('files.list', {path, hidden: $('show-hidden').checked,
     offset: append ? a.listing?.next || 0 : 0, limit: 100});
   if (version !== a.listingVersion) return;
   if (append && a.listing?.path === result.path) result.entries = [...a.listing.entries, ...result.entries];
   a.path = result.path; a.machine.lastPath = result.path; a.listing = result; a.fileError = '';
   await persist();
-  if (current() === a && version === a.listingVersion) renderFiles(a, pathRevision === filePathRevision);
+  if (current() === a && version === a.listingVersion) renderFiles(a);
 }
-function renderFiles(a, updatePath = true) {
+function renderFiles(a) {
   if (!a.listing) { $('file-list').replaceChildren(el('p', {class: 'modal-copy', text: 'Loading files…'})); return; }
   const result = a.listing;
-  if (updatePath) $('file-path').value = result.path;
+  $('file-path').value = a.pathDraft ?? result.path;
   $('file-status').textContent = `${result.entries.length} / ${result.total} items · ${size(result.free)} free${result.truncated ? ' · first 5,000 entries only' : ''}`;
   const rows = result.entries.map(entry => {
     const path = result.path.replace(/\/$/, '') + '/' + entry.name;
@@ -683,7 +686,7 @@ function bindEvents() {
   for (const id of ['new-session-top', 'new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
   $('rename-session').onclick = () => { try { renameSession(); } catch(e) { report(e); } };
   $('close-files').onclick = () => setView('terminal');
-  $('file-path').oninput = () => { filePathRevision++; };
+  $('file-path').oninput = () => { if (current()) current().pathDraft = $('file-path').value; };
   $('file-path-form').onsubmit = e => { e.preventDefault(); listFiles(online(), $('file-path').value).catch(report); };
   $('file-up').onclick = () => { const a = current(); if (a?.listing) listFiles(a, a.listing.parent).catch(report); };
   $('file-refresh').onclick = () => { if (current()) listFiles(current()).catch(report); };
