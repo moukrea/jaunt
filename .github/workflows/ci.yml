@@ -1,0 +1,48 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  host:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: pytest -q
+      - run: python scripts/build_release.py
+  browser-and-relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: npm ci
+      - run: npm run prepare-web
+      - run: python scripts/check_project.py
+      - run: npm test
+      - run: npm run test:relay
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_e2e.py
+      - run: python scripts/build_release.py
+      - run: python tests/installer_e2e.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence
+          path: test-results/
+          if-no-files-found: ignore
