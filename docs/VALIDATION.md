@@ -4,12 +4,30 @@ La réécriture de l’archive a été intégrée sans lire l’ancien code. L�
 initial est conservé sur `backup/pre-rewrite-20260914`; le travail est sur
 `rewrite/archive-beta-1`. Aucun force-push ni suppression de l’historique.
 
-**Déploiement bloqué : aucune autorisation Cloudflare disponible.**
-`wrangler whoami` indique « You are not authenticated » ; les secrets Actions
-`CLOUDFLARE_API_TOKEN` et `CLOUDFLARE_ACCOUNT_ID` sont absents au moment du contrôle.
-Aucun nouveau relais, tag/release ou site public n’est annoncé comme publié.
-Le propriétaire a été invité à fournir uniquement cette autorisation via les
-secrets GitHub Actions. Un token GitHub n’accorde pas de permission Cloudflare.
+**Déploiement public effectué le 14 septembre 2026.**
+Le propriétaire a accordé l’accès Cloudflare par OAuth Wrangler dans son navigateur.
+Le relais est `https://jaunt-relay.moukrea.workers.dev`, avec APP_ORIGIN
+`https://moukrea.github.io`, Durable Object SQLite `ROOMS` et migration `v1`.
+La santé HTTP, les WebSockets authentifiés, le routage bidirectionnel et le refus
+d’une origine non autorisée ont été vérifiés sur ce Worker réel.
+
+La [release v0.1.0-beta.1](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.1)
+a publié ses trois assets avant le [déploiement Pages](https://github.com/moukrea/jaunt/actions/runs/34852763245).
+La page est **https://moukrea.github.io/jaunt/** ; ses ressources et licences locales
+ont été téléchargées et comparées aux fichiers livrés.
+
+Une VM Ubuntu 24.04 neuve (Python 3.12.3, systemd utilisateur réel) a exécuté
+`curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash` avec succès.
+Le wheel public et ses checksums ont été vérifiés, le service activé et démarré,
+et un QR a été produit sans être conservé dans le dépôt. Le navigateur public
+s’est appairé, a exécuté un vrai shell, ouvert deux sessions, transféré un fichier
+avec comparaison des octets et inséré un chemin d’image sans Enter.
+
+La recette réseau a détecté un défaut : les pongs du relais masquaient le silence
+de l’hôte dans le statut du navigateur. Le client suit désormais séparément la
+réception de messages authentifiés de l’hôte. Un test suspend le processus hôte
+isolé tout en laissant le relais actif et exige déconnexion puis reprise.
+La recette publique complète après cette correction reste à terminer.
 
 ## Exécutions réellement observées
 
@@ -110,12 +128,9 @@ Le mode offline initial de six contrôles a également été exécuté avant ext
 
 ## Non validé — ne pas annoncer comme livré en production
 
-- Cloudflare réel, quotas/coûts, santé et WebSockets publics : autorisation manquante.
-  Miniflare est un test réel du runtime local, pas un déploiement Cloudflare.
-- Tag/release publique, trois assets GitHub, Pages réelle et installation depuis cette
-  release sur une machine propre : en attente du relais ; aucune URL inventée.
-- Service utilisateur systemd/launchd réel, bootstrap uv/Python absent de la machine,
-  installation macOS/WSL : non exécutés par les tests locaux d’installateur.
+- Upgrade et reprise réseau de la recette publique après correction du statut : en cours.
+- Service launchd, bootstrap uv/Python absent de la machine, installation macOS/WSL : non exécutés.
+  Le service systemd utilisateur a été validé sur la VM Ubuntu propre.
 - Téléphone physique : aucun utilisé. Caméra, IME/clavier, galerie, rotation réelle,
   Wi-Fi ↔ réseau mobile, PWA suspendue et push écran verrouillé restent non validés.
   Les dimensions tactiles simulées ne prouvent pas ces comportements matériels.
@@ -127,7 +142,7 @@ Le mode offline initial de six contrôles a également été exécuté avant ext
 
 La publication Pages est manuelle et vérifie les trois assets et leurs checksums.
 Les workflows utilisent obligatoirement `npm ci`. La recette publique de
-`docs/DEPLOYMENT.md` reste obligatoire dès que l’autorisation Cloudflare est disponible.
+`docs/DEPLOYMENT.md` inclut les contrôles matériels encore non exécutés.
 
 ## Contrôle des artefacts avant PR
 
@@ -161,3 +176,8 @@ répertoire demandé dès l’envoi. Un 19e scénario retarde les véritables r�
 RPC chiffrées, déclenche un rafraîchissement après la saisie puis pendant la
 navigation, et vérifie le champ et les fichiers obtenus. Il passe sous workerd.
 La CSP est inchangée : le polling Playwright utilise une fonction, sans unsafe-eval.
+
+La [CI du merge initial](https://github.com/moukrea/jaunt/actions/runs/34851720241)
+a réussi ses sept jobs : 34 tests hôte sur quatre combinaisons Linux/macOS et
+Python 3.11/3.13, 19 scénarios navigateur pour chacun des deux relais, 17 tests
+Node, intégration Miniflare réelle et huit contrôles installateur.

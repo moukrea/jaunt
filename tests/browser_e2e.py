@@ -129,6 +129,19 @@ async def main():
         await page.reload();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
         await expect(page.locator('#tabs')).to_contain_text('Workspace');assert json.loads(h.cli('status'))['pid']==original
         passed('reload uses remembered identity and preserves sessions')
+        # Suspend only our isolated host: the relay still answers WebSocket pings.
+        # The UI must detect missing authenticated host replies, not trust relay pongs.
+        h.host.send_signal(signal.SIGSTOP)
+        try:
+            await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=90000)
+        finally:
+            h.host.send_signal(signal.SIGCONT)
+        await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=45000)
+        assert json.loads(h.cli('status'))['pid']==original
+        await terminal_command(page,"printf 'HOST_RESUMED\\n' > host-resumed.txt")
+        await until(lambda:(h.work/'host-resumed.txt').exists())
+        assert (h.work/'host-resumed.txt').read_text()=='HOST_RESUMED\n'
+        passed('host silence detected despite live relay pongs; remembered session resumes')
         # Drop the relay process: real TCP/WebSocket connections close, not merely
         # a browser offline indicator. Host stays alive and re-registers its room.
         h.kill_relay()

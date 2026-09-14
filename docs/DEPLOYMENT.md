@@ -37,3 +37,15 @@ Ne jamais appeler « validé » un test non exécuté. Le rapport local inclus n
 Conserver logs techniques sans payloads, surveiller erreurs/quotas, prévoir rotation des identités et sauvegarde privée de l'état hôte, ne pas transformer le relais en dépôt de fichiers. Une mise à jour Worker peut rompre les connexions ; les hôtes et clients doivent se reconnecter sans réappairage. Les migrations DO ne sont pas annulées en supprimant seulement le code.
 
 Sources primaires : https://developers.cloudflare.com/durable-objects/best-practices/websockets/ ; https://developers.cloudflare.com/workers/wrangler/commands/ ; https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages ; https://docs.astral.sh/uv/getting-started/installation/ .
+
+## Déploiement observé du 14 septembre 2026
+
+Pages : https://moukrea.github.io/jaunt/ ; relais :
+`wss://jaunt-relay.moukrea.workers.dev` ; release : `v0.1.0-beta.1`.
+Le Worker a été déployé avec l’OAuth Wrangler autorisé par le propriétaire,
+stocké chiffré localement avec une clé dans le trousseau système.
+`CLOUDFLARE_ACCOUNT_ID` est renseigné dans GitHub ; le workflow relais Actions
+nécessitera son propre `CLOUDFLARE_API_TOKEN` pour un futur déploiement depuis CI.
+Aucun token OAuth temporaire n’a été copié comme secret API permanent.
+Cela ne demande aucune démarche Cloudflare ou GitHub aux utilisateurs finaux.
+Voir VALIDATION.md pour les résultats réellement observés et leurs limites.

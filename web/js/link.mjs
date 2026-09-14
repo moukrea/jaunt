@@ -34,7 +34,7 @@ export class Link extends EventTarget {
     this.generation = 0; this.pending = new Map(); this.enabled = false;
     this.delay = 500; this.timer = null; this.nextAuth = 'device'; this.stage = '';
     this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve();
-    this.lastSeen = 0; this.latency = null;
+    this.lastSeen = 0; this.lastHostSeen = 0; this.latency = null;
   }
   emit(type, value) { this.dispatchEvent(new CustomEvent(type, {detail: value})); }
   status(state, message = '') { this.state = state; this.emit('status', {state, message}); }
@@ -67,7 +67,10 @@ export class Link extends EventTarget {
       ws.send(JSON.stringify({type: 'auth', role: 'client', token: this.machine.relayToken}));
       this.heartbeat = setInterval(() => {
         if (ws.readyState !== WebSocket.OPEN) return;
-        if (Date.now() - this.lastSeen > 55000) { ws.close(); return; }
+        if (Date.now() - this.lastSeen > 55000 ||
+            (this.state === 'online' && Date.now() - this.lastHostSeen > 55000)) {
+          this.reconnect(); return;
+        }
         ws.send('ping');
         if (this.state === 'online') this.send({type: 'ping', at: Date.now()}).catch(() => {});
       }, 20000);
@@ -144,7 +147,10 @@ export class Link extends EventTarget {
       return;
     }
     if (m.type !== 'box' || !this.channel) throw new Error('Unexpected unencrypted data');
+    // Only an authenticated host message proves end-to-end liveness.
+    // A relay pong may continue while the host has lost its network.
     const value = await this.channel.open(m);
+    this.lastHostSeen = Date.now();
     if (value.type === 'pair.ready') {
       await this.send({type: 'enroll', name: this.machine.deviceName, secret: this.machine.secret});
     } else if (value.type === 'welcome') {
