@@ -13,12 +13,13 @@
     <application android:label="Jaunt" android:theme="@style/AppTheme" android:icon="@drawable/ic_jaunt"
         android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:usesCleartextTraffic="false" android:hardwareAccelerated="true"
         android:supportsRtl="true" android:enableOnBackInvokedCallback="true">
-        <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize"
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|uiMode">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="jaunt"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="image/*"/></intent-filter>
         </activity>
+        <activity android:name=".ScannerActivity" android:exported="false" android:screenOrientation="fullSensor" android:stateNotNeeded="true" android:theme="@style/zxing_CaptureTheme"/>
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths"/></provider>
         <service android:name=".NotificationService" android:exported="false" android:foregroundServiceType="connectedDevice"/>
         <receiver android:name=".BootReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter></receiver>

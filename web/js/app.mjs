@@ -11,6 +11,7 @@ import * as push from './push.mjs';
 
 const {Terminal, FitAddon} = terminalBundle;
 const vault = new Vault(), machines = new Map(), transfers = [];
+let androidAPK = "";
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
@@ -704,6 +705,7 @@ function renderSettings() {
       })),
       el('p', {class: 'settings-notice', text: (isAndroid ? 'The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. No terminal output is shown on the lock screen. ' : '') + 'From any Jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.'})));
   }
+  if (androidAPK && !isAndroid) groups.push(settingsGroup('ANDROID APP', settingsRow('Install the APK', 'Native Android clipboard, camera and background notifications. Your browser pairing stays separate.', el('a', {class: 'button primary', text: 'Download Android APK', href: androidAPK}))));
   const install = button(installedPrompt ? 'Install app' : 'Installation help', async () => {
     if (installedPrompt) { await installedPrompt.prompt(); await installedPrompt.userChoice; installedPrompt = null; renderSettings(); }
     else modal('Install Jaunt on your phone', el('div', {}, el('p', {class: 'modal-copy', text: 'Open the browser menu and choose “Install app” or “Add to Home screen”. On iPhone/iPad, use Safari → Share → Add to Home Screen. This is the web app; a native Android client is not included in this release.'})));
@@ -902,7 +904,9 @@ async function bootstrap() {
     const response = await fetch('./config.json', {cache: 'no-store'});
     const config = await response.json();
     if (!isAndroid && /^android-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(config.androidRelease || '')) {
-      const apk = el('a', {class: 'button primary', text: 'Download Android APK', href: `https://github.com/moukrea/jaunt/releases/download/${config.androidRelease}/jaunt-${config.androidRelease}.apk`});
+      androidAPK = `https://github.com/moukrea/jaunt/releases/download/${config.androidRelease}/jaunt-${config.androidRelease}.apk`;
+      const apk = el('a', {class: 'button primary', text: 'Download Android APK', href: androidAPK});
+      if (view === 'settings') renderSettings();
       $('welcome').append(el('div', {class: 'android-download'}, apk, el('p', {class: 'modal-copy', text: 'Installable Android app with native clipboard, camera and background notifications.'})));
     }
     if (!config.relay) {
