@@ -1,6 +1,6 @@
 # Jaunt — livraison validée le 14 septembre 2026
 
-Dernière livraison publique hôte beta.5 / Android beta.2 : [rapport consolidé et limites](PUBLIC_DELIVERY.md). Les sections ci-dessous conservent les observations historiques.
+Dernière livraison publique hôte beta.5 / Android beta.3 : [rapport consolidé et limites](PUBLIC_DELIVERY.md). Les sections ci-dessous conservent les observations historiques.
 
 **Page : https://moukrea.github.io/jaunt/**
 

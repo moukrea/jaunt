@@ -3,6 +3,7 @@
     "invalid pairing rejected by UI",
     "URL pairing, encrypted authentication, secret removed from URL",
     "real PTY command executed; result proven from file and terminal",
+    "rapid 512-character keyboard input retains every byte without overflowing the peer queue",
     "multiple arbitrary shell sessions",
     "reload uses remembered identity and preserves sessions",
     "host silence detected despite live relay pongs; remembered session resumes",

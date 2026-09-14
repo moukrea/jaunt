@@ -2,7 +2,7 @@
 
 - Application : https://moukrea.github.io/jaunt/
 - Hôte : [v0.1.0-beta.5](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.5).
-- Android : [APK signé 0.1.0-beta.2](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.2/jaunt-android-v0.1.0-beta.2.apk), [release et checksums](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.2).
+- Android : [APK signé 0.1.0-beta.3](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), [release et checksums](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.3).
 - Relais propriétaire déployé : `wss://jaunt-relay.moukrea.workers.dev`, `APP_ORIGIN=https://moukrea.github.io`.
 
 ```sh
@@ -15,16 +15,16 @@ L’APK embarque l’interface WebView et utilise des intégrations Android nati
 
 ## Contrôles exécutés
 
-La [CI de la release](https://github.com/moukrea/jaunt/actions/runs/34902026677) et le [build Android](https://github.com/moukrea/jaunt/actions/runs/34902026665) ont réussi avant fusion de la PR #12. Les releases ont été publiées avant Pages : [hôte](https://github.com/moukrea/jaunt/actions/runs/34902465073), [APK signé](https://github.com/moukrea/jaunt/actions/runs/34902465418), puis [Pages](https://github.com/moukrea/jaunt/actions/runs/34902729279).
+La [CI de la release](https://github.com/moukrea/jaunt/actions/runs/34904297741) et le [build Android](https://github.com/moukrea/jaunt/actions/runs/34904297775) ont réussi avant fusion de la PR #13. Les releases ont été publiées avant Pages : [hôte](https://github.com/moukrea/jaunt/actions/runs/34902465073), [APK signé](https://github.com/moukrea/jaunt/actions/runs/34904737541), puis [Pages](https://github.com/moukrea/jaunt/actions/runs/34905023100).
 
 | Commande / contrôle | Résultat observé |
 |---|---|
 | `pytest -q` | 45 tests, Linux/macOS, Python 3.11 et 3.13 |
-| `npm test` | 17 tests Node |
+| `npm test` | 19 tests Node |
 | `npm run test:relay` | 1 intégration réelle Miniflare/workerd, Durable Object et WebSockets |
 | `python scripts/check_project.py` | Imports, ressources et syntaxe valides |
 | `python scripts/build_release.py` | Wheel, manifeste et SHA256SUMS produits |
-| `python tests/browser_e2e.py` | 22 scénarios par backend : relais Python puis vrai Worker local |
+| `python tests/browser_e2e.py` | 23 scénarios par backend : relais Python puis vrai Worker local |
 | `python tests/installer_e2e.py` | 8 contrôles, dont checksum altéré, véritable PTY, refus de restart implicite et upgrade autorisé |
 | `android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` | 3 tests JVM, lint et builds réussis |
 | `:app:assembleRelease :app:lintRelease`, `apksigner verify --verbose --print-certs` | APK public signé, non debuggable, signature vérifiée |
@@ -36,6 +36,10 @@ Versions locales observées : Python 3.14.2, Node 25.5.0, npm 11.8.0 ; Python de
 
 `npm audit` : aucun avis connu. `pip-audit --local --skip-editable` : aucun avis connu. OSV : 21 dépendances Maven runtime résolues, aucun avis connu au contrôle. Ces résultats dépendent de la couverture des bases et ne constituent pas un audit de sécurité.
 
+## Recette finale des fichiers publiés
+
+La recette finale a utilisé la Page et les releases publiques sans substitution de module : **12 contrôles réussis**. Appairage, shell et commande prouvée, saisie rapide de 512 caractères, second onglet et retour au premier, upload/download avec comparaison des octets, image + chemin sans Enter sur hôte headless, rechargement sans QR, véritable coupure IPv4/IPv6 puis même PID de shell, refus d’upgrade implicite, upgrade explicitement autorisé avec identités conservées, révocation et absence d’exception navigateur. Voir [public-report.json](evidence/public-report.json).
+
 ## Mises à jour réellement installées
 
 Sur les installations publiques beta.4 du poste utilisateur et de la VM, le contrôle automatique initial s’est déclenché seul. Pour ne pas attendre chaque intervalle de quinze minutes pendant la recette, le processus exact installé `python -m jaunt.updates --automatic` a ensuite été déclenché manuellement dans la VM :
@@ -45,6 +49,8 @@ Sur les installations publiques beta.4 du poste utilisateur et de la VM, le cont
 3. Fermeture du shell par la confirmation explicite de l’UI, puis nouvelle exécution du processus automatique : installation de beta.5, service actif et activé, import depuis `site-packages`, identités hôte/appareils inchangées.
 
 L’APK public beta.1 a détecté beta.2 depuis le canal public, téléchargé les assets, vérifié le checksum et le certificat existant, puis ouvert les réglages Android « Allow from this source » et le véritable installateur système. Après confirmation et ouverture, `versionCode=2`, mode non debuggable, même appairage et même PID de shell ; une commande a créé le fichier attendu sur l’hôte. Aucun `adb install` n’a remplacé ce parcours de mise à jour. Le contrôle de découverte a été demandé via Settings ; aucune attente réelle de six heures n’est revendiquée. Après l’upgrade automatique de l’hôte, l’APK a également reconnecté sans QR.
+
+Le même parcours a ensuite installé l’APK public beta.3 depuis beta.2. VersionCode 3, mode non debuggable, appairage conservé et nouvelle commande shell vérifiée après installation. L’APK téléchargé contient exactement le module de régulation d’entrée revu.
 
 Preuves synthétiques : [update-report.json](evidence/update-report.json).
 
@@ -66,3 +72,9 @@ La recette publique a aussi révélé une entrée partiellement reçue pendant u
 - Une notification sur émulateur écran éteint ne prouve pas la livraison en Doze profond, après force-stop ou sous restrictions de batterie constructeur. Aucune garantie de push instantané.
 - Les octets de clipboard et Ctrl+V sont prouvés ; la reconnaissance visuelle d’un attachment par une version réelle de Claude Code/Codex n’a pas été validée par l’agent. Upload + chemin reste distinct, sans Enter. Sur headless, aucun presse-papiers graphique inexistant n’est promis.
 - Le protocole personnalisé et le client Android restent **sans audit de sécurité indépendant**.
+
+## Historique et archive
+
+L’ancien état est conservé sur la branche `backup/pre-rewrite-20260914` (`eb71cfe9b80749d3c53f11e428f027b0d64fb372`). Les changements ont été intégrés par branches et PR, sans force-push ni suppression d’historique. Le dossier `release/` contient les trois assets hôte téléchargés de la release publique ; l’APK reste un asset de release séparé. Les workflows de publication et les contenus des archives ont été inspectés.
+
+L’archive source contient 132 fichiers, chacun couvert par CHECKSUMS.sha256 ; le ZIP a passé la vérification CRC et la relecture complète. Le scan du snapshot extrait ne signale qu’un faux positif revu dans xterm (`FourKeyMap`/`TwoKeyMap`). Aucun état hôte, QR, export de coffre, clé de signature ou log privé n’est inclus. Les wheels publics ont également passé le scan sans détection.
