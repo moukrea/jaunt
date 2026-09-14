@@ -207,7 +207,12 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*.png'))));await page.wait_for_timeout(300)
-        assert 'screenshot.png' in await scrollback(page);passed('PNG conversion/upload and quoted-path insertion, native clipboard truthfully unavailable')
+        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        for _ in range(50):
+            if 'screenshot.png' in await scrollback(page):break
+            await asyncio.sleep(.1)
+        else:raise AssertionError('Uploaded image path never reached terminal scrollback')
+        passed('PNG conversion/upload and quoted-path insertion, native clipboard truthfully unavailable')
         # Ctrl+C clears the unsubmitted image path; it must not execute on upload.
         await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
         await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
