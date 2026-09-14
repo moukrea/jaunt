@@ -1,4 +1,4 @@
-# Jaunt 0.1.0-beta.4
+# Jaunt 0.1.0-beta.5
 
 Keep terminal output alive after interrupted WebSocket sends, and avoid signalling an exited shell process group when the asynchronous reaper has not yet caught up. Live-child permission failures remain errors. Upgrades preserve identities and still require explicit restart authorization before destroying ordinary shells.
 
