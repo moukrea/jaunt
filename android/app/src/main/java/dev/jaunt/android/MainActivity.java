@@ -19,6 +19,9 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
     static final String ORIGIN="https://moukrea.github.io", HOME=ORIGIN+"/jaunt/";
     private WebView web;
+    private android.widget.TextView loading;
+    private final Handler mainHandler=new Handler(Looper.getMainLooper());
+    private boolean appReady;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
     private final Map<String,InputStream> reads=new HashMap<>();
     private final Map<String,OutputStream> writes=new HashMap<>();
@@ -31,7 +34,10 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::goBack);
-        web=new WebView(this);setContentView(web);
+        web=new WebView(this);
+        android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.addView(web,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        loading=new android.widget.TextView(this);loading.setText("Opening Jaunt…");loading.setTextColor(0xffeeeeee);loading.setBackgroundColor(0xff121314);loading.setGravity(Gravity.CENTER);frame.addView(loading,new android.widget.FrameLayout.LayoutParams(-1,-1));setContentView(frame);
+        mainHandler.postDelayed(()->{if(!appReady&&!isFinishing()){loading.setText("Jaunt could not open. Tap to retry.");loading.setOnClickListener(v->recreate());}},20000);
         web.setOnApplyWindowInsetsListener((v,insets)->{
             if(Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.ime());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);}
             return insets;
@@ -44,6 +50,7 @@ public class MainActivity extends Activity {
         WebViewAssetLoader assets=new WebViewAssetLoader.Builder().setDomain("moukrea.github.io")
             .addPathHandler("/jaunt/",path -> bundled.handle("jaunt/"+(path.isEmpty()?"index.html":path))).build();
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onPageFinished(WebView view,String url){view.postInvalidateOnAnimation();}
             @Override public boolean onRenderProcessGone(WebView view,RenderProcessGoneDetail detail){
                 view.destroy();web=null;
                 new AlertDialog.Builder(MainActivity.this).setTitle("Reopen your workspace").setMessage("Android closed the display to free memory. Your shells are still running on the host.").setPositiveButton("Reconnect",(d,w)->recreate()).setCancelable(false).show();return true;
@@ -91,6 +98,7 @@ public class MainActivity extends Activity {
     private void dispatch(String method,JSONObject p,Reply reply){
         try{
             switch(method){
+                case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);return;
                 case "clipboard.read":{
                     if(!foreground)throw new SecurityException("Open Jaunt before reading the clipboard.");
                     ClipboardManager manager=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData clip=manager.getPrimaryClip();
@@ -136,5 +144,5 @@ public class MainActivity extends Activity {
     }
     private void goBack(){if(web==null){moveTaskToBack(true);return;}web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){d.dispatchEvent(new Event('cancel'));d.close();return true;}return false;})()",value->{if(!"true".equals(value))moveTaskToBack(true);});}
     @Override public boolean onKeyUp(int key,KeyEvent event){if(Build.VERSION.SDK_INT<33&&key==KeyEvent.KEYCODE_BACK){goBack();return true;}return super.onKeyUp(key,event);}
-    @Override protected void onDestroy(){if(chooser!=null)chooser.onReceiveValue(null);io.execute(()->{for(InputStream in:reads.values())try{in.close();}catch(IOException ignored){}for(OutputStream out:writes.values())try{out.close();}catch(IOException ignored){}});io.shutdown();if(web!=null)web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){mainHandler.removeCallbacksAndMessages(null);if(chooser!=null)chooser.onReceiveValue(null);io.execute(()->{for(InputStream in:reads.values())try{in.close();}catch(IOException ignored){}for(OutputStream out:writes.values())try{out.close();}catch(IOException ignored){}});io.shutdown();if(web!=null)web.destroy();super.onDestroy();}
 }

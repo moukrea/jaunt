@@ -893,6 +893,7 @@ async function bootstrap() {
   if (vault.locked) { $('lock-screen').hidden = false; }
   else await resumeWorkspace();
   applicationStarted = true;
+  if (isAndroid) await nativeCall('app.ready');
   push.serviceWorker().catch(() => { /* Terminal still works when PWA/push are unavailable. */ });
   try {
     const response = await fetch('./config.json', {cache: 'no-store'});
