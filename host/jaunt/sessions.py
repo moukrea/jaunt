@@ -277,7 +277,26 @@ class Sessions:
 
     async def close(self, sid: str) -> None:
         s = self.get(sid)
-        if s.alive:
+
+        def running() -> bool:
+            # The async reaper may lag behind actual process exit. Never signal
+            # a stale process-group ID after Popen has observed that exit.
+            return s.alive and (s.process is None or s.process.poll() is None)
+
+        def signal_group(sig: int) -> None:
+            if not running():
+                return
+            try:
+                os.killpg(s.pid, sig)
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                # macOS may report EPERM when the child exits between poll and
+                # killpg. An actual permission failure for a live child remains fatal.
+                if running():
+                    raise
+
+        if running():
             if not s.tmux:
                 try:
                     foreground = os.tcgetpgrp(s.fd)
@@ -285,22 +304,12 @@ class Sessions:
                         os.killpg(foreground, signal.SIGHUP)
                 except (ProcessLookupError, OSError):
                     pass
-            try:
-                os.killpg(s.pid, signal.SIGHUP)
-            except ProcessLookupError:
-                pass
+            signal_group(signal.SIGHUP)
             await asyncio.sleep(0.15)
-            if s.alive:
-                try:
-                    os.killpg(s.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+            if running():
+                signal_group(signal.SIGTERM)
                 await asyncio.sleep(0.25)
-            if s.alive:
-                try:
-                    os.killpg(s.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+            signal_group(signal.SIGKILL)
         if s.reaper:
             try:
                 await asyncio.wait_for(asyncio.shield(s.reaper), 3)

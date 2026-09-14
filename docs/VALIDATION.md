@@ -198,3 +198,10 @@ la correction spécifique à Paste reste à confirmer sur son téléphone.
 Transfers n’est plus un onglet permanent. Le suivi, l’annulation et les chemins
 restent accessibles depuis Files → Transfer activity après un transfert ; les
 téléchargements sont enregistrés par le navigateur.
+
+La CI macOS a révélé un autre cas de fermeture : le drapeau alive du reaper
+pouvait rester vrai après la sortie effective du processus. La fermeture vérifie
+maintenant Popen.poll avant d’envoyer un signal au groupe. EPERM n’est toléré que
+si le processus est désormais sorti ; une erreur sur un enfant vivant reste une
+erreur. Une régression vérifie qu’aucun signal n’est envoyé à un PID déjà sorti.
+Cette correction porte la suite locale à 37 tests et prépare la release beta.3.

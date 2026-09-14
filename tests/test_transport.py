@@ -72,3 +72,27 @@ async def test_interrupted_send_preserves_pty_output_and_replay(tmp_path, monkey
         assert not sessions.get(sid).pump.done()
     finally:
         await sessions.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_close_does_not_signal_exited_child_with_stale_alive_flag(tmp_path, monkeypatch):
+    from jaunt.sessions import Session
+
+    class ExitedChild:
+        def poll(self):
+            return 0
+
+    async def noop(*_):
+        pass
+
+    sessions = Sessions(noop, noop, tmp_path)
+    session = Session('stale_child', 'exited', str(tmp_path), 987654, -1, 80, 24,
+                      process=ExitedChild(), alive=True)
+    sessions.items[session.id] = session
+
+    def forbidden_signal(*_):
+        raise AssertionError('An exited child process group must not be signalled')
+
+    monkeypatch.setattr('os.killpg', forbidden_signal)
+    await sessions.close(session.id)
+    assert session.id not in sessions.items
