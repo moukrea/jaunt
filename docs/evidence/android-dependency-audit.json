@@ -1,0 +1,7 @@
+{
+  "source": "https://api.osv.dev/v1/querybatch",
+  "date": "2026-09-14",
+  "scope": "resolved Android releaseRuntimeClasspath Maven artifacts; OSV coverage is not a security audit",
+  "packages": 21,
+  "findings": []
+}

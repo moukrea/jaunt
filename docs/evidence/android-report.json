@@ -1,0 +1,21 @@
+{
+  "apk": "debug installation in Android 14 emulator",
+  "realShell": true,
+  "nativeTextClipboard": true,
+  "nativeProtocolInterop": true,
+  "screenOffNotification": true,
+  "physicalPhoneTested": false,
+  "nativeImageClipboardToHost": true,
+  "ptyInputHex": "16",
+  "enterSent": false,
+  "pngBytesEqual": true,
+  "rotation": true,
+  "networkToggleSameShell": true,
+  "nativeSystemSaveExactBytes": true,
+  "signedReleaseInstallAndLaunch": true,
+  "releaseDebugging": false,
+  "signedReleaseGalleryQRPairing": true,
+  "nativeCameraPermissionAndScannerLaunch": true,
+  "physicalCameraQRDecoded": false,
+  "signedReleaseColdStarts": 3
+}

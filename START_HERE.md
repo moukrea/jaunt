@@ -18,4 +18,4 @@ Pour maintenir ou redéployer ce projet, consulter docs/DEPLOYMENT.md.
 - `SECURITY.md` : permissions, secrets, protocole non audité et précautions GitHub Pages.
 - `release/` : wheel hôte construit et ses checksums, identiques aux assets de la release publique.
 
-L'archive ne contient aucun secret d'appairage ni aucun compte préconfiguré. L'application Android native future n'est pas incluse : l'interface livrée est une PWA mobile/PC.
+L'archive ne contient aucun secret d'appairage ni aucun compte préconfiguré. Le client Android installable en APK utilise l’interface embarquée et des intégrations natives pour la caméra, le presse-papiers, les fichiers et les notifications. Voir docs/ANDROID.md ; la version web reste disponible sur mobile et PC.

@@ -16,6 +16,10 @@ await fs.copyFile(path.join(root, 'install.sh'), path.join(web, 'install.sh'));
 let config = JSON.parse(await fs.readFile(path.join(web, 'config.json'), 'utf8'));
 if (process.env.JAUNT_RELAY_URL) config.relay = process.env.JAUNT_RELAY_URL;
 if (process.env.JAUNT_RELEASE_TAG) config.release = process.env.JAUNT_RELEASE_TAG;
+if (process.env.JAUNT_ANDROID_RELEASE_TAG) {
+  if (!/^android-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(process.env.JAUNT_ANDROID_RELEASE_TAG)) throw new Error('Invalid Android release tag');
+  config.androidRelease = process.env.JAUNT_ANDROID_RELEASE_TAG;
+}
 if (process.env.JAUNT_PAGE_URL) config.page = process.env.JAUNT_PAGE_URL.replace(/\/?$/, '/');
 if (process.env.GITHUB_REPOSITORY) config.repository = process.env.GITHUB_REPOSITORY;
 if (process.env.JAUNT_PRODUCTION === '1') {

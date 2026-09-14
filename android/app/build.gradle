@@ -1,0 +1,45 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'dev.jaunt.android'
+    compileSdk { version = release(37) { minorApiLevel = 0 } }
+    defaultConfig {
+        applicationId 'dev.jaunt.android'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0-beta.1'
+        testInstrumentationRunner 'dev.jaunt.android.ClipboardFixture'
+    }
+    signingConfigs {
+        release {
+            if (System.getenv('JAUNT_ANDROID_KEYSTORE')) {
+                storeFile file(System.getenv('JAUNT_ANDROID_KEYSTORE'))
+                storePassword System.getenv('JAUNT_ANDROID_STORE_PASSWORD')
+                keyAlias System.getenv('JAUNT_ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('JAUNT_ANDROID_STORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-debug' }
+        release { signingConfig signingConfigs.release; minifyEnabled false }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    testOptions { unitTests.returnDefaultValues = false }
+    sourceSets.main.assets.srcDir file("$buildDir/generated/jauntAssets")
+}
+configurations.configureEach { resolutionStrategy.activateDependencyLocking() }
+dependencies {
+    implementation 'androidx.webkit:webkit:1.17.0'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    implementation 'com.google.zxing:core:3.5.4'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20260814'
+}
+tasks.register('bundleJauntWeb', Copy) {
+    from('../../web')
+    into(layout.buildDirectory.dir('generated/jauntAssets/jaunt'))
+    exclude 'install.sh'
+}
+tasks.named('preBuild').configure { dependsOn 'bundleJauntWeb' }

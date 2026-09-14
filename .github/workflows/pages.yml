@@ -29,6 +29,7 @@ jobs:
           JAUNT_PRODUCTION: '1'
           JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
           JAUNT_RELEASE_TAG: ${{ vars.JAUNT_RELEASE_TAG }}
+          JAUNT_ANDROID_RELEASE_TAG: ${{ vars.JAUNT_ANDROID_RELEASE_TAG }}
           JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
       - run: python scripts/check_project.py
       - name: Require published host assets
@@ -54,6 +55,27 @@ jobs:
               verified.add(filename)
           assert verified=={name,'host-manifest.json'}
           PYVERIFY
+      - name: Require published Android assets when advertised
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).androidRelease || ''")
+          if [ -n "$TAG" ]; then
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --pattern SHA256SUMS --pattern SIGNING-CERTIFICATE.txt --dir /tmp/jaunt-android-release
+            python3 - <<'PYANDROID'
+          import hashlib,pathlib
+          root=pathlib.Path('/tmp/jaunt-android-release')
+          rows=(root/'SHA256SUMS').read_text().splitlines()
+          assert len(rows)==2
+          seen=set()
+          for row in rows:
+              digest,name=row.split('  ',1)
+              assert pathlib.Path(name).name==name and (name.endswith('.apk') or name=='SIGNING-CERTIFICATE.txt')
+              assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest
+              seen.add(name)
+          assert len(seen)==2 and 'SIGNING-CERTIFICATE.txt' in seen
+          PYANDROID
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
