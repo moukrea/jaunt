@@ -1,10 +1,10 @@
 # Commencer avec cette archive
 
-**Jaunt 0.1.0-beta.2 — projet complet, livraison source et wheel hôte.**
+**Jaunt 0.1.0-beta.5 — projet complet, livraison source et wheel hôte.**
 
 La livraison est publiée : https://moukrea.github.io/jaunt/.
-L’utilisateur final installe l’hôte avec la commande du README, puis appaire sa
-PWA. Le propriétaire a déjà configuré GitHub Pages et le relais Cloudflare Jaunt.
+L’utilisateur final installe l’hôte avec la commande du README, puis appaire le
+client Android APK ou son navigateur. Le propriétaire a déjà configuré GitHub Pages et le relais Cloudflare Jaunt.
 Pour maintenir ou redéployer ce projet, consulter docs/DEPLOYMENT.md.
 
 **Pour essayer localement sans déployer :** suivre la section Développement local du README (`python scripts/dev.py`). Ce mode n'est accessible que depuis la même machine et ne remplace pas le relais de production.

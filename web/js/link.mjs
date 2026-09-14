@@ -33,7 +33,7 @@ export class Link extends EventTarget {
     this.state = 'offline'; this.channel = null; this.ws = null;
     this.generation = 0; this.pending = new Map(); this.enabled = false;
     this.delay = 500; this.timer = null; this.nextAuth = 'device'; this.stage = '';
-    this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve();
+    this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve(); this.nextSend = 0;
     this.lastSeen = 0; this.lastHostSeen = 0; this.latency = null;
   }
   emit(type, value) { this.dispatchEvent(new CustomEvent(type, {detail: value})); }
@@ -58,7 +58,7 @@ export class Link extends EventTarget {
     this.ws?.close();
     const generation = ++this.generation;
     this.channel = null; this.stage = ''; this.rejectPending();
-    this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve();
+    this.sendQueue = Promise.resolve(); this.receiveQueue = Promise.resolve(); this.nextSend = 0;
     this.status('connecting');
     const ws = this.ws = new WebSocket(`${this.machine.relay}/v1/room/${this.machine.room}`);
     ws.onopen = () => {
@@ -184,8 +184,14 @@ export class Link extends EventTarget {
         await new Promise(resolve => setTimeout(resolve, 15));
         if (generation !== this.generation || this.ws?.readyState !== WebSocket.OPEN) throw new Error('Connection interrupted');
       }
+      // Match host transport pacing: a rapid keyboard/IME burst must not fill
+      // the peer queue or exceed the relay frame budget. Never replay across
+      // a channel change while waiting for the next transmission slot.
+      await new Promise(resolve => setTimeout(resolve, Math.max(0, this.nextSend - performance.now())));
+      if (generation !== this.generation || current !== this.channel || this.ws?.readyState !== WebSocket.OPEN) throw new Error('Connection changed');
       const frame = await current.seal(value);
       if (generation !== this.generation || current !== this.channel) throw new Error('Connection changed');
+      this.nextSend = performance.now() + Math.max(8, JSON.stringify(frame).length / (1.5 * 1024 * 1024) * 1000);
       this.plain(frame);
     });
     this.sendQueue = task;

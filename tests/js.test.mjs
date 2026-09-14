@@ -12,3 +12,26 @@ test('Web Crypto rejects replay and tamper',async()=>{
  await assert.rejects(()=>s.open(f));const x=await c.seal({x:1});await assert.rejects(()=>s.open({...x,ct:'AAAA'}));
  assert.deepEqual(await s.open(x),{x:1});
 });
+
+const {Link}=await import('../web/js/link.mjs');
+function inputLink(onSend){
+ const link=new Link({},async()=>{});link.channel={async seal(value){return value;}};
+ link.ws={readyState:WebSocket.OPEN,bufferedAmount:0,send(raw){onSend(JSON.parse(raw).data);}};
+ return link;
+}
+test('terminal input burst stays within a bounded peer queue and preserves order',async()=>{
+ const pending=[],received=[];let overflow=false;
+ const link=inputLink(value=>{pending.push(value.index);if(pending.length>64)overflow=true;});
+ const drain=setInterval(()=>{if(pending.length)received.push(pending.shift());},5);
+ try{
+  await Promise.all(Array.from({length:200},(_,index)=>link.send({type:'terminal.input',index})));
+  while(pending.length)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(overflow,false,'Burst exhausted the host input queue');
+  assert.deepEqual(received,Array.from({length:200},(_,i)=>i));
+ }finally{clearInterval(drain);}
+});
+test('disconnect while terminal input is queued never replays it into a new channel',async()=>{
+ const sent=[];const link=inputLink(value=>{sent.push(value.index);if(sent.length===1)setTimeout(()=>{link.generation++;link.channel={async seal(value){return value;}};},0);});
+ const results=await Promise.allSettled(Array.from({length:20},(_,index)=>link.send({type:'terminal.input',index})));
+ assert.deepEqual(sent,[0]);assert.equal(results.filter(r=>r.status==='rejected').length,19);
+});

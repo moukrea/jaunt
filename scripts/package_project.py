@@ -21,7 +21,7 @@ ROOT_FILES = (
 SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs', 'android')
 EXCLUDE_DIRS = {'__pycache__', '.pytest_cache', '.dev-state', 'node_modules', '.wrangler', '.venv', 'evidence', '.gradle', '.kotlin', 'build'}
 EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.sock', '.apk', '.aab', '.jks', '.keystore'}
-EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'public-report.json', 'native-clipboard-report.json', 'run-summary.json', 'android-report.json', 'android-dependency-audit.json',
+EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'public-report.json', 'native-clipboard-report.json', 'run-summary.json', 'android-report.json', 'android-dependency-audit.json', 'update-report.json',
             'desktop-welcome.png', 'desktop-terminal.png', 'desktop-files.png',
             'mobile-welcome.png', 'mobile-terminal.png')
 

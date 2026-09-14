@@ -4,9 +4,9 @@
 
 **Vos shells, vos fichiers, votre machine. Depuis votre téléphone.**
 
-Jaunt est une application web installable (PWA) et un hôte POSIX. Elle donne accès à de vrais terminaux, pas seulement à Claude Code ou Codex. La page est statique ; un relais partagé transporte les connexions chiffrées sortantes de l'hôte et du navigateur.
+Jaunt propose un client Android installable en APK, une interface web mobile/PC et un hôte POSIX. Il donne accès à de vrais terminaux, pas seulement à Claude Code ou Codex. La page est statique ; un relais partagé transporte les connexions chiffrées sortantes de l'hôte et du navigateur.
 
-**Version : 0.1.0-beta.2.** [Ouvrir Jaunt](https://moukrea.github.io/jaunt/). Le relais et la release hôte sont déployés ; le protocole reste sans audit de sécurité externe. Voir le [rapport de validation](docs/VALIDATION.md) pour les tests réellement exécutés et les limites non validées.
+**Hôte : 0.1.0-beta.5 · Android : 0.1.0-beta.2.** [Ouvrir Jaunt](https://moukrea.github.io/jaunt/). Le relais et la release hôte sont déployés ; le protocole reste sans audit de sécurité externe. Voir le [rapport de validation](docs/PUBLIC_DELIVERY.md) pour les tests réellement exécutés et les limites non validées.
 
 ## Première mise en ligne — une fois pour le propriétaire du projet
 
@@ -20,14 +20,15 @@ Le relais n'est pas emprunté à sshx, Happy ou Zedra. Aucune dépendance à leu
 curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
 ```
 
-Linux, macOS ou WSL. `curl` est nécessaire. L'installateur utilise un Python 3.11–3.14 compatible ou installe un Python privé via uv. Aucun `sudo` implicite. Il vérifie le SHA-256 de la release, crée un environnement privé et démarre un service utilisateur lorsque disponible.
+Linux, macOS ou WSL. `curl` est nécessaire. L'installateur utilise un Python 3.11–3.14 compatible ou installe un Python privé via uv. Aucun `sudo` implicite. Le service tourne en arrière-plan et les mises à jour sont activées automatiquement ; elles attendent la fin des shells ordinaires et des transferts. Il vérifie le SHA-256 de la release, crée un environnement privé et démarre un service utilisateur lorsque disponible.
 
-Ouvrir **https://moukrea.github.io/jaunt/**, scanner le QR affiché par l'hôte, ou coller la chaîne `JAUNT1.…`. Le QR expire après dix minutes et n'est utilisable qu'une fois. L'appareil mémorisé utilise ensuite sa propre clé : un changement de Wi-Fi ou de 4G/5G ne nécessite pas de réappairage. Conserver l'onglet ouvert pour reprendre automatiquement ; si le système mobile suspend/tue le navigateur, rouvrir l'application.
+Sur Android, [installer l’APK signé](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.2/jaunt-android-v0.1.0-beta.2.apk), puis scanner le QR affiché par l’hôte. Sur PC ou dans un navigateur, ouvrir **https://moukrea.github.io/jaunt/**. La chaîne `JAUNT1.…` peut aussi être collée. Le QR expire après dix minutes et n'est utilisable qu'une fois. L'appareil mémorisé utilise ensuite sa propre clé : un changement de Wi-Fi ou de 4G/5G ne nécessite pas de réappairage. Conserver l'onglet ouvert pour reprendre automatiquement ; si le système mobile suspend/tue le navigateur, rouvrir l'application.
 
 ```sh
 jaunt pair                       # Appairer un autre appareil
 jaunt service install            # Installer/activer le service utilisateur
 jaunt status                     # État de l'hôte et des shells
+jaunt update                     # Vérifier une mise à jour sans fermer les shells
 jaunt doctor                     # Diagnostic sans afficher les secrets
 jaunt devices                    # Appareils autorisés
 jaunt revoke IDENTIFIANT          # Révoquer un appareil perdu
@@ -51,8 +52,8 @@ L'appairage autorise le **compte système qui exécute l'hôte**, avec toutes se
 | Images | Galerie, fichier, collage et drag-and-drop ; conversion PNG des formats décodables par le navigateur ; insertion du chemin ou collage natif conditionnel |
 | Presse-papiers | Sélection, copie du scrollback conservé, lecture/écriture du presse-papiers hôte quand disponible, buffer texte headless, OSC 52 en copie seulement |
 | Protection | QR à usage unique, clés propres aux appareils, révocation, coffre navigateur facultativement protégé par PIN/mot de passe et verrouillage automatique |
-| Notifications | Inscription Web Push, test depuis les réglages, CLI `notify`/`run` ; ni compte ntfy ni détection magique des événements internes d'un agent |
-| Interface | Mobile/PC, PWA installable, ressources locales, logo fourni ; pas encore une application Android native |
+| Notifications | Service natif Android facultatif ou Web Push dans le navigateur ; test dans Settings et CLI `notify`/`run` |
+| Interface | Client Android APK avec interface embarquée et intégrations natives ; web mobile/PC et PWA ; JavaScript local |
 
 ## Images : la distinction importante
 
@@ -69,7 +70,7 @@ L'appairage autorise le **compte système qui exécute l'hôte**, avec toutes se
 - La reprise d'upload fonctionne après coupure réseau tant que l'hôte et la page conservent le transfert. Après redémarrage de l'hôte ou rechargement complet de la page, recommencer l'upload ; aucun accès persistant non autorisé aux fichiers locaux du téléphone.
 - Les shells ordinaires survivent à la déconnexion, **pas au redémarrage du daemon ou de la machine**. tmux permet la survie à un redémarrage du daemon, pas à un reboot de l'OS.
 - Un seul onglet d'application Jaunt par profil navigateur peut posséder le coffre en même temps. Les onglets de terminal dans Jaunt et plusieurs appareils sont supportés.
-- Les notifications requièrent les permissions et le support Web Push du navigateur. Sur iOS, utiliser la PWA installée. La livraison dépend du réseau et du fournisseur push ; aucune garantie temps réel.
+- Dans le navigateur, les notifications requièrent les permissions et le support Web Push. Dans l’APK, activer Android background notifications dans Settings ; les restrictions de batterie Android peuvent retarder la livraison. Sur iOS, utiliser la PWA installée. La livraison dépend du réseau et du fournisseur push ; aucune garantie temps réel.
 - Une machine en veille/éteinte n'est pas joignable. Pas de réveil à distance, pas de tunnel TCP arbitraire, pas de bureau graphique, pas de shell Windows natif.
 - Les coûts, limites et disponibilité du relais de production relèvent du compte Cloudflare. Le relais comporte des garde-fous de base, pas une protection commerciale anti-abus garantie.
 

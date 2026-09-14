@@ -123,6 +123,12 @@ async def main():
             await asyncio.sleep(.1)
         else:raise AssertionError('Executed command result never reached terminal scrollback')
         passed('real PTY command executed; result proven from file and terminal')
+        burst='0123456789abcdef'*32
+        await terminal_command(page,"printf '%s' '"+burst+"' > burst-input.txt")
+        await until(lambda:(h.work/'burst-input.txt').exists())
+        assert (h.work/'burst-input.txt').read_text()==burst
+        await expect(page.locator('#connection span')).to_have_text('Encrypted')
+        passed('rapid 512-character keyboard input retains every byte without overflowing the peer queue')
         await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill('Builds');await page.get_by_label('Working directory').fill(str(h.work))
         await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#tabs')).to_contain_text('Builds')
         assert len(json.loads(h.cli('status'))['sessions'])==2;passed('multiple arbitrary shell sessions')
