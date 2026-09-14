@@ -1,0 +1,68 @@
+name: Android APK
+on:
+  pull_request:
+    paths: ['android/**', 'web/**', 'scripts/prepare_web.mjs', '.github/workflows/android.yml']
+  push:
+    branches: [main, 'android/**']
+    tags: ['android-v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - run: npm ci && npm run prepare-web
+        env:
+          JAUNT_RELEASE_TAG: ${{ vars.JAUNT_RELEASE_TAG }}
+          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
+      - name: Test native protocol, lint and build APK
+        run: android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-validation
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/reports/lint-results-debug.html
+      - name: Sign and publish immutable Android release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          JAUNT_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          JAUNT_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          export JAUNT_ANDROID_KEYSTORE="$RUNNER_TEMP/jaunt-release.jks"
+          trap 'rm -f "$JAUNT_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$JAUNT_ANDROID_KEYSTORE"
+          chmod 600 "$JAUNT_ANDROID_KEYSTORE"
+          python3 - <<'PY'
+          import os,re
+          version=re.search(r"versionName '([^']+)'",open('android/app/build.gradle').read())[1]
+          assert os.environ['TAG']=='android-v'+version, 'Tag/version mismatch'
+          PY
+          android/gradlew -p android :app:assembleRelease :app:lintRelease --no-daemon
+          mkdir -p android-release
+          cp android/app/build/outputs/apk/release/app-release.apk "android-release/jaunt-$TAG.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "android-release/jaunt-$TAG.apk" > android-release/SIGNING-CERTIFICATE.txt
+          (cd android-release && sha256sum *.apk SIGNING-CERTIFICATE.txt > SHA256SUMS)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'Refusing to replace an existing Android release.' >&2
+            exit 1
+          fi
+          gh release create "$TAG" android-release/* --verify-tag --prerelease --title "Jaunt Android ${TAG#android-v}" --notes-file docs/ANDROID_RELEASE_NOTES.md

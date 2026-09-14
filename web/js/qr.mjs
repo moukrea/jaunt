@@ -1,3 +1,4 @@
+import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 // Scanning is entirely local. No QR image or pairing capability leaves this page.
 import {$, el, modal, closeModal, button, toast} from './ui.mjs';
 let jsqrPromise;
@@ -33,7 +34,8 @@ export async function scan(onCode) {
     if (!code || stop) return;
     stop = true; closeModal(); await onCode(code);
   };
-  modal('Pair with a QR code', el('div', {}, video, status, pick), () => {
+  const camera = isAndroid ? button('Open Android camera', async () => { const code = await nativeCall('qr.scan'); if (code) await finish(code); }, 'button primary wide') : null;
+  modal('Pair with a QR code', el('div', {}, camera, video, status, pick), () => {
     stop = true; clearTimeout(timer); stream?.getTracks().forEach(track => track.stop());
   });
   let decode;
@@ -48,6 +50,7 @@ export async function scan(onCode) {
       await finish(code);
     } catch (e) { toast(e.message, true); }
   };
+  if (isAndroid) { video.hidden = true; status.textContent = 'Scan with the camera, or choose a QR image below. Codes stay on this device.'; return; }
   try {
     stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}}, audio: false});
     if (stop) { stream.getTracks().forEach(track => track.stop()); return; }

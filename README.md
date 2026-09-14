@@ -100,3 +100,7 @@ python tests/browser_e2e.py       # Navigateur et hôte réels, isolation tempor
 ## Documents
 
 [Déploiement](docs/DEPLOYMENT.md) · [Sécurité](SECURITY.md) · [Protocole](docs/PROTOCOL.md) · [Dépannage](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Licences tierces](THIRD_PARTY_NOTICES.md)
+
+## Android APK
+
+The Android client bundles this interface with native clipboard, camera, file saving and optional foreground-service notifications. It is an APK with a WebView interface, not a PWA. See [Android setup, architecture and validation](docs/ANDROID.md). The public Page advertises the APK only after its release assets have been verified.

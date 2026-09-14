@@ -22,3 +22,12 @@ playwright-report/
 host.json
 *vault-export*
 *.zip
+
+# Android build outputs and signing material (never committed)
+android/.gradle/
+android/**/build/
+android/local.properties
+*.jks
+*.keystore
+*.apk
+*.aab

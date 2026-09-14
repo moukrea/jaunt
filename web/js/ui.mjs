@@ -1,3 +1,4 @@
+import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {icon} from './icons.mjs';
 export const $ = id => document.getElementById(id);
 export function el(tag, attrs = {}, ...children) {
@@ -51,7 +52,7 @@ export function confirmAction(title, explanation, label, action, danger = false)
   modal(title, body);
 }
 export async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); toast('Copied to this device.'); }
+  try { if (isAndroid) await nativeCall('clipboard.write', {text}); else await navigator.clipboard.writeText(text); toast('Copied to this device.'); }
   catch {
     const area = el('textarea', {class: 'copy-text', value: text, readOnly: true, 'aria-label': 'Text to copy'});
     modal('Copy text', el('div', {}, el('p', {class: 'modal-copy', text: 'Your browser requires manual selection. Select and copy below.'}), area,

@@ -1,6 +1,6 @@
 // precache:begin
-const CACHE = 'jaunt-static-6f565bc17171849a';
-const STATIC = ["./","./assets/favicon.png","./assets/icon-192.png","./assets/icon-512.png","./assets/jaunt.png","./index.html","./js/app.mjs","./js/crypto.mjs","./js/icons.mjs","./js/link.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
+const CACHE = 'jaunt-static-5bc961968c1d15e6';
+const STATIC = ["./","./assets/favicon.png","./assets/icon-192.png","./assets/icon-512.png","./assets/jaunt.png","./index.html","./js/app.mjs","./js/crypto.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
 // precache:end
 const base = new URL('./', self.location.href);
 const resources = new Set(STATIC.map(path => new URL(path, base).href));

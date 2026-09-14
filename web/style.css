@@ -17,3 +17,5 @@
 @media(max-width:760px){.file-name{max-width:calc(100vw - 125px)}.session-tab .tab-label{min-height:40px}.mobile-nav button{min-height:44px}.file-entry{min-height:52px}.compose-execute{font-size:12px}.modal-actions{flex-wrap:wrap}.modal-actions>.button{min-width:120px}.settings-row .button{min-height:40px}.actionbar .tool-button{min-height:40px}.toasts .text-button{font-size:11px}.wide-view{overflow:auto}}
 
 .paste-zone{min-height:150px;padding:16px;margin:18px 0;border:1px dashed var(--muted);border-radius:12px;background:var(--surface);font-size:16px;white-space:pre-wrap;overflow-wrap:anywhere}.paste-zone:empty:before{content:attr(data-placeholder);color:var(--muted);pointer-events:none}.paste-zone:focus{outline:2px solid var(--accent);outline-offset:2px}
+
+.android-download{margin:24px 0 40px;padding:20px;border:1px solid var(--border);border-radius:12px}.android-download .button{display:inline-flex;text-decoration:none}.android-download p{margin:12px 0 0}

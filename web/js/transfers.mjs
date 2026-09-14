@@ -1,3 +1,4 @@
+import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {b64, unb64, random} from './crypto.mjs';
 import {SHA256} from './sha256.mjs';
 const CHUNK = 48 * 1024;
@@ -97,7 +98,8 @@ export async function toPNG(file) {
   return new File([blob], (file.name || 'pasted-image').replace(/\.[^.]+$/, '') + '.png', {type: 'image/png'});
 }
 
-export function saveBlob(blob, filename) {
+export async function saveBlob(blob, filename) {
+  if (isAndroid) return nativeSave(blob, filename);
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 30000);

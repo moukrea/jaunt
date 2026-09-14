@@ -205,3 +205,20 @@ maintenant Popen.poll avant d’envoyer un signal au groupe. EPERM n’est tolé
 si le processus est désormais sorti ; une erreur sur un enfant vivant reste une
 erreur. Une régression vérifie qu’aucun signal n’est envoyé à un PID déjà sorti.
 Cette correction porte la suite locale à 37 tests et prépare la release beta.3.
+
+## Android client and beta.3 follow-up — 2026-09-14
+
+PR #10 passed every CI job, including 37 Python tests on Linux/macOS and both browser relay backends, then merged as `f85b9cb`. Public host `v0.1.0-beta.3` was published by run `34859426583`; all three public assets, wheel contents and checksums were verified, and the wheel secret scan found no leaks. Pages run `34859891960` succeeded; its beta.3 configuration and changed interface resources were compared with the merged source. The isolated Ubuntu VM upgraded from the public installer with its identity preserved and its user service active.
+
+Android local build observations:
+
+- JDK 17; Gradle 9.5.0 with official distribution SHA-256; AGP 9.3.2; compile SDK 37.0 / target 36 / minimum 26.
+- `android/gradlew -p android :app:assembleRelease :app:lintRelease :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --write-locks --write-verification-metadata sha256 --no-daemon`: successful. Two native protocol unit tests passed (bidirectional encryption, replay/tamper rejection and proof binding). The native channel also authenticated against the actual public Python host, independently of these unit fixtures.
+- Android lint: no errors. Remaining warnings concern the deliberately retained target API 36, the compatible Gradle version, JavaScript being enabled for the bundled interface and feature-guard analysis; these are reviewed boundaries, not suppressed assertions. A renderer-loss recovery callback was subsequently added following the WebKit lint warning.
+- OSV queried all 21 resolved Android release runtime Maven artifacts: no reported advisories on 2026-09-14. This is database coverage, not a security audit. WebKit was updated to 1.17.0 and the JVM JSON test library to 20260814 after checking available versions.
+- `apksigner verify --verbose --print-certs`: signed release APK verifies with APK Signature Scheme v2, RSA 4096, certificate SHA-256 `0c94f35fe68a30eb155c4aa5b9003f633b5b4884f191c54f84bdeeec956348fe`. Local signed APK installation and launch succeeded in the emulator. Release debugging is disabled; the end-to-end automation below used the debug build's WebView debugging, not a production debug endpoint.
+- Android 14/API 34 x86_64 emulator: installed APK → public Cloudflare relay → public release-installed beta.3 host → real shell command and output file; native Android text clipboard round-trip; native Java encrypted notification channel; actual Android notification with the app backgrounded and emulator screen off; native Android image clipboard → upload → isolated host X11 clipboard → PTY byte `16` (Ctrl+V), no Enter, PNG bytes equal; rotation and network toggle retain the same shell ID/PID; Android Save dialog writes exact binary fixture bytes.
+- Android clipboard fixture is a separate instrumentation APK. It is not in the signed application. All host/clipboard/image tests used synthetic data in the isolated VM/emulator, never the user's desktop clipboard or personal folders.
+- After shared-interface integration: `npm test` and actual `npm run test:relay` passed; `python tests/browser_e2e.py` passed all 22 browser scenarios; `python scripts/check_project.py` passed. GitHub CI repeats both browser relay backends before merge.
+
+Evidence: `docs/evidence/android-report.json` and `android-dependency-audit.json`. Physical Android camera scanning, real keyboard/IME behavior, gallery variants, actual Wi-Fi/mobile handoff, deep idle/OEM battery behavior and attachment recognition inside an actual Claude Code/Codex version are not claimed. Screen-off emulator notification delivery is not proof of guaranteed deep-idle push. The protocol and native implementation remain independently unaudited.

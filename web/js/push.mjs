@@ -1,10 +1,13 @@
+import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {b64, unb64} from './crypto.mjs';
 export async function serviceWorker() {
+  if (isAndroid) return null;
   if (!('serviceWorker' in navigator)) throw new Error('This browser does not support service workers.');
   await navigator.serviceWorker.register(new URL('../sw.js', import.meta.url), {scope: new URL('../', import.meta.url).pathname});
   return navigator.serviceWorker.ready;
 }
 export async function subscribe(vault, link) {
+  if (isAndroid) { await nativeCall('notifications.enable', {machine: link.machine}); link.machine.push = true; await vault.save(); return true; }
   if (!('PushManager' in window) || !('Notification' in window)) throw new Error('Web Push is not supported. On iPhone/iPad, install Jaunt on the home screen first.');
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('Notifications are not allowed. Change this site’s notification permission in your browser settings.');
@@ -26,6 +29,7 @@ export async function subscribe(vault, link) {
   return true;
 }
 export async function unsubscribe(vault, link) {
+  if (isAndroid) { await nativeCall('notifications.disable', {room: link.machine.room}); link.machine.push = false; await vault.save(); return; }
   // A PushSubscription is per browser origin, shared by all Jaunt machines.
   // Removing it here would silently break push from the other hosts.
   await link.request('notifications.unsubscribe');

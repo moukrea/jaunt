@@ -1,3 +1,4 @@
+import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import terminalBundle from '../vendor/xterm.mjs';
 import {Link, parsePairing} from './link.mjs';
 import {Vault} from './vault.mjs';
@@ -452,7 +453,7 @@ async function getFile(a, path, name, writer) {
   const item = transferItem(a, name, 'down', 0);
   try {
     const result = await download(a.link, path, progressFor(item), {writer, signal: item.controller.signal});
-    if (result.blob) saveBlob(result.blob, result.name);
+    if (result.blob) await saveBlob(result.blob, result.name);
     item.done = true; item.status = 'Downloaded'; item.offset = item.total; renderTransfers(); return result;
   } catch (e) { item.done = true; item.error = true; item.status = e.message; renderTransfers(); throw e; }
 }
@@ -609,6 +610,13 @@ async function pasteDevice() {
   const a = online(), t = activeTerm(a);
   if (!t) throw new Error('Open a shell first.');
   let files = [], text = '';
+  if (isAndroid) {
+    ({files, text} = await nativeClipboard());
+    if (files.length) await pasteFiles(a, t, files);
+    else if (text) await insertText(a, t, text);
+    else showPastePanel(a, t);
+    return;
+  }
   try {
     if (navigator.clipboard?.read) {
       const items = await navigator.clipboard.read();
@@ -682,22 +690,22 @@ function renderSettings() {
       settingsRow('Authorized devices', 'Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.', button('Manage', () => manageDevices(a))),
       settingsRow('Forget this machine', 'Removes its saved key from this browser. Revoke it on the host first when possible.', button('Forget', () => forgetMachine(a), 'button danger'))));
     groups.push(settingsGroup('NOTIFICATIONS',
-      settingsRow('Background push', a.machine.push ? 'Registered for this machine. Delivery depends on browser/OS permissions and the host being online.' : 'Standard Web Push sent by your host. No ntfy, bot or third-party notification account.',
+      settingsRow(isAndroid ? 'Android background notifications' : 'Background push', isAndroid ? 'Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.' : a.machine.push ? 'Registered for this machine. Delivery depends on browser/OS permissions and the host being online.' : 'Standard Web Push sent by your host. No ntfy, bot or third-party notification account.',
         button(a.machine.push ? 'Disable' : 'Enable', async () => {
           if (a.machine.push) await push.unsubscribe(vault, a.link); else await push.subscribe(vault, a.link);
           renderSettings(); toast('Notification preference saved.');
         })),
       settingsRow('Test delivery', 'Background notifications omit command output by default.', button('Send test', async () => {
         const result = await a.link.request('notifications.test');
-        toast(result.delivered ? 'Push sent to the notification provider.' : result.results?.join('; ') || 'No push subscription delivered; a live in-app notification may still appear.', !result.delivered);
+        toast(isAndroid ? 'Test sent. Check Android notifications after enabling the background connection.' : result.delivered ? 'Push sent to the notification provider.' : result.results?.join('; ') || 'No push subscription delivered; a live in-app notification may still appear.', !isAndroid && !result.delivered);
       })),
-      el('p', {class: 'settings-notice', text: 'From any Jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; this is not a native Android foreground service.'})));
+      el('p', {class: 'settings-notice', text: (isAndroid ? 'The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. No terminal output is shown on the lock screen. ' : '') + 'From any Jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.'})));
   }
   const install = button(installedPrompt ? 'Install app' : 'Installation help', async () => {
     if (installedPrompt) { await installedPrompt.prompt(); await installedPrompt.userChoice; installedPrompt = null; renderSettings(); }
     else modal('Install Jaunt on your phone', el('div', {}, el('p', {class: 'modal-copy', text: 'Open the browser menu and choose “Install app” or “Add to Home screen”. On iPhone/iPad, use Safari → Share → Add to Home Screen. This is the web app; a native Android client is not included in this release.'})));
   });
-  groups.push(settingsGroup('JAUNT', settingsRow('Installable web app', 'A focused window on your home screen, with the same remembered machines.', install),
+  groups.push(settingsGroup('JAUNT', settingsRow(isAndroid ? 'Jaunt for Android' : 'Installable web app', isAndroid ? 'Installed APK · bundled interface and native Android integrations.' : 'A focused window on your home screen, with the same remembered machines.', isAndroid ? null : install),
     el('p', {class: 'settings-notice', text: 'Jaunt 0.1.0 beta · Host-authenticated encrypted channels · Open source. The custom protocol has automated tests, not an independent security audit. The relay transports ciphertext but can see routing metadata and interrupt availability. Never pair an untrusted device.'})));
   content.replaceChildren(...groups);
 }
@@ -729,6 +737,7 @@ async function manageDevices(a) {
 }
 function forgetMachine(a) {
   confirmAction('Forget this machine?', 'This removes its key locally. It does not terminate shells or revoke other browsers. To revoke this saved identity on the host, use Authorized devices first.', 'Forget', async () => {
+    if (isAndroid) await nativeCall('notifications.disable', {room: a.machine.room});
     a.link.stop(); for (const t of a.terms.values()) { t.term.dispose(); t.node.remove(); }
     machines.delete(a.machine.room); vault.data.machines = vault.data.machines.filter(m => m.room !== a.machine.room);
     if (selected === a.machine.room) selected = vault.data.machines[0]?.room || null;
@@ -828,7 +837,7 @@ function bindEvents() {
   $('forget-vault').onclick = () => {
     // Native confirm remains accessible above the lock overlay and needs a gesture.
     if (!window.confirm('Reset all remembered machines on this browser? You will need new pairing codes. Remote authorizations must be revoked separately on each host.')) return;
-    vault.forgetAll().then(() => location.reload()).catch(report);
+    (async () => { if (isAndroid) await nativeCall('notifications.clear'); await vault.forgetAll(); location.reload(); })().catch(report);
   };
   window.addEventListener('hashchange', () => {
     const parameters = new URLSearchParams(location.hash.slice(1));
@@ -855,6 +864,22 @@ function bindEvents() {
   document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setView('settings'); }
   });
+  async function nativeOpen() {
+    if (!isAndroid || !vault.data) return;
+    const state = await nativeCall('notifications.status');
+    for (const m of vault.data.machines) m.push = !!state.enabled && (state.rooms || []).includes(m.room);
+    if (view === 'settings') renderSettings();
+    const target = await nativeCall('open.pending');
+    const a = machines.get(target?.host);
+    if (a) { selected = a.machine.room; setView('terminal'); if (a.sessions.some(s => s.id === target.session)) await selectSession(a, target.session); }
+    const shared = await nativeClipboard('shared.read');
+    if (shared.files.length) { const selectedMachine = current(), term = activeTerm(selectedMachine);
+      if (!selectedMachine || !term) { toast('Open a shell, then share the image to Jaunt again.', true); return; }
+      confirmAction('Send this shared image?', `Send the image to ${term.session.name} on ${selectedMachine.machine.name}.`, 'Send image', () => pasteFiles(selectedMachine, term, shared.files));
+    }
+  }
+  window.addEventListener('jaunt-native-open', () => nativeOpen().catch(report));
+  if (isAndroid) setTimeout(() => nativeOpen().catch(report), 1500);
   navigator.serviceWorker?.addEventListener('message', e => {
     if (e.data?.type !== 'open-session' || !vault.data) return;
     const a = machines.get(e.data.host); if (!a) return;
@@ -872,6 +897,10 @@ async function bootstrap() {
   try {
     const response = await fetch('./config.json', {cache: 'no-store'});
     const config = await response.json();
+    if (!isAndroid && /^android-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(config.androidRelease || '')) {
+      const apk = el('a', {class: 'button primary', text: 'Download Android APK', href: `https://github.com/moukrea/jaunt/releases/download/${config.androidRelease}/jaunt-${config.androidRelease}.apk`});
+      $('welcome').append(el('div', {class: 'android-download'}, apk, el('p', {class: 'modal-copy', text: 'Installable Android app with native clipboard, camera and background notifications.'})));
+    }
     if (!config.relay) {
       $('deployment-note').hidden = false;
       $('deployment-note').textContent = 'Project deployment pending: configure and deploy the relay before using the public installer. Local development and pairing to an existing Jaunt host are available.';
