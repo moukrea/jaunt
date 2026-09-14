@@ -21,7 +21,7 @@ ROOT_FILES = (
 SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs')
 EXCLUDE_DIRS = {'__pycache__', '.pytest_cache', '.dev-state', 'node_modules', '.wrangler', '.venv', 'evidence'}
 EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.sock'}
-EVIDENCE = ('browser-report.json', 'installer-report.json', 'run-summary.json',
+EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'run-summary.json',
             'desktop-welcome.png', 'desktop-terminal.png', 'desktop-files.png',
             'mobile-welcome.png', 'mobile-terminal.png')
 

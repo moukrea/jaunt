@@ -28,12 +28,14 @@ le test installateur vérifie séparément la provenance du wheel installé.
 | `python scripts/check_project.py` | Réussi, sans exemption `--source` |
 | `python scripts/build_release.py` | Wheel, manifeste et SHA256SUMS construits |
 | `python -m playwright install chromium` | Chromium de test réellement téléchargé |
-| `python tests/browser_e2e.py` | **18 scénarios réussis**, site servi sous `/jaunt/` |
+| `python tests/browser_e2e.py` | **18 scénarios réussis**, relais Python de référence, site servi sous `/jaunt/` |
+| `JAUNT_E2E_RELAY=workerd python tests/browser_e2e.py` | **18 scénarios réussis**, navigateur → Worker/workerd réel → hôte → PTY/fichiers |
+| `python tests/installer_e2e.py` | **8 contrôles réussis** en mode miroir offline |
 | `JAUNT_INSTALLER_ONLINE=1 python tests/installer_e2e.py` | **8 contrôles réussis**, miroir de release loopback, dépendances PyPI installées dans des environnements privés neufs |
 | `npm audit` | **0 vulnérabilité connue** dans le graphe résolu |
 | `pip-audit` | **0 vulnérabilité connue** ; `jaunt-host` local absent de PyPI, donc non auditable par cette base |
 
-Preuves synthétiques : `docs/evidence/browser-report.json` et
+Preuves synthétiques : `docs/evidence/browser-report.json` , `docs/evidence/browser-worker-report.json` et
 `docs/evidence/installer-report.json`. Les captures contiennent uniquement des
 terminaux et fichiers de test. Aucun QR ni secret d’appairage n’y est conservé.
 
@@ -138,3 +140,16 @@ Le ZIP de livraison a été reconstruit, contrôlé par CRC, comparaison des oct
 checksums de tous ses fichiers. Les cinq captures ont été examinées visuellement :
 aucun QR, coffre ou terminal privé. La licence jsQR est copiée sans modification ;
 son saut de ligne final est signalé par `git diff --check` et conservé tel que fourni.
+
+## CI GitHub observée
+
+[Exécution 34849935562](https://github.com/moukrea/jaunt/actions/runs/34849935562) :
+**5 jobs réussis**, hôte Linux/macOS × Python 3.11/3.13, navigateur et relais sous Node 22.
+Cela valide les tests hôte macOS ; l’installation par launchd et Safari restent non testés.
+
+Le parcours E2E additionnel Worker passe localement avec 18 scénarios, dont la perte
+du vrai processus workerd et la reprise avec stockage Durable Object persistant.
+Le premier essai tuait uniquement le parent Node : les sockets workerd restaient
+temporaires ouvertes. Le harness a été corrigé pour tuer son propre groupe de
+processus isolé ; il vérifie toujours la déconnexion effective avant redémarrage.
+Cette correction concerne uniquement l’injection de panne dans le test.

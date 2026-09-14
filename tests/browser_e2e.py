@@ -5,7 +5,7 @@ No production services, no mocks of the host or terminal. Temporary loopback
 servers/state and files are cleaned up. Never edits browser security policies.
 """
 from __future__ import annotations
-import asyncio,base64,functools,http.server,json,os,socket,struct,subprocess,sys,tempfile,threading,time,zlib
+import asyncio,base64,functools,http.server,json,os,signal,socket,struct,subprocess,sys,tempfile,threading,time,zlib
 import qrcode
 from pathlib import Path
 from playwright.async_api import async_playwright,expect
@@ -51,12 +51,28 @@ class Harness:
     def cli(self,*args,input=None):
         return subprocess.check_output([sys.executable,'-m','jaunt.cli',*args],env=self.env,input=input,text=True,timeout=30)
     def pair(self):return json.loads(self.cli('pair','--json'))
+    def kill_relay(self):
+        if self.relay:
+            # Miniflare owns a workerd child. Kill only this harness's dedicated
+            # process group so the test interrupts real sockets, not just Node.
+            try:os.killpg(self.relay.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            self.relay.wait(timeout=5)
     def restart_relay(self):
-        if self.relay and self.relay.poll() is None:self.relay.kill();self.relay.wait(timeout=5)
-        self.relay=subprocess.Popen([sys.executable,str(ROOT/'scripts/dev_relay.py'),'--port',str(self.rport)],stdout=self.log,stderr=self.log)
-        time.sleep(.15)
+        self.kill_relay()
+        if os.environ.get('JAUNT_E2E_RELAY') == 'workerd':
+            command=['node',str(ROOT/'scripts/test_worker.mjs'),str(self.rport),self.url.removesuffix('/jaunt/'),str(self.root/'worker-state')]
+        else:
+            command=[sys.executable,str(ROOT/'scripts/dev_relay.py'),'--port',str(self.rport)]
+        self.relay=subprocess.Popen(command,stdout=self.log,stderr=self.log,start_new_session=True)
+        for _ in range(100):
+            try:
+                with socket.create_connection(('127.0.0.1',self.rport),timeout=.1):return
+            except OSError:time.sleep(.05)
+        raise RuntimeError('Test relay did not listen')
     def close(self):
-        for p in [self.host,self.relay]:
+        self.kill_relay()
+        for p in [self.host]:
             if p and p.poll() is None:
                 p.terminate()
                 try:p.wait(timeout=10)
@@ -115,7 +131,7 @@ async def main():
         passed('reload uses remembered identity and preserves sessions')
         # Drop the relay process: real TCP/WebSocket connections close, not merely
         # a browser offline indicator. Host stays alive and re-registers its room.
-        h.relay.kill();h.relay.wait(timeout=5)
+        h.kill_relay()
         await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
         h.restart_relay();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
         assert json.loads(h.cli('status'))['pid']==original
@@ -128,7 +144,7 @@ async def main():
         async with page.expect_file_chooser() as chooser:await page.locator('#file-upload').click()
         await (await chooser.value).set_files({'name':filename,'mimeType':'application/octet-stream','buffer':payload})
         await until(lambda:any(p.stat().st_size>49152 for p in h.work.glob('.jaunt-upload-*')))
-        h.relay.kill();h.relay.wait(timeout=5)
+        h.kill_relay()
         await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
         h.restart_relay();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
         await until(lambda:(h.work/filename).exists());assert (h.work/filename).read_bytes()==payload
@@ -196,7 +212,7 @@ async def main():
         assert not errors,errors;passed('no uncaught browser exceptions')
         await mobile.close();await ctx.close();await browser.close()
     finally:
-        (OUT/'browser-report.json').write_text(json.dumps({'passed':checks,'uncaughtErrors':errors,'tested':'Chromium desktop and emulated mobile; not a physical handset'},indent=2)+'\n')
+        (OUT/'browser-report.json').write_text(json.dumps({'passed':checks,'uncaughtErrors':errors,'tested':'Chromium desktop and emulated mobile; not a physical handset','relay':os.environ.get('JAUNT_E2E_RELAY','python-reference')},indent=2)+'\n')
         h.close()
     print(f'{len(checks)} browser scenarios passed.',flush=True)
 if __name__=='__main__':asyncio.run(main())
