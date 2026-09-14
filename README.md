@@ -6,13 +6,7 @@
 
 Jaunt propose un client Android installable en APK, une interface web mobile/PC et un hôte POSIX. Il donne accès à de vrais terminaux, pas seulement à Claude Code ou Codex. La page est statique ; un relais partagé transporte les connexions chiffrées sortantes de l'hôte et du navigateur.
 
-**Hôte : 0.1.0-beta.5 · Android : 0.1.0-beta.2.** [Ouvrir Jaunt](https://moukrea.github.io/jaunt/). Le relais et la release hôte sont déployés ; le protocole reste sans audit de sécurité externe. Voir le [rapport de validation](docs/PUBLIC_DELIVERY.md) pour les tests réellement exécutés et les limites non validées.
-
-## Première mise en ligne — une fois pour le propriétaire du projet
-
-Confier [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) à l'agent qui a accès à GitHub. Il configure GitHub Pages, une release hôte et **un relais Cloudflare pour le projet entier**. Il faut une autorisation Cloudflare : un token GitHub ne la remplace pas. Aucune infrastructure à créer par les utilisateurs finaux.
-
-Le relais n'est pas emprunté à sshx, Happy ou Zedra. Aucune dépendance à leurs serveurs, à Tailscale ou à un compte utilisateur Jaunt. Le compte Cloudflare du propriétaire peut avoir des quotas/coûts : aucune promesse de relais gratuit ou illimité.
+**Hôte : 0.1.0-beta.5 · Android : 0.1.0-beta.3.** [Ouvrir Jaunt](https://moukrea.github.io/jaunt/). Le relais et la release hôte sont déployés ; le protocole reste sans audit de sécurité externe. Voir le [rapport de validation](docs/PUBLIC_DELIVERY.md) pour les tests réellement exécutés et les limites non validées.
 
 ## Installer l'hôte
 
@@ -22,7 +16,7 @@ curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
 
 Linux, macOS ou WSL. `curl` est nécessaire. L'installateur utilise un Python 3.11–3.14 compatible ou installe un Python privé via uv. Aucun `sudo` implicite. Le service tourne en arrière-plan et les mises à jour sont activées automatiquement ; elles attendent la fin des shells ordinaires et des transferts. Il vérifie le SHA-256 de la release, crée un environnement privé et démarre un service utilisateur lorsque disponible.
 
-Sur Android, [installer l’APK signé](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.2/jaunt-android-v0.1.0-beta.2.apk), puis scanner le QR affiché par l’hôte. Sur PC ou dans un navigateur, ouvrir **https://moukrea.github.io/jaunt/**. La chaîne `JAUNT1.…` peut aussi être collée. Le QR expire après dix minutes et n'est utilisable qu'une fois. L'appareil mémorisé utilise ensuite sa propre clé : un changement de Wi-Fi ou de 4G/5G ne nécessite pas de réappairage. Conserver l'onglet ouvert pour reprendre automatiquement ; si le système mobile suspend/tue le navigateur, rouvrir l'application.
+Sur Android, [installer l’APK signé](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), puis scanner le QR affiché par l’hôte. Sur PC ou dans un navigateur, ouvrir **https://moukrea.github.io/jaunt/**. La chaîne `JAUNT1.…` peut aussi être collée. Le QR expire après dix minutes et n'est utilisable qu'une fois. L'appareil mémorisé utilise ensuite sa propre clé : un changement de Wi-Fi ou de 4G/5G ne nécessite pas de réappairage. Conserver l'onglet ouvert pour reprendre automatiquement ; si le système mobile suspend/tue le navigateur, rouvrir l'application.
 
 ```sh
 jaunt pair                       # Appairer un autre appareil
@@ -32,7 +26,7 @@ jaunt update                     # Vérifier une mise à jour sans fermer les sh
 jaunt doctor                     # Diagnostic sans afficher les secrets
 jaunt devices                    # Appareils autorisés
 jaunt revoke IDENTIFIANT          # Révoquer un appareil perdu
-jaunt notify "Build terminé"      # Push aux navigateurs inscrits
+jaunt notify "Build terminé"      # Notifier les appareils
 jaunt run -- make test            # Notification de fin de commande
 jaunt clipboard < notes.txt       # Mettre du texte à disposition du client
 jaunt stop                       # Arrête l'hôte ET ses shells non-tmux
@@ -98,12 +92,18 @@ python tests/browser_e2e.py       # Navigateur et hôte réels, isolation tempor
 
 `JAUNT_BROWSER_EXECUTABLE=/chemin/vers/chromium` permet d'utiliser un navigateur système. Sinon : `python -m playwright install chromium`. Les tests ne modifient jamais les politiques de sécurité de votre navigateur.
 
+## Première mise en ligne — une fois pour le propriétaire du projet
+
+Confier [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) à l'agent qui a accès à GitHub. Il configure GitHub Pages, une release hôte et **un relais Cloudflare pour le projet entier**. Il faut une autorisation Cloudflare : un token GitHub ne la remplace pas. Aucune infrastructure à créer par les utilisateurs finaux.
+
+Le relais n'est pas emprunté à sshx, Happy ou Zedra. Aucune dépendance à leurs serveurs, à Tailscale ou à un compte utilisateur Jaunt. Le compte Cloudflare du propriétaire peut avoir des quotas/coûts : aucune promesse de relais gratuit ou illimité.
+
 ## Documents
 
 [Déploiement](docs/DEPLOYMENT.md) · [Sécurité](SECURITY.md) · [Protocole](docs/PROTOCOL.md) · [Dépannage](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Licences tierces](THIRD_PARTY_NOTICES.md)
 
-## Android APK
+## Application Android
 
-The Android client bundles this interface with native clipboard, camera, file saving and optional foreground-service notifications. It is an APK with a WebView interface, not a PWA. See [Android setup, architecture and validation](docs/ANDROID.md). The public Page advertises the APK only after its release assets have been verified.
+Le client Android est un APK avec interface WebView embarquée et intégrations natives pour le presse-papiers, la caméra, les fichiers et les notifications en arrière-plan. Voir [installation, architecture et validation Android](docs/ANDROID.md). La page propose l’APK après vérification de ses assets publics.
 
-The host updates itself from the published release channel, staging updates while ordinary shells are active and applying them once those shells finish. Android automatically checks for a newer APK and offers a verified update through Android's installer. See [update behavior and explicit restart controls](docs/UPDATES.md).
+L’hôte se met à jour automatiquement depuis le canal publié. Il attend la fin des shells ordinaires et des transferts avant d’installer. Android cherche automatiquement un nouvel APK et propose sa mise à jour vérifiée via l’installateur système. Voir [les mises à jour et l’autorisation explicite de redémarrage](docs/UPDATES.md).

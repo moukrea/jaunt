@@ -26,5 +26,10 @@
   "physicalPhone": false,
   "independentProtocolAudit": false,
   "userHostPeriodicUpdateWithoutManualTrigger": true,
-  "userHostInstalledVersion": "0.1.0b5"
+  "userHostInstalledVersion": "0.1.0b5",
+  "secondAndroidFrom": "android-v0.1.0-beta.2",
+  "secondAndroidTo": "android-v0.1.0-beta.3",
+  "secondAndroidUpdateViaSystemInstaller": true,
+  "secondAndroidPairingPreserved": true,
+  "latestAndroidCommandVerified": true
 }

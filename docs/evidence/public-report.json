@@ -1,8 +1,10 @@
 {
   "page": "https://moukrea.github.io/jaunt/",
+  "publicHostRelease": "v0.1.0-beta.5",
   "passed": [
     "public wheel installed without editable source; enabled user service owns the connected daemon",
     "public Page pairing; real Cloudflare WebSockets and authenticated encrypted channel",
+    "512-character rapid input produces exact bytes on public relay and release host",
     "arbitrary shell command proven in terminal and guest file; second tab and return to first",
     "public upload and download of multichunk Unicode/binary file; exact byte comparison",
     "image uploaded with quoted path and no Enter; native clipboard correctly unavailable on headless VM",
