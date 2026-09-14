@@ -9,5 +9,5 @@
     "installer refuses upgrade with active real shell, preserving daemon and runtime",
     "explicit restart ends plain shell, preserves identity/devices and reconnects browser"
   ],
-  "mode": "Local mirror, fresh PyPI dependencies, no service manager"
+  "mode": "Offline local mirror, runtime dependencies inherited for test only; no service manager"
 }

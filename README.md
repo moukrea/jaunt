@@ -6,7 +6,7 @@
 
 Jaunt est une application web installable (PWA) et un hôte POSIX. Elle donne accès à de vrais terminaux, pas seulement à Claude Code ou Codex. La page est statique ; un relais partagé transporte les connexions chiffrées sortantes de l'hôte et du navigateur.
 
-**Version : 0.1.0-beta.1.** Implémentation nouvelle, sans audit de sécurité externe. L'archive n'est pas un service déjà déployé. Voir le [rapport de validation](docs/VALIDATION.md) pour les tests réellement exécutés et les limites non validées.
+**Version : 0.1.0-beta.2.** [Ouvrir Jaunt](https://moukrea.github.io/jaunt/). Le relais et la release hôte sont déployés ; le protocole reste sans audit de sécurité externe. Voir le [rapport de validation](docs/VALIDATION.md) pour les tests réellement exécutés et les limites non validées.
 
 ## Première mise en ligne — une fois pour le propriétaire du projet
 
@@ -14,7 +14,7 @@ Confier [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) à l'agent qui a accès
 
 Le relais n'est pas emprunté à sshx, Happy ou Zedra. Aucune dépendance à leurs serveurs, à Tailscale ou à un compte utilisateur Jaunt. Le compte Cloudflare du propriétaire peut avoir des quotas/coûts : aucune promesse de relais gratuit ou illimité.
 
-## Installer l'hôte après ce déploiement
+## Installer l'hôte
 
 ```sh
 curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
@@ -26,6 +26,7 @@ Ouvrir **https://moukrea.github.io/jaunt/**, scanner le QR affiché par l'hôte,
 
 ```sh
 jaunt pair                       # Appairer un autre appareil
+jaunt service install            # Installer/activer le service utilisateur
 jaunt status                     # État de l'hôte et des shells
 jaunt doctor                     # Diagnostic sans afficher les secrets
 jaunt devices                    # Appareils autorisés
@@ -46,7 +47,7 @@ L'appairage autorise le **compte système qui exécute l'hôte**, avec toutes se
 | Reprise | Historique borné, reconnexion automatique, état mémorisé ; une coupure navigateur ne ferme pas le shell |
 | tmux | Créer une session tmux ou rattacher une session existante, si tmux est installé ; fermer sa vue ne tue pas le serveur tmux |
 | Fichiers | Navigation, fichiers cachés, pagination, création de dossier, renommage, suppression non récursive, upload/download, aperçu texte/image |
-| Transferts | Morceaux de 48 Kio, offsets de reprise réseau, SHA-256 d'upload, finalisation atomique, annulation |
+| Transferts | Suivi contextuel dans Files → Transfer activity ; morceaux de 48 Kio, offsets de reprise réseau, SHA-256 d'upload, finalisation atomique, annulation |
 | Images | Galerie, fichier, collage et drag-and-drop ; conversion PNG des formats décodables par le navigateur ; insertion du chemin ou collage natif conditionnel |
 | Presse-papiers | Sélection, copie du scrollback conservé, lecture/écriture du presse-papiers hôte quand disponible, buffer texte headless, OSC 52 en copie seulement |
 | Protection | QR à usage unique, clés propres aux appareils, révocation, coffre navigateur facultativement protégé par PIN/mot de passe et verrouillage automatique |
@@ -55,7 +56,9 @@ L'appairage autorise le **compte système qui exécute l'hôte**, avec toutes se
 
 ## Images : la distinction importante
 
-**Toujours disponible avec une connexion active :** sélectionner/coller l'image, l'envoyer sur l'hôte et insérer son chemin correctement échappé dans le terminal. Aucune validation automatique par Entrée. Claude/Codex ou un autre outil peut lire ce fichier si son propre mode l'autorise.
+**Paste :** une image est envoyée automatiquement au presse-papiers de l’hôte puis collée avec Ctrl+V dans la session choisie, si le backend natif est disponible. Si le navigateur renvoie du vide, une zone de collage riche et un choix d’image sont proposés. Attach conserve les deux modes explicites. Aucun Enter n’est envoyé.
+
+**Fallback disponible avec une connexion active :** sélectionner/coller l'image, l'envoyer sur l'hôte et insérer son chemin correctement échappé dans le terminal. Aucune validation automatique par Entrée. Claude/Codex ou un autre outil peut lire ce fichier si son propre mode l'autorise.
 
 **Collage natif conditionnel :** quand l'hôte dispose d'un presse-papiers graphique accessible (macOS, Wayland avec `wl-clipboard`, X11 avec `xclip`), Jaunt y place le PNG puis envoie Ctrl+V au terminal. Cela dépend aussi du raccourci et du comportement de l'outil CLI. **Sur une machine headless, Jaunt ne simule pas une pièce jointe native Claude/Codex par magie : le fallback est le fichier et son chemin.** HEIC et autres formats non décodés par le navigateur restent transférables comme fichiers, mais ne sont pas convertis en PNG.
 

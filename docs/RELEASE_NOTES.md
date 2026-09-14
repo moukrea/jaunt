@@ -1,7 +1,7 @@
-# Jaunt 0.1.0-beta.2
+# Jaunt 0.1.0-beta.3
 
-Fix interrupted WebSocket sends so the PTY output pump keeps running after network loss. The shell, replay buffer and remembered identities survive the interruption. Upgrade retains host and device identities; active ordinary shells still block a restart unless explicitly authorized with `JAUNT_ALLOW_RESTART=1`.
+Keep terminal output alive after interrupted WebSocket sends, and avoid signalling an exited shell process group when the asynchronous reaper has not yet caught up. Live-child permission failures remain errors. Upgrades preserve identities and still require explicit restart authorization before destroying ordinary shells.
 
-The web client separately checks authenticated host liveness, waits for terminal attachment before accepting input, and preserves disconnect reasons. Real PTY and browser regression tests cover recovery.
+The companion web client makes single-image Paste automatic through a supported host clipboard and Ctrl+V, without Enter. Empty browser clipboard results open a rich paste fallback; headless hosts retain the explicit upload/path choice. Transfer activity is contextual in Files.
 
-This beta has no independent protocol/security audit. Native image paste requires an accessible host desktop clipboard; headless hosts support image upload plus a quoted path without Enter. Physical phone camera, network switching and locked-screen push have not been tested by the agent. See docs/VALIDATION.md for observed results and remaining limits.
+This beta has no independent security/protocol audit. Android handset behavior and actual Claude/Codex attachment rendering are not claimed as agent-validated. See docs/VALIDATION.md for observed browser, real X11/PTY, public installation, network recovery and upgrade tests.

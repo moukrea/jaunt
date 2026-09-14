@@ -21,7 +21,7 @@ ROOT_FILES = (
 SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs')
 EXCLUDE_DIRS = {'__pycache__', '.pytest_cache', '.dev-state', 'node_modules', '.wrangler', '.venv', 'evidence'}
 EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.sock'}
-EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'run-summary.json',
+EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'public-report.json', 'native-clipboard-report.json', 'run-summary.json',
             'desktop-welcome.png', 'desktop-terminal.png', 'desktop-files.png',
             'mobile-welcome.png', 'mobile-terminal.png')
 
@@ -46,7 +46,9 @@ def collect() -> dict[str, bytes]:
                 raise ValueError(f'Unexpected runtime state: {relative}')
             files[relative.as_posix()] = path.read_bytes()
     for name in EVIDENCE:
-        path = ROOT / 'test-results' / name
+        path = ROOT / 'docs/evidence' / name
+        if not path.exists():
+            path = ROOT / 'test-results' / name
         if path.exists():
             files['docs/evidence/' + name] = path.read_bytes()
     manifest = json.loads((ROOT / 'dist/host-manifest.json').read_text())
@@ -64,7 +66,7 @@ def collect() -> dict[str, bytes]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT.parent / 'Jaunt-0.1.0-beta.1.zip')
+    parser.add_argument('--output', type=Path, default=ROOT.parent / 'Jaunt-0.1.0-beta.2.zip')
     output = parser.parse_args().output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     files = collect()

@@ -24,7 +24,7 @@ def main():
             def log_message(self,*_):pass
         server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(mirror)))
         threading.Thread(target=server.serve_forever,daemon=True).start();url=f'http://127.0.0.1:{server.server_port}'
-        config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':'v0.1.0-beta.2','page':url+'/'}
+        config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':'v0.1.0-beta.3','page':url+'/'}
         (mirror/'config.json').write_text(json.dumps(config))
         env={**os.environ,'JAUNT_DEV_INSTALL':'1','JAUNT_TEST_SYSTEM_SITE':'1','JAUNT_PIP_NO_DEPS':'1',
              'JAUNT_PREFIX':str(t/'runtime'),'JAUNT_BIN_DIR':str(t/'bin'),'JAUNT_STATE':str(t/'state'),
@@ -59,7 +59,7 @@ def main():
                 if status['connected']:break
                 time.sleep(.1)
             assert status['connected'];room=status['machine']['room'];pid=status['pid']
-            assert cli('--version').strip()=='0.1.0b2';passed('wheel installed in private runtime; actual daemon connects to relay')
+            assert cli('--version').strip()=='0.1.0b3';passed('wheel installed in private runtime; actual daemon connects to relay')
             py=t/'runtime/current/bin/python'
             origin=subprocess.check_output([str(py),'-c','import jaunt;print(jaunt.__file__)'],env=env,text=True).strip()
             assert Path(origin).resolve().is_relative_to(t/'runtime/versions') and '/site-packages/' in origin

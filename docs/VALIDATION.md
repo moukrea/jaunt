@@ -1,190 +1,207 @@
-# Jaunt — validation de l’intégration du 14 septembre 2026
+# Jaunt — livraison validée le 14 septembre 2026
 
-La réécriture de l’archive a été intégrée sans lire l’ancien code. L’état distant
-initial est conservé sur `backup/pre-rewrite-20260914`; le travail est sur
-`rewrite/archive-beta-1`. Aucun force-push ni suppression de l’historique.
+**Page : https://moukrea.github.io/jaunt/**
 
-**Déploiement public effectué le 14 septembre 2026.**
-Le propriétaire a accordé l’accès Cloudflare par OAuth Wrangler dans son navigateur.
-Le relais est `https://jaunt-relay.moukrea.workers.dev`, avec APP_ORIGIN
-`https://moukrea.github.io`, Durable Object SQLite `ROOMS` et migration `v1`.
-La santé HTTP, les WebSockets authentifiés, le routage bidirectionnel et le refus
-d’une origine non autorisée ont été vérifiés sur ce Worker réel.
+**Relais : wss://jaunt-relay.moukrea.workers.dev**
 
-La [release v0.1.0-beta.1](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.1)
-a publié ses trois assets avant le [déploiement Pages](https://github.com/moukrea/jaunt/actions/runs/34852763245).
-La page est **https://moukrea.github.io/jaunt/** ; ses ressources et licences locales
-ont été téléchargées et comparées aux fichiers livrés.
+**Release : [v0.1.0-beta.2](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.2)**
 
-Une VM Ubuntu 24.04 neuve (Python 3.12.3, systemd utilisateur réel) a exécuté
-`curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash` avec succès.
-Le wheel public et ses checksums ont été vérifiés, le service activé et démarré,
-et un QR a été produit sans être conservé dans le dépôt. Le navigateur public
-s’est appairé, a exécuté un vrai shell, ouvert deux sessions, transféré un fichier
-avec comparaison des octets et inséré un chemin d’image sans Enter.
+```sh
+curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
+```
 
-La recette réseau a détecté un défaut : les pongs du relais masquaient le silence
-de l’hôte dans le statut du navigateur. Le client suit désormais séparément la
-réception de messages authentifiés de l’hôte. Un test suspend le processus hôte
-isolé tout en laissant le relais actif et exige déconnexion puis reprise.
-La recette publique complète après cette correction reste à terminer.
-La panne supplémentaire de sortie PTY venait d’une exception WebSocket brute
-pendant un envoi : elle terminait la tâche de lecture du terminal. Le transport
-normalise désormais les interruptions en ConnectionError et ferme le canal
-inutilisable. Deux tests avec un vrai PTY couvrent ConnectionClosedError et un
-timeout d’envoi, puis exigent replay et nouvelle sortie avec le même PID.
-La suite Python passe à 36 tests. La release corrective prévue est beta.2 ;
-la beta.1 publique reste immuable.
+Cette commande a été exécutée dans une VM Ubuntu propre, sans source editable.
+L’utilisateur final ne crée aucun compte GitHub/Cloudflare et ne configure ni
+serveur public ni VPN. **Le protocole et le produit restent sans audit de sécurité
+indépendant.** Les limites de SECURITY.md, notamment l’origine Pages partagée,
+restent applicables.
 
-## Exécutions réellement observées
+## Historique et publication
 
-Les commandes Python ci-dessous utilisent l’environnement `.venv` créé avec
-`python3 -m venv .venv`, puis `pip install -e . -r requirements-dev.txt pip-audit`.
-La présence d’un environnement editable concerne le développement seulement ;
-le test installateur vérifie séparément la provenance du wheel installé.
+L’archive a été intégrée sans lire l’ancien code pour s’en inspirer. Le commit
+initial `eb71cfe9b80749d3c53f11e428f027b0d64fb372` est conservé sur
+`backup/pre-rewrite-20260914`. Les PR [8](https://github.com/moukrea/jaunt/pull/8)
+et [9](https://github.com/moukrea/jaunt/pull/9) ont été fusionnées après les checks
+requis, sans contournement des protections, force-push ni suppression d’historique.
+La release beta.1 reste immuable ; les corrections hôte sont publiées dans beta.2.
 
-| Commande | Résultat observé |
+Le propriétaire a accordé OAuth Wrangler dans son navigateur. Le Worker Jaunt,
+version `00dd364c-c69c-4e89-8878-00ebd38ca414`, utilise `ROOMS` / `Room`, SQLite,
+migration `v1`, APP_ORIGIN `https://moukrea.github.io`. Aucun relais d’un autre
+projet n’a été utilisé. Santé HTTP, authentification WebSocket, routage dans les
+deux sens, ping/pong et refus d’une origine non autorisée ont été vérifiés.
+Le véritable appairage chiffré et le shell ont ensuite été testés publiquement.
+
+[Release beta.2](https://github.com/moukrea/jaunt/actions/runs/34855623613) : trois
+assets publics (wheel, host-manifest.json, SHA256SUMS), téléchargés et vérifiés
+avant [Pages](https://github.com/moukrea/jaunt/actions/runs/34855764137).
+Les variables GitHub JAUNT_RELAY_URL, JAUNT_RELEASE_TAG et JAUNT_PAGE_URL sont
+renseignées. Les 25 requêtes de ressources de la page, dont les modules JS,
+images, licences jsQR/xterm, installateur et service worker, ont été comparées
+aux octets livrés sous `/jaunt/`. Aucun JS runtime ne provient d’un CDN.
+
+Les identifiants OAuth sont stockés chiffrés avec une clé dans le trousseau local.
+CLOUDFLARE_ACCOUNT_ID est renseigné dans GitHub ; un futur déploiement du relais
+par Actions exige encore son propre CLOUDFLARE_API_TOKEN. Le déploiement observé
+a utilisé OAuth local, pas un token GitHub ni un token OAuth copié comme secret
+API permanent. Cela ne concerne pas les utilisateurs finaux.
+
+## Commandes et résultats réellement observés
+
+En développement : `python3 -m venv .venv`, puis
+`pip install -e . -r requirements-dev.txt pip-audit` et `npm ci`.
+L’installation editable de développement est distincte des tests du wheel.
+
+| Commande | Résultat |
 |---|---|
-| `npm install`, puis `npm ci` | Lockfile réel résolu ; installation reproductible depuis ce lockfile |
-| `npm run prepare-web` | 20 ressources web ; jsQR 1.4.0 et licence Apache-2.0 copiés localement |
-| `pytest -q` | **34 tests réussis**, dont PTY réel, Python ↔ Web Crypto et arrêt d’upgrade atomique |
-| `npm test` | **17 tests réussis** (relais déterministe + JavaScript) |
-| `npm run test:relay` | **1 intégration réussie dans workerd/Miniflare réel** : upgrade WS, Durable Object SQLite, authentification, routage bidirectionnel, auto-pong |
-| `python scripts/check_project.py` | Réussi, sans exemption `--source` |
-| `python scripts/build_release.py` | Wheel, manifeste et SHA256SUMS construits |
-| `python -m playwright install chromium` | Chromium de test réellement téléchargé |
-| `python tests/browser_e2e.py` | **18 scénarios réussis**, relais Python de référence, site servi sous `/jaunt/` |
-| `JAUNT_E2E_RELAY=workerd python tests/browser_e2e.py` | **19 scénarios réussis**, navigateur → Worker/workerd réel → hôte → PTY/fichiers |
-| `python tests/installer_e2e.py` | **8 contrôles réussis** en mode miroir offline |
-| `JAUNT_INSTALLER_ONLINE=1 python tests/installer_e2e.py` | **8 contrôles réussis**, miroir de release loopback, dépendances PyPI installées dans des environnements privés neufs |
+| `npm install`, puis `npm ci` | Vrai package-lock.json résolu et committé ; installation reproductible |
+| `npm run prepare-web` | 20 ressources, jsQR 1.4.0 et licence Apache copiés localement |
+| `pytest -q` | **36 réussis** ; PTY réel, interop Web Crypto, upgrade atomique, envoi interrompu |
+| `npm test` | **17 réussis** |
+| `npm run test:relay` | **1 intégration réelle workerd/Miniflare réussie**, SQLite et WebSockets |
+| `python scripts/check_project.py` | Réussi sans exemption `--source` |
+| `python scripts/build_release.py` | Wheel beta.2, manifeste et checksums construits |
+| `python -m playwright install chromium` | Chromium effectivement installé |
+| `python tests/browser_e2e.py` | **20 scénarios réussis** dans la CI avec le relais Python |
+| `JAUNT_E2E_RELAY=workerd python tests/browser_e2e.py` | **20 scénarios réussis**, localement et en CI |
+| `python tests/installer_e2e.py` | **8 contrôles réussis** sur beta.2, localement et en CI |
+| `JAUNT_INSTALLER_ONLINE=1 python tests/installer_e2e.py` | **8 contrôles réussis** sur beta.1, miroir loopback et dépendances PyPI dans des environnements neufs |
 | `npm audit` | **0 vulnérabilité connue** dans le graphe résolu |
-| `pip-audit` | **0 vulnérabilité connue** ; `jaunt-host` local absent de PyPI, donc non auditable par cette base |
+| `pip-audit` | **0 vulnérabilité connue** ; package local Jaunt absent de PyPI, donc non couvert |
 
-Preuves synthétiques : `docs/evidence/browser-report.json` , `docs/evidence/browser-worker-report.json` et
-`docs/evidence/installer-report.json`. Les captures contiennent uniquement des
-terminaux et fichiers de test. Aucun QR ni secret d’appairage n’y est conservé.
+[CI beta.2](https://github.com/moukrea/jaunt/actions/runs/34855112550) : sept jobs
+réussis, dont 36 tests hôte sur Linux/macOS × Python 3.11/3.13 et les deux séries
+de 20 scénarios navigateur. Les jobs `lint` et `test` exigés par la protection
+exécutent de vrais contrôles ; le second dépend du succès des suites complètes.
 
-## Versions et corrections
+Versions locales : Python 3.14.2, Node 25.5.0, npm 11.8.0, pytest 9.1.1,
+Playwright 1.62.0, Chromium 151.0.7922.34. CI : Node 22, Python 3.11/3.13.
+Hôte : websockets 16.0, cryptography 50.0.1, qrcode 8.2, pywebpush 2.5.0.
+Build : setuptools 84.0.0, pip 26.2.1, Wrangler 4.131.2,
+Miniflare direct 4.20260730.0 ; Wrangler utilise aussi son Miniflare
+5.20260911.1-alpha. Overrides Miniflare : sharp 0.35.4 et undici 7.29.0.
 
-Environnement local : Linux x86_64, Python **3.14.2**, Node **25.5.0**, npm **11.8.0**,
-Playwright **1.62.0**, Chromium **151.0.7922.34**, pytest **9.1.1**.
-Hôte : websockets **16.0**, cryptography **50.0.1**, qrcode **8.2**, pywebpush **2.5.0**.
-Build : setuptools **84.0.0**, pip **26.2.1**, Wrangler **4.131.2**,
-Miniflare direct **4.20260730.0**. Wrangler embarque aussi son propre Miniflare
-**5.20260911.1-alpha** ; les tests directs utilisent la version 4 épinglée.
-La CI cible Node 22 et Python 3.11/3.13, sur Linux/macOS pour les tests hôte.
-
-L’audit initial signalait cryptography 46.0.4 et pip 25.3 côté Python,
-et trois paquets npm de gravité haute (Miniflare, sharp, undici).
-cryptography et pywebpush ont été mis à jour et épinglés. L’installateur normal
-met désormais pip à jour vers la version contrôlée avant les dépendances.
-Les dépendances de Miniflare sharp **0.35.4** et undici **7.29.0** sont imposées
-par des overrides explicites ; `npm audit fix` seul laissait les avis ouverts.
-Les tests workerd ont été réexécutés après correction et après `npm ci`.
-
-Sources des avis consultés :
-[cryptography](https://github.com/pyca/cryptography/security/advisories),
+Les avis initiaux de cryptography/pip et Miniflare/sharp/undici ont été traités
+par mises à jour épinglées et overrides, puis retestés.
+Sources : [cryptography](https://github.com/pyca/cryptography/security/advisories),
 [sharp](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c),
 [undici](https://github.com/advisories/GHSA-4cwx-7wf7-3272).
-Les avis connus ne constituent pas un audit du code Jaunt ni du protocole.
-Le bundle xterm reçu dans l’archive conserve sa limitation de provenance/version
-exacte décrite dans `THIRD_PARTY_NOTICES.md` ; il n’est pas couvert par npm audit.
+La provenance/version exacte du bundle xterm reçu reste limitée comme indiqué
+dans THIRD_PARTY_NOTICES.md ; ce bundle n’est pas couvert par npm audit.
 
-Échecs lus et corrigés, sans supprimer les assertions :
+## Recette publique sur machine propre
 
-- Le fichier preuve était créé avant la réception/rendu asynchrone du terminal.
-  Le test attend maintenant la présence effective du résultat dans le scrollback
-  avec une borne temporelle ; il échoue toujours si le résultat n’arrive pas.
-- Le test headless héritait du bureau X11/Wayland et déclarait à tort attendre
-  un presse-papiers indisponible. Son processus hôte est désormais privé des
-  variables graphiques ; les PTY de test n’exécutent plus les profils personnels.
-- Une réponse tardive du navigateur de fichiers écrasait un chemin en cours de
-  saisie. Le rendu suit désormais les révisions de saisie et de requête.
-- Deux vérifications de statut dans Bash ne suffisaient pas à exclure une création
-  de shell juste avant l’arrêt. Le daemon vérifie les PTY et ferme leur admission
-  atomiquement ; l’installateur utilise cette opération avant de toucher au service.
-- Le contrôle du chemin d’installation résout le symlink `runtime/current` avant
-  de vérifier que le module provient bien du `site-packages` du runtime neuf.
+VM QEMU/KVM Ubuntu 24.04, Python 3.12.3, image officielle vérifiée SHA-256 :
+`612b2c0cc1bc413a6cb8c38fd611794caf0f2b436c50013d8b3794db12ad7354`.
+Aucun code source ni runtime editable n’y a été installé. L’installation publique
+beta.1 a produit un QR et un service utilisateur systemd activé ; un vrai reboot
+a confirmé son démarrage automatique, la connexion au relais et l’identité
+conservée. La mise à jour publique beta.1 → beta.2 a conservé les appareils.
 
-## Parcours prouvés et portée
+Le script de recette privé a piloté SSH et Chromium contre la page publique.
+Il a exécuté la commande d’installation ci-dessus, `jaunt status`, `jaunt pair
+--json`, les commandes `systemctl --user` et les interactions UI. Les QR et
+sorties privées restent hors du dépôt. Résultats :
 
-Shell arbitraire réel : commande `printf`/`cat`, contenu exact du fichier et sortie
-visible. Deux shells indépendants, retour au premier, rechargement avec identité
-mémorisée. Le relais local est tué puis relancé : même daemon et PTY, nouvelle
-connexion chiffrée sans QR ; interruption supplémentaire pendant un upload.
-Fichier Unicode/binaire multichunks uploadé puis téléchargé et comparé octet par
-octet. PNG converti et chemin échappé inséré sans Enter ; bouton de collage natif
-désactivé pour l’hôte headless. Buffer presse-papiers >64 Kio, coffre protégé,
-mauvais mot de passe rejeté, second appareil émulé, révocation sans fermer les shells.
+- Appairage public et canal authentifié chiffré via Cloudflare.
+- Shell arbitraire, `printf`/`cat`, résultat `PUBLIC_JAUNT_PROVED` vérifié dans
+  le terminal et dans un fichier ; deuxième onglet puis retour au premier.
+- Upload et téléchargement multichunks Unicode/binaire comparés octet par octet.
+- Image transférée, chemin cité inséré sans Enter ; absence d’exécution vérifiée
+  par un fichier sentinelle. Collage natif désactivé sur cette VM headless.
+- Rechargement de la page avec identité mémorisée, sans nouveau QR.
+- Vraie coupure réseau sortant de la VM par une règle temporaire limitée à cette
+  VM, retirée dans un `finally` : même PID du shell, même session, commande
+  `RESUMED` prouvée après reconnexion sans appairage.
+- Upgrade public refusé avec deux shells ordinaires actifs : daemon conservé.
+- Upgrade avec `JAUNT_ALLOW_RESTART=1` : redémarrage explicite, shells terminés,
+  service actif, identités hôte/appareils conservées, navigateur reconnecté.
+- Révocation : navigateur déconnecté et création de shell désactivée.
+- Aucune exception navigateur non interceptée.
 
-Le fallback jsQR décode une image QR générée pour le test, sans BarcodeDetector.
-Ce test ne prétend pas utiliser une caméra. Toutes les ressources précachées,
-la licence jsQR, l’installateur et config.json répondent sous `/jaunt/`.
-Aucun JavaScript runtime n’est chargé depuis un CDN. Les téléchargements de
-navigateurs/dépendances sont des opérations de build, pas des scripts de la page.
+Les onze contrôles sont conservés dans `docs/evidence/public-report.json`.
+Les preuves workerd et installateur beta.2 sont dans le même dossier.
+`browser-report.json` conserve l’ancien parcours local de 18 scénarios comme
+preuve historique ; la CI référencée ci-dessus prouve les 20 scénarios actuels.
 
-Le test installateur télécharge un wheel depuis un miroir HTTP loopback explicitement
-autorisé par `JAUNT_DEV_INSTALL=1`. En mode `JAUNT_INSTALLER_ONLINE=1`, il installe
-les dépendances depuis PyPI sans hériter des dépendances du développement.
-Il refuse un checksum falsifié avant toute installation, démarre le daemon, produit
-un appairage, conserve l’identité et les appareils lors d’une mise à jour.
-Un navigateur crée ensuite un vrai shell dans le runtime installé : l’upgrade sans
-accord échoue, conservant PID et pointeur de runtime ; l’upgrade avec
-`JAUNT_ALLOW_RESTART=1` termine le shell et reconnecte le navigateur mémorisé.
-Le mode offline initial de six contrôles a également été exécuté avant extension.
+## Échecs corrigés sans retirer les fonctionnalités ni les assertions
 
-## Non validé — ne pas annoncer comme livré en production
+- Une réponse de listing tardive remplaçait le chemin saisi : brouillon par
+  machine et révision de requête, test retardant de vraies réponses chiffrées.
+- Des assertions lisaient le terminal avant la livraison asynchrone : attente
+  bornée du résultat réel, de l’insertion ou du rattachement terminé.
+- Un contrôle Bash séparé de l’arrêt laissait une course avec la création d’un
+  shell : arrêt d’upgrade atomique dans le daemon et fermeture de l’admission.
+- Les pongs du relais masquaient la perte de l’hôte : contrôle séparé des
+  messages authentifiés de l’hôte et reconnexion. Le test suspend le vrai hôte
+  tout en laissant le relais fonctionner.
+- Une exception WebSocket pendant un envoi terminait la tâche de sortie PTY :
+  interruption normalisée en ConnectionError et canal fermé. Deux régressions
+  avec PTY réel échouent avec l’ancien transport et passent après correction,
+  avec replay et nouvelle sortie sur le même PID.
+- Les tests headless héritaient du bureau et des profils personnels : environnement
+  graphique retiré et shells de test sans profils, dans des dossiers temporaires.
+- Tuer seulement le parent Miniflare laissait workerd connecté : le harness
+  interrompt désormais son propre groupe de processus isolé.
 
-- Upgrade et reprise réseau de la recette publique après correction du statut : en cours.
-- Service launchd, bootstrap uv/Python absent de la machine, installation macOS/WSL : non exécutés.
-  Le service systemd utilisateur a été validé sur la VM Ubuntu propre.
-- Téléphone physique : aucun utilisé. Caméra, IME/clavier, galerie, rotation réelle,
-  Wi-Fi ↔ réseau mobile, PWA suspendue et push écran verrouillé restent non validés.
-  Les dimensions tactiles simulées ne prouvent pas ces comportements matériels.
-- Livraison Web Push FCM/Apple/Mozilla et collage image natif Claude/Codex sur un
-  presse-papiers graphique : non exécutés. Un chemin inséré n’est pas une pièce jointe native.
-- tmux réel, Firefox/Safari, charge prolongée, SLA et coût du relais : non validés.
-- **Protocole, hôte, front et relais sans audit de sécurité indépendant.**
-  Les limites de `SECURITY.md`, dont l’origine GitHub Pages partagée, sont conservées.
+## Limites et signalements à ne pas masquer
 
-La publication Pages est manuelle et vérifie les trois assets et leurs checksums.
-Les workflows utilisent obligatoirement `npm ci`. La recette publique de
-`docs/DEPLOYMENT.md` inclut les contrôles matériels encore non exécutés.
+- Aucun téléphone physique n’a été manipulé par l’agent. L’utilisateur rapporte
+  un appairage mobile réussi après oubli d’une entrée mémorisée ; cela ne valide
+  pas caméra, clavier/IME, galerie, rotation, Wi-Fi/mobile, PWA suspendue ou push
+  écran verrouillé. Il signale aussi un échec de collage de capture Android dans
+  Claude Code : ce parcours spécifique reste en investigation.
+- Livraison Web Push réelle et collage natif dans Claude/Codex : non validés.
+  Un chemin inséré n’est pas une pièce jointe native ; aucun presse-papiers OS
+  n’est promis sur un hôte headless.
+- launchd, installation macOS/WSL, bootstrap sans Python, Safari/Firefox, tmux
+  réel, charge prolongée, quotas/coûts et SLA du relais : non validés.
+- Le protocole, l’hôte, le front et le relais n’ont pas d’audit indépendant.
 
-## Contrôle des artefacts avant PR
+## Artefacts et confidentialité
 
-Gitleaks **8.30.1** a inspecté le snapshot courant (89 fichiers), sans parcourir
-l’ancien historique ni les dossiers personnels. Un unique résultat a été examiné :
-`r.FourKeyMap=r.TwoKeyMap=void 0` dans le bundle xterm, une affectation JavaScript
-et non une clé API. Aucune fuite réelle identifiée. Le wheel a été décompressé et
-scanné séparément ; il contient uniquement le package Jaunt et ses métadonnées.
-Le ZIP de livraison a été reconstruit, contrôlé par CRC, comparaison des octets et
-checksums de tous ses fichiers. Les cinq captures ont été examinées visuellement :
-aucun QR, coffre ou terminal privé. La licence jsQR est copiée sans modification ;
-son saut de ligne final est signalé par `git diff --check` et conservé tel que fourni.
+Les trois assets de chaque release ont été téléchargés, leurs checksums et le
+contenu du wheel contrôlés. Gitleaks 8.30.1 n’a trouvé aucune fuite dans les
+wheels. Le snapshot initial a produit un seul faux positif examiné :
+l’initialisation JavaScript de FourKeyMap/TwoKeyMap dans xterm.
+Les contrôles portent sur le projet et ses fixtures, jamais des scans destructifs
+des dossiers personnels. Aucun host.json, état de développement, QR, coffre,
+secret ou terminal privé n’est publié. Les workflows ont été relus et utilisent
+npm ci ; Pages vérifie les trois assets avant déploiement. Le ZIP est produit
+par liste autorisée, avec CRC, comparaison des octets et checksums par fichier.
+La licence jsQR est conservée intacte, y compris son saut de ligne final.
 
-## CI GitHub observée
+## Correctifs ergonomiques après retour utilisateur
 
-[Exécution 34849935562](https://github.com/moukrea/jaunt/actions/runs/34849935562) :
-**5 jobs réussis**, hôte Linux/macOS × Python 3.11/3.13, navigateur et relais sous Node 22.
-Cela valide les tests hôte macOS ; l’installation par launchd et Safari restent non testés.
+Le bouton Paste pouvait traiter un texte vide comme un collage réussi. Il ouvre
+maintenant une zone de collage riche si l’API ne fournit aucun contenu utile,
+accepte les images de FileList/DataTransfer et les PNG incorporés au HTML, sans
+insérer de HTML ni télécharger une URL externe. Une image seule est envoyée
+automatiquement au presse-papiers hôte puis au Ctrl+V de la session capturée si
+le backend natif est disponible. Headless conserve le choix explicite du chemin.
+Les erreurs hôte ne sont plus masquées comme des refus du presse-papiers mobile.
 
-Le parcours E2E additionnel Worker passe localement avec 18 scénarios, dont la perte
-du vrai processus workerd et la reprise avec stockage Durable Object persistant.
-Le premier essai tuait uniquement le parent Node : les sockets workerd restaient
-temporaires ouvertes. Le harness a été corrigé pour tuer son propre groupe de
-processus isolé ; il vérifie toujours la déconnexion effective avant redémarrage.
-Cette correction concerne uniquement l’injection de panne dans le test.
+Le parcours workerd local passe à **22 scénarios**, dont lecture d’une vraie image
+par l’API Clipboard de Chromium et simulation d’un résultat texte vide suivie
+d’un collage riche vers un vrai hôte. Ce dernier test simule uniquement l’entrée
+presse-papiers : il ne prétend pas avoir manipulé Android.
 
-La CI Worker a ensuite reproduit une seconde course de navigation : une requête
-de rafraîchissement démarrée après la saisie pouvait encore la remplacer.
-La correction conserve désormais le brouillon par machine et enregistre le
-répertoire demandé dès l’envoi. Un 19e scénario retarde les véritables réponses
-RPC chiffrées, déclenche un rafraîchissement après la saisie puis pendant la
-navigation, et vérifie le champ et les fichiers obtenus. Il passe sous workerd.
-La CSP est inchangée : le polling Playwright utilise une fonction, sans unsafe-eval.
+Une VM Xvfb/X11 séparée a aussi reçu l’image depuis le navigateur, via le Worker
+public et le wheel beta.2 installé. Le PNG du presse-papiers xclip est identique
+au fichier reçu et le PTY a reçu exactement l’octet `16` (Ctrl+V), sans Enter.
+Ce test avant publication utilisait les fichiers UI de la branche injectés dans
+Chromium à l’origine de la Page ; voir `native-clipboard-report.json`. Il ne prouve
+pas l’affichage d’une pièce jointe dans un véritable Claude Code/Codex.
+L’utilisateur rapporte que les deux modes Attach fonctionnent sur son appareil ;
+la correction spécifique à Paste reste à confirmer sur son téléphone.
 
-La [CI du merge initial](https://github.com/moukrea/jaunt/actions/runs/34851720241)
-a réussi ses sept jobs : 34 tests hôte sur quatre combinaisons Linux/macOS et
-Python 3.11/3.13, 19 scénarios navigateur pour chacun des deux relais, 17 tests
-Node, intégration Miniflare réelle et huit contrôles installateur.
+Transfers n’est plus un onglet permanent. Le suivi, l’annulation et les chemins
+restent accessibles depuis Files → Transfer activity après un transfert ; les
+téléchargements sont enregistrés par le navigateur.
+
+La CI macOS a révélé un autre cas de fermeture : le drapeau alive du reaper
+pouvait rester vrai après la sortie effective du processus. La fermeture vérifie
+maintenant Popen.poll avant d’envoyer un signal au groupe. EPERM n’est toléré que
+si le processus est désormais sorti ; une erreur sur un enfant vivant reste une
+erreur. Une régression vérifie qu’aucun signal n’est envoyé à un PID déjà sorti.
+Cette correction porte la suite locale à 37 tests et prépare la release beta.3.

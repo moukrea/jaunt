@@ -216,6 +216,44 @@ async def main():
         # Ctrl+C clears the unsubmitted image path; it must not execute on upload.
         await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
         await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
+        # Chromium's real clipboard API, scoped to this isolated browser context.
+        await ctx.grant_permissions(['clipboard-read','clipboard-write'])
+        await page.evaluate('''async value => {
+          const bytes=Uint8Array.from(atob(value),c=>c.charCodeAt(0));
+          await navigator.clipboard.write([new ClipboardItem({'image/png':new Blob([bytes],{type:'image/png'})})]);
+        }''',base64.b64encode(PNG).decode())
+        await page.locator('#paste-button').click()
+        await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
+        await page.get_by_role('button',name='Upload & insert path',exact=True).click()
+        await until(lambda:bool(list((h.state/'attachments').glob('*clipboard-*.png'))))
+        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
+        passed('real browser image clipboard reaches headless upload/path fallback')
+        # Reproduce an empty async clipboard result, then deliver an image through
+        # the rich paste event. Only clipboard ingress is simulated, not the host.
+        await page.evaluate('''() => {
+          window.__clipboardRead=navigator.clipboard.read;
+          navigator.clipboard.read=async()=>[{types:['text/plain'],getType:async()=>new Blob([''],{type:'text/plain'})}];
+        }''')
+        await page.locator('#paste-button').click()
+        await expect(page.get_by_role('textbox',name='Paste text or image',exact=True)).to_be_visible()
+        await page.get_by_role('textbox',name='Paste text or image',exact=True).evaluate('''(node,value) => {
+          const data=new DataTransfer();data.items.add(new File([Uint8Array.from(atob(value),c=>c.charCodeAt(0))],'fallback-capture.png',{type:'image/png'}));
+          node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+        }''',base64.b64encode(PNG).decode())
+        await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
+        await page.get_by_role('button',name='Upload & insert path',exact=True).click()
+        await until(lambda:bool(list((h.state/'attachments').glob('*fallback-capture.png'))))
+        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await page.evaluate('''() => {navigator.clipboard.read=window.__clipboardRead;delete window.__clipboardRead;}''')
+        assert await page.locator('#sidebar [data-view="transfers"]').count()==0
+        assert await page.locator('#mobile-nav [data-view="transfers"]').count()==0
+        await page.locator('[data-view="files"]').first.click()
+        await expect(page.locator('#file-transfers')).to_be_visible()
+        await page.locator('#file-transfers').click();await expect(page.locator('#transfer-list')).to_contain_text('fallback-capture.png')
+        await page.locator('[data-view="terminal"]').first.click()
+        await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
+        passed('empty clipboard opens rich image paste fallback; transfer activity remains accessible from Files')
         h.cli('clip',input='Shared remote clipboard\n'+('abcé'*20000))
         await page.locator('#copy-button').click();await page.get_by_role('button',name='Read remote clipboard',exact=True).click()
         await expect(page.locator('#modal')).to_contain_text('Remote clipboard')
