@@ -15,6 +15,7 @@ dbe92cde7bcbb9e79d5ed968bb182bcde80752cb0f70a4d9c420cbffd907603c  START_HERE.md
 e27c773c7c2687ebec9f184b9f9995a42d308c48e7c9b413c06a412a16270886  android/app/gradle.lockfile
 f6488bcbde4998b002137debf59586ca08c99afeb86cf1b5356f6057dad798fb  android/app/src/androidTest/java/dev/jaunt/android/ClipboardFixture.java
 6d884f88b36abbc8791841e5b9fe36f0bdfbb38eb51bb1620ef3883418b659e3  android/app/src/main/AndroidManifest.xml
+4050f79c1d8f0d890eb73d141fe49f73dfe94089b5fd88745b3d9921006dd583  android/app/src/main/assets/NOTICE.txt
 a7ddc976323df937379e8e8a9c13fc09d1fda61982dc1c3066b1f4785984811a  android/app/src/main/java/dev/jaunt/android/BootReceiver.java
 20ed0f594c27924241423d6fa90a104003aea85bb623b27d7e965d27f0544fcc  android/app/src/main/java/dev/jaunt/android/CryptoChannel.java
 ba81a3c0500791762d7c17880d7dc081486297561ce59cfa15e3197361dc8d16  android/app/src/main/java/dev/jaunt/android/IdentityStore.java
