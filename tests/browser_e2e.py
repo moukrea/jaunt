@@ -138,6 +138,8 @@ async def main():
             h.host.send_signal(signal.SIGCONT)
         await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=45000)
         assert json.loads(h.cli('status'))['pid']==original
+        # The encrypted welcome precedes asynchronous terminal replay/attachment.
+        await page.wait_for_timeout(300)
         await terminal_command(page,"printf 'HOST_RESUMED\\n' > host-resumed.txt")
         await until(lambda:(h.work/'host-resumed.txt').exists())
         assert (h.work/'host-resumed.txt').read_text()=='HOST_RESUMED\n'
