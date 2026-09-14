@@ -231,6 +231,8 @@ class Host:
             await self.drop(routing_id)
 
     async def rpc(self, peer: Peer, method: str, p: dict):
+        if self.stopping.is_set():
+            raise ValueError("Host is restarting; reconnect before starting another operation")
         if not isinstance(p, dict):
             raise ValueError("Invalid request parameters")
         if method == "session.list":
@@ -391,6 +393,8 @@ class Host:
         active = sum(s.alive and not s.tmux for s in self.sessions.items.values())
         if active and allow_restart is not True:
             raise ValueError(f"{active} plain shells are running. JAUNT_ALLOW_RESTART=1 explicitly authorizes terminating them.")
+        if (self.files.uploads or self.files.downloads) and allow_restart is not True:
+            raise ValueError("File transfers are active; the update will wait until they finish")
         self.sessions.accepting = False
         self.stopping.set()
         return {"stopping": True}
@@ -404,7 +408,8 @@ class Host:
             method, p = command.get("method"), command.get("params", {})
             if method == "status":
                 result = {"running": True, "connected": self.transport.ready.is_set(),
-                          "pid": os.getpid(), "machine": self.info(), "sessions": self.sessions.list()}
+                          "pid": os.getpid(), "machine": self.info(), "sessions": self.sessions.list(),
+                          "activeTransfers": len(self.files.uploads) + len(self.files.downloads)}
             elif method == "pair":
                 result = self.pair()
             elif method == "devices":

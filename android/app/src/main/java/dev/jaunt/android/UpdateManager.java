@@ -17,7 +17,7 @@ import java.util.concurrent.*;
 /** Public-release discovery; Android still confirms installation of a verified, same-signer APK. */
 final class UpdateManager {
     private static final ExecutorService IO=Executors.newSingleThreadExecutor();
-    private static final String API="https://api.github.com/repos/moukrea/jaunt/releases?per_page=30";
+    private static final String CHANNEL="https://moukrea.github.io/jaunt/config.json";
     private static final String RELEASES="https://github.com/moukrea/jaunt/releases/download/";
     private static final OkHttpClient HTTP=new OkHttpClient.Builder().callTimeout(90,TimeUnit.SECONDS).followSslRedirects(false).build();
     private final Context context;private final Activity activity;private File pending;
@@ -30,7 +30,7 @@ final class UpdateManager {
     }
     static boolean newer(String candidate,String current){int[] a=version(candidate),b=version(current);for(int i=0;i<a.length;i++)if(a[i]!=b[i])return a[i]>b[i];return false;}
     private byte[] fetch(String url,int maximum)throws Exception{
-        Request req=new Request.Builder().url(url).header("Accept","application/vnd.github+json").header("User-Agent","Jaunt Android updater").build();
+        Request req=new Request.Builder().url(url).header("Cache-Control","no-cache").header("User-Agent","Jaunt Android updater").build();
         try(Response response=HTTP.newCall(req).execute()){
             if(!response.isSuccessful()||response.body()==null)throw new IOException("Release download failed (HTTP "+response.code()+")");
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[16384];int n;
@@ -44,13 +44,12 @@ final class UpdateManager {
         preferences().edit().putLong("checked",now).apply();
         IO.execute(()->{try{
             String current=context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;
-            JSONArray releases=new JSONArray(new String(fetch(API,1024*1024),java.nio.charset.StandardCharsets.UTF_8));JSONObject selected=null;
-            for(int i=0;i<releases.length();i++){JSONObject release=releases.getJSONObject(i);String tag=release.optString("tag_name");if(release.optBoolean("draft")||!tag.startsWith("android-v"))continue;
-                try{if(newer(tag,current)&&(selected==null||newer(tag,selected.getString("tag_name"))))selected=release;}catch(IllegalArgumentException ignored){}
-            }
-            if(selected==null){if(explicit)message("Jaunt is up to date","You already have the latest Android release.");return;}
-            String tag=selected.getString("tag_name"),name="jaunt-"+tag+".apk";JSONArray assets=selected.getJSONArray("assets");boolean apk=false,sums=false;
-            for(int i=0;i<assets.length();i++){String n=assets.getJSONObject(i).getString("name");apk|=name.equals(n);sums|="SHA256SUMS".equals(n);}if(!apk||!sums)throw new IOException("The new release is not fully published yet.");
+            // The owner publishes this channel only after checking the public APK assets.
+            // No per-user GitHub API account or shared-IP API quota is required.
+            JSONObject channel=new JSONObject(new String(fetch(CHANNEL,16384),java.nio.charset.StandardCharsets.UTF_8));
+            String tag=channel.optString("androidRelease");
+            if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("Jaunt is up to date","You already have the latest published Android release.");return;}
+            String name="jaunt-"+tag+".apk";
             if(activity==null){notifyAvailable(tag);return;}
             activity.runOnUiThread(()->{if(!activity.isFinishing())new AlertDialog.Builder(activity).setTitle("Jaunt update available").setMessage("Version "+tag.substring(9)+" is available. Your paired machines will be kept. Android will ask you to confirm installation.").setNegativeButton("Later",null).setPositiveButton("Download and install",(d,w)->download(tag,name)).show();});
         }catch(Exception e){if(explicit)message("Update check unavailable","Could not verify the latest release. Check your connection and try again.");}});

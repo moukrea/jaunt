@@ -67,3 +67,23 @@ def test_disable_persists_and_performs_no_network_request(release,monkeypatch):
     monkeypatch.setattr(updates,'fetch',lambda *a:pytest.fail('Automatic updates are disabled'))
     assert updates.update(automatic=True)['state']=='disabled'
     assert updates.status()['automatic'] is False
+
+def test_automatic_update_waits_for_file_transfers(release,monkeypatch):
+    monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[],'activeTransfers':1})
+    monkeypatch.setattr(updates.subprocess,'run',lambda *a,**k:pytest.fail('An automatic update must not interrupt a transfer'))
+    assert updates.update(automatic=True)['state']=='deferred'
+
+@pytest.mark.asyncio
+async def test_host_atomically_refuses_restart_during_a_transfer(tmp_path):
+    from jaunt.daemon import Host
+    from jaunt.state import State
+    host=Host(State(tmp_path))
+    upload=host.files.begin_upload('test-owner', {'path':str(tmp_path),'name':'transfer.bin','size':4})
+    with pytest.raises(ValueError,match='File transfers'):
+        host.stop_for_upgrade()
+    assert not host.stopping.is_set() and host.sessions.accepting
+    from jaunt.crypto import b64
+    host.files.upload_chunk('test-owner', {'id':upload['id'],'offset':0,'data':b64(b'data')})
+    host.files.finish_upload('test-owner', {'id':upload['id'],'sha256':hashlib.sha256(b'data').hexdigest()})
+    assert (tmp_path/'transfer.bin').read_bytes()==b'data'
+    assert host.stop_for_upgrade()['stopping']

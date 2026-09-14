@@ -4,7 +4,7 @@
 
 The public installer configures automatic updates by default. The host checks the release selected by the published Page after startup and every 15 minutes. This keeps it on the owner's validated deployment channel. A source checkout has no automatic installation authority; it must first be installed through the public installer.
 
-A new wheel is downloaded over HTTPS and verified against its release manifest. The installer is read from that verified wheel. If ordinary shells are still active, the update is staged and deferred. It is retried automatically after they finish. The installer checks again immediately before shutdown and atomically stops accepting new sessions, so a shell created during the download is also protected. Automatic mode never inherits `JAUNT_ALLOW_RESTART` or developer download overrides.
+A new wheel is downloaded over HTTPS and verified against its release manifest. The installer is read from that verified wheel. If ordinary shells or file transfers are still active, the update is staged and deferred. It is retried automatically after they finish. The installer checks again immediately before shutdown and atomically stops accepting new sessions, so a shell created during the download is also protected. Automatic mode never inherits `JAUNT_ALLOW_RESTART` or developer download overrides.
 
 Settings shows the update state and allows automatic updates to be disabled. “Check for updates” preserves running ordinary shells. “Update and restart” requires a separate, explicit confirmation that it can close ordinary shells. The equivalent local command is `jaunt update --allow-restart`; `jaunt update` alone never grants that permission.
 

@@ -1,6 +1,6 @@
 {
   "schema": 1,
   "wheel": "jaunt_host-0.1.0b4-py3-none-any.whl",
-  "sha256": "77e7ca30ff8aa2bf9971e833822dcd19fe04fdd10fe17ecd90a85a1d10e8b263",
+  "sha256": "85550043658fa5391962056208f556671b76cb2acb5b41a64ec8d17cecbcc90c",
   "requiresPython": ">=3.11,<3.15"
 }

@@ -113,9 +113,9 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
             live = control("status")
             active = sum(bool(s["alive"] and not s.get("tmux")) for s in live["sessions"])
             authorized = allow_restart is True and not automatic
-            if active and not authorized:
+            if (active or live.get("activeTransfers", 0)) and not authorized:
                 return record("deferred", version=tag, activeShells=active,
-                              message="Update downloaded. It will install after ordinary shells finish.")
+                              message="Update downloaded. It will install after ordinary shells and file transfers finish.")
             with zipfile.ZipFile(wheel) as archive:
                 info = archive.getinfo("jaunt/installer.sh")
                 if info.file_size > 128 * 1024:
