@@ -13,5 +13,9 @@
   "networkToggleSameShell": true,
   "nativeSystemSaveExactBytes": true,
   "signedReleaseInstallAndLaunch": true,
-  "releaseDebugging": false
+  "releaseDebugging": false,
+  "signedReleaseGalleryQRPairing": true,
+  "nativeCameraPermissionAndScannerLaunch": true,
+  "physicalCameraQRDecoded": false,
+  "signedReleaseColdStarts": 3
 }
