@@ -11,7 +11,7 @@ Jaunt propose un client Android installable en APK, une interface web mobile/PC 
 ## Installer l'hôte
 
 ```sh
-curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
+bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
 Linux, macOS ou WSL. `curl` est nécessaire. L'installateur utilise un Python 3.11–3.14 compatible ou installe un Python privé via uv. Aucun `sudo` implicite. Le service tourne en arrière-plan et les mises à jour sont activées automatiquement ; elles attendent la fin des shells ordinaires et des transferts. Il vérifie le SHA-256 de la release, crée un environnement privé et démarre un service utilisateur lorsque disponible.

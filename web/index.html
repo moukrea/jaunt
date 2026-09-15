@@ -51,7 +51,7 @@
           <div class="feature-line"><span><span data-icon="terminal" data-size="17"></span>Any shell</span><span><span data-icon="shield" data-size="17"></span>End-to-end encrypted</span><span><span data-icon="refresh" data-size="17"></span>Pick up where you left off</span></div>
           <div class="install-block">
             <div class="install-caption"><span class="step-index">01</span><strong>On your machine</strong><span>Linux · macOS · WSL</span></div>
-            <div class="command"><code id="install-command">curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash</code><button id="copy-install" class="icon-button" aria-label="Copy installation command"><span data-icon="copy" data-size="18"></span></button></div>
+            <div class="command"><code id="install-command">bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'</code><button id="copy-install" class="icon-button" aria-label="Copy installation command"><span data-icon="copy" data-size="18"></span></button></div>
             <p class="fine-print">Installs in your account. No root, VPN, or SSH configuration.</p>
             <div id="deployment-note" class="deployment-note" hidden></div>
           </div>

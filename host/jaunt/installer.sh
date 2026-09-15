@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Jaunt user-space installer. Inspect this file before piping it into bash.
-# Production: curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
+# Production: bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 set -Eeuo pipefail
 umask 077
+STAGE='initialization'
+trap 'rc=$?; printf "\njaunt: Installation failed during %s (line %s, exit %s). See the error above.\n" "$STAGE" "$LINENO" "$rc" >&2; exit "$rc"' ERR
+printf '\n  Jaunt · Starting installation\n'
 fail() { printf 'jaunt: %s\n' "$*" >&2; exit 1; }
 say() { printf '\n  Jaunt · %s\n' "$*"; }
 case "$(uname -s)" in Linux|Darwin) ;; *) fail 'Use Linux, macOS, or WSL. Windows native is not supported.';; esac
@@ -14,14 +17,28 @@ BIN="${JAUNT_BIN_DIR:-$HOME/.local/bin}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/jaunt-install.XXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 fetch() {
-  case "$1" in
-    https://*) curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location --retry 3 --connect-timeout 20 --max-time 180 "$1" -o "$2" ;;
+  local url="$1" destination="$2" rc
+  printf '  Jaunt · Downloading %s\n' "${url##*/}" >&2
+  case "$url" in
+    https://*)
+      if curl --disable --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" -o "$destination"; then
+        return 0
+      else rc=$?; fi
+      case "$rc" in
+        5|6|7|28|35|52|55|56)
+          printf '  Jaunt · Download failed (curl %s); retrying over IPv4.\n' "$rc" >&2
+          curl --disable --ipv4 --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" -o "$destination"
+          ;;
+        *) return "$rc" ;;
+      esac
+      ;;
     http://127.0.0.1:*|http://localhost:*)
       [[ "${JAUNT_DEV_INSTALL:-0}" == 1 ]] || fail 'HTTP downloads are allowed only in explicit local installer tests.'
       curl --fail --show-error --silent --location "$1" -o "$2" ;;
     *) fail 'Downloads must use HTTPS.' ;;
   esac
 }
+STAGE='Python runtime selection'
 PY=''
 for candidate in python3 python3.13 python3.12 python3.11; do
   if command -v "$candidate" >/dev/null && "$candidate" -c 'import sys,venv;assert (3,11)<=sys.version_info<(3,15)' 2>/dev/null; then
@@ -41,6 +58,7 @@ if [[ -z "$PY" ]]; then
   "$UV" python install 3.12
   PY="$("$UV" python find 3.12)"
 fi
+STAGE='deployment configuration download'
 fetch "${PAGE%/}/config.json" "$TMP/config.json"
 "$PY" - "$TMP/config.json" "${JAUNT_DEV_INSTALL:-0}" <<'PY'
 import json,sys,urllib.parse
@@ -53,6 +71,7 @@ TAG="${JAUNT_VERSION:-$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || fail 'Invalid release tag.'
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'Invalid repository name.'
 BASE="${JAUNT_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}"
+STAGE="release $TAG download and checksum verification"
 say "Downloading $TAG"
 fetch "${BASE%/}/host-manifest.json" "$TMP/host-manifest.json"
 WHEEL="$("$PY" - "$TMP/host-manifest.json" <<'PY'
@@ -80,6 +99,7 @@ if [[ -x "$PREFIX/current/bin/python" ]]; then
 fi
 mkdir -p "$PREFIX/versions" "$BIN"
 TARGET="$PREFIX/versions/${TAG}-$(date +%s)-$$"
+STAGE='Python environment and dependencies installation'
 say 'Installing into a private environment'
 VENV_ARGS=()
 # An explicit test-only switch allows offline CI to reuse installed dependencies.
@@ -105,6 +125,7 @@ if ! "$TARGET/bin/python" -m pip install --disable-pip-version-check "${PIP_ARGS
 fi
 # On upgrade, only switch the pointer after the new environment has been verified.
 "$TARGET/bin/python" -c 'from jaunt.daemon import Host; from jaunt.cli import main' || fail 'Runtime dependencies are missing.'
+STAGE='safe runtime replacement'
 # Only now stop the old runtime. A failed download, checksum, venv or pip install
 # leaves the previous daemon running. Recheck: a shell could have started meanwhile.
 if [[ -x "$PREFIX/current/bin/python" ]]; then
@@ -134,6 +155,7 @@ old=installation()
 atomic_json(state_dir()/'installation.json', {'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)})
 PYUPDATE
 RELAY="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["relay"])' "$TMP/config.json")"
+STAGE='host configuration and service startup'
 "$BIN/jaunt" init --relay "$RELAY" --page "${PAGE%/}/"
 export PATH="$BIN:$PATH"
 if [[ "${JAUNT_NO_SERVICE:-0}" != 1 ]]; then
