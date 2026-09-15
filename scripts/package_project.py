@@ -66,7 +66,7 @@ def collect() -> dict[str, bytes]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT.parent / 'jaunt-0.1.0-beta.6.zip')
+    parser.add_argument('--output', type=Path, default=ROOT.parent / 'jaunt-0.1.0-beta.7.zip')
     output = parser.parse_args().output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     files = collect()

@@ -237,9 +237,12 @@ class Sessions:
 
     async def _reap(self, s: Session) -> None:
         while s.alive:
-            code = s.process.poll() if s.process else None
-            if code is not None:
-                s.exit_code = code
+            # Keep the leader waitable until this retained session is removed.
+            # Its reserved PID prevents reuse while we still own background jobs,
+            # including jobs which outlive the interactive shell.
+            result = os.waitid(os.P_PID, s.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) if s.process else None
+            if result is not None:
+                s.exit_code = result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
                 break
             await asyncio.sleep(0.1)
         s.alive = False
@@ -384,7 +387,7 @@ class Sessions:
             _, error = await proc.communicate()
             if proc.returncode and b"can't find" not in error and b"no server" not in error:
                 raise ValueError("Could not terminate the tmux session")
-        elif s.alive and (s.process is None or s.process.poll() is None):
+        elif s.process is not None and s.process.returncode is None:
             # Job control creates several process groups inside this PTY's session.
             # Signal all of those jobs, not only the interactive shell's group.
             proc = await asyncio.create_subprocess_exec("ps", "-e", "-o", "pid=",
@@ -428,9 +431,8 @@ class Sessions:
         s = self.get(sid)
 
         def running() -> bool:
-            # The async reaper may lag behind actual process exit. Never signal
-            # a stale process-group ID after Popen has observed that exit.
-            return s.alive and (s.process is None or s.process.poll() is None)
+            # The leader remains waitable, reserving its PID until final cleanup.
+            return s.alive and (s.process is None or s.process.returncode is None)
 
         def signal_group(sig: int) -> None:
             if not running():
@@ -470,6 +472,8 @@ class Sessions:
             s.fd = -1
         if s.pump:
             s.pump.cancel()
+        if s.process is not None:
+            await asyncio.to_thread(s.process.wait, timeout=3)
         self.items.pop(sid, None)
         await self.changed()
 

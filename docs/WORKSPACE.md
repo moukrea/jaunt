@@ -12,6 +12,8 @@ Use **Sessions** beside the tabs to see every retained session on the selected h
 
 Ordinary termination covers processes in the shell's POSIX terminal session, including background job-control groups. A process deliberately daemonized into a separate operating-system session is outside that boundary. Session termination is not a general process/container sandbox.
 
+Exited shells retain their wait status until the session is removed, reserving the leader PID so that surviving background jobs can still be terminated safely.
+
 Closing the app, losing a network connection, or locking its vault does not terminate shells. Plain shells do not survive a host daemon restart or reboot. Automatic host updates wait for ordinary active shells; explicitly authorizing an update/restart can terminate them. tmux remains available when restart-independent persistence is needed.
 
 ## Shared dimensions and scrolling

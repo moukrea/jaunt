@@ -79,8 +79,11 @@ async def test_close_does_not_signal_exited_child_with_stale_alive_flag(tmp_path
     from jaunt.sessions import Session
 
     class ExitedChild:
+        returncode = 0
         def poll(self):
-            return 0
+            return self.returncode
+        def wait(self, timeout=None):
+            return self.returncode
 
     async def noop(*_):
         pass

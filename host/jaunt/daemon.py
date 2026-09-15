@@ -302,7 +302,11 @@ class Host:
             await self.sessions.terminate(p["id"])
             return {}
         if method == "session.close":
-            await self.sessions.close(p["id"])
+            # Legacy clients use close for plain-shell termination and tmux detach.
+            if self.sessions.get(p["id"]).tmux:
+                await self.sessions.close(p["id"])
+            else:
+                await self.sessions.terminate(p["id"])
             return {}
         if method == "session.rename":
             return await self.sessions.rename(p["id"], p["name"])

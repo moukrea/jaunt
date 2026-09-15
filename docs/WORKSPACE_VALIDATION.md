@@ -6,7 +6,7 @@ This report records observations, not a certification. The custom protocol remai
 
 | Command / environment | Observed result |
 |---|---|
-| `.venv/bin/python -m pytest -q` | 59 passed, including a real shell/background job that ignores graceful termination, shared geometry ownership, split OSC parsing, encryption/replay, and safe updates |
+| `.venv/bin/python -m pytest -q` | 60 passed, including a real shell/background job that ignores graceful termination, surviving jobs after shell exit, shared geometry ownership, split OSC parsing, encryption/replay, and safe updates |
 | `npm test` | 21 passed, including split-tree retention, themes, cryptography, input pacing/order and disconnect-without-input-replay |
 | `npm run test:relay` | Real workerd/Miniflare WebSocket upgrade, Durable Object registration, routing and hibernation ping passed |
 | `npm run prepare-web` | Bundles pinned xterm/fit and jsQR locally, preserves their licenses, copies installer, regenerates service-worker inventory |

@@ -1,8 +1,8 @@
-# jaunt 0.1.0-beta.6
+# jaunt 0.1.0-beta.7
 
 Shared ordinary shells are now accessible simultaneously from the host desktop app and authorized remote clients, without tmux. The active device controls PTY dimensions; passive views do not resize it. Replay carries the geometry associated with retained output.
 
-Sessions can be listed, opened, detached from a view, or explicitly terminated with their jobs. Closing a tab no longer terminates the shell. Automatic upgrades still preserve active ordinary shells and identities; destroying them during an update requires explicit restart authorization.
+Sessions can be listed, opened, detached from a view, or explicitly terminated with their jobs. Closing a tab no longer terminates the shell. Explicit termination also catches background jobs after the shell has exited; the host retains the leader wait status until removal to prevent PID reuse. Automatic upgrades still preserve active ordinary shells and identities; destroying them during an update requires explicit restart authorization.
 
 The companion clients add persistent tiled desktop tabs, mobile session tabs, corrected terminal sizing, natural text selection controls, a gear icon, dark/light/system/circadian themes, friendly host names/order/defaults, and automatic terminal-attention events. The Android update fixes system-bar/IME insets and uses the original artwork. Runtime JavaScript remains local and xterm/fit now have pinned, reproducible build inputs.
 

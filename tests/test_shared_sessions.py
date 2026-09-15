@@ -9,7 +9,8 @@ def test_attention_chunk_boundaries(message,expected):
         assert p.feed(message[:boundary])|p.feed(message[boundary:])==expected
 
 @pytest.mark.asyncio
-async def test_shared_geometry_and_jobs(tmp_path,monkeypatch):
+@pytest.mark.parametrize("exit_parent", [False, True])
+async def test_shared_geometry_and_jobs(tmp_path,monkeypatch,exit_parent):
     monkeypatch.setenv('SHELL','/bin/sh')
     events=[]
     async def send(peer,value):events.append((peer,value))
@@ -34,6 +35,14 @@ async def test_shared_geometry_and_jobs(tmp_path,monkeypatch):
             await asyncio.sleep(.03)
         child=int((tmp_path/'stubborn.pid').read_text())
         assert os.getsid(child)==s['pid']
+        if exit_parent:
+            await sessions.write(sid,b'exit\n')
+            for _ in range(100):
+                if not sessions.get(sid).alive:break
+                await asyncio.sleep(.03)
+            assert not sessions.get(sid).alive
+            assert sessions.get(sid).process.returncode is None, 'Leader PID must remain reserved'
+            os.kill(child,0)
         await sessions.terminate(sid)
         assert sid not in sessions.items
         for _ in range(100):
