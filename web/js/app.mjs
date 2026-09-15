@@ -200,6 +200,11 @@ function handleMessage(a, message) {
       message.session ? {label: tr('Open'), run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null);
   } else if (message.type === 'clipboard.available') {
     toast(`${a.machine.name} shared clipboard text.`, false, {label: tr('Open'), run: () => showClipboard(a)});
+  } else if (message.type === 'bridge.changed') {
+    const {type, ...status} = message; if (a.info) a.info.bridge = status;
+    if (view === 'settings' && a === current()) renderSettings();
+  } else if (message.type === 'bridge.message') {
+    bridgeMessageActivity(a, message);
   } else if (message.type === 'update.progress') {
     const {type, ...status} = message; hostUpdateProgress(a, status);
   } else if (message.type === 'host.restarting') {
@@ -1031,6 +1036,50 @@ function attentionSettings(a) {
     return settingsRow({bell:tr('Terminal bell'),program:tr('Program notifications'),exit:tr('Session finished')}[key],{bell:tr('When a terminal rings its attention bell.'),program:'OSC 9 and OSC 777 notifications from terminal programs.',exit:tr('When the shell exits. For individual command completion, use jaunt run -- command.')}[key],input);
   });
 }
+const bridgeJobs=new Map();
+function bridgeMessageActivity(a,m){
+  const key='bridge-'+a.machine.room+'-'+m.id;
+  let job=bridgeJobs.get(key);
+  if(!job){job=activity(key,tr("AI sessions · {0}",a.machine.name));bridgeJobs.set(key,job);}
+  const who=`${m.from} → ${m.to}`;
+  const labels={accepted:tr('Accepted'),delivering:tr('Delivering…'),delivered:tr('Delivered to the session'),failed:tr('Delivery failed'),cancelled:tr('Cancelled')};
+  const text=`${who} · ${labels[m.state]||m.state}${m.detail?' · '+m.detail:''}${m.preview?' · '+m.preview:''}`;
+  if(m.state==='failed')job.fail(new Error(text));
+  else if(m.state==='delivered'||m.state==='cancelled')job.finish(text);
+  else job.update({status:text});
+}
+function bridgeSettings(a){
+  const b=a.info?.bridge;
+  if(!b||!b.visible)return [];
+  const runtimes=b.runtimes||{};
+  const versions=['claude','codex'].map(k=>`${k==='claude'?'Claude Code':'Codex'} ${runtimes[k]?.version||'?'}`).join(' · ');
+  let description,control;
+  if(!b.available){
+    description=(b.reason?tr(b.reason):tr('Unavailable on this host.'))+' · '+versions;
+    control=el('span',{class:'settings-hint',text:tr('Unavailable')});
+  } else {
+    const toggle=el('input',{type:'checkbox',checked:!!b.enabled,'aria-label':tr('Claude Code ↔ Codex bridge')});
+    toggle.onchange=async()=>{
+      toggle.disabled=true;const job=activity('bridge-setup-'+a.machine.room,tr("AI sessions · {0}",a.machine.name));
+      job.update({status:toggle.checked?tr('Preparing the integrations in Claude Code and Codex…'):tr('Turning the bridge off…')});
+      try{a.info.bridge=await a.link.request('bridge.configure',{enabled:toggle.checked},120000);job.finish(toggle.checked?tr('Bridge on. Sessions opened from now on take part; sessions already open join after their next restart. Codex asks once in its terminal to trust the new hooks.'):tr('Bridge off. Existing sessions keep running; no further cross-runtime messages are delivered.'));}
+      catch(error){toggle.checked=!toggle.checked;job.fail(error);}
+      finally{toggle.disabled=false;renderSettings();}
+    };
+    description=(b.enabled?tr('On. Claude Code and Codex sessions started from jaunt shells on the same project know about each other and can message each other.'):tr('Off. Turn on to let Claude Code and Codex sessions on the same project discover and message each other automatically.'))+' · '+versions;
+    control=toggle;
+  }
+  const rows=[settingsRow(tr('Claude Code ↔ Codex bridge'),description,control)];
+  if(b.enabled){
+    const participants=b.participants||[],unbridged=b.unbridged||[];
+    const list=el('div',{class:'bridge-list'});
+    for(const p of participants)list.append(el('div',{class:'bridge-row',text:`${p.runtime==='claude'?'Claude Code':'Codex'} · ${p.terminal} · ${p.project||p.cwd} · ${p.state==='busy'?tr('working'):tr('idle')}`}));
+    for(const u of unbridged)list.append(el('div',{class:'bridge-row muted',text:tr("{0} in \"{1}\" was started before the bridge and joins after its next restart or /clear.",u.runtime==='claude'?'Claude Code':'Codex',u.terminal)}));
+    if(!participants.length&&!unbridged.length)list.append(el('div',{class:'bridge-row muted',text:tr('No Claude Code or Codex session is running in a jaunt shell right now.')}));
+    rows.push(settingsRow(tr('Bridged sessions'),tr('Real interactive sessions registered through their own hooks. Only sessions of the other runtime on the same project are announced to each other.'),el('span')),list);
+  }
+  return rows;
+}
 function desktopUpdateStatus(value) {
   value={...value,message:tr(value.message||'')};
   const changed=desktopUpdateState?.state!==value.state || desktopUpdateState?.automatic!==value.automatic;
@@ -1168,6 +1217,7 @@ function renderSettings() {
       settingsRow(tr('Host clipboard'), a.info?.clipboard?.backend || tr('Unknown until connected'), button(tr('Open'), () => showClipboard(a))),
       settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
       ...(!a.machine.local ? [settingsRow(tr('Forget this machine'), tr('Removes its saved key from this browser. Revoke it on the host first when possible.'), button(tr('Forget'), () => forgetMachine(a), 'button danger'))] : [])));
+    if(a.info?.bridge?.visible)groups.push(settingsGroup(tr('AI SESSIONS'),...bridgeSettings(a)));
     groups.push(settingsGroup(tr('NOTIFICATIONS'),
       ...(a.info?.sharedViews ? attentionSettings(a) : []),
       ...(!desktop ? [settingsRow(isAndroid ? tr('Android background notifications') : tr('Background push'), isAndroid ? tr('Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.') : a.machine.push ? tr('Registered for this machine. Delivery depends on browser/OS permissions and the host being online.') : tr('Standard Web Push sent by your host. No ntfy, bot or third-party notification account.'),

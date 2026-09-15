@@ -68,6 +68,8 @@ Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and re
 
 The two **split icons** arrange panes side by side or above/below on desktop, using a new or existing session. Each pane can move into its own tab. Layouts survive reopening; mobile displays their sessions as normal tabs. The desktop sidebar can collapse, with the preference retained. Settings includes friendly host names, ordering and the default host, dark/light/system/circadian themes, and notification controls. Host settings follow the selected machine immediately, including its identity and update controls. The native desktop app also manages the local host service and pairs to other hosts; local service controls appear only for the local host, while desktop application updates remain separate. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
 
+**Claude Code ↔ Codex bridge.** When both `claude` and `codex` are installed on a host, Settings shows one switch. Turned on, real Claude Code and Codex sessions opened in jaunt shells on the same project automatically know about each other (as ordinary hook context) and can message each other's open conversation, at your request or on their own initiative. Off by default; turning it off removes everything jaunt added to both runtimes. See the [bridge guide](docs/BRIDGE.md).
+
 ## Image handling
 
 Progress stays visible during upload and clipboard/path delivery. Completed operations collapse into a compact result; **Show history** retains the details. Cancelling a transfer is shown as cancellation, and errors stay with their operation. The final result states exactly what happened; errors stay visible with a retry action. A successful path insertion or Ctrl+V delivery does not prove that Claude Code or Codex recognized an attachment.
@@ -135,6 +137,7 @@ python tests/shared_workspace_e2e.py # Electron + browser sharing real PTYs; nee
 python tests/terminal_render_e2e.py  # Scroll, selection and terminal geometry
 python tests/installer_e2e.py        # Real wheel install and protected upgrade
 python tests/client_update_e2e.py    # Browser-driven host self-update, pushed progress, refusal of a broken release
+python tests/bridge_e2e.py           # Real Claude Code and Codex sessions discover and message each other through the bridge (uses your real accounts)
 ```
 
 Set `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.

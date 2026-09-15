@@ -1,0 +1,484 @@
+"""Claude Code ↔ Codex bridge: cross-runtime awareness and messaging for jaunt shells.
+
+The host is the only authority. Real interactive sessions register themselves
+through jaunt-installed hooks that run inside jaunt-owned PTYs; the host verifies
+each claim against the PTY it owns before listing a participant. Awareness is
+pushed into the models through hook context, messages are delivered into the
+actual open conversations through each runtime's own inbox mechanism, and the
+whole thing is one per-host switch. Nothing here reads conversations.
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import os
+import re
+import shutil
+import subprocess
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .crypto import token
+
+log = logging.getLogger("jaunt")
+
+RUNTIMES = ("claude", "codex")
+# Verified on Claude Code 2.1.272 (session registry + peer inbox) and Codex CLI
+# 0.154.0 (hooks + queued session messages). Older releases are treated as
+# incompatible rather than guessed at.
+MINIMUM = {"claude": (2, 1, 230), "codex": (0, 150, 0)}
+STALE_AFTER = 6 * 3600
+MESSAGE_LIMIT = 12_000
+PAIR_RATE = (8, 60)  # at most 8 messages per minute between two participants
+MAX_HOPS = 6
+
+
+def parse_version(text: str) -> tuple | None:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", text or "")
+    return tuple(int(x) for x in match.groups()) if match else None
+
+
+def runtime_name(runtime: str) -> str:
+    return {"claude": "Claude Code", "codex": "Codex"}.get(runtime, runtime)
+
+
+@dataclass
+class Participant:
+    id: str
+    session: str          # jaunt session id (the terminal)
+    runtime: str
+    conversation: str     # runtime conversation/thread id
+    pid: int
+    cwd: str
+    project: dict         # {"root": ..., "common": ..., "kind": ...}
+    name: str = ""        # jaunt terminal name at registration
+    state: str = "idle"   # idle | busy | ended
+    inbox: dict = field(default_factory=dict)   # runtime delivery details (socket path, key file)
+    since: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    roster_seen: int = -1
+    bridged: bool = True
+
+    def public(self, terminal_name: str = "") -> dict:
+        return {"id": self.id, "session": self.session, "runtime": self.runtime, "conversation": self.conversation[:12],
+                "cwd": self.cwd, "project": self.project.get("root", ""), "kind": self.project.get("kind", "dir"),
+                "terminal": terminal_name or self.name, "state": self.state, "since": self.since, "lastSeen": self.last_seen}
+
+
+class Bridge:
+    def __init__(self, host):
+        self.host = host
+        self.participants: dict[str, Participant] = {}
+        self.messages: dict[str, dict] = {}
+        self.waiters: dict[str, asyncio.Future] = {}
+        self.version = 0
+        self.detected: dict | None = None
+        self.detected_at = -float("inf")
+        self.integrations: dict = dict(self.host.state.data.get("bridge", {}).get("integrations", {}))
+        self.rates: dict[tuple, list] = {}
+
+    # ---- settings -------------------------------------------------------
+    @property
+    def enabled(self) -> bool:
+        return bool(self.host.state.data.get("bridge", {}).get("enabled"))
+
+    def _store(self, **changes) -> None:
+        current = dict(self.host.state.data.get("bridge", {}))
+        current.update(changes)
+        self.host.state.data["bridge"] = current
+        self.host.state.save()
+
+    # ---- runtime detection ------------------------------------------------
+    async def detect(self, force: bool = False) -> dict:
+        """Resolve both runtimes in the user's login shell, not the service's minimal PATH."""
+        if self.detected is not None and not force and time.monotonic() - self.detected_at < 30:
+            return self.detected
+        shell = os.environ.get("SHELL") or shutil.which("bash") or "/bin/sh"
+        script = "for p in claude codex; do printf '%s\\t%s\\n' \"$p\" \"$(command -v \"$p\" 2>/dev/null)\"; done"
+        found: dict[str, str] = {}
+        try:
+            proc = await asyncio.create_subprocess_exec(shell, "-lc", script, stdout=asyncio.subprocess.PIPE,
+                                                        stderr=asyncio.subprocess.DEVNULL, stdin=asyncio.subprocess.DEVNULL)
+            out, _ = await asyncio.wait_for(proc.communicate(), 20)
+            for line in out.decode(errors="replace").splitlines():
+                name, _, path = line.partition("\t")
+                if name in RUNTIMES and path.strip():
+                    found[name] = path.strip()
+        except (OSError, asyncio.TimeoutError):
+            pass
+        for name in RUNTIMES:
+            if name not in found and shutil.which(name):
+                found[name] = shutil.which(name)
+        runtimes: dict[str, dict] = {}
+        for name in RUNTIMES:
+            path = found.get(name)
+            entry = {"installed": bool(path), "path": path or "", "version": "", "compatible": False}
+            if path:
+                try:
+                    proc = await asyncio.create_subprocess_exec(path, "--version", stdout=asyncio.subprocess.PIPE,
+                                                                stderr=asyncio.subprocess.STDOUT, stdin=asyncio.subprocess.DEVNULL)
+                    out, _ = await asyncio.wait_for(proc.communicate(), 20)
+                    version = parse_version(out.decode(errors="replace"))
+                    entry["version"] = ".".join(map(str, version)) if version else ""
+                    entry["compatible"] = bool(version and version >= MINIMUM[name])
+                except (OSError, asyncio.TimeoutError):
+                    pass
+            runtimes[name] = entry
+        both = all(runtimes[n]["installed"] for n in RUNTIMES)
+        compatible = both and all(runtimes[n]["compatible"] for n in RUNTIMES)
+        reason = ""
+        if both and not compatible:
+            bad = [f"{runtime_name(n)} {runtimes[n]['version'] or '?'} (needs {'.'.join(map(str, MINIMUM[n]))} or newer)"
+                   for n in RUNTIMES if not runtimes[n]["compatible"]]
+            reason = "Incompatible runtime: " + ", ".join(bad)
+        self.detected = {"runtimes": runtimes, "visible": both, "available": compatible, "reason": reason, "checkedAt": time.time()}
+        self.detected_at = time.monotonic()
+        return self.detected
+
+    def status(self) -> dict:
+        detected = self.detected or {"runtimes": {}, "visible": False, "available": False, "reason": "", "checkedAt": 0}
+        return {"enabled": self.enabled, **detected, "integrations": self.integrations,
+                "participants": [self.public(p) for p in self.participants.values() if p.state != "ended"],
+                "unbridged": self.unbridged(), "version": self.version}
+
+    def public(self, p: Participant) -> dict:
+        session = self.host.sessions.items.get(p.session)
+        return p.public(session.name if session else p.name)
+
+    def unbridged(self) -> list[dict]:
+        """Claude/Codex programs running in jaunt shells that have not registered.
+
+        Typically sessions opened before the bridge was turned on: they only load
+        the integration on their next start. The UI says so instead of pretending.
+        """
+        registered = {p.session for p in self.participants.values() if p.state != "ended"}
+        rows = []
+        for s in self.host.sessions.items.values():
+            if s.alive and s.program in RUNTIMES and s.id not in registered:
+                rows.append({"session": s.id, "terminal": s.name, "runtime": s.program})
+        return rows
+
+    # ---- configure --------------------------------------------------------
+    async def configure(self, enabled: bool) -> dict:
+        if type(enabled) is not bool:
+            raise ValueError("Bridge preference must be true or false")
+        detected = await self.detect(force=True)
+        if enabled and not detected["available"]:
+            raise ValueError(detected["reason"] or "Both Claude Code and Codex must be installed on this host")
+        from . import bridge_setup
+        if enabled:
+            results = await asyncio.to_thread(bridge_setup.install, detected["runtimes"])
+            self.integrations = results
+            complete = all(r.get("ok") for r in results.values())
+            self._store(enabled=complete, integrations=results)
+            if not complete:
+                # Never leave a half-installed integration behind a green switch.
+                await asyncio.to_thread(bridge_setup.uninstall, detected["runtimes"])
+                self.integrations = {}
+                self._store(enabled=False, integrations={})
+                failed = "; ".join(f"{runtime_name(n)}: {r.get('error', 'failed')}" for n, r in results.items() if not r.get("ok"))
+                raise ValueError(f"Could not prepare the bridge ({failed}). Nothing was left enabled.")
+        else:
+            results = await asyncio.to_thread(bridge_setup.uninstall, detected["runtimes"])
+            self.integrations = {}
+            self._store(enabled=False, integrations={})
+            self.disable_now()
+        await self.changed()
+        return self.status()
+
+    def disable_now(self) -> None:
+        """Immediate effect of OFF: no more roster, no deliveries, waiting calls unblocked."""
+        for message in self.messages.values():
+            if message["state"] in ("accepted", "delivering"):
+                message["state"] = "cancelled"
+                message["detail"] = "bridge disabled"
+        for future in self.waiters.values():
+            if not future.done():
+                future.set_result({"state": "cancelled", "detail": "bridge disabled"})
+        self.participants.clear()
+        self.version += 1
+
+    async def changed(self) -> None:
+        await self.host.broadcast({"type": "bridge.changed", **self.status()})
+
+    # ---- registration (from hooks inside jaunt PTYs) ---------------------------
+    def verify_session(self, session_id: str, runtime: str, pid: int) -> "Session":
+        session = self.host.sessions.items.get(session_id)
+        if session is None or not session.alive:
+            raise ValueError("This terminal is not a running jaunt shell")
+        # The claimed runtime process must belong to the process group tree of this PTY:
+        # the hook inherits jaunt_SESSION_ID only when started from that shell.
+        if pid and not self._descends(pid, session.pid):
+            raise ValueError("Runtime process does not belong to this jaunt shell")
+        return session
+
+    @staticmethod
+    def _parent(pid: int) -> int:
+        try:
+            with open(f"/proc/{pid}/stat") as stream:
+                return int(stream.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            pass
+        try:  # macOS and other hosts without /proc
+            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+            return int(out.stdout.strip() or 0)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return 0
+
+    @classmethod
+    def _ancestors(cls, pid: int) -> list[int]:
+        chain = []
+        while pid > 1 and len(chain) < 64:
+            chain.append(pid)
+            pid = cls._parent(pid)
+        return chain
+
+    @classmethod
+    def _descends(cls, pid: int, ancestor: int) -> bool:
+        return ancestor in cls._ancestors(pid)
+
+    def session_for_pid(self, pid: int) -> str:
+        """The jaunt terminal whose shell is an ancestor of this process, or ''."""
+        if not pid:
+            return ""
+        chain = set(self._ancestors(pid))
+        for s in self.host.sessions.items.values():
+            if s.alive and s.pid in chain:
+                return s.id
+        return ""
+
+    async def register(self, p: dict) -> dict:
+        """A hook event from a real session. Returns the context to inject, if any."""
+        if not self.enabled:
+            return {"enabled": False, "context": ""}
+        runtime = p.get("runtime")
+        if runtime not in RUNTIMES:
+            raise ValueError("Unknown runtime")
+        session_id = str(p.get("session", ""))
+        conversation = str(p.get("conversation", ""))[:128]
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{6,128}", conversation):
+            raise ValueError("Invalid conversation identifier")
+        pid = int(p.get("pid") or 0)
+        session = self.verify_session(session_id, runtime, pid)
+        event = str(p.get("event", ""))
+        cwd = str(p.get("cwd") or session.cwd)
+        project = p.get("project") if isinstance(p.get("project"), dict) else {}
+        project = {"root": str(project.get("root") or cwd), "common": str(project.get("common") or ""),
+                   "kind": str(project.get("kind") or "dir")}
+        now = time.time()
+        existing = self.participants.get(f"{runtime}:{conversation}")
+        replaced = [q for q in self.participants.values() if q.session == session_id and q.conversation != conversation and q.state != "ended"]
+        for old in replaced:
+            # A new conversation in the same terminal supersedes the previous one:
+            # messages addressed to the old id must never land in the new one.
+            self.end_participant(old, "replaced")
+        if event == "end":
+            if existing:
+                self.end_participant(existing, "ended")
+            await self.changed()
+            return {"enabled": True, "context": ""}
+        if existing is None:
+            existing = Participant(id=f"{runtime}:{conversation[:8]}", session=session_id, runtime=runtime, conversation=conversation,
+                                   pid=pid, cwd=cwd, project=project, name=session.name)
+            self.participants[f"{runtime}:{conversation}"] = existing
+            self.version += 1
+        else:
+            changed = (existing.cwd, existing.project, existing.state) != (cwd, project, "idle" if event in ("stop", "start") else existing.state)
+            existing.cwd, existing.project, existing.pid = cwd, project, pid or existing.pid
+            if existing.state == "ended":
+                existing.state = "idle"; changed = True
+            if changed:
+                self.version += 1
+        existing.inbox = {k: str(v) for k, v in (p.get("inbox") or {}).items() if k in ("socket", "key", "sessionPid")}
+        existing.last_seen = now
+        existing.state = {"prompt": "busy", "tool": "busy", "stop": "idle", "start": "idle", "compact": "busy"}.get(event, existing.state)
+        context = self.context_for(existing, event, str(p.get("source", "")))
+        if replaced or existing.roster_seen < 0:
+            await self.changed()
+        return {"enabled": True, "id": existing.id, "context": context, "peers": [self.public(q) for q in self.relevant(existing)]}
+
+    def end_participant(self, p: Participant, reason: str) -> None:
+        p.state = "ended"
+        self.version += 1
+        for message in self.messages.values():
+            if message["to"] == p.id and message["state"] in ("accepted", "delivering"):
+                message["state"] = "failed"
+                message["detail"] = f"recipient {reason}"
+        for message_id, future in list(self.waiters.items()):
+            m = self.messages.get(message_id)
+            if m and m["to"] == p.id and not future.done():
+                future.set_result({"state": "failed", "detail": f"recipient {reason}"})
+
+    def sweep(self) -> bool:
+        """Drop participants whose terminal or runtime process is gone."""
+        changed = False
+        for key, p in list(self.participants.items()):
+            session = self.host.sessions.items.get(p.session)
+            gone = session is None or not session.alive or (p.pid and not self._alive(p.pid))
+            if p.state != "ended" and gone:
+                self.end_participant(p, "terminated"); changed = True
+            if p.state == "ended" and time.time() - p.last_seen > 600:
+                del self.participants[key]
+        return changed
+
+    @staticmethod
+    def _alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    # ---- relevance --------------------------------------------------------------
+    @staticmethod
+    def same_project(a: dict, b: dict) -> str:
+        """'' when unrelated, otherwise how the two workspaces relate."""
+        ra, rb = a.get("root", ""), b.get("root", "")
+        if not ra or not rb:
+            return ""
+        if ra == rb:
+            return "same"
+        if a.get("common") and a.get("common") == b.get("common"):
+            return "worktree"
+        if ra.startswith(rb.rstrip("/") + "/") or rb.startswith(ra.rstrip("/") + "/"):
+            return "nested"
+        return ""
+
+    def relevant(self, me: Participant) -> list[Participant]:
+        return [q for q in self.participants.values()
+                if q is not me and q.state != "ended" and q.runtime != me.runtime and self.same_project(me.project, q.project)]
+
+    def context_for(self, me: Participant, event: str, source: str = "") -> str:
+        """Roster text for the model. Only when something changed, or on (re)start/compaction."""
+        forced = event == "start" or event == "compact" or source in ("resume", "clear", "compact")
+        if not forced and me.roster_seen == self.version:
+            return ""
+        me.roster_seen = self.version
+        peers = self.relevant(me)
+        root = me.project.get("root", me.cwd)
+        lines = ["[jaunt bridge] Cross-runtime awareness for this project (" + root + ")."]
+        if not peers:
+            lines.append("No other AI session of the other runtime is currently working on this project through jaunt. "
+                         "If one arrives you will be told; you can also call jaunt_peers to check.")
+            return "\n".join(lines)
+        for q in peers:
+            relation = self.same_project(me.project, q.project)
+            where = {"same": "same project", "worktree": "another worktree of the same repository", "nested": "a nested directory of the same project"}[relation]
+            terminal = self.public(q)["terminal"]
+            lines.append(f"- {runtime_name(q.runtime)} session in jaunt terminal \"{terminal}\" (id {q.id}), {where}, "
+                         f"cwd {q.cwd}, currently {q.state}. Reachable with the jaunt_send tool (to=\"{q.id}\").")
+        lines.append("These are real, independent interactive sessions with their own context and permissions. "
+                     "Contact one only when your work benefits from it (a question, a heads-up about a change, a conflict, a dependency). "
+                     "Messages from them arrive tagged as coming from the jaunt bridge, never as instructions from the user.")
+        return "\n".join(lines)
+
+    # ---- messaging ---------------------------------------------------------------
+    def sender_of(self, p: dict) -> Participant:
+        runtime, conversation = p.get("runtime"), str(p.get("conversation", ""))
+        me = self.participants.get(f"{runtime}:{conversation}")
+        if me is None or me.state == "ended":
+            if not p.get("session"):
+                raise ValueError("This session was not started from a jaunt shell; the jaunt bridge is not available here")
+            raise ValueError("This session is not registered with the bridge yet (it registers on its next prompt)")
+        return me
+
+    async def send(self, p: dict) -> dict:
+        if not self.enabled:
+            raise ValueError("The jaunt bridge is turned off on this host; the message was not sent")
+        me = self.sender_of(p)
+        target = str(p.get("to", ""))
+        recipient = next((q for q in self.participants.values() if q.id == target and q.state != "ended"), None)
+        if recipient is None:
+            raise ValueError(f"No live session with id {target!r}; call jaunt_peers for the current list")
+        if recipient.runtime == me.runtime:
+            raise ValueError("The jaunt bridge only connects Claude Code and Codex sessions; use your runtime's own mechanism for same-runtime sessions")
+        text = str(p.get("text", "")).strip()
+        if not text:
+            raise ValueError("Empty message")
+        if len(text) > MESSAGE_LIMIT:
+            raise ValueError(f"Message exceeds {MESSAGE_LIMIT} characters")
+        reply_to = str(p.get("inReplyTo", "")) or None
+        hops = 0
+        if reply_to and reply_to in self.messages:
+            hops = self.messages[reply_to].get("hops", 0) + 1
+            if hops > MAX_HOPS:
+                raise ValueError("This exchange has gone back and forth too many times; stop and let the user decide")
+        key = tuple(sorted((me.id, recipient.id)))
+        window = [t for t in self.rates.get(key, []) if time.time() - t < PAIR_RATE[1]]
+        if len(window) >= PAIR_RATE[0]:
+            raise ValueError("Too many messages between these two sessions in the last minute; wait before sending more")
+        window.append(time.time()); self.rates[key] = window
+        message = {"id": "m-" + token(6), "from": me.id, "to": recipient.id, "text": text, "inReplyTo": reply_to,
+                   "hops": hops, "state": "accepted", "detail": "", "at": time.time()}
+        self.messages[message["id"]] = message
+        if len(self.messages) > 500:
+            for old in sorted(self.messages.values(), key=lambda m: m["at"])[:100]:
+                self.messages.pop(old["id"], None)
+        await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
+        message["state"] = "delivering"
+        try:
+            from . import bridge_deliver
+            await bridge_deliver.deliver(self, me, recipient, message)
+            message["state"] = "delivered"
+        except Exception as exc:
+            message["state"] = "failed"
+            message["detail"] = str(exc)[:200]
+            await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
+            raise ValueError(f"Could not deliver to {recipient.id}: {message['detail']}") from None
+        await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
+        if reply_to and reply_to in self.waiters and not self.waiters[reply_to].done():
+            self.waiters[reply_to].set_result({"state": "replied", "reply": self.message_public(message)})
+        return self.message_public(message)
+
+    def message_public(self, m: dict) -> dict:
+        return {"id": m["id"], "from": m["from"], "to": m["to"], "state": m["state"], "detail": m["detail"],
+                "inReplyTo": m["inReplyTo"], "at": m["at"], "preview": m["text"][:140], "text": m["text"]}
+
+    async def wait_reply(self, p: dict) -> dict:
+        """Block (bounded) until a message replying to `id` arrives, the recipient ends, or the bridge is turned off."""
+        me = self.sender_of(p)
+        message_id = str(p.get("id", ""))
+        message = self.messages.get(message_id)
+        if message is None or message["from"] != me.id:
+            raise ValueError("Unknown message")
+        already = next((m for m in self.messages.values() if m["inReplyTo"] == message_id), None)
+        if already:
+            return {"state": "replied", "reply": self.message_public(already)}
+        if message["state"] in ("failed", "cancelled"):
+            return {"state": message["state"], "detail": message["detail"]}
+        seconds = min(max(int(p.get("seconds") or 60), 1), 600)
+        future = self.waiters.get(message_id)
+        if future is None or future.done():
+            future = asyncio.get_running_loop().create_future()
+            self.waiters[message_id] = future
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), seconds)
+        except asyncio.TimeoutError:
+            return {"state": "pending", "detail": f"no reply within {seconds}s; it will arrive as a bridge message when the other session answers"}
+        finally:
+            if future.done():
+                self.waiters.pop(message_id, None)
+
+    def resolve(self, p: dict) -> dict:
+        """MCP tool calls identify their terminal by env or by process ancestry; map it to the live conversation registered by hooks."""
+        if not p.get("session"):
+            found = self.session_for_pid(int(p.get("pid") or 0))
+            if found:
+                p = {**p, "session": found}
+        if p.get("conversation") in ("", "current", None):
+            session_id = str(p.get("session", ""))
+            live = [q for q in self.participants.values() if q.session == session_id and q.runtime == p.get("runtime") and q.state != "ended"]
+            if live:
+                p = {**p, "conversation": max(live, key=lambda q: q.last_seen).conversation}
+        return p
+
+    def peers_for(self, p: dict) -> dict:
+        if not self.enabled:
+            return {"enabled": False, "peers": [], "note": "The jaunt bridge is turned off on this host"}
+        me = self.sender_of(p)
+        return {"enabled": True, "me": self.public(me), "peers": [self.public(q) for q in self.relevant(me)]}
