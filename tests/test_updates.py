@@ -90,3 +90,23 @@ async def test_host_atomically_refuses_restart_during_a_transfer(tmp_path):
     host.files.finish_upload('test-owner', {'id':upload['id'],'sha256':hashlib.sha256(b'data').hexdigest()})
     assert (tmp_path/'transfer.bin').read_bytes()==b'data'
     assert host.stop_for_upgrade()['stopping']
+
+def test_installer_failure_is_reported_as_failure_not_waiting(release,monkeypatch):
+    monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[]})
+    monkeypatch.setattr(updates.subprocess,'run',lambda *a,**k:type('Result',(),{'returncode':23})())
+    result=updates.update()
+    assert result['state']=='error' and '23' in result['message']
+
+def test_update_progress_preserves_the_requested_operation(release,monkeypatch):
+    root,responses=release;observed=[]
+    monkeypatch.setenv('jaunt_UPDATE_ID','fixture-operation')
+    original=updates.atomic_json
+    def record(path,value):
+        if path.name=='update-status.json':observed.append(value.copy())
+        return original(path,value)
+    monkeypatch.setattr(updates,'atomic_json',record)
+    monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[]})
+    monkeypatch.setattr(updates.subprocess,'run',lambda *a,**k:type('Result',(),{'returncode':0})())
+    assert updates.update()['state']=='installed'
+    assert [r['state'] for r in observed]==['checking','downloading','verifying','installing','installed']
+    assert all(r['operation']=='fixture-operation' for r in observed)

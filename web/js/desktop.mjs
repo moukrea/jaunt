@@ -19,5 +19,6 @@ export class LocalLink extends EventTarget {
   reconnect(){if(this.enabled)this.start();}
   rejectPending(){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Connection interrupted; input was not replayed.'));}this.pending.clear();}
   send(value){if(this.state!=='online')return Promise.reject(new Error('Local host is offline.'));return desktop.send(value);}
+  waitOnline(signal){return Link.prototype.waitOnline.call(this,signal);}
   request(...args){return Link.prototype.request.apply(this,args);}
 }

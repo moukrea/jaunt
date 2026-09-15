@@ -563,10 +563,14 @@ class Host:
         elif allow_restart is True:
             args.append("--allow-restart")
         env = os.environ.copy(); env["jaunt_STATE"] = str(self.state.root)
+        from .state import atomic_json
+        operation = token(12)
+        env["jaunt_UPDATE_ID"] = operation
+        atomic_json(self.state.root / "update-status.json", {"state": "checking", "checkedAt": time.time(), "operation": operation})
         self.update_process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         self.last_update_check = time.monotonic()
-        return {"state": "checking"}
+        return {"state": "checking", "operation": operation}
 
     async def run(self) -> None:
         relay_url(self.state.data["relay"], self.state.data["room"])

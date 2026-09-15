@@ -3,7 +3,7 @@
 import asyncio,json,os,subprocess,sys,shlex
 from pathlib import Path
 from playwright.async_api import async_playwright,expect
-from browser_e2e import Harness,port,until,terminal_command,scrollback,ROOT
+from browser_e2e import Harness,port,until,terminal_command,scrollback,ROOT,PNG
 
 async def main():
     h=Harness();electron=None
@@ -127,6 +127,17 @@ async def main():
             await local.get_by_role('button',name='Terminate session',exact=True).click()
             await expect(local.locator('#modal')).not_to_be_visible()
             assert auto['id'] not in [s['id'] for s in json.loads(h.cli('status'))['sessions']]
+            async with local.expect_file_chooser() as chosen:await local.locator('#attach-button').click()
+            await (await chosen.value).set_files({'name':'local-progress.png','mimeType':'image/png','buffer':PNG})
+            await local.get_by_role('button',name='Upload & insert path',exact=True).click()
+            operation=local.locator('#activity .activity-row').filter(has_text='local-progress.png')
+            await expect(operation).to_contain_text('path inserted · no Enter',timeout=30000)
+            await expect(operation).to_have_attribute('data-state','done')
+            assert list((h.state/'attachments').glob('*local-progress.png'))
+            await local.locator('#settings-button').click()
+            await local.get_by_role('button',name='Check desktop update',exact=True).click()
+            await expect(local.locator('#activity')).to_contain_text('up to date' if executable else 'source checkout')
+            await expect(local.locator('#activity .activity-row').filter(has_text='Desktop update')).to_have_attribute('data-state','done')
             await browser.close();await native.close()
             print('PASS native host + remote browser share one PTY; last active view sizes it; close/reopen preserves shell; terminate closes every view; tiled tabs persist through reload and flatten on mobile')
     finally:

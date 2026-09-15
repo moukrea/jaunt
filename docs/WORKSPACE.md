@@ -52,3 +52,9 @@ Notifications omit terminal output by default. Browser/OS permissions, force-sto
 Program notifications preserve OSC 9 message text and OSC 777 title/body. Clicking a native notification selects its host and session, including after reconnecting or unlocking. Android follows the OS lock-screen privacy settings. Terminal output is not scraped to invent notification text.
 
 Interface pictograms use pinned, locally bundled Lucide icons (ISC license). The supplied jaunt artwork remains the application logo; Linux packages include standard icon sizes and Android uses an adaptive launcher wrapper around that artwork.
+
+## Updates and visible progress
+
+Host/CLI and desktop versions are separate. The host checks automatically and waits for ordinary shells and transfers to finish before restarting. The desktop checks on startup and every 15 minutes, verifies downloads, and installs when its window closes. Settings offers manual checks and Install and reopen. Desktop installation preserves the app's saved machines and does not stop host shells; system packages may require an OS authorization prompt. Android verifies its APK and signing identity before handing installation to Android.
+
+The activity strip remains visible through image preparation, upload, verification and insertion. Completion distinguishes a path inserted without Enter from a PNG placed in the host clipboard with Ctrl+V sent. It never promises that a specific CLI recognized an attachment. Update checks report current, installed, waiting for active shells, or failed; completed/error results remain until dismissed.

@@ -213,7 +213,7 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*.png'))));await page.wait_for_timeout(300)
-        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await expect(page.locator('#activity .activity-row').filter(has_text='screenshot.png')).to_contain_text('path inserted · no Enter',timeout=30000)
         for _ in range(50):
             if 'screenshot.png' in await scrollback(page):break
             await asyncio.sleep(.1)
@@ -232,7 +232,7 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*clipboard-*.png'))))
-        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await expect(page.locator('#activity .activity-row').filter(has_text='clipboard-')).to_contain_text('path inserted · no Enter',timeout=30000)
         await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
         passed('real browser image clipboard reaches headless upload/path fallback')
         # Reproduce an empty async clipboard result, then deliver an image through
@@ -250,7 +250,7 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*fallback-capture.png'))))
-        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await expect(page.locator('#activity .activity-row').filter(has_text='fallback-capture.png')).to_contain_text('path inserted · no Enter',timeout=30000)
         await page.evaluate('''() => {navigator.clipboard.read=window.__clipboardRead;delete window.__clipboardRead;}''')
         assert await page.locator('#sidebar [data-view="transfers"]').count()==0
         assert await page.locator('#mobile-nav [data-view="transfers"]').count()==0

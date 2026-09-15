@@ -116,3 +116,5 @@ English is the default language for repository documentation and contribution gu
 The Android client is an APK with a bundled WebView interface and native clipboard, camera, file, and background-notification integrations. See [Android installation, architecture, and validation](docs/ANDROID.md). The page advertises the APK after its public assets have been verified.
 
 The host updates automatically from the published channel, waiting until ordinary shells and transfers finish. Android automatically checks for a new APK and offers a verified update through the system installer. See [updates and explicit restart authorization](docs/UPDATES.md).
+
+The desktop app also checks for updates automatically and installs verified downloads when it closes, independently of the host. Settings offers manual checks and Install and reopen. System packages may need OS authorization. Uploads and update checks show progress and retain their actual result in the activity strip.
