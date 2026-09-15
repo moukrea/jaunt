@@ -295,7 +295,8 @@ async def main():
         await mp.wait_for_timeout(7000)
         await mp.screenshot(path=str(OUT/'mobile-terminal.png'))
         devices=json.loads(h.cli('devices'));mobile_id=next(d['id'] for d in devices if d['id']!=devices[0]['id'])
-        h.cli('revoke',mobile_id);await expect(mp.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
+        # Base64url device IDs may start with '-'; terminate CLI option parsing.
+        h.cli('revoke','--',mobile_id);await expect(mp.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
         assert len(json.loads(h.cli('status'))['sessions'])==2;passed('revoked device disconnected; shell sessions retained')
         # Check all precached resources at the actual project subpath.
         import re
