@@ -151,8 +151,16 @@ class Bridge:
         # well-known per-user install locations.
         found: dict[str, str] = {}
         try:
-            found.update(await asyncio.wait_for(asyncio.to_thread(probe_in_terminal), 25))
-        except (asyncio.TimeoutError, Exception):
+            # A separate single-threaded interpreter owns the pseudo-terminal: forking
+            # a pty from the multi-threaded daemon itself is not safe.
+            import sys
+            proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "jaunt.bridge", "--probe",
+                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                                                        stdin=asyncio.subprocess.DEVNULL, start_new_session=True)
+            out, _ = await asyncio.wait_for(proc.communicate(), 30)
+            data = json.loads(out or b"{}")
+            found.update({k: v for k, v in data.items() if k in RUNTIMES and isinstance(v, str)})
+        except (OSError, ValueError, asyncio.TimeoutError):
             pass
         home = Path.home()
         fallback = [home / ".local/bin", home / ".npm-global/bin", home / ".bun/bin", home / ".codex/bin", home / ".claude/local",
@@ -538,3 +546,9 @@ class Bridge:
             return {"enabled": False, "peers": [], "note": "The jaunt bridge is turned off on this host"}
         me = self.sender_of(p)
         return {"enabled": True, "me": self.public(me), "peers": [self.public(q) for q in self.relevant(me)]}
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] == ["--probe"]:
+        print(json.dumps(probe_in_terminal()))
