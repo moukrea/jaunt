@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """System locale, explicit override and literal user content in real browsers."""
-import asyncio,json,os,subprocess,tempfile
+import asyncio,json,os,subprocess,tempfile,sys
 from pathlib import Path
 from playwright.async_api import async_playwright,expect
 from browser_e2e import Harness,ROOT
@@ -24,7 +24,7 @@ async def main():
    await b.close()
   with tempfile.TemporaryDirectory(prefix='jaunt-language-test-') as tmp:
    env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':tmp,'LANG':'fr_FR.UTF-8','LC_ALL':'fr_FR.UTF-8'}
-   def cli(*args):return subprocess.check_output([str(ROOT/'.venv/bin/python'),'-m','jaunt.cli',*args],env=env,text=True)
+   def cli(*args):return subprocess.check_output([sys.executable,'-m','jaunt.cli',*args],env=env,text=True)
    for lang in ['en','fr','es','it','pt','de']:
     text=cli('--language',lang,'--help');assert '--language' in text and '--help' in text and 'desktop-bridge' in text
    cli('language','de');assert json.loads((Path(tmp)/'language.json').read_text())['language']=='de'
