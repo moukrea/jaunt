@@ -179,6 +179,7 @@ function render() {
   for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || view !== v;
   for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
+  $('arrange-panes').disabled = !a?.active || a?.link.state !== 'online';
   $('terminal-empty').hidden = !!a?.active;
   for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || !visibleSessions(a).includes(id);
   if (a) layoutPanes(a);
