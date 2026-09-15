@@ -1,4 +1,5 @@
 import asyncio,json,os,sys,time
+from pathlib import Path
 import pytest,pytest_asyncio
 from jaunt.daemon import Host
 from jaunt.state import State
@@ -195,7 +196,9 @@ async def test_claude_delivery_frames_authenticate_then_inject(tmp_path,monkeypa
     import asyncio
     from jaunt import bridge_deliver
     monkeypatch.setenv('CLAUDE_CONFIG_DIR',str(tmp_path))
-    sessions=tmp_path/'sessions';sessions.mkdir();sock=tmp_path/'i.sock'
+    import tempfile
+    sessions=tmp_path/'sessions';sessions.mkdir()
+    sock=Path(tempfile.mkdtemp(prefix='jb',dir='/tmp'))/'i.sock'  # macOS limits AF_UNIX paths to ~104 bytes
     received=[]
     async def handler(reader,writer):
         while line:=await reader.readline():received.append(json.loads(line))
