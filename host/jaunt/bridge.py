@@ -41,6 +41,55 @@ def parse_version(text: str) -> tuple | None:
     return tuple(int(x) for x in match.groups()) if match else None
 
 
+def probe_in_terminal() -> dict[str, str]:
+    """Ask a login + interactive shell on a pseudo-terminal where the runtimes live."""
+    import pty, select, termios, tty
+    shell = os.environ.get("SHELL") or shutil.which("bash") or "/bin/sh"
+    if Path(shell).name == "bash":
+        argv = [shell, "-l", "-c", 'exec "$0" -i', shell]
+    else:
+        argv = [shell, "-i", "-l"]
+    sentinel = "__jaunt_probe_" + token(6) + "__"
+    command = f" printf '{sentinel}\\n'; for p in claude codex; do printf '%s\\t%s\\n' \"$p\" \"$(command -v \"$p\" 2>/dev/null)\"; done; printf '{sentinel}\\n'; exit\n"
+    pid, fd = pty.fork()
+    if pid == 0:  # child
+        os.environ["TERM"] = "dumb"
+        os.execvp(argv[0], argv)
+    try:
+        with contextlib.suppress(termios.error):
+            tty.setraw(fd)  # no echo games: the shell still prints our lines as output
+        os.write(fd, command.encode())
+        out = b""
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([fd], [], [], 0.5)
+            if ready:
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                out += chunk
+                if out.count(sentinel.encode()) >= 3:  # echo + two markers
+                    break
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError, ChildProcessError):
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+    text = out.decode(errors="replace")
+    parts = text.split(sentinel)
+    found: dict[str, str] = {}
+    if len(parts) >= 3:
+        for line in parts[-2].splitlines():
+            name, _, path = line.strip().partition("\t")
+            if name in RUNTIMES and path.strip() and os.access(path.strip(), os.X_OK):
+                found[name] = path.strip()
+    return found
+
+
 def runtime_name(runtime: str) -> str:
     return {"claude": "Claude Code", "codex": "Codex"}.get(runtime, runtime)
 
@@ -96,22 +145,29 @@ class Bridge:
         """Resolve both runtimes in the user's login shell, not the service's minimal PATH."""
         if self.detected is not None and not force and time.monotonic() - self.detected_at < 30:
             return self.detected
-        shell = os.environ.get("SHELL") or shutil.which("bash") or "/bin/sh"
-        script = "for p in claude codex; do printf '%s\\t%s\\n' \"$p\" \"$(command -v \"$p\" 2>/dev/null)\"; done"
+        # jaunt shells are login + interactive shells on a real terminal; resolve the
+        # runtimes exactly the same way (a user service's PATH is not the user's, and
+        # many .bashrc files only set PATH when attached to a terminal), then look in
+        # well-known per-user install locations.
         found: dict[str, str] = {}
         try:
-            proc = await asyncio.create_subprocess_exec(shell, "-lc", script, stdout=asyncio.subprocess.PIPE,
-                                                        stderr=asyncio.subprocess.DEVNULL, stdin=asyncio.subprocess.DEVNULL)
-            out, _ = await asyncio.wait_for(proc.communicate(), 20)
-            for line in out.decode(errors="replace").splitlines():
-                name, _, path = line.partition("\t")
-                if name in RUNTIMES and path.strip():
-                    found[name] = path.strip()
-        except (OSError, asyncio.TimeoutError):
+            found.update(await asyncio.wait_for(asyncio.to_thread(probe_in_terminal), 25))
+        except (asyncio.TimeoutError, Exception):
             pass
+        home = Path.home()
+        fallback = [home / ".local/bin", home / ".npm-global/bin", home / ".bun/bin", home / ".codex/bin", home / ".claude/local",
+                    Path("/usr/local/bin"), Path("/opt/homebrew/bin"), Path("/usr/bin")]
         for name in RUNTIMES:
-            if name not in found and shutil.which(name):
+            if name in found:
+                continue
+            if shutil.which(name):
                 found[name] = shutil.which(name)
+                continue
+            for directory in fallback:
+                candidate = directory / name
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    found[name] = str(candidate)
+                    break
         runtimes: dict[str, dict] = {}
         for name in RUNTIMES:
             path = found.get(name)
