@@ -10,6 +10,13 @@ def main():
     subprocess.run([sys.executable,'-m','pip','wheel','--no-deps','--no-build-isolation','--wheel-dir',str(out),str(ROOT)],check=True)
     wheels=sorted(out.glob('jaunt_host-*.whl'),key=lambda x:x.stat().st_mtime)
     wheel=wheels[-1]
+    with zipfile.ZipFile(wheel) as archive:
+        names=archive.namelist()
+        for name in names:
+            assert not any(part in {'host.json','.dev-state','.env','installation.json','update-status.json'} for part in Path(name).parts), 'Private state in release wheel'
+        for lang in ('en','fr','es','it','pt','de'):
+            assert f'jaunt/locales/{lang}.json' in names, 'Missing release locale'
+        assert archive.read('jaunt/installer.sh')==(ROOT/'install.sh').read_bytes(), 'Stale bundled installer'
     manifest={'schema':1,'wheel':wheel.name,'sha256':hashlib.sha256(wheel.read_bytes()).hexdigest(),'requiresPython':'>=3.11,<3.15'}
     (out/'host-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     (out/'SHA256SUMS').write_text('\n'.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}' for p in [wheel,out/'host-manifest.json'])+'\n')
