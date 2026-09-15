@@ -172,12 +172,12 @@ function render() {
   $('machine-title').textContent = a?.machine.friendlyName || a?.machine.name || 'Overview';
   $('breadcrumb-prefix').textContent = 'Workspace';
   $('welcome').hidden = !!a || view === 'settings'; $('workspace').hidden = !a && view !== 'settings';
-  $('new-session-top').hidden = !a; $('new-session-top').disabled = a?.link.state !== 'online';
+  $('new-session-top').hidden = !a; $('new-session-top').disabled = !!a?.creating || a?.link.state !== 'online';
   $('lock-button').hidden = !vault.protected;
   for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('selected', b.dataset.view === view);
   $('terminal-view').hidden = !a || (view !== 'terminal' && !(view === 'files' && !isMobile()));
   for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || view !== v;
-  for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = a?.link.state !== 'online';
+  for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = !!a?.creating || a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
   for(const id of ['arrange-panes','split-below']) $(id).disabled = !a?.active || a?.link.state !== 'online';
   $('terminal-empty').hidden = !!a?.active;
@@ -187,7 +187,7 @@ function render() {
     renderTabs(a);
     const s = a.sessions.find(s => s.id === a.active), t = activeTerm(a);
     $('rename-session').hidden = !s;
-    $('terminal-meta').textContent = s ? `${s.cwd}  ·  ${s.alive ? `${t?.term.cols || s.cols} × ${t?.term.rows || s.rows}` : `Exited (${s.exitCode ?? '—'})`}${t?.trimmed ? '  ·  older output trimmed' : ''}` : 'No active shell';
+    $('terminal-meta').textContent = a.creating ? 'Creating shell…' : s ? `${s.cwd}  ·  ${s.alive ? `${t?.term.cols || s.cols} × ${t?.term.rows || s.rows}` : `Exited (${s.exitCode ?? '—'})`}${t?.trimmed ? '  ·  older output trimmed' : ''}` : 'No active shell';
     if (s && !t && a.link.state === 'online') selectSession(a, s.id).catch(report);
   }
   requestAnimationFrame(fitActive);
@@ -284,7 +284,7 @@ function createTerm(a, session) {
   return t;
 }
 function updateTermInput(a, t) {
-  const disabled = a.link.state !== 'online' || !t.session.alive || !t.attached;
+  const disabled = !!a.creating || a.link.state !== 'online' || !t.session.alive || !t.attached;
   t.term.options.disableStdin = disabled;
   const area = t.node.querySelector('textarea');
   if (area) area.disabled = disabled;
@@ -470,6 +470,11 @@ function terminalText(t) {
 }
 async function newSession(splitAxis = null, options = {}) {
   const a = online(), splitTarget = a.active;
+  if(a.creating)return;
+  a.creating=true;
+  for(const t of a.terms.values())updateTermInput(a,t);
+  render();
+  try {
   const result = await a.link.request('session.create', {id:random(12),
     sourceSession:splitTarget || undefined, cwd:a.info?.sessionDirectory ? undefined : a.sessions.find(s=>s.id===splitTarget)?.cwd, ...options, cols:100, rows:30});
   if (!a.sessions.some(s=>s.id===result.id)) a.sessions.push(result);
@@ -479,6 +484,11 @@ async function newSession(splitAxis = null, options = {}) {
     rememberLayout(a,split(a.machine.layout || {id:splitTarget},splitTarget,result.id,splitAxis));
   }
   closeModal(); view='terminal'; await selectSession(a,result.id);
+  } finally {
+    a.creating=false;
+    for(const t of a.terms.values())updateTermInput(a,t);
+    render();
+  }
   if (!isMobile()) activeTerm(a)?.term.focus();
 }
 async function browseNewSession() {
