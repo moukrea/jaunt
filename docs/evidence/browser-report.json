@@ -26,5 +26,5 @@
   ],
   "uncaughtErrors": [],
   "tested": "Chromium desktop and emulated mobile; not a physical handset",
-  "relay": "python-reference"
+  "relay": "workerd"
 }

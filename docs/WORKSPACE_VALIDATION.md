@@ -1,6 +1,6 @@
 # Workspace validation — 2026-09-15
 
-This report records observations, not a certification. The custom protocol remains independently unaudited. Public release checks are recorded separately from the following candidate observations.
+This report records observations, not a certification. The custom protocol remains independently unaudited. Public deployment and installed-release checks are recorded in [PUBLIC_DELIVERY.md](PUBLIC_DELIVERY.md); the following table records the development and platform checks.
 
 ## Local observations
 
@@ -34,6 +34,8 @@ Version references were checked against [Electron's official release record](htt
 - Desktop package permissions inherited a private build umask, making the installed directory inaccessible to ordinary users. The packaging hook now normalizes application directories and executable/data permissions. Packaged sandbox validation is tracked separately from source-mode renderer tests. Explicit ALSA/GBM/DRM dependencies were also added after installation in the clean Ubuntu VM exposed a missing library.
 
 CI additionally caught macOS Bash 3.2 compatibility in the environment-alias bootstrap and an old-wheel/new-installer state-directory mismatch. The compatibility bootstrap now runs before importing an old wheel, including subsequent CLI invocations. The real Fedora confined-curl test passes with the public beta.5 wheel and candidate installer.
+
+The host matrix passed on Linux and macOS with Python 3.11 and 3.13. On macOS, the host uses the system waitid binding when Python omits it, following Apple’s public [wait.h](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/wait.h) and [signal.h](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/signal.h) definitions. Both running and exited-shell background-job termination are exercised by the same real-process tests on both operating systems.
 
 The source-mode headless Electron test uses a test-only sandbox override in an isolated X server. The separate installed-package check passed without that override on the Ubuntu VM. Production main/preload code never disables the sandbox.
 

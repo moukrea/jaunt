@@ -1,80 +1,64 @@
 # Public delivery — September 15, 2026
 
-- Application: https://moukrea.github.io/jaunt/
-- Host: [v0.1.0-beta.5](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.5).
-- Android: [signed APK 0.1.0-beta.3](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), [release and checksums](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.3).
-- Deployed project relay: `wss://jaunt-relay.moukrea.workers.dev`, `APP_ORIGIN=https://moukrea.github.io`.
+The published application is **https://moukrea.github.io/jaunt/**. End users do not need a GitHub or Cloudflare account, VPN, or inbound server configuration.
+
+- Host: [v0.1.0-beta.8](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.8), Python version `0.1.0b8`.
+- Desktop: [0.1.0-beta.6](https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.6), Linux x64/ARM64 tar/deb/rpm and macOS x64/ARM64 zip/dmg packages.
+- Android: [signed beta.4 APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.4/jaunt-android-v0.1.0-beta.4.apk), [release and checksums](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.4).
+- Project relay: `wss://jaunt-relay.moukrea.workers.dev`, with `APP_ORIGIN=https://moukrea.github.io`.
+
+## Validated installation
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-The previous form of this command (`curl -fsSL … | bash`) was used from the public page in an isolated Ubuntu 24.04 VM. Bootstrap fixes and Fedora testing are documented in [INSTALLER_FEDORA.md](INSTALLER_FEDORA.md). The wheel was installed in a private environment, not as editable source; its checksum was verified and the user service enabled. The user's workstation also received beta.4 from the public release without closing active shells, preserving identities and enabling the service. Its periodic check subsequently installed beta.5 automatically, with no manual trigger; version 0.1.0b5 and the active service were verified.
+The exact command extracted from the public page installed `0.1.0b8` in a fresh Fedora 43 container. A subsequent `jaunt gui --install-only` downloaded and verified the desktop archive and created its application-menu entry. The normal installer performs this desktop setup automatically when it detects a graphical host. `jaunt gui` opens the installed desktop app; Linux distribution packages are also available from the desktop release.
 
-The APK bundles the WebView interface and uses native Android integrations for camera, clipboard, files, and notifications. Connecting requires no Cloudflare/GitHub account. Android still requires confirmation to install an update.
+A separate Ubuntu 24.04.5 VM upgraded the non-editable public beta.5 wheel to public beta.8, retaining host and device identities and its enabled, active user service. The initial upgrade explicitly selected the new public release before the default Pages channel switched. The subsequent public acceptance recipe used the published default installer without a version override.
 
-## Executed checks
+Automatic host updates retain ordinary shells and transfers. Explicit restart authorization is required to destroy active shells, including background jobs which survive an exited shell. The final code also strips both current and legacy environment overrides from automatic installations. Android checks for updates and uses the Android system installer; its confirmation remains required.
 
-The [release CI](https://github.com/moukrea/jaunt/actions/runs/34904297741) and [Android build](https://github.com/moukrea/jaunt/actions/runs/34904297775) passed before PR #13 was merged. Releases preceded Pages: [host](https://github.com/moukrea/jaunt/actions/runs/34902465073), [signed APK](https://github.com/moukrea/jaunt/actions/runs/34904737541), then [Pages](https://github.com/moukrea/jaunt/actions/runs/34905023100).
+## Observed checks
 
-| Command / check | Observed result |
+[PR #18](https://github.com/moukrea/jaunt/pull/18) merged after its checks passed. The [final CI](https://github.com/moukrea/jaunt/actions/runs/34950530292), [host release](https://github.com/moukrea/jaunt/actions/runs/34950562658), [desktop release](https://github.com/moukrea/jaunt/actions/runs/34948505167), and [Android release](https://github.com/moukrea/jaunt/actions/runs/34948504993) passed. Releases preceded [Pages deployment](https://github.com/moukrea/jaunt/actions/runs/34951111652).
+
+| Command or actual environment | Result |
 |---|---|
-| `pytest -q` | 45 tests on Linux/macOS with Python 3.11 and 3.13 at release time; later installer regressions are reported separately |
-| `npm test` | 19 Node tests |
-| `npm run test:relay` | 1 real Miniflare/workerd integration covering Durable Objects and WebSockets |
-| `python scripts/check_project.py` | Valid imports, resources, and syntax |
-| `python scripts/build_release.py` | Wheel, manifest, and SHA256SUMS produced |
-| `python tests/browser_e2e.py` | 23 scenarios per backend: Python relay and real local Worker |
-| `python tests/installer_e2e.py` | 8 checks, including a tampered checksum, real PTY, refusal of implicit restart, and authorized upgrade |
-| `android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` | 3 JVM tests, lint, and builds passed |
-| `:app:assembleRelease :app:lintRelease`, `apksigner verify --verbose --print-certs` | Signed, non-debuggable public APK with verified signature |
-| Public release downloads | Three host assets and three Android assets checked; checksums, names/versions, and certificate match |
-| Published page | Correct host/APK configuration; 26 resources under `/jaunt/` compared with built files; APK link visible in a mobile viewport; no observed JS exception |
-| Public relay | `/health` returned 200 with curl; real WebSocket authentication and bidirectional routing passed; foreign origin rejected with 403 |
+| `pytest -q` | 61 passed; Linux/macOS, Python 3.11 and 3.13 |
+| `npm test` | 21 passed |
+| `npm run test:relay` | Real Miniflare/workerd Durable Object and WebSocket tests passed |
+| `npm run prepare-web`; `python scripts/check_project.py` | Pinned local jsQR/xterm assets and licenses generated; resource/import/syntax checks passed |
+| `python scripts/build_release.py` | Wheel, manifest and SHA256SUMS built |
+| `python tests/browser_e2e.py`, with development relay and `jaunt_E2E_RELAY=workerd` | 23 scenarios per backend, with real PTYs and transfers |
+| `python tests/shared_workspace_e2e.py` under Xvfb | Same PTY in Electron/browser; last active view sizes it; close/reopen and termination; persistent split tabs and mobile flattening |
+| `python tests/terminal_render_e2e.py` | Scroll to latest, final row/column bounds, text selection, theme persistence, synchronized output; actual isolated Claude Code/Codex startup locally |
+| `python tests/installer_e2e.py` | 8 passed, including checksum tampering, non-editable import, retained identities and refusal of implicit restart |
+| Fedora 43/44 CI; `installer_namespace_e2e.py`; `installer_storage_e2e.py` | Public installation, isolated curl, full temporary storage and curl-write-error recovery passed |
+| Android Gradle unit/lint/debug/release builds and `apksigner verify` | Passed; public APK retains the established signing certificate |
+| `python tests/android_workspace_e2e.py` | Android 14 emulator: real public relay and shell, actual keyboard opening/resize, system-bar bounds, rotation and terminal-BEL notification with screen off |
+| Public APK beta.3 → beta.4, installed with `adb install -r` | Same authorized device reconnects without pairing; this check does not claim an in-app system-installer flow |
+| Public Linux `.deb` installed in Ubuntu VM | Real shell command executed; renderer Seccomp=2 and NoNewPrivs=1, without a sandbox override |
+| Public desktop + public Page + public wheel | Two proven commands in one shared PTY; close/reopen retains it; remote termination removes both views |
+| Public installed host, shell exited with stubborn background job | Unapproved restart refused; desktop Terminate kills the remaining job and removes the session |
+| Public assets | Three host assets, three Android assets and all ten desktop packages verified against checksums; archive paths, APK signer and original icon resources checked |
+| Public Page | Correct three release tags; 25 resources checked under `/jaunt/` against built bytes, including local JS and licenses |
+| Public relay | Health HTTP 200, real WebSocket HTTP 101 and ping/pong; foreign browser origin rejected with 403 |
+| `gitleaks dir` on exported Git source, public wheel and extracted desktop application | No leaks detected |
+| `npm audit`; `pip-audit --local --skip-editable` | No known vulnerabilities reported in the checked dependency environments |
 
-Observed local versions: Python 3.14.2, Node 25.5.0, npm 11.8.0; public VM Python 3.12.3. Android: JDK 17, Gradle 9.5.0, AGP 9.3.2, compile SDK 37.0 / target 36 / minimum 26; Android 14/API 34 emulator, WebView 113.0.5672.136. CI uses Node 22. Dependencies are pinned and lockfiles were generated by real tools.
+The public acceptance driver ran **12 checks** against the release-installed VM: pairing, proven arbitrary-shell output, a 512-character input burst, second tab and return, upload/download byte comparison, image upload plus quoted path without Enter on a headless host, reload without QR, real IPv4/IPv6 interruption with the same shell PID afterward, refusal of implicit upgrade, authorized restart retaining identities, revocation, and no uncaught browser errors. See [public-report.json](evidence/public-report.json). Each run used a fresh fixture directory; no personal folders were scanned or deleted.
 
-`npm audit`: no known advisories. `pip-audit --local --skip-editable`: no known advisories. OSV: 21 resolved Maven runtime dependencies, no known advisories at the time of checking. These results depend on database coverage and are not a security audit.
+Tool versions and development findings are in [WORKSPACE_VALIDATION.md](WORKSPACE_VALIDATION.md). The delivered UI and package files use the original artwork. The beta.6 host candidate was superseded before it became the default channel; the beta.7 publishing workflow was cancelled before a release was created. Tags and history were retained.
 
-## Final acceptance test of published files
+## Validation boundaries
 
-The final acceptance test used the public page and releases without module substitution: **12 checks passed**. Pairing, shell with proven command output, a 512-character input burst, a second tab and return to the first, upload/download byte comparison, image-plus-path without Enter on a headless host, reload without QR, a real IPv4/IPv6 outage followed by the same shell PID, refusal of an implicit upgrade, an explicitly authorized upgrade preserving identities, revocation, and no browser exceptions. See [public-report.json](evidence/public-report.json).
+The custom security protocol remains **independently unaudited**. Automated tests and dependency scanners do not establish a security certification.
 
-## Actually installed updates
+No physical Android handset was available. Camera QR capture, gallery/OEM variations, physical gesture navigation, Wi-Fi/mobile handover, deep idle and locked-screen push on a real phone remain unvalidated. Emulator results are reported as emulator results.
 
-The automatic initial check ran by itself on both public beta.4 installations: the user's workstation and the VM. To avoid waiting through each fifteen-minute interval during testing, the exact installed `python -m jaunt.updates --automatic` process was subsequently triggered manually in the VM:
+macOS desktop execution and trust prompts, ARM hardware, desktop notification presentation across environments, and browser push-provider delivery remain platform-specific validation limits. macOS desktop builds are unsigned. Linux per-user archives require a working Chromium sandbox; use the distribution package where user namespaces are restricted. Production launchers do not disable the sandbox.
 
-1. Downloaded the public beta.5 wheel and compared it with the public manifest.
-2. With an ordinary shell active, deferred installation while retaining the host PID, shell PID, and keys. An inherited `jaunt_ALLOW_RESTART=1` did not authorize automatic updates to kill the shell.
-3. Closed the shell through the UI's explicit confirmation, then reran the automatic process: beta.5 installed, service active and enabled, import from `site-packages`, host/device identities unchanged.
+Actual isolated Claude Code/Codex startup screens were tested without authentication or model requests. Full agent conversations and every agent-specific image-attachment implementation are not claimed as tested. Image upload plus path insertion remains distinct from conditional native OS clipboard plus Ctrl+V; neither sends Enter automatically. A headless host does not acquire an OS clipboard by connecting a client.
 
-The public beta.1 APK discovered beta.2 through the public channel, downloaded the assets, verified the checksum and existing certificate, and opened Android's “Allow from this source” settings and real system installer. After confirmation and opening, `versionCode=2`, non-debuggable mode, pairing, and shell PID were verified; a command created the expected host file. No `adb install` substituted for this update flow. Discovery was requested through Settings; no actual six-hour wait is claimed. The APK also reconnected without a QR code after the automatic host upgrade.
-
-The same flow then installed public APK beta.3 from beta.2. VersionCode 3, non-debuggable mode, retained pairing, and a new shell command were verified after installation. The downloaded APK contains exactly the reviewed input-pacing module.
-
-Structured evidence: [update-report.json](evidence/update-report.json).
-
-## Android and images
-
-The first signed public APK ran a verified shell command on the VM. A synthetic PNG in the Android clipboard reached the host's X11 clipboard: exact bytes matched, and the PTY received only `16` (Ctrl+V), without Enter. The same shell stayed alive. The public APK also received a native notification with the emulator screen off.
-
-Earlier Android tests covered the system Save dialog with binary comparison, rotation and network interruption/recovery with the same session, three cold starts of the signed build, pairing from a gallery QR image, camera permission, and scanner launch. Clipboard tests use separate instrumentation absent from the public APK. The user's clipboard and personal directories were not test fixtures.
-
-One initial test tap encountered Android's clipboard-preview overlay on top of the app; after it disappeared, the real Paste button was exercised and bytes verified. The post-open check waits for the Encrypted state rather than assuming instant startup. A urllib probe with its default User-Agent received 403; the same probe with a jaunt User-Agent and curl received 200, and real WebSockets passed. The first network interruption in the final acceptance test blocked only IPv4 while the VM socket used IPv6, confirmed with `ss`. The test was corrected to interrupt both families and restore rules in a finally block. No functional check was removed to obtain a passing result.
-
-## Rapid input correction
-
-Public testing also revealed partially received input during a burst of small frames. The host's per-client queue is bounded at 64 messages; the web client did not pace these bursts. The observed closure originated on the host, and subsequent commands worked after reconnecting. Client send pacing now follows the host transport; a changed channel generation still cancels queued input. Two regression tests failed before the fix (queue overflow and channel change during a burst), then passed. Browser testing also types 512 characters rapidly and compares the resulting file exactly.
-
-## Retained limitations
-
-- The agent used no physical phone. Real camera decoding, vendor IMEs/keyboards, gallery variants, physical rotation, and actual Wi-Fi/mobile handoff remain unvalidated on hardware.
-- An emulator notification with the screen off does not establish delivery during deep Doze, after force-stop, or under vendor battery restrictions. Instant push is not guaranteed.
-- Clipboard bytes and Ctrl+V delivery are proven; visual recognition as an attachment by an actual Claude Code/Codex version was not agent-validated. Upload-plus-path remains distinct, with no Enter. No nonexistent graphical clipboard is promised on headless hosts.
-- The custom protocol and Android client remain **without an independent security audit**.
-
-## History and archive
-
-The previous state is preserved on `backup/pre-rewrite-20260914` (`eb71cfe9b80749d3c53f11e428f027b0d64fb372`). Changes were integrated through branches and PRs without force-push or history deletion. `release/` contains the three host assets downloaded from the public release; the APK remains a separate release asset. Publication workflows and archive contents were inspected.
-
-The original beta.5 source archive contained 132 files and a CHECKSUMS.sha256 inventory; it passed CRC verification and a complete read-back. Scanning the extracted snapshot found only a reviewed xterm false positive (`FourKeyMap`/`TwoKeyMap`). No host state, QR code, vault export, signing key, or private log was included. Public wheels also passed scanning with no findings. Later documentation and installer fixes are tracked separately in Git history; these archive observations describe the original delivery.
+Closing a view preserves its shell. Explicit termination ends its POSIX-session jobs; deliberately daemonized processes which create a separate OS session are outside that boundary. Ordinary shells cannot survive a host reboot or daemon restart; tmux remains optional for that separate persistence requirement.

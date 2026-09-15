@@ -19,13 +19,14 @@ Deployment tools are pinned and the resolved lockfile is committed. The sharp/un
 - APP_ORIGIN must be `https://moukrea.github.io` (the origin, without `/jaunt/`). Do not use `*` in production. `config.json` must contain the Worker's actual WSS URL, without an appended `/v1/room/...` path; the client constructs that path.
 - Verify `/health`, then **real pairing and an encrypted command**. An HTTP 200 health response does not validate WebSockets.
 
-## Host and Android releases, then Pages
+## Host, desktop and Android releases, then Pages
 
-1. Pass CI. Create the host tag, currently `v0.1.0-beta.5` (Python version `0.1.0b5`). The release workflow builds the wheel and publishes it with `host-manifest.json` and `SHA256SUMS`. Beta releases are explicitly marked as prereleases. Never overwrite an existing release's assets.
-2. For Android, publish the tag, currently `android-v0.1.0-beta.3`, with its signed APK, `SIGNING-CERTIFICATE.txt`, and `SHA256SUMS`; verify the public assets. Keep the same signing key for updates.
-3. Set repository variables `jaunt_RELAY_URL` (actual WSS URL), `jaunt_RELEASE_TAG` (`v0.1.0-beta.5`), `jaunt_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.3`), and optionally `jaunt_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
-4. Enable Pages in GitHub Actions mode. `pages.yml` builds the web app, validates configuration, copies the installer, and publishes it.
-5. Do not run Pages with a nonexistent release. The deployment prompt requires this order.
+1. Pass CI. Create the host tag, currently `v0.1.0-beta.8` (Python version `0.1.0b8`). The release workflow builds the wheel and publishes it with `host-manifest.json` and `SHA256SUMS`. Beta releases are explicitly marked as prereleases. Never overwrite an existing release's assets.
+2. For Android, publish the tag, currently `android-v0.1.0-beta.4`, with its signed APK, `SIGNING-CERTIFICATE.txt`, and `SHA256SUMS`; verify the public assets. Keep the same signing key for updates.
+3. Publish `desktop-v0.1.0-beta.6`: Linux x64/ARM64 archives, deb/rpm packages, macOS x64/ARM64 zip/dmg packages, and `SHA256SUMS`. Verify the public archives before advertising them. The Linux package must retain Chromium sandbox support; macOS builds are unsigned.
+4. Set repository variables `jaunt_RELAY_URL` (actual WSS URL), `jaunt_RELEASE_TAG` (`v0.1.0-beta.8`), `jaunt_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.4`), `jaunt_DESKTOP_RELEASE_TAG` (`desktop-v0.1.0-beta.6`), and optionally `jaunt_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
+5. Enable Pages in GitHub Actions mode. `pages.yml` builds the web app, validates configuration, copies the installer, and publishes it.
+6. Do not run Pages with a nonexistent release. The deployment prompt requires this order.
 
 ## Required remote acceptance testing
 
@@ -41,6 +42,6 @@ Primary sources: [Durable Object WebSockets](https://developers.cloudflare.com/d
 
 ## Observed deployment, September 14–15, 2026
 
-Pages: https://moukrea.github.io/jaunt/ ; relay: `wss://jaunt-relay.moukrea.workers.dev` ; host release: `v0.1.0-beta.5` ; APK: `android-v0.1.0-beta.3`.
+Pages: https://moukrea.github.io/jaunt/ ; relay: `wss://jaunt-relay.moukrea.workers.dev` ; host release: `v0.1.0-beta.8` ; APK: `android-v0.1.0-beta.4`.
 
 The Worker was deployed using owner-authorized Wrangler OAuth, stored locally with encryption and a key in the system keyring. `CLOUDFLARE_ACCOUNT_ID` is set in GitHub; a future relay deployment through Actions will need its own `CLOUDFLARE_API_TOKEN`. No temporary OAuth token was copied into a permanent API secret. End users do not need to take any Cloudflare or GitHub action. See [VALIDATION.md](VALIDATION.md) for observed results and their limitations.
