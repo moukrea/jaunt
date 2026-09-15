@@ -1,3 +1,4 @@
+import {activity,clearActivity} from './activity.mjs';
 import {bindTouchScroll} from './touch-scroll.mjs';
 import {desktop, LocalLink} from './desktop.mjs';
 import {leaves, prune, split, themeMode} from './workspace.mjs';
@@ -14,7 +15,7 @@ import * as push from './push.mjs';
 
 const {Terminal, FitAddon} = terminalBundle;
 const vault = new Vault(), machines = new Map(), transfers = [];
-let androidAPK = "", desktopRelease = "";
+let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null;
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
@@ -172,14 +173,14 @@ function render() {
   $('machine-title').textContent = a?.machine.friendlyName || a?.machine.name || 'Overview';
   $('breadcrumb-prefix').textContent = 'Workspace';
   $('welcome').hidden = !!a || view === 'settings'; $('workspace').hidden = !a && view !== 'settings';
-  $('new-session-top').hidden = !a; $('new-session-top').disabled = a?.link.state !== 'online';
+  $('new-session-top').hidden = !a; $('new-session-top').disabled = !!a?.creating || a?.link.state !== 'online';
   $('lock-button').hidden = !vault.protected;
   for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('selected', b.dataset.view === view);
   $('terminal-view').hidden = !a || (view !== 'terminal' && !(view === 'files' && !isMobile()));
   for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || view !== v;
-  for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = a?.link.state !== 'online';
+  for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = !!a?.creating || a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
-  $('arrange-panes').disabled = !a?.active || a?.link.state !== 'online';
+  for(const id of ['arrange-panes','split-below']) $(id).disabled = !a?.active || a?.link.state !== 'online';
   $('terminal-empty').hidden = !!a?.active;
   for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || !visibleSessions(a).includes(id);
   if (a) layoutPanes(a);
@@ -187,7 +188,7 @@ function render() {
     renderTabs(a);
     const s = a.sessions.find(s => s.id === a.active), t = activeTerm(a);
     $('rename-session').hidden = !s;
-    $('terminal-meta').textContent = s ? `${s.cwd}  ·  ${s.alive ? `${t?.term.cols || s.cols} × ${t?.term.rows || s.rows}` : `Exited (${s.exitCode ?? '—'})`}${t?.trimmed ? '  ·  older output trimmed' : ''}` : 'No active shell';
+    $('terminal-meta').textContent = a.creating ? 'Creating shell…' : s ? `${s.cwd}  ·  ${s.alive ? `${t?.term.cols || s.cols} × ${t?.term.rows || s.rows}` : `Exited (${s.exitCode ?? '—'})`}${t?.trimmed ? '  ·  older output trimmed' : ''}` : 'No active shell';
     if (s && !t && a.link.state === 'online') selectSession(a, s.id).catch(report);
   }
   requestAnimationFrame(fitActive);
@@ -207,6 +208,7 @@ function renderTabs(a) {
     const ids=leaves(tree), group=sessions.filter(s=>ids.includes(s.id));if(!group.length)return el('span');
     const active=ids.includes(a.active), target=active?a.active:group[0].id, name=group.map(s=>s.name).join(' + ');
     const label=button(name,()=>selectSession(a,target),'tab-label');
+    label.ondblclick=()=>renameSession(a,a.sessions.find(s=>s.id===target));
     label.setAttribute('role','tab');label.setAttribute('aria-selected',String(active));
     const close=button('',async()=>{for(const s of group)await closeView(a,s.id);},'icon-button tab-close','close');close.setAttribute('aria-label',`Close view of ${name}`);
     return el('div',{class:'session-tab'+(active?' active':'')},el('span',{class:'tab-symbol'},icon('terminal',15)),label,el('span',{class:`status-dot${group.some(s=>s.alive)?' online':''}`}),close);
@@ -215,7 +217,10 @@ function renderTabs(a) {
 function createTerm(a, session) {
   const node = el('div', {class: 'terminal-container', hidden: a !== current() || session.id !== a.active, 'data-session': session.id});
   $('terminal-containers').append(node);
-  node.append(el('div',{class:'pane-caption',text:session.name}));
+  const title=button(session.name,()=>renameSession(a,session),'pane-name');
+  const undock=button('',()=>undockPane(a,session.id),'icon-button','external');
+  undock.setAttribute('aria-label','Move pane to its own tab');
+  node.append(el('div',{class:'pane-caption'},title,undock));
   const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
     cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, convertEol: false,
     screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
@@ -280,7 +285,7 @@ function createTerm(a, session) {
   return t;
 }
 function updateTermInput(a, t) {
-  const disabled = a.link.state !== 'online' || !t.session.alive || !t.attached;
+  const disabled = !!a.creating || a.link.state !== 'online' || !t.session.alive || !t.attached;
   t.term.options.disableStdin = disabled;
   const area = t.node.querySelector('textarea');
   if (area) area.disabled = disabled;
@@ -304,17 +309,19 @@ async function attachTerm(a, t) {
   try { await promise; } finally { if (t.attaching?.promise === promise) t.attaching = null; }
 }
 async function selectSession(a, id) {
+  document.querySelectorAll('.split-picker').forEach(n=>n.remove());
   document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
   const session = a.sessions.find(s => s.id === id);
   if (!session) throw new Error('This terminal no longer exists.');
   selected = a.machine.room; a.active = id; a.machine.lastSession = id;
   a.machine.openSessions ||= []; if(!a.machine.openSessions.includes(id))a.machine.openSessions.push(id);
-  const t = a.terms.get(id) || createTerm(a, session);
   if (!leaves(a.machine.layout).includes(id)) a.machine.layout = a.machine.layouts?.find(tree=>leaves(tree).includes(id)) || {id};
   rememberLayout(a, a.machine.layout);
-  render();
-  if ((!t.attached || t.generation !== a.link.generation) && a.link.state === 'online') await attachTerm(a, t);
+  // Commit the workspace before displaying it or awaiting a network attach.
   await persist();
+  render();
+  const t = a.terms.get(id) || createTerm(a, session);
+  if ((!t.attached || t.generation !== a.link.generation) && a.link.state === 'online') await attachTerm(a, t);
   requestAnimationFrame(fitActive);
 }
 function visibleSessions(a) {
@@ -381,7 +388,7 @@ function layoutPanes(a) {
       const t = a.terms.get(tree.id) || createTerm(a, session);
       Object.assign(t.node.style, {left: x+'%', top: y+'%', width: w+'%', height: h+'%', right: 'auto', bottom: 'auto'});
       t.node.hidden = false; t.node.classList.toggle('pane-active', tree.id === a.active);t.node.classList.toggle('pane-tiled',visibleSessions(a).length>1);
-      t.node.querySelector('.pane-caption').textContent=session.name;
+      t.node.querySelector('.pane-name').textContent=session.name;
       if (!t.attached && !t.attaching && a.link.state === 'online') attachTerm(a, t).catch(report);
       return;
     }
@@ -411,15 +418,29 @@ function selectTerminalText() {
   $('terminal-stage').append(overlay);text.scrollTop=text.scrollHeight;
   // A native text control gives Android/iOS their own selection handles and copy menu.
 }
-function arrangePanes() {
-  const a = checked(current());
-  const other = a.sessions.filter(s => !visibleSessions(a).includes(s.id));
-  const body = el('div', {class:'file-menu'}, el('p',{text:'Split the current pane with another session. On mobile, each pane becomes a normal session tab.'}));
-  for (const s of other) body.append(el('div',{class:'settings-row'},el('span',{text:s.name}),
-    ...[['x','Side by side'],['y','Above / below']].map(([axis,label]) => button(label,async()=>{a.machine.layout=split(a.machine.layout||{id:a.active},a.active,s.id,axis);a.machine.openSessions||=[];if(!a.machine.openSessions.includes(s.id))a.machine.openSessions.push(s.id);rememberLayout(a,a.machine.layout);await persist();closeModal();render();}))));
-  body.append(button('Single pane',async()=>{rememberLayout(a,{id:a.active});await persist();closeModal();render();}));
-  body.prepend(el('div',{class:'modal-actions'},button('New shell beside',()=>newSession('x')),button('New shell below',()=>newSession('y'))));
-  modal('Arrange panes',body);
+function arrangePanes(axis) {
+  const a = online(), target = a.active;
+  const old = document.querySelector('.split-picker');
+  if (old) old.remove();
+  const picker = el('div', {class:'split-picker', role:'region', 'aria-label':'Choose pane session'});
+  const add = async id => {
+    picker.remove();
+    a.machine.openSessions ||= [];
+    if (!a.machine.openSessions.includes(id)) a.machine.openSessions.push(id);
+    rememberLayout(a, split(a.machine.layout || {id:target}, target, id, axis));
+    await selectSession(a,id);
+  };
+  picker.append(button('New shell',async()=>{picker.remove();await newSession(axis);},'button','plus'));
+  for (const session of a.sessions.filter(s=>!leaves(a.machine.layout || {id:target}).includes(s.id)))
+    picker.append(button(session.name,()=>add(session.id),'button','terminal'));
+  picker.append(button('Cancel',()=>picker.remove(),'button','close'));
+  $('terminal-stage').append(picker);
+  picker.querySelector('button').focus();
+  picker.onkeydown=e=>{if(e.key==='Escape')picker.remove();};
+}
+async function undockPane(a,id) {
+  rememberLayout(a,{id});
+  await selectSession(a,id);
 }
 async function sendInput(a, t, text) {
   if (a.link.state !== 'online' || !t.session.alive || !t.attached) throw new Error('This terminal is not ready for input.');
@@ -433,9 +454,16 @@ async function insertText(a, t, text) {
   if (a.link.state !== 'online' || !t.attached) throw new Error('Wait for the terminal to reconnect before pasting.');
   // Do not allow clipboard text to terminate bracketed paste or smuggle terminal controls.
   const clean = text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
-  const perform = async () => { t.term.paste(clean); };
+  const perform = async () => {
+    const normalized=clean.replace(/\r?\n/g,'\r');
+    await sendInput(a,t,t.term.modes.bracketedPasteMode?'\x1b[200~'+normalized+'\x1b[201~':normalized);
+  };
   if (/[\r\n]/.test(clean) && !t.term.modes.bracketedPasteMode) {
-    confirmAction('Paste multiple lines?', 'This shell does not enable bracketed paste. Newlines may execute commands immediately. Review the text with Compose instead when in doubt.', 'Paste anyway', perform, true);
+    await new Promise((resolve,reject)=>{
+      let accepted=false;
+      modal('Paste multiple lines?',el('div',{},el('p',{class:'modal-copy',text:'This shell does not enable bracketed paste. Newlines may execute commands immediately. Review the text with Compose instead when in doubt.'}),
+        el('div',{class:'modal-actions'},button('Cancel',closeModal),button('Paste anyway',async()=>{await perform();accepted=true;closeModal();resolve();},'button danger'))),()=>{if(!accepted)reject(new Error('Paste cancelled'));});
+    });
   } else await perform();
 }
 function terminalText(t) {
@@ -448,23 +476,52 @@ function terminalText(t) {
   }
   return lines.join('\n').replace(/\n+$/, '');
 }
-async function newSession(splitAxis = null) {
-  const a = online(), id = random(12), splitTarget=a.active;
-  const name = el('input', {value: `Shell ${a.sessions.length + 1}`, maxLength: 80});
-  const cwd = el('input', {value: a.info?.home || '~', spellcheck: false, autocapitalize: 'off'});
-  const body = el('div', {}, field('Session name', name), field('Working directory', cwd),
-    el('div', {class: 'modal-actions'}, button('Cancel', closeModal), button('Create shell', async () => {
-      const result = await a.link.request('session.create', {id, name: name.value, cwd: cwd.value,
-        cols: 100, rows: 30});
-      if (!a.sessions.some(s => s.id === result.id)) a.sessions.push(result);
-      if(['x','y'].includes(splitAxis) && splitTarget) {
-        const tree=split(a.machine.layout||{id:splitTarget},splitTarget,result.id,splitAxis);
-        rememberLayout(a,tree);
-      }
-      closeModal(); view = 'terminal'; await selectSession(a, result.id);
-      if (!isMobile()) activeTerm(a)?.term.focus();
-    }, 'button primary')));
-  modal('New terminal', body); name.focus(); name.select();
+async function newSession(splitAxis = null, options = {}) {
+  const a = online(), splitTarget = a.active;
+  if(a.creating)return;
+  a.creating=true;
+  for(const t of a.terms.values())updateTermInput(a,t);
+  render();
+  try {
+  const result = await a.link.request('session.create', {id:random(12),
+    sourceSession:splitTarget || undefined, cwd:a.info?.sessionDirectory ? undefined : a.sessions.find(s=>s.id===splitTarget)?.cwd, ...options, cols:100, rows:30});
+  if (!a.sessions.some(s=>s.id===result.id)) a.sessions.push(result);
+  if (['x','y'].includes(splitAxis) && splitTarget) {
+    a.machine.openSessions ||= [];
+    if (!a.machine.openSessions.includes(result.id)) a.machine.openSessions.push(result.id);
+    rememberLayout(a,split(a.machine.layout || {id:splitTarget},splitTarget,result.id,splitAxis));
+  }
+  closeModal(); view='terminal'; await selectSession(a,result.id);
+  } finally {
+    a.creating=false;
+    for(const t of a.terms.values())updateTermInput(a,t);
+    render();
+  }
+  if (!isMobile()) activeTerm(a)?.term.focus();
+}
+async function browseNewSession() {
+  const a=online(), active=a.sessions.find(s=>s.id===a.active);
+  const directory=active && a.info?.sessionDirectory ? (await a.link.request('session.directory',{id:active.id})).path : active?.cwd;
+  const name=el('input',{maxLength:80,placeholder:'Automatic'});
+  const cwd=el('input',{value:directory || a.info?.home || '~',spellcheck:false,autocapitalize:'off'});
+  const folders=el('div',{class:'folder-picker'});
+  let listing, request=0;
+  const navigate=async(path,append=false)=>{
+    const version=++request;
+    const result=await a.link.request('files.list',{path,offset:append?listing.next:0,limit:100,hidden:false});
+    if(version!==request)return;
+    if(append)result.entries=[...listing.entries,...result.entries];
+    listing=result;cwd.value=result.path;
+    folders.replaceChildren(button('Parent folder',()=>navigate(result.parent),'button','arrowUp'),
+      ...result.entries.filter(e=>e.directory).map(e=>button(e.name,()=>navigate(result.path.replace(/\/$/,'')+'/'+e.name),'button','folder')),
+      ...(result.next!==null?[button('Load more',()=>navigate(result.path,true))]:[]));
+  };
+  cwd.oninput=()=>{request++;};
+  cwd.onchange=()=>navigate(cwd.value).catch(report);
+  await navigate(cwd.value);
+  modal('New terminal',el('div',{},field('Session name',name,'Optional — leave blank for an automatic name.'),
+    field('Working directory',cwd),folders,
+    el('div',{class:'modal-actions'},button('Cancel',closeModal),button('Create shell',()=>newSession(null,{name:name.value,cwd:cwd.value}),'button primary'))));
 }
 async function closeView(a, id) {
   a.machine.openSessions = (a.machine.openSessions || a.sessions.map(s=>s.id)).filter(s=>s!==id);
@@ -477,12 +534,13 @@ async function closeView(a, id) {
   a.machine.lastSession=a.active;await persist();render();
 }
 function sessionList() {
-  const a=checked(current()), body=el('div',{class:'file-menu'});
+  const a=checked(current()), body=el('div',{class:'session-manager'});
   for(const s of a.sessions) body.append(el('div',{class:'settings-row'},
     el('div',{class:'settings-label'},el('strong',{text:s.name}),el('p',{text:`${s.alive?'Running':'Exited'} · ${s.cwd}`}),el('p',{text:(s.viewers||[]).map(v=>v.name).join(', ')||'No open views'})),
-    button('Open',async()=>{closeModal();await selectSession(a,s.id);}),
+    el('div',{class:'session-actions'},button('Open',async()=>{closeModal();view='terminal';await selectSession(a,s.id);}),
+    button('Rename',()=>renameSession(a,s)),
     ...(a.machine.openSessions?.includes(s.id)?[button('Close view',async()=>{await closeView(a,s.id);sessionList();})]:[]),
-    button('Terminate',()=>terminateSession(a,s),'button danger')));
+    button('Terminate',()=>terminateSession(a,s),'button danger'))));
   if(!a.sessions.length)body.append(el('p',{text:'No sessions are running on this host.'}));
   body.append(button('New shell',newSession,'button primary'));
   modal('Sessions on this host',body);
@@ -496,11 +554,11 @@ function terminateSession(a, session) {
       a.sessions = a.sessions.filter(s => s.id !== session.id); syncSessions(a); await persist(); render();
     }, true);
 }
-function renameSession() {
-  const a = online(), s = a.sessions.find(s => s.id === a.active); if (!s) return;
+function renameSession(a = online(), s = a.sessions.find(s => s.id === a.active)) {
+  if (!s) return;
   const input = el('input', {value: s.name, maxLength: 80});
   modal('Rename terminal', el('div', {}, field('Name', input), el('div', {class: 'modal-actions'}, button('Save', async () => {
-    await a.link.request('session.rename', {id: s.id, name: input.value}); closeModal();
+    await a.link.request('session.rename', {id: s.id, name: input.value}); s.name=input.value.trim() || s.name; closeModal(); render();
   }, 'button primary')))); input.focus(); input.select();
 }
 
@@ -601,14 +659,16 @@ function renderTransfers() {
   }));
   if (!transfers.length) $('transfer-list').append(el('p', {class: 'modal-copy', text: 'Files you send and receive will appear here. Transfers resume automatically after a network interruption while this page stays open.'}));
 }
-async function putFile(a, file, options = {}) {
+async function putFile(a, file, options = {}, operation = null) {
   if (file.size > (a.info?.maxFileBytes || 512 * 1024 * 1024)) throw new Error('This file exceeds the host’s transfer limit.');
   const item = transferItem(a, file.name, 'up', file.size);
+  const job=operation || activity(item.key,`${file.name} → ${a.machine.name}`);
   try {
-    const result = await upload(a.link, file, options, progressFor(item), item.controller.signal);
+    const result = await upload(a.link, file, options, value=>{progressFor(item)(value);job.update({status:`${value.status} · ${size(value.offset)} / ${size(value.total)}`,percent:value.total?Math.round(value.offset/value.total*100):null});}, item.controller.signal);
     item.done = true; item.path = result.path; item.status = 'Verified · SHA-256'; item.offset = file.size; renderTransfers();
+    if(!operation)job.finish('Uploaded and verified · SHA-256');
     return result;
-  } catch (e) { item.done = true; item.error = true; item.status = e.message; renderTransfers(); throw e; }
+  } catch (e) { job.fail(e);item.done = true; item.error = true; item.status = e.message; renderTransfers(); throw e; }
 }
 async function getFile(a, path, name, writer) {
   const item = transferItem(a, name, 'down', 0);
@@ -637,16 +697,7 @@ async function attachFiles(a, t, files) {
     el('p', {class: 'modal-copy', text: 'Upload & insert path transfers the file to the host and inserts a safely quoted path, without Enter. Ask your CLI agent to read that path. Native paste instead puts a PNG in the host desktop clipboard, then sends Ctrl+V.'}));
   const doUpload = async native => {
     closeModal();
-    for (const input of files) {
-      const file = input.type.startsWith('image/') ? await toPNG(input) : input;
-      const result = await putFile(a, file, {attachment: true});
-      if (!a.sessions.some(s => s.id === t.session.id && s.alive)) {
-        toast('File uploaded, but the destination shell has closed. Find its path in Transfers.', true); continue;
-      }
-      if (native) await a.link.request('clipboard.image', {path: result.path, session: t.session.id, paste: true});
-      else await insertText(a, t, quotePath(result.path) + (files.length > 1 ? ' ' : ''));
-      toast(native ? 'Image sent to the host clipboard; Ctrl+V delivered to the shell.' : 'File uploaded. Its path was inserted without executing anything.');
-    }
+    for (const input of files) await deliverAttachment(a,t,input,native,files.length>1);
     selected = a.machine.room; view = 'terminal'; await selectSession(a, t.session.id);
   };
   const actions = el('div', {class: 'modal-actions'}, button('Upload & insert path', () => doUpload(false), 'button primary', 'upload'));
@@ -704,6 +755,19 @@ function clipboardFiles(data) {
   return Array.from(data?.items || []).filter(item => item.kind === 'file')
     .map(item => item.getAsFile()).filter(Boolean);
 }
+async function deliverAttachment(a,t,input,native,multiple=false,operationId=random(8)) {
+  const job=activity(operationId,`${input.name} → ${t.session.name}`);
+  job.update({status:'Preparing image or file…'});
+  try {
+    const file=input.type.startsWith('image/') ? await toPNG(input) : input;
+    const result=await putFile(a,file,{attachment:true},job);
+    if(!a.sessions.some(s=>s.id===t.session.id && s.alive))throw new Error('Uploaded, but the destination shell closed. The file remains available in Files → Transfers.');
+    job.update({status:native?'Copying to host clipboard and sending Ctrl+V…':'Inserting the uploaded path…',percent:null});
+    if(native)await a.link.request('clipboard.image',{path:result.path,session:t.session.id,paste:true});
+    else {await insertText(a,t,quotePath(result.path)+(multiple?' ':''));await a.link.request('session.list');}
+    job.finish(native?'Host clipboard ready · Ctrl+V sent · no Enter':'Uploaded and verified · path inserted · no Enter');
+  } catch(error){job.fail(error);job.update({action:{label:'Try again',run:()=>deliverAttachment(a,t,input,native,multiple,operationId)}});throw error;}
+}
 async function pasteFiles(a, t, files) {
   // The destination is captured before any async clipboard read or upload.
   // Unsupported hosts keep the explicit upload/path choice, never a fake paste.
@@ -711,13 +775,7 @@ async function pasteFiles(a, t, files) {
     await attachFiles(a, t, files); return;
   }
   closeModal();
-  const file = await toPNG(files[0]);
-  const result = await putFile(a, file, {attachment: true});
-  if (!a.sessions.some(s => s.id === t.session.id && s.alive)) {
-    throw new Error('Image uploaded, but the destination shell has closed. Find its path in Transfers.');
-  }
-  await a.link.request('clipboard.image', {path: result.path, session: t.session.id, paste: true});
-  toast(`Image copied to the host clipboard; Ctrl+V sent to ${t.session.name}.`);
+  await deliverAttachment(a,t,files[0],true);
   selected = a.machine.room; view = 'terminal'; await selectSession(a, t.session.id);
 }
 function showPastePanel(a, t) {
@@ -843,6 +901,65 @@ function attentionSettings(a) {
     return settingsRow({bell:'Terminal bell',program:'Program notifications',exit:'Session finished'}[key],{bell:'When a terminal rings its attention bell.',program:'OSC 9 and OSC 777 notifications from terminal programs.',exit:'When the shell exits. For individual command completion, use jaunt run -- command.'}[key],input);
   });
 }
+function desktopUpdateStatus(value) {
+  desktopUpdateState=value;
+  if((!desktopUpdateOperation || desktopUpdateOperation.item.dismissed) && ['downloading','verifying','ready','installed','error'].includes(value.state))desktopUpdateOperation=activity('desktop-update','Desktop update');
+  const job=desktopUpdateOperation;
+  if(job){
+    job.update({status:value.message,percent:value.percent??null,done:false,error:false,waiting:false,action:null});
+    if(value.state==='error'){job.fail(new Error(value.message));job.update({action:{label:'Try again',run:checkDesktopUpdate}});}
+    else if(value.state==='ready')job.update({done:true,waiting:true,status:value.message+(value.requiresAuthorization?' System authorization will be requested.':''),action:{label:'Install and reopen',run:()=>desktop.updates('install')}});
+    else if(['current','installed'].includes(value.state))job.finish(value.message);
+  }
+  if(view==='settings')renderSettings();
+}
+async function checkDesktopUpdate(){
+  desktopUpdateOperation=activity('desktop-update','Desktop update');
+  desktopUpdateOperation.update({status:'Checking published version…'});
+  try{desktopUpdateStatus(await desktop.updates('check'));}catch(error){desktopUpdateOperation.fail(error);}
+}
+const hostUpdateJobs=new Map();
+async function checkHostUpdate(a,allowRestart=false) {
+  if(hostUpdateJobs.has(a.machine.room))return;
+  const job=activity('host-update-'+a.machine.room,`Host update · ${a.machine.name}`);
+  hostUpdateJobs.set(a.machine.room,job);
+  try {
+    job.update({status:'Checking published version…'});
+    const requestedAt=Date.now()/1000;
+    const started=await a.link.request('updates.install',{allowRestart});
+    for(let i=0;i<600;i++) {
+      await new Promise(resolve=>setTimeout(resolve,1000));
+      if(!vault.data || !machines.has(a.machine.room))return;
+      if(a.link.state!=='online'){job.update({status:'Waiting for the host to reconnect…'});continue;}
+      let result;
+      try {result=await a.link.request('updates.status');} catch(error) {
+        if(a.link.state!=='online')continue;
+        throw error;
+      }
+      if(started.operation && result.operation!==started.operation)continue;
+      if(!started.operation && result.checkedAt && result.checkedAt<Math.floor(requestedAt))continue;
+      a.info.updates=result;
+      const labels={checking:'Checking published version…',downloading:'Downloading host update…',verifying:'Verifying downloaded files…',installing:'Installing · waiting for restart…',current:'Up to date',installed:'Update installed',deferred:'Downloaded · waiting for active shells or transfers to finish',error:'Update failed'};
+      const message=result.message || labels[result.state] || 'Checking…';
+      job.update({status:message+(result.version?' · '+result.version:'')});
+      if(['current','installed','deferred','error','disabled'].includes(result.state)) {
+        if(result.state==='error')job.fail(new Error(message));
+        else job.finish(message+(result.version?' · '+result.version:''));
+        if(result.state==='deferred')job.update({waiting:true});
+        if(result.state==='error' || result.state==='deferred')job.update({action:{label:'Check again',run:()=>checkHostUpdate(a)}});
+        if(view==='settings')renderSettings();
+        return;
+      }
+    }
+    throw new Error('The host has not confirmed completion yet. Check again to see its current state.');
+  } catch(error){job.fail(error);job.update({action:{label:'Try again',run:()=>checkHostUpdate(a)}});}
+  finally {hostUpdateJobs.delete(a.machine.room);}
+}
+async function installLocalHost() {
+  const job=activity('host-install','Install local host');job.update({status:'Downloading and installing the host…'});
+  try {const result=await desktop.action('install');job.finish(result.message);machines.get('local-host')?.link.start();}
+  catch(error){job.fail(error);job.update({action:{label:'Try again',run:installLocalHost}});}
+}
 function renderSettings() {
   if (!vault.data) return;
   const a = current(), content = $('settings-content');
@@ -881,8 +998,8 @@ function renderSettings() {
       ...hostPreferences(a),
       settingsRow(a.machine.name, `${a.info?.platform || 'Remote host'} · ${a.info?.version || 'Connecting'} · ${a.link.state}`, button('Reconnect', () => { a.link.start(); })),
       ...(a.info?.updates?.supported ? [settingsRow('Automatic host updates', a.info.updates.message || 'Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.', button(a.info.updates.automatic ? 'Disable auto-update' : 'Enable auto-update', async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
-        settingsRow('Host version', a.info.version, button('Check for updates', async () => { await a.link.request('updates.install'); toast('Checking for a verified update. Active ordinary shells will be preserved.'); })),
-        settingsRow('Update and restart now', 'This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.', button('Update and restart', () => confirmAction('Close active shells and update?', 'This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.', 'Close shells and update', async () => { await a.link.request('updates.install', {allowRestart: true}); toast('Checking the release before restarting the host.'); }, true), 'button danger'))] : []),
+        settingsRow('Host version', a.info.version, button('Check for updates', ()=>checkHostUpdate(a))),
+        settingsRow('Update and restart now', 'This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.', button('Update and restart', () => confirmAction('Close active shells and update?', 'This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.', 'Close shells and update', ()=>checkHostUpdate(a,true), true), 'button danger'))] : []),
       settingsRow('Host clipboard', a.info?.clipboard?.backend || 'Unknown until connected', button('Open', () => showClipboard(a))),
       settingsRow('Authorized devices', 'Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.', button('Manage', () => manageDevices(a))),
       ...(!a.machine.local ? [settingsRow('Forget this machine', 'Removes its saved key from this browser. Revoke it on the host first when possible.', button('Forget', () => forgetMachine(a), 'button danger'))] : [])));
@@ -902,10 +1019,15 @@ function renderSettings() {
   if (desktop) {
     const notifications=el('input',{type:'checkbox',checked:!!prefs().desktopNotifications,'aria-label':'Desktop notifications'});
     notifications.onchange=async()=>{vault.data.preferences.desktopNotifications=notifications.checked;await persist();};
+    const autoDesktop=el('input',{type:'checkbox',checked:desktopUpdateState?.automatic!==false,'aria-label':'Automatic desktop updates'});
+    autoDesktop.onchange=()=>desktop.updates('configure',autoDesktop.checked).then(desktopUpdateStatus).catch(report);
+    groups.push(settingsGroup('DESKTOP APP',
+      settingsRow('Desktop version',desktopUpdateState?.message || 'Loading update status…',button('Check desktop update',checkDesktopUpdate)),
+      settingsRow('Automatic desktop updates','Downloads and verifies updates automatically. Installs when the app closes; host shells keep running. System packages may require OS authorization.',autoDesktop)));
     groups.push(settingsGroup('THIS COMPUTER',
-      settingsRow('Install or update the host','Installs the official host and its background user service on this computer. Skip this if you only connect to other hosts.',button('Install / update host',async()=>{toast('Installing the host. This can take a few minutes.');const result=await desktop.action('install');toast(result.message);machines.get('local-host')?.link.start();})),
-      settingsRow('Update safely','Checks the published host version. Active ordinary shells prevent a restart.',button('Check host update',async()=>{await desktop.action('update');toast('Host update check started. Active shells are preserved.');})),
-      settingsRow('Restart for update','Explicitly closes ordinary shells on this computer. Use only when your jobs are finished.',button('Update and restart',()=>confirmAction('Close local shells and update?','This terminates ordinary shells and their foreground work on this computer.','Close shells and update',async()=>{await desktop.action('restart');toast('Host update started.');},true),'button danger')),
+      settingsRow('Install or update the host','Installs the official host and its background user service on this computer. Skip this if you only connect to other hosts.',button('Install / update host',installLocalHost)),
+      settingsRow('Update safely','Checks the published host version. Active ordinary shells prevent a restart.',button('Check host update',()=>checkHostUpdate(checked(machines.get('local-host'))))),
+      settingsRow('Restart for update','Explicitly closes ordinary shells on this computer. Use only when your jobs are finished.',button('Update and restart',()=>confirmAction('Close local shells and update?','This terminates ordinary shells and their foreground work on this computer.','Close shells and update',()=>checkHostUpdate(checked(machines.get('local-host')),true),true),'button danger')),
       settingsRow('Local host','Local and remote views share the same shells. Closing this window leaves them running.',button('Start host',async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
       settingsRow('Start automatically','Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.',button('Install service',async()=>{const result=await desktop.action('service');toast(result.message);machines.get('local-host')?.link.start();})),
       settingsRow('Connect another device','Create a private one-use pairing link for this host.',button('Pair device',async()=>{const result=await desktop.action('pair');modal('Pair this computer',el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:'One-use pairing QR code'})]:[]),el('p',{text:'Open this one-use link on your other device. It expires after ten minutes. Keep it private.'}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button('Copy pairing link',()=>copyText(result.url))));})),
@@ -958,7 +1080,7 @@ function forgetMachine(a) {
 }
 async function lockWorkspace() {
   if (!vault.protected || !vault.data) return;
-  closeModal(); drawer();
+  closeModal(); drawer(); clearActivity();
   for (const a of machines.values()) { a.link.stop('Locked'); for (const t of a.terms.values()) { t.term.dispose(); t.node.remove(); } }
   for (const t of transfers) if (!t.done) t.controller.abort();
   machines.clear(); transfers.length = 0;
@@ -1002,10 +1124,12 @@ function bindEvents() {
   for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => setView(b.dataset.view);
   $('select-terminal-text').onclick = () => {try{selectTerminalText();}catch(e){report(e);}};
   $('list-sessions').onclick = () => {try{sessionList();}catch(e){report(e);}};
-  $('arrange-panes').onclick = () => { try { arrangePanes(); } catch(e) { report(e); } };
+  $('arrange-panes').onclick = () => { try { arrangePanes('x'); } catch(e) { report(e); } };
   $('scroll-bottom').onclick = () => activeTerm(current())?.term.scrollToBottom();
   $('settings-button').onclick = () => setView('settings'); $('lock-button').onclick = () => lockWorkspace().catch(report);
   for (const id of ['new-session-top', 'new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
+  $('split-below').onclick = () => {try {arrangePanes('y');} catch(e) {report(e);}};
+  $('new-session-folder').onclick = () => browseNewSession().catch(report);
   $('rename-session').onclick = () => { try { renameSession(); } catch(e) { report(e); } };
   $('close-files').onclick = () => setView('terminal');
   $('file-path').oninput = () => { if (current()) current().pathDraft = $('file-path').value; };
@@ -1123,7 +1247,7 @@ function bindEvents() {
 async function bootstrap() {
   if (!window.isSecureContext || !crypto.subtle) throw new Error('jaunt requires HTTPS, or localhost for development. Do not open index.html directly.');
   bindEvents(); viewport();
-  if(desktop)desktop.onFrame(message=>{if(message.type!=='desktop.open')return;openNotification(message.host,message.session);});
+  if(desktop){desktop.onFrame(message=>{if(message.type==='desktop.update'){desktopUpdateStatus(message);return;}if(message.type==='desktop.open')openNotification(message.host,message.session);});desktop.updates('status').then(desktopUpdateStatus).catch(report);}
   await vault.load();
   if (vault.locked) { $('lock-screen').hidden = false; }
   else await resumeWorkspace();

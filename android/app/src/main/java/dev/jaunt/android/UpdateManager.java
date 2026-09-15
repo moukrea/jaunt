@@ -29,12 +29,13 @@ final class UpdateManager {
         return new int[]{Integer.parseInt(m.group(1)),Integer.parseInt(m.group(2)),Integer.parseInt(m.group(3)),m.group(4)==null?3:List.of("alpha","beta","rc").indexOf(m.group(4)),m.group(5)==null?0:Integer.parseInt(m.group(5))};
     }
     static boolean newer(String candidate,String current){int[] a=version(candidate),b=version(current);for(int i=0;i<a.length;i++)if(a[i]!=b[i])return a[i]>b[i];return false;}
-    private byte[] fetch(String url,int maximum)throws Exception{
+    private byte[] fetch(String url,int maximum)throws Exception{return fetch(url,maximum,null);}
+    private byte[] fetch(String url,int maximum,java.util.function.BiConsumer<Integer,Long> progress)throws Exception{
         Request req=new Request.Builder().url(url).header("Cache-Control","no-cache").header("User-Agent","jaunt Android updater").build();
         try(Response response=HTTP.newCall(req).execute()){
             if(!response.isSuccessful()||response.body()==null)throw new IOException("Release download failed (HTTP "+response.code()+")");
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[16384];int n;
-            try(InputStream in=response.body().byteStream()){while((n=in.read(buffer))!=-1){if(out.size()+n>maximum)throw new IOException("Release exceeds size limit");out.write(buffer,0,n);}}
+            try(InputStream in=response.body().byteStream()){while((n=in.read(buffer))!=-1){if(out.size()+n>maximum)throw new IOException("Release exceeds size limit");out.write(buffer,0,n);if(progress!=null)progress.accept(out.size(),response.body().contentLength());}}
             return out.toByteArray();
         }
     }
@@ -42,6 +43,8 @@ final class UpdateManager {
         if(context.getPackageName().endsWith(".debug"))return;
         long now=System.currentTimeMillis();if(!explicit&&now-preferences().getLong("checked",0)<6*60*60*1000L)return;
         preferences().edit().putLong("checked",now).apply();
+        final ProgressDialog checking=explicit&&activity!=null?new ProgressDialog(activity):null;
+        if(checking!=null){checking.setMessage("Checking published Android version…");checking.setCancelable(false);checking.show();}
         IO.execute(()->{try{
             String current=context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;
             // The owner publishes this channel only after checking the public APK assets.
@@ -52,7 +55,7 @@ final class UpdateManager {
             String name="jaunt-"+tag+".apk";
             if(activity==null){notifyAvailable(tag);return;}
             activity.runOnUiThread(()->{if(!activity.isFinishing())new AlertDialog.Builder(activity).setTitle("jaunt update available").setMessage("Version "+tag.substring(9)+" is available. Your paired machines will be kept. Android will ask you to confirm installation.").setNegativeButton("Later",null).setPositiveButton("Download and install",(d,w)->download(tag,name)).show();});
-        }catch(Exception e){if(explicit)message("Update check unavailable","Could not verify the latest release. Check your connection and try again.");}});
+        }catch(Exception e){if(explicit)message("Update check unavailable","Could not verify the latest release. Check your connection and try again.");}finally{if(checking!=null)activity.runOnUiThread(checking::dismiss);}});
     }
     private void notifyAvailable(String tag){
         NotificationManager manager=context.getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel("jaunt-updates","Application updates",NotificationManager.IMPORTANCE_DEFAULT));
@@ -61,11 +64,17 @@ final class UpdateManager {
         manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("jaunt update available").setContentText("Tap to install "+tag.substring(9)+". Your pairings will be kept.").setContentIntent(open).setAutoCancel(true).build());
     }
     private void download(String tag,String name){
-        ProgressDialog progress=new ProgressDialog(activity);progress.setMessage("Downloading and verifying jaunt…");progress.setCancelable(false);progress.show();
+        ProgressDialog progress=new ProgressDialog(activity);progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);progress.setMax(100);progress.setIndeterminate(true);progress.setMessage("Downloading jaunt…");progress.setCancelable(false);progress.show();
         IO.execute(()->{try{
             String base=RELEASES+tag+"/";String sums=new String(fetch(base+"SHA256SUMS",16384),java.nio.charset.StandardCharsets.UTF_8),expected=null;
             for(String row:sums.split("\\n")){String[] parts=row.trim().split("  ",2);if(parts.length==2&&parts[1].equals(name)&&parts[0].matches("[a-f0-9]{64}"))expected=parts[0];}
-            if(expected==null)throw new IOException("APK checksum missing");byte[] apk=fetch(base+name,64*1024*1024);
+            if(expected==null)throw new IOException("APK checksum missing");
+            java.util.concurrent.atomic.AtomicInteger shown=new java.util.concurrent.atomic.AtomicInteger(-1);
+            byte[] apk=fetch(base+name,64*1024*1024,(bytes,total)->{
+                int percent=total>0?(int)(bytes*100L/total):-1;
+                if(shown.getAndSet(percent)!=percent)activity.runOnUiThread(()->{progress.setIndeterminate(total<=0);if(total>0)progress.setProgress(percent);progress.setMessage("Downloading jaunt · "+(bytes/1024)+" KiB");});
+            });
+            activity.runOnUiThread(()->{progress.setIndeterminate(true);progress.setMessage("Verifying checksum and application signature…");});
             if(!hex(MessageDigest.getInstance("SHA-256").digest(apk)).equals(expected))throw new IOException("APK checksum mismatch");
             File dir=new File(context.getCacheDir(),"updates");if(!dir.exists()&&!dir.mkdirs())throw new IOException("No update directory");File file=new File(dir,"jaunt-update.apk");
             try(FileOutputStream out=new FileOutputStream(file)){out.write(apk);out.getFD().sync();}

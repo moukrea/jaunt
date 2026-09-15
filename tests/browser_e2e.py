@@ -109,7 +109,7 @@ async def main():
         pair=h.pair();await page.goto(pair['url']);await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
         assert '#pair' not in page.url;passed('URL pairing, encrypted authentication, secret removed from URL')
         original=json.loads(h.cli('status'))['pid']
-        await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill('Workspace')
+        await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill('Workspace')
         await page.get_by_label('Working directory').fill(str(h.work))
         await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
         await expect(page.locator('#tabs')).to_contain_text('Workspace');await page.wait_for_timeout(400)
@@ -129,7 +129,7 @@ async def main():
         assert (h.work/'burst-input.txt').read_text()==burst
         await expect(page.locator('#connection span')).to_have_text('Encrypted')
         passed('rapid 512-character keyboard input retains every byte without overflowing the peer queue')
-        await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill('Builds');await page.get_by_label('Working directory').fill(str(h.work))
+        await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill('Builds');await page.get_by_label('Working directory').fill(str(h.work))
         await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#tabs')).to_contain_text('Builds')
         assert len(json.loads(h.cli('status'))['sessions'])==2;passed('multiple arbitrary shell sessions')
         await page.locator('#tabs').get_by_role('tab',name='Workspace',exact=False).click()
@@ -213,7 +213,7 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*.png'))));await page.wait_for_timeout(300)
-        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await expect(page.locator('#activity .activity-row').filter(has_text='screenshot.png')).to_contain_text('path inserted · no Enter',timeout=30000)
         for _ in range(50):
             if 'screenshot.png' in await scrollback(page):break
             await asyncio.sleep(.1)
@@ -232,7 +232,7 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*clipboard-*.png'))))
-        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await expect(page.locator('#activity .activity-row').filter(has_text='clipboard-')).to_contain_text('path inserted · no Enter',timeout=30000)
         await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.press('Control+c')
         passed('real browser image clipboard reaches headless upload/path fallback')
         # Reproduce an empty async clipboard result, then deliver an image through
@@ -250,7 +250,7 @@ async def main():
         await expect(page.get_by_role('button',name='Native image paste',exact=True)).to_be_disabled()
         await page.get_by_role('button',name='Upload & insert path',exact=True).click()
         await until(lambda:bool(list((h.state/'attachments').glob('*fallback-capture.png'))))
-        await expect(page.locator('#toasts')).to_contain_text('Its path was inserted',timeout=30000)
+        await expect(page.locator('#activity .activity-row').filter(has_text='fallback-capture.png')).to_contain_text('path inserted · no Enter',timeout=30000)
         await page.evaluate('''() => {navigator.clipboard.read=window.__clipboardRead;delete window.__clipboardRead;}''')
         assert await page.locator('#sidebar [data-view="transfers"]').count()==0
         assert await page.locator('#mobile-nav [data-view="transfers"]').count()==0
@@ -295,7 +295,8 @@ async def main():
         await mp.wait_for_timeout(7000)
         await mp.screenshot(path=str(OUT/'mobile-terminal.png'))
         devices=json.loads(h.cli('devices'));mobile_id=next(d['id'] for d in devices if d['id']!=devices[0]['id'])
-        h.cli('revoke',mobile_id);await expect(mp.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
+        # Base64url device IDs may start with '-'; terminate CLI option parsing.
+        h.cli('revoke','--',mobile_id);await expect(mp.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
         assert len(json.loads(h.cli('status'))['sessions'])==2;passed('revoked device disconnected; shell sessions retained')
         # Check all precached resources at the actual project subpath.
         import re

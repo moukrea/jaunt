@@ -1,6 +1,6 @@
 {
   "name": "jaunt-desktop",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "prepare-web": "node scripts/prepare_web.mjs",
     "test:relay": "node --test tests/relay.miniflare.mjs",
-    "test": "node --test tests/relay.test.mjs tests/js.test.mjs",
+    "test": "node --test tests/relay.test.mjs tests/js.test.mjs tests/desktop_updates.test.cjs",
     "desktop": "electron .",
     "build:desktop": "electron-builder --linux tar.gz deb --publish never"
   },
@@ -96,6 +96,7 @@
         "libsecret-1-0",
         "libasound2t64 | libasound2",
         "libgbm1",
+        "pkexec",
         "libdrm2",
         "libxkbcommon0"
       ]
@@ -103,6 +104,7 @@
     "rpm": {
       "depends": [
         "gtk3",
+        "polkit",
         "libnotify",
         "nss",
         "libXScrnSaver",

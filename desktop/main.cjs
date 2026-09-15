@@ -11,19 +11,21 @@ app.setName('jaunt');
 if(process.platform==='linux')app.commandLine.appendSwitch('class','jaunt');
 protocol.registerSchemesAsPrivileged([{scheme:'jaunt',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 if(!app.requestSingleInstanceLock())app.quit();
-let win,bridge;
+let win,bridge,updates,installingDesktop=false;
+const {DesktopUpdates}=require('./updates.cjs');
+const sendFrame=(channel,value)=>{if(win&&!win.isDestroyed()&&!win.webContents.isDestroyed())win.webContents.send(channel,value);};
 const executable=()=>process.env.jaunt_host_executable || (existsSync(join(homedir(),'.local/bin/jaunt'))?join(homedir(),'.local/bin/jaunt'):'jaunt');
 const allowed=e=>{if(e.sender!==win?.webContents||e.senderFrame!==win.webContents.mainFrame||!e.senderFrame.url.startsWith('jaunt://app/'))throw new Error('Untrusted frame');};
 function disconnect(){bridge?.kill();bridge=null;}
 function connect(){
   disconnect();
   const child=spawn(executable(),['desktop-bridge'],{stdio:['pipe','pipe','pipe']});bridge=child;
-  createInterface({input:child.stdout}).on('line',line=>{if(bridge!==child||line.length>7000000)return;try{win?.webContents.send('host.frame',JSON.parse(line));}catch{disconnect();}});
+  createInterface({input:child.stdout}).on('line',line=>{if(bridge!==child||line.length>7000000)return;try{sendFrame('host.frame',JSON.parse(line));}catch{disconnect();}});
   child.stderr.resume(); // Never forward private host logs into renderer or public diagnostics.
-  const closed=()=>{if(bridge===child){bridge=null;win?.webContents.send('host.frame',{type:'bridge.closed'});}};
+  const closed=()=>{if(bridge===child){bridge=null;sendFrame('host.frame',{type:'bridge.closed'});}};
   child.on('error',closed);child.on('exit',closed);
 }
-app.whenReady().then(()=>{
+app.whenReady().then(async()=>{
   const root=resolve(__dirname,'../web');
   protocol.handle('jaunt',request=>{
     const url=new URL(request.url), file=resolve(root,'.'+decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname));
@@ -47,8 +49,30 @@ app.whenReady().then(()=>{
     return ['status','pair','update','restart'].includes(name)?JSON.parse(result.stdout):{message:result.stdout.trim()};
   });
   ipcMain.handle('desktop.notify',(e,data)=>{allowed(e);if(win.isFocused()||!Notification.isSupported())return;const notice=new Notification({title:String(data.title||'jaunt').slice(0,100),body:String(data.body||'').slice(0,400),icon:app.isPackaged?join(process.resourcesPath,'jaunt.png'):join(root,'assets/jaunt.png')});notice.on('click',()=>{win.show();win.focus();win.webContents.send('host.frame',{type:'desktop.open',session:String(data.session||'').slice(0,80),host:String(data.host||'').slice(0,80)});});notice.show();});
+  updates=new DesktopUpdates({app,fetch:(...args)=>net.fetch(...args),emit:value=>sendFrame('host.frame',{type:'desktop.update',...value})});
+  try{await updates.init();}catch(error){updates.publish({state:'error',message:error.message});}
+  ipcMain.handle('desktop.updates',async(e,action,value)=>{
+    allowed(e);
+    if(action==='status')return {...updates.state};
+    if(action==='configure')return updates.configure(value);
+    if(action==='check')return updates.check();
+    if(action==='install'){
+      await updates.install(true);installingDesktop=true;setImmediate(()=>app.exit());return updates.state;
+    }
+    throw new Error('Unknown desktop update action');
+  });
+  if(app.isPackaged){
+    const check=()=>{if(updates.state.automatic&&!installingDesktop)updates.check().catch(()=>{});};
+    setTimeout(()=>{if(updates.state.state!=='error')check();},15000).unref();setInterval(check,15*60*1000).unref();
+  }
   win.loadURL('jaunt://app/');
 });
 app.on('second-instance',()=>{win?.show();win?.focus();});
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',disconnect);
+app.on('before-quit',event=>{
+  if(!installingDesktop&&updates?.state.state==='ready'&&updates.state.automatic){
+    event.preventDefault();installingDesktop=true;
+    updates.install(false).then(()=>app.exit()).catch(error=>{installingDesktop=false;updates.publish({state:'error',message:error.message});app.exit();});
+  }
+  disconnect();
+});

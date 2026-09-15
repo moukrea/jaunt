@@ -10,7 +10,7 @@ async def main():
         async with async_playwright() as pw:
             browser=await pw.chromium.launch();page=await browser.new_page(viewport={'width':1100,'height':800})
             await page.goto(h.pair()['url']);await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
-            await page.locator('#new-session-top').click();await page.get_by_label('Working directory').fill(str(h.work));await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#modal')).not_to_be_visible()
+            await page.locator('#new-session-folder').click();await page.get_by_label('Working directory').fill(str(h.work));await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#modal')).not_to_be_visible()
             fixture=h.work/'render.py';fixture.write_text("import sys,time\nfor i in range(150): print(f'line {i:03d} '+('wide-content '*10))\nfor i in range(12):\n sys.stdout.write('\\x1b[?2026h\\rprogress '+str(i)+'\\x1b[K\\x1b[?2026l');sys.stdout.flush();time.sleep(.03)\nprint('\\nLAST-ROW-PROVED')\n")
             await terminal_command(page,'python3 '+shlex.quote(str(fixture)))
             for _ in range(40):
@@ -58,7 +58,7 @@ async def main():
             for name,setting in [('claude','CLAUDE_CONFIG_DIR'),('codex','CODEX_HOME')]:
                 executable=shutil.which(name)
                 if not executable:continue # Optional installed programs, core fixture is always required.
-                await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill(name+' fixture');await page.get_by_label('Working directory').fill(str(h.work));await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#modal')).not_to_be_visible()
+                await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill(name+' fixture');await page.get_by_label('Working directory').fill(str(h.work));await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#modal')).not_to_be_visible()
                 config=h.root/name;config.mkdir()
                 env=['env','-i','HOME='+str(config),'PATH=/usr/local/bin:/usr/bin:/bin','TERM=xterm-256color',setting+'='+str(config),'DISABLE_AUTOUPDATER=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',executable]
                 await terminal_command(page,shlex.join(env))

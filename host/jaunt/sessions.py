@@ -135,6 +135,29 @@ class Sessions:
                 for row in out.decode(errors="replace").splitlines()
                 if len(p := row.split("\t")) == 3]
 
+    async def directory(self, sid: str) -> str:
+        session = self.get(sid)
+        if session.alive:
+            try:
+                if sys.platform.startswith("linux"):
+                    return str(Path(f"/proc/{session.pid}/cwd").resolve(strict=True))
+                if sys.platform == "darwin":
+                    proc = await asyncio.create_subprocess_exec(
+                        "/usr/sbin/lsof", "-a", "-p", str(session.pid), "-d", "cwd", "-Fn",
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                    try:
+                        out, _ = await asyncio.wait_for(proc.communicate(), 2)
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        await proc.communicate()
+                        return session.cwd
+                    for line in out.decode(errors="replace").splitlines():
+                        if line.startswith("n/"):
+                            return line[1:]
+            except OSError:
+                pass
+        return session.cwd
+
     async def create(self, data: dict) -> dict:
         if not self.accepting:
             raise ValueError("Host is stopping for an upgrade; cannot create a shell")
@@ -147,15 +170,24 @@ class Sessions:
             raise ValueError("Close an old terminal first (32 retained sessions maximum)")
         if sum(s.alive for s in self.items.values()) >= 16:
             raise ValueError("The limit is 16 running shells per host")
-        cwd = Path(data.get("cwd") or Path.home()).expanduser().resolve(strict=True)
+        source = data.get("sourceSession")
+        inherited = await self.directory(source) if source and not data.get("cwd") else None
+        cwd = Path(data.get("cwd") or inherited or Path.home()).expanduser().resolve(strict=True)
         if not cwd.is_dir():
             raise ValueError("Working directory is not a directory")
-        name = str(data.get("name") or f"Shell {len(self.items) + 1}")[:80]
+        name = str(data.get("name") or "").strip()[:80]
         cols, rows = dimensions(data)
         tmux = str(data.get("tmux") or "")
         shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
         if not os.path.isfile(shell):
             shell = "/bin/sh"
+        if not name:
+            stem = Path(shell).name
+            number = 1
+            used = {s.name for s in self.items.values()}
+            while f"{stem} {number}" in used:
+                number += 1
+            name = f"{stem} {number}"
         # Bash login profiles may omit .bashrc entirely. Load the login environment,
         # then start the same interactive shell, just as a desktop terminal does.
         # Never source account startup files inside the daemon itself.

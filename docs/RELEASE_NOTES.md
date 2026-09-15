@@ -1,4 +1,4 @@
-# jaunt 0.1.0-beta.9
+# jaunt 0.1.0-beta.10
 
 New bash sessions now load the login environment and the interactive shell configuration, restoring user command paths and prompts even when `.bash_profile` omits `.bashrc`. Accounts without a `SHELL` environment variable use their configured account shell.
 
@@ -9,3 +9,5 @@ Program notifications preserve OSC 9 messages and OSC 777 title/body. Companion 
 Existing pairing identities and running shells remain protected during automatic updates. Closing a view does not kill its shell; explicit termination remains available from host and clients. Updates still require explicit restart authorization before destroying active ordinary shells.
 
 The protocol has not undergone an independent security audit. Physical-phone validation is not claimed. See the delivery regression report for commands and observed results.
+
+Session controls now keep Open, Rename, Close view and Terminate inside each responsive session card. New shell creates an automatically named terminal immediately. New shell in folder offers directory browsing and an optional name. The host can inherit the active shell’s current directory. Desktop has separate side-by-side and above/below split controls, an inline choice of new or existing sessions, and a button to move each pane into its own tab. Mobile retains ordinary session tabs. Closing a view keeps its shell alive; termination still requires explicit confirmation.

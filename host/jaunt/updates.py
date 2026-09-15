@@ -73,7 +73,7 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
     if not config or (automatic and not config.get("automatic", True)):
         return {"state": "disabled"}
     def record(state: str, **extra) -> dict:
-        result = {"state": state, "checkedAt": int(time.time()), **extra}
+        result = {"state": state, "checkedAt": time.time(), "operation": os.environ.get("jaunt_UPDATE_ID", ""), **extra}
         atomic_json(root / "update-status.json", result)
         return result
     with open(root / "update.lock", "a") as lock:
@@ -102,7 +102,9 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
             cache.mkdir(mode=0o700, exist_ok=True)
             wheel = cache / name
             if not wheel.exists() or hashlib.sha256(wheel.read_bytes()).hexdigest() != manifest["sha256"]:
+                record("downloading", version=tag)
                 data = fetch(base + "/" + name, 16 * 1024 * 1024)
+                record("verifying", version=tag)
                 if hashlib.sha256(data).hexdigest() != manifest["sha256"]:
                     raise ValueError("Release checksum mismatch")
                 with tempfile.NamedTemporaryFile(dir=cache, delete=False) as out:
@@ -140,7 +142,16 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
                 with os.fdopen(fd, "wb") as log:
                     result = subprocess.run(["bash", str(installer)], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=900)
                 if result.returncode:
-                    return record("deferred", version=tag, message="Update not applied. The previous runtime was retained; see private update.log.")
+                    try:
+                        live = control("status")
+                    except (OSError, ValueError):
+                        live = {}
+                    active = sum(bool(s["alive"] and not s.get("tmux")) for s in live.get("sessions", []))
+                    if not authorized and (active or live.get("activeTransfers", 0)):
+                        return record("deferred", version=tag, activeShells=active,
+                                      message="Update is waiting for active shells or transfers to finish.")
+                    return record("error", version=tag,
+                                  message=f"Host update failed (installer exit {result.returncode}). Try again.")
             return record("installed", version=tag)
         except Exception as exc:
             return record("error", message=str(exc)[:180])

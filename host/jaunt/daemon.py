@@ -157,10 +157,21 @@ class Peer:
             except (ValueError, OSError, KeyError, TypeError, asyncio.TimeoutError) as exc:
                 await self.send({"type": "reply", "id": rid, "ok": False, "error": str(exc)[:240]})
         elif kind == "terminal.input":
+            data = unb64(message["data"], 65536)
+            session = self.host.sessions.items.get(message["id"])
+            # Input/geometry already in flight may outlive an explicit terminate.
+            # Discard it; never disconnect other shells or replay it later.
+            if session is None or not session.alive:
+                return
             if message.get("active"):
                 await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
-            await self.host.sessions.write(message["id"], unb64(message["data"], 65536))
+            session = self.host.sessions.items.get(message["id"])
+            if session is not None and session.alive:
+                await self.host.sessions.write(message["id"], data)
         elif kind == "terminal.resize":
+            session = self.host.sessions.items.get(message["id"])
+            if session is None or not session.alive:
+                return
             await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
         elif kind == "ping":
             await self.send({"type": "pong", "at": message.get("at")})
@@ -221,7 +232,7 @@ class Host:
                 "version": __version__, "platform": platform.system(), "user": getpass.getuser(),
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
-                "replayBytes": 2 * 1024 * 1024, "sharedViews": True,
+                "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True,
                 "updates": update_status(self.state.root),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
@@ -284,6 +295,8 @@ class Host:
             raise ValueError("Invalid request parameters")
         if method == "session.list":
             return self.sessions.list()
+        if method == "session.directory":
+            return {"path": await self.sessions.directory(p["id"])}
         if method == "session.create":
             return await self.sessions.create(p)
         if method == "session.attach":
@@ -550,10 +563,14 @@ class Host:
         elif allow_restart is True:
             args.append("--allow-restart")
         env = os.environ.copy(); env["jaunt_STATE"] = str(self.state.root)
+        from .state import atomic_json
+        operation = token(12)
+        env["jaunt_UPDATE_ID"] = operation
+        atomic_json(self.state.root / "update-status.json", {"state": "checking", "checkedAt": time.time(), "operation": operation})
         self.update_process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         self.last_update_check = time.monotonic()
-        return {"state": "checking"}
+        return {"state": "checking", "operation": operation}
 
     async def run(self) -> None:
         relay_url(self.state.data["relay"], self.state.data["room"])
