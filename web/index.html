@@ -8,30 +8,48 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="Your own shell, anywhere. Encrypted remote terminals, files and image transfers, designed for your phone.">
-  <title>jaunt — Your machine. Within reach.</title>
-  <link rel="icon" type="image/png" href="./assets/jaunt.png">
-  <link rel="apple-touch-icon" href="./assets/jaunt.png">
+  <title>jaunt</title>
+  <meta name="apple-mobile-web-app-title" content="jaunt (PWA)">
+  <link rel="icon" type="image/png" href="./assets/favicon.png">
+  <link rel="apple-touch-icon" href="./assets/app-icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./vendor/xterm.css">
   <link rel="stylesheet" href="./style.css">
   <script type="module" src="./js/app.mjs"></script>
 </head>
 <body>
+<section id="site-home" class="site-home" hidden>
+  <nav class="site-nav" aria-label="Project navigation"><a class="site-logo" href="./"><img src="./assets/jaunt.png" width="34" height="34" alt=""><strong>jaunt</strong></a><div><a href="#features">Features</a><a href="https://github.com/moukrea/jaunt">GitHub</a><select id="site-language" aria-label="Language"></select><button id="open-workspace" class="button primary">Open workspace<span data-icon="arrowRight"></span></button></div></nav>
+  <div class="site-hero"><div class="site-intro"><div class="eyebrow"><span class="hero-rule"></span>YOUR TERMINAL. EVERYWHERE.</div><h1>A real shell.<br><span>A little more freedom.</span></h1><p>Pick up your work from your phone, laptop or another desktop. The same running shells, your files, your tools — securely connected to your own machine.</p><div class="site-actions"><button id="site-get-started" class="button primary">Connect your machine<span data-icon="arrowRight"></span></button><a class="button" href="#install-host">Install the host</a></div><div class="site-facts"><span><span data-icon="terminal"></span>Any shell</span><span><span data-icon="qr"></span>Pair once</span><span><span data-icon="shield"></span>Encrypted</span></div></div>
+  <div class="site-stage" aria-label="Preview of a shared terminal workspace">
+    <div class="stage-orbit orbit-one"></div><div class="stage-orbit orbit-two"></div>
+    <div class="stage-label"><span class="status-dot online"></span><span>One session. All your screens.</span></div>
+    <div class="site-demo"><div class="site-demo-bar"><span class="demo-dot"></span><span class="demo-dot"></span><span class="demo-dot"></span><img src="./assets/jaunt.png" width="16" height="16" alt=""><strong>jaunt</strong><span class="demo-connected"><span data-icon="shield" data-size="12"></span>Encrypted</span></div>
+    <div class="preview-workspace"><aside class="preview-sidebar"><span class="preview-host"><span data-icon="monitor" data-size="17"></span><span>workstation</span><i></i></span><span data-icon="terminal"></span><span data-icon="folder"></span><span data-icon="settings"></span></aside><div class="preview-main"><div class="site-demo-tabs" role="tablist" aria-label="Product preview"><button role="tab" aria-selected="true" data-preview="shell">shell</button><button role="tab" aria-selected="false" data-preview="codex">codex</button><button role="tab" aria-selected="false" data-preview="files">Files</button><span>+</span></div><pre id="preview-desktop-output" translate="no"></pre><div class="preview-status"><span class="status-dot online"></span><span>~/work/project</span><span>80 × 24</span></div></div></div></div>
+    <div class="preview-phone"><div class="phone-speaker"></div><div class="phone-top"><span translate="no">09:41</span><span data-icon="shield" data-size="12"></span></div><div class="phone-host"><span data-icon="menu" data-size="14"></span><strong>workstation</strong><span class="status-dot online"></span></div><div class="phone-tab"><span data-icon="terminal" data-size="13"></span><span id="preview-phone-tab">shell</span></div><pre id="preview-phone-output" translate="no"></pre><div class="phone-keys" translate="no"><span>Esc</span><span>Tab</span><span>Ctrl</span><span>↑</span><span>↓</span></div><div class="phone-nav"><span data-icon="terminal" data-size="16"></span><span data-icon="folder" data-size="16"></span><span data-icon="settings" data-size="16"></span></div><div class="phone-home"></div></div>
+    <div class="stage-caption"><span data-icon="arrowRight" data-size="16"></span><span>Try the tabs. The same session follows you.</span></div>
+  </div></div>
+  <section id="features" class="site-features"><div class="eyebrow">MADE FOR YOUR ACTUAL WORK</div><h2>Your tools come with you.</h2><div class="site-feature-grid"><article><span data-icon="terminal"></span><h3>A full terminal</h3><p>Run your everyday shell, development tools, Claude Code or Codex. Nothing limits you to an agent.</p></article><article><span data-icon="split"></span><h3>A shared workspace</h3><p>Keep several sessions, split the desktop into panes, and pick up the same workspace as tabs on your phone.</p></article><article><span data-icon="image"></span><h3>Files and images</h3><p>Upload, download and paste from the device in your hand. Image delivery clearly shows a path or supported native paste.</p></article><article><span data-icon="refresh"></span><h3>Room to move</h3><p>Saved device keys reconnect when your network changes. New hosts preserve running shells during runtime updates.</p></article><article><span data-icon="bell"></span><h3>Stay informed</h3><p>Receive program notifications and open the matching session. Native Android and desktop apps are available.</p></article><article><span data-icon="shield"></span><h3>Your own machine</h3><p>No VPN and no account for your users. Pair with a one-use QR and revoke a device whenever you need.</p></article></div></section>
+  <section id="install-host" class="site-install"><div><div class="eyebrow">ONE MACHINE. ONE COMMAND.</div><h2>Start where your work lives.</h2><p>Install the host on Linux or macOS, then pair your other device. The background service keeps jaunt ready.</p></div><div><div class="command"><code id="site-install-command" translate="no">bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'</code><button id="site-copy-install" class="icon-button" aria-label="Copy installation command"><span data-icon="copy"></span></button></div><div class="site-downloads"><button id="site-client-install" class="text-button">Install desktop client only<span data-icon="copy"></span></button><a id="site-android-download" class="text-button" href="https://github.com/moukrea/jaunt/releases">Android APK<span data-icon="external"></span></a></div></div></section>
+  <footer class="site-footer"><a class="site-logo" href="./"><img src="./assets/jaunt.png" width="25" height="25" alt=""><strong>jaunt</strong></a><p>Open source. End-to-end encrypted. Beta protocol — not independently audited.</p><a href="https://github.com/moukrea/jaunt/blob/main/SECURITY.md">Security model</a></footer>
+</section>
+
 <div id="app" class="app">
   <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
   <aside id="sidebar" class="sidebar" aria-label="Machines and navigation">
     <a class="brand" href="./" aria-label="jaunt home"><img src="./assets/jaunt.png" alt="" width="33" height="33"><span>jaunt</span><span class="version">BETA</span></a>
+    <button id="sidebar-toggle" class="icon-button sidebar-toggle" aria-label="Collapse sidebar" aria-expanded="true"><span data-icon="arrowLeft"></span></button>
     <div class="sidebar-section"><span>WORKSPACE</span><span class="tiny-pill" id="machine-count">0</span></div>
     <div id="machine-list" class="machine-list"></div>
-    <button class="add-machine" id="add-machine"><span data-icon="plus"></span>Pair a machine</button>
+    <button class="add-machine" id="add-machine" aria-label="Pair a machine"><span data-icon="plus"></span><span class="nav-label">Pair a machine</span></button>
     <div class="sidebar-rule"></div>
     <nav class="desktop-nav" aria-label="Workspace views">
-      <button data-view="terminal" class="nav-item selected"><span data-icon="terminal"></span>Terminals<span id="session-count" class="nav-count"></span></button>
-      <button data-view="files" class="nav-item"><span data-icon="folder"></span>Files</button>
+      <button data-view="terminal" aria-label="Terminals" class="nav-item selected"><span data-icon="terminal"></span><span class="nav-label">Terminals</span><span id="session-count" class="nav-count"></span></button>
+      <button data-view="files" aria-label="Files" class="nav-item"><span data-icon="folder"></span><span class="nav-label">Files</span></button>
     </nav>
     <div class="sidebar-bottom">
-      <button id="settings-button" class="nav-item"><span data-icon="settings"></span>Settings<span class="shortcut">⌘ ,</span></button>
-      <button id="lock-button" class="nav-item" hidden><span data-icon="lock"></span>Lock this device</button>
+      <button id="settings-button" aria-label="Settings" class="nav-item"><span data-icon="settings"></span><span class="nav-label">Settings</span><span class="shortcut">⌘ ,</span></button>
+      <button id="lock-button" aria-label="Lock this device" class="nav-item" hidden><span data-icon="lock"></span><span class="nav-label">Lock this device</span></button>
       <div class="trust-note"><span data-icon="shield" data-size="16"></span><span>Private by design.<br><small>Your keys stay with you.</small></span></div>
     </div>
   </aside>

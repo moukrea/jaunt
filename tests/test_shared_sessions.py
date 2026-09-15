@@ -131,7 +131,8 @@ async def test_late_stream_frames_after_termination_keep_peer_alive(tmp_path,mon
     messages=[]
     async def send(value):messages.append(value)
     sessions=Sessions(noop,noop,tmp_path)
-    peer=SimpleNamespace(host=SimpleNamespace(sessions=sessions),routing_id='fixture',display_name='Fixture',send=send)
+    peer=SimpleNamespace(host=SimpleNamespace(sessions=sessions,reexec=None,active_actions=0),routing_id='fixture',display_name='Fixture',send=send)
+    peer._dispatch=lambda message: Peer._dispatch(peer,message)
     try:
         shell=await sessions.create({'cwd':str(tmp_path)})
         await sessions.terminate(shell['id'])

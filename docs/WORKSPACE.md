@@ -8,7 +8,7 @@ Every shell belongs to the host daemon, not to the window that created it. The d
 
 Use **Sessions** beside the tabs to see every retained session on the selected host, including sessions with no open view. The list shows whether each shell is running and which devices have it open.
 
-- **Rename** changes the shared session name. Double-click a tab name or click a pane title to rename it too.
+- **Rename** changes the shared session name. Double-click a tab name or double-click a pane title to rename it too.
 - **Open** attaches this device to the existing shell and its retained history.
 - The tab's **×** or **Close view** detaches only this view. The shell and other clients remain connected.
 - **Terminate** asks for confirmation, then ends the shell and its jobs for all viewers. For tmux it explicitly kills that tmux session, including attachments outside jaunt.
@@ -17,7 +17,9 @@ Ordinary termination covers processes in the shell's POSIX terminal session, inc
 
 Exited shells retain their wait status until the session is removed, reserving the leader PID so that surviving background jobs can still be terminated safely.
 
-Closing the app, losing a network connection, or locking its vault does not terminate shells. Plain shells do not survive a host daemon restart or reboot. Automatic host updates wait for ordinary active shells; explicitly authorizing an update/restart can terminate them. tmux remains available when restart-independent persistence is needed.
+Closing the app, losing a network connection, or locking its vault does not terminate shells. Compatible host updates retain ordinary shell processes and their history through an in-place runtime replacement. An explicit daemon stop/restart or reboot still ends them. Legacy hosts without handoff defer updates while ordinary shells are active unless restarting is explicitly authorized. tmux remains available when restart-independent persistence is needed.
+
+Tabs retain their order when selected. Drag them to reorder; on a keyboard use Alt+Shift+Left/Right. Double-click renames; holding a tab does not open rename. Desktop split groups and mobile tab order are retained across reconnections. The desktop sidebar can collapse, and its preference is saved.
 
 ## Shared dimensions and scrolling
 
@@ -58,3 +60,7 @@ Interface pictograms use pinned, locally bundled Lucide icons (ISC license). The
 Host/CLI and desktop versions are separate. The host checks automatically and waits for ordinary shells and transfers to finish before restarting. The desktop checks on startup and every 15 minutes, verifies downloads, and installs when its window closes. Settings offers manual checks and Install and reopen. Desktop installation preserves the app's saved machines and does not stop host shells; system packages may require an OS authorization prompt. Android verifies its APK and signing identity before handing installation to Android.
 
 The activity strip remains visible through image preparation, upload, verification and insertion. Completion distinguishes a path inserted without Enter from a PNG placed in the host clipboard with Ctrl+V sent. It never promises that a specific CLI recognized an attachment. Update checks report current, installed, waiting for active shells, or failed; completed/error results remain until dismissed.
+
+### Foreground program icons
+
+Tabs and pane captions use the locally bundled Meteor Icons Claude and OpenAI marks while the owned PTY foreground program is `claude` or `codex`. Detection refreshes once per second and sends only the program category, never command arguments. Returning to the shell restores the terminal icon. Friendly session names do not affect detection. Existing tmux sessions and unrecognized wrappers retain the terminal icon. Meteor Icons 4.4.0 is MIT licensed; its license is included in the web bundle.

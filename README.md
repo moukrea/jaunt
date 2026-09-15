@@ -6,7 +6,7 @@
 
 jaunt provides native desktop and Android applications, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
 
-**Host: 0.1.0-beta.10 · Desktop: 0.1.0-beta.9 · Android: 0.1.0-beta.7.** [Open jaunt](https://moukrea.github.io/jaunt/). The relay and host release are deployed. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SESSION_CONTROLS_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.11 · Desktop: 0.1.0-beta.10 · Android: 0.1.0-beta.8.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -14,9 +14,9 @@ jaunt provides native desktop and Android applications, a mobile/desktop web cli
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled and wait until ordinary shells and transfers finish.
+Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled. Compatible hosts retain their shell processes during runtime replacement and wait for transfers to finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.7/jaunt-android-v0.1.0-beta.7.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.8/jaunt-android-v0.1.0-beta.8.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -50,11 +50,23 @@ Pairing grants access as the **system account running the host**, with all of th
 | Notifications | Optional native Android service or browser Web Push; terminal bells, program events, session exit, Settings test and CLI `notify`/`run` |
 | Interface | Native desktop and Android apps with a shared bundled interface; browser client; local JavaScript |
 
+## Desktop client only
+
+To connect to other hosts without installing a local host service or jaunt CLI:
+
+```sh
+bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash -s -- --client-only'
+```
+
+This installs the same desktop application and launcher, with remote pairing, sessions, files, notifications and automatic app updates. It does not start a daemon or show local host controls. It does not uninstall a previously installed host. Run the normal host installation command to enable local host integration later.
+
+The installed browser application is named **jaunt (PWA)** so it can be distinguished from the native **jaunt** app. Both use the original transparent logo. Native Android uses the same artwork without a bundled dark background; individual launchers may apply their own icon treatment.
+
 ## Shared desktop workspace
 
-Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and remote clients share the same ordinary shells without tmux. **New shell** opens an automatically named shell immediately, inheriting the previous active shell’s current directory. The folder button lets you browse the host’s directories and optionally name the new shell. **Sessions** lists running and exited sessions: open, rename, close only your view, or explicitly terminate a shell for everyone. You can also rename a tab by double-clicking its title, or click a pane’s title. The device you interact with controls the shared terminal size.
+Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and remote clients share the same ordinary shells without tmux. **New shell** opens an automatically named shell immediately, inheriting the previous active shell’s current directory. The folder button lets you browse the host’s directories and optionally name the new shell. **Sessions** lists running and exited sessions: open, rename, close only your view, or explicitly terminate a shell for everyone. You can also rename a tab by double-clicking its title, or double-click a pane’s title. Drag tabs to reorder them; selecting a tab never changes its position. The device you interact with controls the shared terminal size.
 
-The two **split icons** arrange panes side by side or above/below on desktop, using a new or existing session. Each pane can move into its own tab. Layouts survive reopening; mobile displays their sessions as normal tabs. Settings includes friendly host names, ordering and the default host, dark/light/system/circadian themes, and notification controls. Host settings follow the selected machine immediately, including its identity and update controls. The native desktop app also manages the local host service and pairs to other hosts; local service controls appear only for the local host, while desktop application updates remain separate. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
+The two **split icons** arrange panes side by side or above/below on desktop, using a new or existing session. Each pane can move into its own tab. Layouts survive reopening; mobile displays their sessions as normal tabs. The desktop sidebar can collapse, with the preference retained. Settings includes friendly host names, ordering and the default host, dark/light/system/circadian themes, and notification controls. Host settings follow the selected machine immediately, including its identity and update controls. The native desktop app also manages the local host service and pairs to other hosts; local service controls appear only for the local host, while desktop application updates remain separate. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
 
 ## Image handling
 
@@ -70,7 +82,7 @@ Progress stays visible during upload and clipboard/path delivery. Completed oper
 
 | Component | Update behavior |
 |---|---|
-| Host / CLI | Same installation. Checks the published channel every 15 minutes, verifies downloads and waits for ordinary shells and transfers to finish before restarting. Settings or `jaunt update` checks immediately. **Update and restart** requires explicit confirmation to end active work. |
+| Host / CLI | Same installation. Checks the published channel every 15 minutes, verifies downloads and replaces compatible runtimes without ending shell processes. Transfers finish first. Settings or `jaunt update` checks immediately. Older hosts without runtime handoff defer while ordinary shells are active; ending those shells still requires explicit confirmation. |
 | Desktop app | Separate version from the host. Automatically checks, downloads and verifies an update; installs when you close the app. Settings provides a manual check, an automatic-update toggle and **Install and reopen**. Updating the GUI does not stop the host or its shells. System packages may request OS authorization. |
 | Android APK | Automatically checks for a new APK. A visible check/download dialog leads to Android’s installation confirmation. The APK’s checksum and signing certificate are verified; Android does not permit silent self-installation. |
 | Web client | Uses the version published on Pages. Reopen/reload to activate a downloaded service-worker update. |
@@ -92,7 +104,7 @@ Enable notifications in **Settings** and use its test action. Program notificati
 - Up to 16 active shells, 32 retained views, 2 MiB of raw replay per PTY, and 10,000 xterm scrollback lines. Copy-all covers retained history, not an unlimited log.
 - Host file limit: 512 MiB. In-memory downloads are limited to 128 MiB in browsers without direct file writing; previews are limited to 16 MiB. Up to eight simultaneous uploads and 1 GiB of declared total size.
 - Uploads resume after network interruptions while the host and page retain the transfer. Restart the upload after a host restart or full page reload; jaunt does not obtain unauthorized persistent access to the phone's local files.
-- Ordinary shells survive disconnection, **not a daemon restart or machine reboot**. tmux can survive a daemon restart, but not an OS reboot.
+- Ordinary shells survive disconnection and compatible runtime updates, **not an explicit daemon stop/restart or machine reboot**. tmux can survive a daemon restart, but not an OS reboot.
 - Only one jaunt application tab per browser profile may own the vault at a time. Multiple terminal tabs inside jaunt and multiple devices are supported.
 - Browser notifications require permission and Web Push support. In the APK, enable Android background notifications in Settings; Android battery restrictions may delay delivery. On iOS, use the installed PWA. Delivery depends on the network and push provider; it is not guaranteed in real time.
 - A sleeping or powered-off host is unreachable. There is no remote wake-up, arbitrary TCP tunnel, graphical desktop, or native Windows shell support.
@@ -136,7 +148,11 @@ jaunt does not borrow relays from sshx, Happy, or Zedra. It does not depend on t
 
 [Deployment](docs/DEPLOYMENT.md) · [Security](SECURITY.md) · [Protocol](docs/PROTOCOL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-English is the default language for repository documentation and contribution guidance. Application localization is separate from the documentation language.
+English is the canonical documentation language. Translations: [Français](docs/i18n/fr/README.md), [Español](docs/i18n/es/README.md), [Italiano](docs/i18n/it/README.md), [Português](docs/i18n/pt/README.md), [Deutsch](docs/i18n/de/README.md). Each translated tree includes the security, deployment and validation guides.
+
+Web, Android and desktop select the system language automatically. Override it in **Settings → Language**. The CLI uses the system locale; `jaunt --language fr --help` overrides one invocation and `jaunt language fr` saves the preference. Use `system` to restore automatic selection. Command names, arguments, terminal output and user content are never translated.
+
+The public web address introduces the project; **Open workspace** enters the client. Native apps open the workspace directly.
 
 ## Android app
 

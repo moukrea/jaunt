@@ -98,11 +98,23 @@ jobs:
       - run: xvfb-run -a python tests/shared_workspace_e2e.py
       - run: python tests/feedback_e2e.py
       - run: python tests/terminal_render_e2e.py
+      - run: python tests/workspace_usability_e2e.py
+      - run: python tests/i18n_e2e.py
+      - run: xvfb-run -a python tests/pwa_e2e.py
+      - run: python tests/handoff_e2e.py
       - run: python tests/browser_e2e.py
         env:
           jaunt_E2E_RELAY: workerd
       - run: python scripts/build_release.py
       - run: python tests/installer_e2e.py
+      - name: Download the public legacy host fixture
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download v0.1.0-beta.10 --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --pattern 'host-manifest.json' --pattern 'SHA256SUMS' --dir "$RUNNER_TEMP/legacy-host"
+      - name: Verify legacy restart protection and explicit migration
+        env:
+          jaunt_LEGACY_RELEASE_DIR: ${{ runner.temp }}/legacy-host
+        run: python tests/installer_e2e.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

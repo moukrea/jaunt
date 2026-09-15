@@ -5,7 +5,6 @@ import os
 import socket
 import tempfile
 from pathlib import Path
-from .crypto import token
 
 
 def state_dir() -> Path:
@@ -36,6 +35,7 @@ class State:
         if self.path.exists():
             self.data = json.loads(self.path.read_text())
         else:
+            from .crypto import token
             self.data = {
                 "version": 1, "name": socket.gethostname(), "room": token(18),
                 "hostToken": token(), "clientToken": token(), "devices": {}, "pairs": {},

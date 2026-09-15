@@ -1,3 +1,4 @@
+import {t as tr} from './i18n.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {icon} from './icons.mjs';
 export const $ = id => document.getElementById(id);
@@ -32,8 +33,8 @@ export function reportError(error,scope='action',context='') {
   if(error && typeof error==='object' && reported.has(error))return;
   markReported(error);
   if(scope==='modal'&&!$('modal')?.open)scope='action';
-  const message=(context?context+': ':'')+(error?.message || String(error));
-  if(scope==='action' && /Connection (?:interrupted|changed|is offline)|Wait for the encrypted connection|Local host is offline/.test(message))scope='connection';
+  const message=(context?context+': ':'')+tr(error?.message || String(error));
+  if(scope==='action' && /Connection (?:interrupted|changed|is offline)|Wait for the encrypted connection|Local host is offline/.test(error?.message||String(error)))scope='connection';
   if(scope==='connection' && $('connection-banner') && !$('connection-banner').hidden)return;
   if(errors.get(scope)===message)return;
   errors.set(scope,message);renderErrors();
@@ -42,7 +43,7 @@ function renderErrors(){
   const root=$('feedback');if(!root)return;
   root.hidden=!errors.size;
   root.replaceChildren(...[...errors].filter(([scope])=>scope!=='modal'&&scope!=='pair').map(([scope,message])=>el('div',{class:'feedback-error',role:'alert'},
-    el('div',{},el('strong',{text:scope==='connection'?'Connection interrupted':'Action could not complete'}),el('p',{text:message})),button('Dismiss',()=>clearError(scope),'text-button'))));
+    el('div',{},el('strong',{text:scope==='connection'?tr('Connection interrupted'):tr('Action could not complete')}),el('p',{text:message})),button(tr('Dismiss'),()=>clearError(scope),'text-button'))));
   root.hidden=!root.childElementCount;
   const pair=$('pair-error');if(pair){pair.hidden=!errors.has('pair');pair.textContent=errors.get('pair')||'';}
   const inline=$('modal-error');if(inline){inline.hidden=!errors.has('modal');inline.textContent=errors.get('modal')||'';}
@@ -52,7 +53,7 @@ export function toast(message, error = false, action) {
   const previous=notices.get(message);if(previous){clearTimeout(previous.timer);previous.timer=setTimeout(()=>removeNotice(message),5000);return;}
   const node = el('div', {class:'toast',role:'status'}, el('span', {}, icon('check', 17)), el('p', {text: message}));
   if (action) node.append(button(action.label, action.run, 'text-button'));
-  node.append(button('', () => removeNotice(message), 'icon-button', 'close'));
+  const dismiss=button('',()=>removeNotice(message),'icon-button','close');dismiss.setAttribute('aria-label',tr('Dismiss notification'));node.append(dismiss);
   $('toasts').append(node);notices.set(message,{node,timer:setTimeout(()=>removeNotice(message),5000)});
   while(notices.size>2)removeNotice(notices.keys().next().value);
 }
@@ -75,15 +76,15 @@ export function field(label, input, hint = '') {
 }
 export function confirmAction(title, explanation, label, action, danger = false) {
   const body = el('div', {}, el('p', {class: 'modal-copy', text: explanation}),
-    el('div', {class: 'modal-actions'}, button('Cancel', closeModal), button(label, async () => { await action(); closeModal(); }, `button ${danger ? 'danger' : 'primary'}`)));
+    el('div', {class: 'modal-actions'}, button(tr('Cancel'), closeModal), button(label, async () => { await action(); closeModal(); }, `button ${danger ? 'danger' : 'primary'}`)));
   modal(title, body);
 }
 export async function copyText(text) {
-  try { if (isAndroid) await nativeCall('clipboard.write', {text}); else await navigator.clipboard.writeText(text); toast('Copied to this device.'); }
+  try { if (isAndroid) await nativeCall('clipboard.write', {text}); else await navigator.clipboard.writeText(text); toast(tr('Copied to this device.')); }
   catch {
-    const area = el('textarea', {class: 'copy-text', value: text, readOnly: true, 'aria-label': 'Text to copy'});
-    modal('Copy text', el('div', {}, el('p', {class: 'modal-copy', text: 'Your browser requires manual selection. Select and copy below.'}), area,
-      el('div', {class: 'modal-actions'}, button('Select all', () => { area.focus(); area.select(); }))));
+    const area = el('textarea', {class: 'copy-text', value: text, readOnly: true, 'aria-label': tr('Text to copy')});
+    modal(tr('Copy text'), el('div', {}, el('p', {class: 'modal-copy', text: tr('Your browser requires manual selection. Select and copy below.')}), area,
+      el('div', {class: 'modal-actions'}, button(tr('Select all'), () => { area.focus(); area.select(); }))));
     area.focus(); area.select();
   }
 }

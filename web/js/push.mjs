@@ -1,3 +1,4 @@
+import {t as tr} from './i18n.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {b64, unb64} from './crypto.mjs';
 export async function serviceWorker() {
@@ -13,7 +14,7 @@ export async function subscribe(vault, link) {
   if (permission !== 'granted') throw new Error('Notifications are not allowed. Change this site’s notification permission in your browser settings.');
   const reg = await serviceWorker();
   if (!vault.data.vapid) {
-    const pair = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, true, ['sign', 'verify']);
+    const pair = await crypto.subtle.generateKey({name: tr('ECDSA'), namedCurve: 'P-256'}, true, ['sign', 'verify']);
     const key = await crypto.subtle.exportKey('jwk', pair.privateKey);
     vault.data.vapid = {private: key.d, public: b64(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)))};
     await vault.save();

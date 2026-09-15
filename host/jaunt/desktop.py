@@ -2,9 +2,10 @@
 from __future__ import annotations
 import asyncio
 import sys
-from .state import state_dir
+from .i18n import tr
 
 async def bridge():
+    from .state import state_dir
     reader, writer = await asyncio.open_unix_connection(str(state_dir() / 'control.sock'), limit=7_000_001)
     writer.write(b'{"method":"ui.connect"}\n')
     await writer.drain()
@@ -34,13 +35,15 @@ async def bridge():
         transport.close()
 
 
-def install_gui() -> 'Path':
+def install_gui(*, page=None, client_only=False) -> 'Path':
     """Install the published desktop payload for this account, preserving app data."""
     import hashlib,json,os,platform,re,shutil,tarfile,tempfile,zipfile,subprocess,posixpath,stat
     from pathlib import Path
-    from .updates import fetch,installation
-    config=installation()
-    page=config.get('page','https://moukrea.github.io/jaunt').rstrip('/')
+    from .downloads import fetch
+    if page is None:
+        from .updates import installation
+        page=installation().get('page','https://moukrea.github.io/jaunt')
+    page=page.rstrip('/')
     deployed=json.loads(fetch(page+'/config.json',65536))
     tag=deployed.get('desktopRelease','')
     if not re.fullmatch(r'desktop-v\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?',tag):
@@ -54,18 +57,20 @@ def install_gui() -> 'Path':
     # AppArmor profile and sandbox helper are configured by the package manager.
     restricted=Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
     if system=='Linux' and restricted.exists() and restricted.read_text().strip()=='1':
-        return install_linux_package(tag, arch)
+        exe=install_linux_package(tag, arch)
+        save_mode(client_only)
+        return exe
     extension='tar.gz' if system=='Linux' else 'zip'
     name=f'jaunt-desktop-{tag.removeprefix("desktop-v")}-{arch}.{extension}'
     base=f'https://github.com/moukrea/jaunt/releases/download/{tag}'
     checks={row.split('  ',1)[1]:row.split('  ',1)[0] for row in fetch(base+'/SHA256SUMS',65536).decode().splitlines() if '  ' in row}
     digest=checks.get(name,'')
     if not re.fullmatch('[0-9a-f]{64}',digest):raise ValueError('Desktop checksum is missing')
-    root=Path.home()/'.local/share/jaunt-desktop';root.mkdir(parents=True,exist_ok=True)
+    root=Path(os.environ.get('jaunt_DESKTOP_ROOT',Path.home()/'.local/share/jaunt-desktop'));root.mkdir(parents=True,exist_ok=True)
     destination=root/tag
     binary=Path('jaunt-desktop') if system=='Linux' else Path('jaunt.app/Contents/MacOS/jaunt')
     if not (destination/binary).is_file():
-        print('jaunt: Downloading the verified desktop app…',flush=True)
+        print(tr('jaunt: Downloading the verified desktop app…'),flush=True)
         with tempfile.TemporaryDirectory(prefix='.install-',dir=root) as temp:
             stage=Path(temp);payload=fetch(base+'/'+name,350*1024*1024)
             if hashlib.sha256(payload).hexdigest()!=digest:raise ValueError('Desktop checksum mismatch')
@@ -96,12 +101,13 @@ def install_gui() -> 'Path':
             os.rename(extracted,destination)
     pointer=root/'current.new'
     pointer.unlink(missing_ok=True);pointer.symlink_to(destination);os.replace(pointer,root/'current')
+    save_mode(client_only)
     if system=='Darwin':
         applications=Path.home()/'Applications';applications.mkdir(exist_ok=True)
         shortcut=applications/'jaunt.app'
         if shortcut.is_symlink():shortcut.unlink()
         if not shortcut.exists():shortcut.symlink_to(root/'current/jaunt.app')
-        print('jaunt: Desktop app installed in Applications.',flush=True)
+        print(tr('jaunt: Desktop app installed in Applications.'),flush=True)
         return root/'current'/binary
     icon=root/'icon.png'
     # This is the original supplied artwork, shipped separately from the asar.
@@ -113,7 +119,7 @@ def install_gui() -> 'Path':
     (applications/'dev.jaunt.desktop.desktop').write_text(f'[Desktop Entry]\nType=Application\nName=jaunt\nComment=Shared local and remote shells\nExec="{quoted}"\nIcon={icon}\nTerminal=false\nCategories=System;TerminalEmulator;\nStartupWMClass=jaunt\n')
     if shutil.which('update-desktop-database'):
         subprocess.run(['update-desktop-database',str(applications)],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    print('jaunt: Desktop app installed. Open jaunt from your applications menu.',flush=True)
+    print(tr('jaunt: Desktop app installed. Open jaunt from your applications menu.'),flush=True)
     return exe
 
 
@@ -121,7 +127,7 @@ def install_linux_package(tag: str, arch: str):
     """Use the system package on Linux hosts that restrict Chromium namespaces."""
     import hashlib, os, re, shutil, subprocess, tempfile
     from pathlib import Path
-    from .updates import fetch
+    from .downloads import fetch
     apt=shutil.which('apt-get')
     if not apt:
         raise RuntimeError('This Linux security policy requires a system desktop package; no supported package manager was found.')
@@ -130,7 +136,7 @@ def install_linux_package(tag: str, arch: str):
     checks=dict(row.split('  ',1)[::-1] for row in fetch(base+'/SHA256SUMS',65536).decode().splitlines() if '  ' in row)
     expected=checks.get(name,'')
     if not re.fullmatch('[0-9a-f]{64}',expected):raise ValueError('Desktop package checksum is missing')
-    print('jaunt: Installing the Ubuntu desktop package with its sandbox support. Your system may ask for an administrator password.',flush=True)
+    print(tr('jaunt: Installing the Ubuntu desktop package with its sandbox support. Your system may ask for an administrator password.'),flush=True)
     payload=fetch(base+'/'+name,350*1024*1024)
     if hashlib.sha256(payload).hexdigest()!=expected:raise ValueError('Desktop package checksum mismatch')
     with tempfile.TemporaryDirectory(prefix='jaunt-desktop-',dir='/tmp') as folder:
@@ -147,3 +153,16 @@ def install_linux_package(tag: str, arch: str):
     if shortcut.is_file() and '.local/share/jaunt-desktop/' in shortcut.read_text():
         shortcut.unlink()
     return Path('/usr/bin/jaunt-desktop')
+
+
+def save_mode(client_only: bool):
+    """Account preference survives application replacement; contains no keys."""
+    import json,os,tempfile
+    from pathlib import Path
+    root=Path(os.environ.get('jaunt_DESKTOP_ROOT',Path.home()/'.local/share/jaunt-desktop'));root.mkdir(parents=True,exist_ok=True)
+    fd,temp=tempfile.mkstemp(prefix='.mode-',dir=root)
+    try:
+        with os.fdopen(fd,'w') as stream:json.dump({'clientOnly':bool(client_only)},stream)
+        os.replace(temp,root/'mode.json')
+    finally:
+        Path(temp).unlink(missing_ok=True)

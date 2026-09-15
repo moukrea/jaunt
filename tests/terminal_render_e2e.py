@@ -63,6 +63,9 @@ async def main():
                 env=['env','-i','HOME='+str(config),'PATH=/usr/local/bin:/usr/bin:/bin','TERM=xterm-256color',setting+'='+str(config),'DISABLE_AUTOUPDATER=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',executable]
                 await terminal_command(page,shlex.join(env))
                 await expect(page.locator('.terminal-container:not([hidden]) .xterm-rows')).to_contain_text('Choose the text style' if name=='claude' else 'Welcome to Codex',timeout=20000)
+                brand='claude' if name=='claude' else 'openai'
+                await expect(page.locator('.session-tab.active .tab-symbol svg')).to_have_attribute('data-icon-name',brand,timeout=10000)
+                await expect(page.locator('.terminal-container:not([hidden]) .pane-symbol svg')).to_have_attribute('data-icon-name',brand)
                 assert not await page.locator('#modal').is_visible(),await page.locator('#modal').inner_text()
                 text=await scrollback(page)
                 (ROOT/('test-results/'+name+'-startup.txt')).write_text(text)

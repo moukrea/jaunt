@@ -9,6 +9,7 @@ import os
 import pty
 import re
 import shutil
+import shlex
 import signal
 import struct
 import subprocess
@@ -75,6 +76,27 @@ class AttentionParser:
         return events
 
 
+def classify_program(command: str) -> str:
+    """Recognize executable names and Node entry points, never arbitrary arguments."""
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return ""
+    if not args:
+        return ""
+    executable = Path(args[0]).name
+    if executable in {"claude", "codex"}:
+        return executable
+    if executable in {"node", "nodejs", "bun"}:
+        entry = next((arg for arg in args[1:] if not arg.startswith("-")), "")
+        name = Path(entry).name
+        if name in {"claude", "claude.js", "codex", "codex.js"}:
+            return name.removesuffix(".js")
+        if name == "cli.js" and "@anthropic-ai/claude-code/" in entry:
+            return "claude"
+    return ""
+
+
 @dataclass
 class Session:
     id: str
@@ -84,6 +106,7 @@ class Session:
     fd: int
     cols: int
     rows: int
+    program: str = ""
     tmux: str = ""
     process: subprocess.Popen | None = None
     created: float = field(default_factory=time.time)
@@ -108,7 +131,7 @@ class Session:
         return {"id": self.id, "name": self.name, "cwd": self.cwd, "pid": self.pid,
                 "cols": self.cols, "rows": self.rows, "alive": self.alive,
                 "exitCode": self.exit_code, "created": self.created, "tmux": self.tmux,
-                "viewers": list(self.viewers.values()), "activeView": self.active_view}
+                "program": self.program, "viewers": list(self.viewers.values()), "activeView": self.active_view}
 
 
 class Sessions:
@@ -121,6 +144,36 @@ class Sessions:
 
     def list(self) -> list[dict]:
         return [s.info() for s in self.items.values()]
+
+    async def refresh_programs(self) -> None:
+        """Read only owned PTY foreground leaders; never publish command arguments."""
+        changed = False
+        for session in tuple(self.items.values()):
+            program = ""
+            if session.alive and session.fd >= 0 and not session.tmux:
+                try:
+                    foreground = os.tcgetpgrp(session.fd)
+                    if foreground > 0:
+                        proc = await asyncio.create_subprocess_exec(
+                            "ps", "-p", str(foreground), "-o", "args=",
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                        try:
+                            output, _ = await asyncio.wait_for(proc.communicate(), 1)
+                        except (TimeoutError, asyncio.CancelledError):
+                            if proc.returncode is None:
+                                proc.kill()
+                            await proc.wait()
+                            raise
+                        # Recheck ownership: the command may have exited during ps.
+                        if os.tcgetpgrp(session.fd) == foreground:
+                            program = classify_program(output.decode(errors="replace"))
+                except (OSError, ValueError, TimeoutError):
+                    pass
+            if session.program != program:
+                session.program = program
+                changed = True
+        if changed:
+            await self.changed()
 
     async def tmux_list(self) -> list[dict]:
         binary = shutil.which("tmux")
@@ -291,7 +344,7 @@ class Sessions:
                     await self._safe_send(peer, event)
             s.queue.task_done()
 
-    async def _reap(self, s: Session) -> None:
+    async def _reap(self, s: Session, announce: bool = True) -> None:
         while s.alive:
             # Keep the leader waitable until this retained session is removed.
             # Its reserved PID prevents reuse while we still own background jobs,
@@ -302,7 +355,7 @@ class Sessions:
                 break
             await asyncio.sleep(0.1)
         s.alive = False
-        self.attention(s, 'exit')
+        if announce:self.attention(s, 'exit')
         # Drain all buffered trailing bytes before reporting exit. Reader callbacks
         # may still have bytes queued while the shell has already exited.
         self._pause_reader(s)

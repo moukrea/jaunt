@@ -146,6 +146,17 @@ class Peer:
                 await self.host.transport.send({"type": "disconnect", "to": self.routing_id})
 
     async def dispatch(self, message: dict) -> None:
+        terminal = message.get('type') in ('terminal.input','terminal.resize')
+        if terminal and self.host.reexec:
+            return
+        tracked = message.get('type') != 'ping' and message.get('method') != 'updates.status'
+        if tracked:self.host.active_actions += 1
+        try:
+            await self._dispatch(message)
+        finally:
+            if tracked:self.host.active_actions -= 1
+
+    async def _dispatch(self, message: dict) -> None:
         kind = message.get("type")
         if kind == "rpc":
             rid = message.get("id")
@@ -190,6 +201,7 @@ class LocalPeer:
     Remote peers still require the existing authenticated encrypted handshake.
     """
     dispatch = Peer.dispatch
+    _dispatch = Peer._dispatch
     local = True
     ready = True
     display_name = 'Host desktop'
@@ -217,6 +229,9 @@ class Host:
         self.state = state
         self.peers: dict[str, Peer] = {}
         self.stopping = asyncio.Event()
+        self.reexec = None
+        self.active_actions = 0
+        self.runtime_id = token(12)
         self.transport = Transport(state.data, self.receive, self.disconnected)
         self.sessions = Sessions(self.send, self.sessions_changed, state.root, self.attention)
         self.files = Files(state.root, state.data.get("maxFileBytes", 512 * 1024 * 1024))
@@ -232,7 +247,7 @@ class Host:
                 "version": __version__, "platform": platform.system(), "user": getpass.getuser(),
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
-                "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True,
+                "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
                 "updates": update_status(self.state.root),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
@@ -289,7 +304,10 @@ class Host:
                 await self.drop(routing_id)
 
     async def rpc(self, peer: Peer, method: str, p: dict):
-        if self.stopping.is_set():
+        if method == "updates.status":
+            from .updates import status
+            return status(self.state.root)
+        if self.stopping.is_set() or self.reexec:
             raise ValueError("Host is restarting; reconnect before starting another operation")
         if not isinstance(p, dict):
             raise ValueError("Invalid request parameters")
@@ -504,7 +522,7 @@ class Host:
                 return
             if method == "status":
                 result = {"running": True, "connected": self.transport.ready.is_set(),
-                          "pid": os.getpid(), "machine": self.info(), "sessions": self.sessions.list(),
+                          "pid": os.getpid(), "runtime": sys.executable, "runtimeId": self.runtime_id, "machine": self.info(), "sessions": self.sessions.list(),
                           "activeTransfers": len(self.files.uploads) + len(self.files.downloads)}
             elif method == "pair":
                 result = self.pair()
@@ -523,6 +541,18 @@ class Host:
                     result = await self.clipboard.get_text()
             elif method == "updates.install":
                 result = self.launch_update(allow_restart=p.get("allowRestart") is True)
+            elif method == "upgrade.exec":
+                if self.active_actions:
+                    raise ValueError("Host actions are still finishing; retry the update shortly")
+                target = Path(p["python"]).absolute()
+                if not target.is_file() or not os.access(target,os.X_OK):
+                    raise ValueError("New host runtime is not executable")
+                if self.files.uploads or self.files.downloads:
+                    raise ValueError("File transfers are active; the update will wait until they finish")
+                self.reexec = str(target)
+                self.sessions.accepting = False
+                result = {"replacing": True, "preservesShells": True}
+                asyncio.get_running_loop().call_later(.1,self.stopping.set)
             elif method == "upgrade.stop":
                 result = self.stop_for_upgrade(p.get("allowRestart", False))
             elif method == "stop":
@@ -540,6 +570,12 @@ class Host:
         with contextlib.suppress(Exception):
             await writer.wait_closed()
 
+    async def watch_programs(self) -> None:
+        while True:
+            if not self.reexec:
+                await self.sessions.refresh_programs()
+            await asyncio.sleep(1)
+
     async def maintenance(self) -> None:
         while True:
             await asyncio.sleep(60)
@@ -556,7 +592,8 @@ class Host:
         if not installation(self.state.root):
             raise ValueError("Use the public installer once to enable automatic updates")
         if self.update_process is not None and self.update_process.poll() is None:
-            return {"state": "checking"}
+            from .updates import status
+            return status(self.state.root)
         args = [sys.executable, "-m", "jaunt.updates"]
         if automatic:
             args.append("--automatic")
@@ -574,7 +611,17 @@ class Host:
 
     async def run(self) -> None:
         relay_url(self.state.data["relay"], self.state.data["room"])
-        self.lockfile = open(self.state.root / "daemon.lock", "a+")
+        handoff = os.environ.pop("jaunt_HANDOFF_FD", "")
+        if handoff:
+            from .handoff import restore
+            self.lockfile = restore(self.sessions,int(handoff))
+            self.last_update_check = time.monotonic()
+            updater=os.environ.pop('jaunt_HANDOFF_UPDATER','')
+            if updater:
+                from .handoff import InheritedChild
+                self.update_process=InheritedChild(int(updater))
+        else:
+            self.lockfile = open(self.state.root / "daemon.lock", "a+")
         os.chmod(self.state.root / "daemon.lock", 0o600)
         try:
             fcntl.flock(self.lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -589,13 +636,53 @@ class Host:
             loop.add_signal_handler(sig, self.stopping.set)
         transport_task = asyncio.create_task(self.transport.run())
         maintenance = asyncio.create_task(self.maintenance())
+        programs = asyncio.create_task(self.watch_programs())
+        state = None
         try:
-            await self.stopping.wait()
+            while True:
+                await self.stopping.wait()
+                if self.reexec:
+                    try:
+                        from .handoff import snapshot
+                        state = await snapshot(self.sessions,self.lockfile.fileno())
+                    except Exception:
+                        # A failed snapshot must leave the old host and PTYs usable.
+                        from .state import atomic_json
+                        atomic_json(self.state.root/'update-status.json',{'state':'error','message':'Could not prepare the update; existing shells are still running.'})
+                        self.reexec=None;self.stopping.clear();self.sessions.accepting=True
+                        for session in self.sessions.items.values():
+                            session.resizing=False
+                            if session.fd>=0:os.set_inheritable(session.fd,False)
+                            if session.alive:
+                                self.sessions._resume_reader(session)
+                            if session.reaper is None or session.reaper.done():session.reaper=asyncio.create_task(self.sessions._reap(session,announce=session.alive))
+                        continue
+                break
         finally:
+            programs.cancel()
+            await asyncio.gather(programs, return_exceptions=True)
             maintenance.cancel()
+            server.close()
+            # Local clients must observe EOF immediately, not an online socket
+            # that only rejects requests while the old runtime is draining.
+            for peer in tuple(self.peers.values()):
+                if getattr(peer,'local',False):
+                    peer.ready=False;peer.writer.close();peer.task.cancel()
             await self.transport.close()
             transport_task.cancel()
             await self.disconnected()
+            if self.reexec:
+                env={**os.environ,"jaunt_HANDOFF_FD":str(state.fileno()),"jaunt_STATE":str(self.state.root)}
+                if self.update_process is not None and self.update_process.poll() is None:
+                    env['jaunt_HANDOFF_UPDATER']=str(self.update_process.pid)
+                try:
+                    os.execve(self.reexec,[self.reexec,"-m","jaunt.cli","daemon"],env)
+                except OSError:
+                    # The old runtime is retained on disk. If exec itself fails,
+                    # re-enter it with the same handoff instead of closing PTYs.
+                    from .state import atomic_json
+                    atomic_json(self.state.root/'update-status.json',{'state':'error','message':'Runtime replacement failed; existing shells were preserved.'})
+                    os.execve(sys.executable,[sys.executable,"-m","jaunt.cli","daemon"],env)
             await self.sessions.shutdown()
             self.files.cleanup(all_files=True)
             server.close()

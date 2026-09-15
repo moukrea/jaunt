@@ -1,13 +1,11 @@
-# jaunt 0.1.0-beta.10
+# jaunt 0.1.0-beta.11
 
-New bash sessions now load the login environment and the interactive shell configuration, restoring user command paths and prompts even when `.bash_profile` omits `.bashrc`. Accounts without a `SHELL` environment variable use their configured account shell.
+Compatible host updates now replace the runtime while preserving ordinary shell processes, their working directories, environment and terminal history. Clients reconnect automatically. Older hosts need one protected migration: their active shells cannot be preserved retroactively, and the installer still requires explicit authorization before terminating them.
 
-On Ubuntu with restricted user namespaces, `jaunt gui` and graphical installation select the verified system desktop package so AppArmor and sandbox support are installed correctly. System authorization may be requested for the desktop package; the host remains a per-user service.
+The shared workspace fixes squeezed Settings labels, unstable tab positions, mobile history jumps and oversized error messages. Tabs support drag-and-drop ordering and double-click renaming; the desktop sidebar can collapse. Claude and Codex foreground programs use locally bundled Meteor brand icons in tabs and pane captions. Other programs retain the terminal icon.
 
-Program notifications preserve OSC 9 messages and OSC 777 title/body. Companion desktop and Android clients display that content and open the requested session on notification clicks. They use locally bundled Lucide icons, corrected launcher packaging, clearer split-pane controls, and touch/keyboard scroll fixes.
+Web, desktop, Android and CLI support system language detection and explicit English, French, Spanish, Italian, Portuguese and German preferences. English remains the canonical repository documentation, with linked translated copies. The web homepage introduces the project and provides copyable installation commands; native apps open the workspace directly.
 
-Existing pairing identities and running shells remain protected during automatic updates. Closing a view does not kill its shell; explicit termination remains available from host and clients. Updates still require explicit restart authorization before destroying active ordinary shells.
+The installer offers `--client-only` for a desktop client without installing a local host or exposing local host controls. Update and transfer operations retain visible progress and final results. Desktop windows are titled `jaunt`; the installed web app is named `jaunt (PWA)`. Launcher and web icons use the supplied transparent artwork.
 
-The protocol has not undergone an independent security audit. Physical-phone validation is not claimed. See the delivery regression report for commands and observed results.
-
-Session controls now keep Open, Rename, Close view and Terminate inside each responsive session card. New shell creates an automatically named terminal immediately. New shell in folder offers directory browsing and an optional name. The host can inherit the active shell’s current directory. Desktop has separate side-by-side and above/below split controls, an inline choice of new or existing sessions, and a button to move each pane into its own tab. Mobile retains ordinary session tabs. Closing a view keeps its shell alive; termination still requires explicit confirmation.
+The protocol has not undergone an independent security audit. Physical-phone validation is not claimed. See [the validation report](SEAMLESS_WORKSPACE_VALIDATION.md) for observed tests and remaining platform boundaries.

@@ -21,17 +21,20 @@ def main():
     with tempfile.TemporaryDirectory(prefix='jaunt-install-test-') as tmp:
         t=Path(tmp);mirror=t/'mirror';mirror.mkdir();relayport=freeport()
         shutil.copytree(ROOT/'web',mirror,dirs_exist_ok=True)
-        release=json.loads((ROOT/'dist/host-manifest.json').read_text())
-        for name in ('host-manifest.json','SHA256SUMS',release['wheel']):shutil.copy2(ROOT/'dist'/name,mirror/name)
+        legacy=Path(os.environ['jaunt_LEGACY_RELEASE_DIR']) if os.environ.get('jaunt_LEGACY_RELEASE_DIR') else None
+        initial=legacy or ROOT/'dist'
+        release=json.loads((initial/'host-manifest.json').read_text())
+        for name in ('host-manifest.json','SHA256SUMS',release['wheel']):shutil.copy2(initial/name,mirror/name)
         class Handler(http.server.SimpleHTTPRequestHandler):
             def log_message(self,*_):pass
         server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(mirror)))
         threading.Thread(target=server.serve_forever,daemon=True).start();url=f'http://127.0.0.1:{server.server_port}'
+        if legacy:tag='v'+release['wheel'].split('-')[1].replace('b','-beta.')
         config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':tag,'page':url+'/'}
         (mirror/'config.json').write_text(json.dumps(config))
         env={**os.environ,'jaunt_DEV_INSTALL':'1','jaunt_TEST_SYSTEM_SITE':'1','jaunt_PIP_NO_DEPS':'1',
              'jaunt_PREFIX':str(t/'runtime'),'jaunt_BIN_DIR':str(t/'bin'),'jaunt_STATE':str(t/'state'),
-             'jaunt_PAGE_URL':url,'jaunt_RELEASE_BASE':url,'jaunt_NO_SERVICE':'1','jaunt_SKIP_PAIR':'1',
+             'jaunt_DESKTOP_ROOT':str(t/'desktop'),'jaunt_PAGE_URL':url,'jaunt_RELEASE_BASE':url,'jaunt_NO_SERVICE':'1','jaunt_SKIP_PAIR':'1',
              'PIP_NO_INDEX':'1','PIP_DISABLE_PIP_VERSION_CHECK':'1'}
         sentinels=t/'service-manager-sentinels';sentinels.mkdir()
         service_calls=t/'unexpected-service-manager-call'
@@ -69,7 +72,7 @@ def main():
                 if status['connected']:break
                 time.sleep(.1)
             assert status['connected'];room=status['machine']['room'];pid=status['pid']
-            assert cli('--version').strip()==version;passed('wheel installed in private runtime; actual daemon connects to relay')
+            assert cli('--version').strip()==(release['wheel'].split('-')[1] if legacy else version);passed('wheel installed in private runtime; actual daemon connects to relay')
             py=t/'runtime/current/bin/python'
             origin=subprocess.check_output([str(py),'-c','import jaunt;print(jaunt.__file__)'],env=env,text=True).strip()
             assert Path(origin).resolve().is_relative_to(t/'runtime/versions') and '/site-packages/' in origin
@@ -99,21 +102,44 @@ def main():
                 assert created['name'].endswith(' 1')
                 before=json.loads(cli('status'));pointer=(t/'runtime/current').resolve()
                 assert before['sessions'][0]['alive']
-                refused=install()
-                assert refused.returncode and 'plain shells are running' in refused.stderr
+                if legacy:
+                    candidate=json.loads((ROOT/'dist/host-manifest.json').read_text())
+                    for name in ('host-manifest.json','SHA256SUMS',candidate['wheel']):shutil.copy2(ROOT/'dist'/name,mirror/name)
+                    config['release']='v'+version.replace('b','-beta.');(mirror/'config.json').write_text(json.dumps(config))
+                    refused=install()
+                    assert refused.returncode and 'plain shells are running' in refused.stderr,refused.stdout+refused.stderr
+                    after=json.loads(cli('status'))
+                    assert after['pid']==before['pid'] and after['sessions'][0]['pid']==before['sessions'][0]['pid']
+                    assert after['sessions'][0]['alive'] and (t/'runtime/current').resolve()==pointer
+                    devices=set(json.loads((t/'state/host.json').read_text())['devices'])
+                    approved=install({'jaunt_ALLOW_RESTART':'1'})
+                    assert approved.returncode==0,approved.stdout+approved.stderr
+                    after=json.loads(cli('status'))
+                    assert after['pid']!=before['pid'] and after['sessions']==[]
+                    assert after['machine']['room']==room and set(json.loads((t/'state/host.json').read_text())['devices'])==devices
+                    assert not service_calls.exists()
+                    passed('public legacy host refuses to end active shell without authorization; explicit fixture restart preserves identity and devices')
+                    browser.close()
+                    return
+                area=page.locator('.terminal-container:not([hidden]) textarea')
+                expect(area).to_be_enabled();area.focus();page.keyboard.type("export INSTALL_HANDOFF=preserved; printf before > installed-proof.txt");page.keyboard.press('Enter')
+                deadline=time.time()+10
+                while not (t/'installed-proof.txt').exists() and time.time()<deadline:time.sleep(.1)
+                assert (t/'installed-proof.txt').read_text()=='before'
+                devices=set(json.loads((t/'state/host.json').read_text())['devices'])
+                upgraded=install()
+                assert upgraded.returncode==0,upgraded.stdout+upgraded.stderr
                 after=json.loads(cli('status'))
                 assert after['pid']==before['pid'] and after['sessions'][0]['pid']==before['sessions'][0]['pid']
-                assert after['sessions'][0]['alive'] and (t/'runtime/current').resolve()==pointer
-                passed('installer refuses upgrade with active real shell, preserving daemon and runtime')
-                devices=set(json.loads((t/'state/host.json').read_text())['devices'])
-                approved=install({'jaunt_ALLOW_RESTART':'1'})
-                assert approved.returncode==0,approved.stdout+approved.stderr
-                after=json.loads(cli('status'))
-                assert after['pid']!=before['pid'] and after['sessions']==[]
+                assert after['sessions'][0]['alive'] and (t/'runtime/current').resolve()!=pointer
                 assert after['machine']['room']==room
                 assert set(json.loads((t/'state/host.json').read_text())['devices'])==devices
-                expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
-                passed('explicit restart ends plain shell, preserves identity/devices and reconnects browser')
+                expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
+                expect(area).to_be_enabled();area.focus();page.keyboard.type('printf "%s" "$INSTALL_HANDOFF" >> installed-proof.txt');page.keyboard.press('Enter')
+                deadline=time.time()+10
+                while (t/'installed-proof.txt').read_text()!='beforepreserved' and time.time()<deadline:time.sleep(.1)
+                assert (t/'installed-proof.txt').read_text()=='beforepreserved'
+                passed('installed runtime replacement preserves daemon and shell PID, environment, cwd, identity and devices; browser executes after reconnect')
                 assert not service_calls.exists(), 'No-service installation invoked the account service manager'
                 passed('no-service installation never calls systemctl or launchctl')
                 browser.close()
