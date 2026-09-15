@@ -16,4 +16,3 @@ def fetch(url: str, maximum: int) -> bytes:
     if len(data) > maximum:
         raise ValueError("Update artifact exceeds its size limit")
     return data
-
