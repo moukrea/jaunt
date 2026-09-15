@@ -31,6 +31,13 @@ async def main():
             await page.locator('#select-terminal-text').click();assert 'LAST-ROW-PROVED' in await page.get_by_label('Select terminal text').input_value()
             await page.get_by_role('button',name='Back to terminal',exact=True).click()
             await page.locator('#settings-button').click();await page.get_by_label('Color theme').select_option('light');assert await page.locator('html').get_attribute('data-theme')=='light'
+            # onchange persists asynchronously. Observe the actual committed vault
+            # before navigating away; an immediate reload can abort its transaction.
+            for _ in range(50):
+                saved=await page.evaluate("async()=>{const {Vault}=await import('./js/vault.mjs');const v=new Vault();await v.load();return v.data.preferences.theme;}")
+                if saved=='light':break
+                await asyncio.sleep(.1)
+            assert saved=='light', 'Theme was not committed to the local vault'
             await page.reload();await page.locator('#settings-button').click();await expect(page.get_by_label('Color theme')).to_have_value('light')
             await page.get_by_label('Color theme').select_option('dark');await page.locator('[data-view=terminal]').first.click()
             for name,setting in [('claude','CLAUDE_CONFIG_DIR'),('codex','CODEX_HOME')]:
