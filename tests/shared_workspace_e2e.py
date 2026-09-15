@@ -12,6 +12,8 @@ async def main():
         launcher.write_text('#!/bin/sh\nexec '+shlex.quote(sys.executable)+' -m jaunt.cli "$@"\n');launcher.chmod(0o700)
         debug=port()
         env={**h.env,'DISPLAY':os.environ.get('DISPLAY',':179'),'jaunt_host_executable':str(launcher)}
+        # The shell fixture is headless; Electron must retain xvfb-run's X cookie.
+        if os.environ.get('XAUTHORITY'):env['XAUTHORITY']=os.environ['XAUTHORITY']
         env.pop('ELECTRON_RUN_AS_NODE',None)
         electron=subprocess.Popen([str(ROOT/'node_modules/.bin/electron'),'.','--ozone-platform=x11','--disable-gpu',f'--user-data-dir={h.root}/desktop-profile','--no-sandbox',f'--remote-debugging-port={debug}'],cwd=ROOT,env=env,stdout=h.log,stderr=h.log)
         async with async_playwright() as pw:

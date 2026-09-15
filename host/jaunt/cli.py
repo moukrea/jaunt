@@ -162,7 +162,10 @@ def main() -> None:
         elif args.command == "gui":
             from .desktop import install_gui
             desktop = Path.home() / ".local/share/jaunt-desktop/current" / ("jaunt.app/Contents/MacOS/jaunt" if platform.system() == "Darwin" else "jaunt-desktop")
-            if args.install_only or not desktop.is_file():
+            system_desktop = shutil.which("jaunt-desktop") if platform.system() == "Linux" else None
+            if system_desktop:
+                desktop = Path(system_desktop)
+            elif args.install_only or not desktop.is_file():
                 desktop = install_gui()
             if not args.install_only:
                 subprocess.Popen([str(desktop)], start_new_session=True, stdin=subprocess.DEVNULL)

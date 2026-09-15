@@ -1,6 +1,6 @@
 # Workspace validation — 2026-09-15
 
-This report records observations, not a certification. The custom protocol remains independently unaudited. Publication checks will be recorded here after the candidate artifacts are deployed.
+This report records observations, not a certification. The custom protocol remains independently unaudited. Public release checks are recorded separately from the following candidate observations.
 
 ## Local observations
 
@@ -17,6 +17,7 @@ This report records observations, not a certification. The custom protocol remai
 | `python tests/terminal_render_e2e.py` | Long-output wheel scroll and return to latest, final row/column bounds, native text selection control, persisted themes, synchronized-output fixture; installed Claude Code/Codex startup screens in isolated, unauthenticated profiles |
 | Android Gradle debug build/unit tests | Build and native unit tests passed |
 | `python tests/android_workspace_e2e.py` | Android 14 emulator: installed APK → project-owned public relay → isolated real host → proven command; actual screen tap opens IME and shrinks viewport; status-bar bounds, rotation and screen-off OS notification from a terminal BEL passed |
+| Installed `.deb` in Ubuntu 24.04.5 VM | Native app opened, non-editable candidate wheel executed a proven local PTY command, renderer had Seccomp=2 and NoNewPrivs=1, and no sandbox override was present |
 | `npm audit` | Zero reported vulnerabilities in the resolved dependency tree |
 
 The local toolchain included Python 3.14.2, Node 25.5.0, npm 11.8.0, Java 17, Gradle 9.5.0, Electron 44.3.0, xterm 6.0.0, FitAddon 0.11.0, and jsQR 1.4.0. CI uses Node 22 and its configured Python/Linux/macOS matrix. The actual installed CLI startup checks used Claude Code 2.1.272 and codex-cli 0.154.0; they did not submit model requests or inspect user conversations/credentials.
@@ -34,7 +35,7 @@ Version references were checked against [Electron's official release record](htt
 
 CI additionally caught macOS Bash 3.2 compatibility in the environment-alias bootstrap and an old-wheel/new-installer state-directory mismatch. The compatibility bootstrap now runs before importing an old wheel, including subsequent CLI invocations. The real Fedora confined-curl test passes with the public beta.5 wheel and candidate installer.
 
-The source-mode headless Electron test uses a test-only sandbox override in an isolated X server. That is not evidence that the packaged production sandbox works; the installed-package check must run without that override. Production main/preload code never disables the sandbox.
+The source-mode headless Electron test uses a test-only sandbox override in an isolated X server. The separate installed-package check passed without that override on the Ubuntu VM. Production main/preload code never disables the sandbox.
 
 ## Remaining validation boundaries
 

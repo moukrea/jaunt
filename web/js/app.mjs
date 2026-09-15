@@ -112,7 +112,7 @@ function handleMessage(a, message) {
     const t = a.terms.get(message.id); if (!t) return;
     Object.assign(t.session, message); t.ownsSize = message.activeView === a.peer;
     // Serialize geometry with xterm's asynchronous output parser, including replay.
-    t.term.write('', () => {t.term.resize(message.cols, message.rows);
+    t.term.write('', () => {t.term.resize(message.cols, message.rows);t.term.refresh(0,t.term.rows-1);
       if(t.term.element)t.term.element.style.height=t.ownsSize?'100%':t.node.querySelector('.xterm-screen').getBoundingClientRect().height+'px';
       updateGeometryLabel(a, t);});
   } else if (message.type === 'terminal.reset') {
@@ -322,7 +322,7 @@ function claimSize(a, t) {
   try {
     const d = t.fit.proposeDimensions(); if (!d) return;
     if(owned && d.cols===t.term.cols && d.rows===t.term.rows)return;
-    t.term.resize(d.cols, d.rows);
+    t.fit.fit();
     a.link.send({type: 'terminal.resize', id: t.session.id, ...d}).catch(report);
   } catch { /* Retry after layout. */ }
 }
@@ -797,7 +797,7 @@ setInterval(() => { if (vault.data) applyTheme(); }, 60000);
 matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (vault.data) applyTheme(); });
 function hostPreferences(a) {
   const name = el('input', {value:a.machine.friendlyName || a.machine.name, maxlength:80, 'aria-label':'Friendly host name'});
-  name.onchange = async () => { a.machine.friendlyName = name.value.trim().slice(0,80) || a.machine.name; await persist(); renderMachines(); };
+  name.onchange = async () => { a.machine.friendlyName = name.value.trim().slice(0,80) || a.machine.name; await persist(); render(); };
   const order = el('div',{class:'modal-actions'});
   for (const [delta,label] of [[-1,'Move up'],[1,'Move down']]) order.append(button(label,async()=>{
     const list=vault.data.machines, from=list.indexOf(a.machine), to=from+delta;
