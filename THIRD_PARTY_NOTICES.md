@@ -1,11 +1,11 @@
-# Licences et dépendances
+# Third-party licenses and dependencies
 
-Le code Jaunt est sous licence MIT, copyright moukrea. Le logo est fourni par le propriétaire du projet ; vérifier les droits avant toute redistribution hors du projet. Aucune police propriétaire n'est distribuée : l'interface utilise les polices système.
+Jaunt code is licensed under MIT, copyright moukrea. The project owner supplied the logo; verify rights before redistributing it outside this project. No proprietary fonts are distributed: the UI uses system fonts.
 
-- `web/vendor/xterm.mjs` et `xterm.css` : xterm.js et FitAddon, licence MIT, voir `web/vendor/LICENSE-xterm.txt`. Bundle reçu avec les sources initiales ; aucune prétention à une build reproductible de ce bundle sans retrouver sa version/source exacte. Tester les mises à jour avant remplacement.
-- Le build web installe **jsQR 1.4.0**, licence Apache-2.0, à partir du package npm `jsqr`, puis copie la source et sa licence sous `web/vendor`. Source : https://github.com/cozmo/jsQR . Aucun CDN JavaScript exécuté à la volée dans la page.
-- Hôte : Python (PSF), websockets (BSD), cryptography (Apache-2.0/BSD), qrcode (BSD), pywebpush (MPL-2.0). Les dépendances sont installées séparément dans l'environnement privé ; leurs licences restent applicables.
-- Outils de build/test : pytest, Playwright, Wrangler/Miniflare, setuptools, wheel. Voir leurs distributions et métadonnées de licence.
-- L'installateur peut télécharger uv et Python depuis leurs canaux officiels lorsque Python manque. Ce téléchargement n'est pas une inclusion de leurs binaires dans le ZIP source.
+- `web/vendor/xterm.mjs` and `xterm.css`: xterm.js and FitAddon, MIT license; see `web/vendor/LICENSE-xterm.txt`. This bundle arrived with the original sources. No reproducible-build claim is made without recovering its exact version/source. Test updates before replacing it.
+- The web build installs **jsQR 1.4.0**, Apache-2.0, from the npm `jsqr` package and copies its source and license into `web/vendor`. Source: https://github.com/cozmo/jsQR . No CDN JavaScript runs dynamically in the page.
+- Host: Python (PSF), websockets (BSD), cryptography (Apache-2.0/BSD), qrcode (BSD), pywebpush (MPL-2.0). Dependencies are installed separately in the private environment; their licenses still apply.
+- Build/test tools: pytest, Playwright, Wrangler/Miniflare, setuptools, wheel. See their distributions and license metadata.
+- When Python is missing, the installer may download uv and Python from their official channels. Their binaries are not bundled in the source ZIP.
 
-Le SHA-256 du wheel détecte un téléchargement corrompu, mais ne constitue pas une signature indépendante du même compte GitHub qui publie le manifeste. Protéger le dépôt et les autorisations de release.
+The wheel SHA-256 detects a corrupted download, but is not a signature independent of the GitHub account publishing the manifest. Protect the repository and release permissions.

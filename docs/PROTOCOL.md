@@ -1,41 +1,41 @@
-# Protocole Jaunt v1
+# Jaunt protocol v1
 
-Ce document décrit l'implémentation, pas un standard ni une garantie de sécurité.
+This document describes the implementation, not a standard or security guarantee.
 
-## Transport et identités
+## Transport and identities
 
-Endpoint `wss://RELAY/v1/room/ROOM`. ROOM : 18 octets aléatoires, base64url sans padding (24 caractères). Capacités de routage : 32 octets, 43 caractères. L'hôte s'enregistre avec `hostToken` et `clientToken`. Le Durable Object stocke leurs SHA-256 lors d'une première transaction atomique ; un autre hôte ne peut pas remplacer ces valeurs. Le navigateur possède seulement clientToken. Les messages client sont routés avec un peer ID attribué par le relais, pas choisi par le client.
+Endpoint: `wss://RELAY/v1/room/ROOM`. ROOM is 18 random bytes, encoded as unpadded base64url (24 characters). Routing capabilities are 32 bytes (43 characters). The host registers with `hostToken` and `clientToken`. The Durable Object stores their SHA-256 hashes in an initial atomic transaction; another host cannot replace them. The browser holds only clientToken. Client messages are routed using a peer ID assigned by the relay, not chosen by the client.
 
-Le relais stocke les hashes de routage et états d'attachement nécessaires à l'hibernation, jamais l'historique du terminal. Les clés de chiffrement restent aux extrémités. Les deux connexions sont sortantes, sans port entrant sur la machine.
+The relay stores routing hashes and attachment state needed for hibernation, never terminal history. Encryption keys remain at the endpoints. Both connections are outbound; the host needs no incoming port.
 
-## Appairage
+## Pairing
 
-`JAUNT1.` + JSON base64url, contenant `v` (version), `r` (relais), `h` (room), `t` (clientToken), `p` (pair ID), `s` (pair secret), `n` (nom hôte). La date d’expiration est conservée et contrôlée côté hôte, pas utilisée comme autorité côté navigateur. Un QR pointe vers la Page avec ce code dans le fragment. Durée 600 secondes, usage unique.
+`JAUNT1.` followed by base64url JSON containing `v` (version), `r` (relay), `h` (room), `t` (clientToken), `p` (pair ID), `s` (pair secret), and `n` (host name). The host stores and enforces the expiry; the browser does not treat its own expiry value as authoritative. A QR code points to the page with this code in the fragment. Lifetime: 600 seconds, single use.
 
-Le navigateur crée son device ID et secret de 32 octets, les sauvegarde AVANT de consommer le QR, puis les transmet seulement après authentification/chiffrement. Si le welcome final est perdu, il essaie d'abord l'identité appareil déjà persistée, puis le pairing si encore valide. La révocation supprime l'autorisation côté hôte et ferme les canaux de cet appareil.
+The browser creates its device ID and 32-byte secret and saves them BEFORE consuming the QR code, then transmits them only after authentication and encryption. If the final welcome message is lost, it first tries the persisted device identity, then pairing if still valid. Revocation removes host-side authorization and closes that device's channels.
 
 ## Handshake
 
-Client et serveur créent chacun une clé P-256 éphémère. Clé publique SEC1 non compressée, base64url. Le transcript est le tableau JSON compact, ASCII, dans cet ordre :
+Client and server each create an ephemeral P-256 key. Public keys use uncompressed SEC1 encoding and base64url. The transcript is a compact ASCII JSON array in this exact order:
 
 ```
 ["jaunt-v1", room, auth, id, pair-or-"", clientNonce, clientPublic, serverNonce, serverPublic]
 ```
 
-Les preuves sont HMAC-SHA256(secret, `server:` || transcript) et HMAC-SHA256(secret, `client:` || transcript), comparées avant ouverture du canal. `auth` distingue pairing et appareil mémorisé. Nonces aléatoires par connexion.
+Proofs are HMAC-SHA256(secret, `server:` || transcript) and HMAC-SHA256(secret, `client:` || transcript), checked before opening the channel. `auth` distinguishes pairing from a remembered device. Each connection uses random nonces.
 
-Shared = P-256 ECDH. AAD = SHA256(transcript). HKDF-SHA256, longueur 32, salt SHA256(secret), info AAD || `jaunt-c2h` ou AAD || `jaunt-h2c`. Deux clés AES-256-GCM indépendantes par direction. Compteurs stricts à partir de 1, nonce de 12 octets = 4 zéros + uint64 big-endian du compteur. Nonce épuisé avant 2^53 : fermer et reconnecter. Tout saut, doublon ou échec GCM ferme le canal. Aucune clé éphémère réutilisée après reconnexion.
+Shared = P-256 ECDH. AAD = SHA256(transcript). HKDF-SHA256, length 32, salt SHA256(secret), info AAD || `jaunt-c2h` or AAD || `jaunt-h2c`. Two independent AES-256-GCM keys, one per direction. Strict counters start at 1; the 12-byte nonce is four zero bytes followed by the big-endian uint64 counter. Close and reconnect before the nonce counter reaches 2^53. Any gap, duplicate, or GCM failure closes the channel. Ephemeral keys are never reused after reconnecting.
 
-Trame application : `{type:"box", n:counter, ct:base64url(ciphertext+tag)}`. Le message déchiffré est JSON ; les blocs binaires sont base64url. Budget transport 132 000 caractères. Les entrées/sorties/fichiers sont découpés avant chiffrement.
+Application frame: `{type:"box", n:counter, ct:base64url(ciphertext+tag)}`. Decrypted messages are JSON; binary chunks use base64url. Transport budget: 132,000 characters. Input, output, and files are chunked before encryption.
 
-## RPC et flux
+## RPC and streams
 
-Requêtes `{type:"rpc", id, method, params}` ; réponses `{type:"reply", id, ok:true, result}` ou forme d'erreur définie dans daemon.py. Les méthodes et événements sont à lire dans `Peer.dispatch`/`Host.rpc`, source de vérité, plutôt que d'inventer un second schéma divergent.
+Requests: `{type:"rpc", id, method, params}`. Responses: `{type:"reply", id, ok:true, result}`, or the error form defined in daemon.py. `Peer.dispatch` and `Host.rpc` are the source of truth for methods and events; do not invent a second, diverging schema.
 
-Sessions : IDs idempotents, sorties avec offset absolu d'octet. Après reconnexion `session.attach(after)` rejoue uniquement la partie conservée non reçue. Si le buffer a été tronqué, événement reset explicite. Les dimensions sont partagées : le dernier client actif redimensionne la PTY commune.
+Sessions use idempotent IDs and output with absolute byte offsets. After reconnection, `session.attach(after)` replays only retained output that has not been received. If the buffer was truncated, an explicit reset event is sent. Dimensions are shared: the last active client resizes the common PTY.
 
-Uploads : ID par transfert, propriétaire device, offset attendu, réponse offset sur doublon. SHA-256 calculé à la réception ; commit atomique sans écraser une destination concurrente. Temporaire dans le même dossier, permissions 0600. Expiration après une heure d'inactivité. Pas de reprise disque après redémarrage de l'hôte. Downloads : lecture de fichier régulier, taille et mtime contrôlées, blocs 48 Kio.
+Uploads use per-transfer IDs, device ownership, an expected offset, and an offset response for duplicate chunks. SHA-256 is calculated during receipt; commit is atomic and does not overwrite a concurrently created destination. Temporary files are in the same directory with mode 0600. Transfers expire after one hour of inactivity. There is no on-disk resumption after a host restart. Downloads read regular files, check size and mtime, and use 48 KiB chunks.
 
-## Évolution
+## Evolution
 
-Un client Android natif doit implémenter ce protocole et le même stockage d'identité, pas copier la session WebSocket du navigateur. Versionner tout changement incompatible. Les tests d'interopérabilité Python/Web Crypto et les tests de replay doivent rester bloquants en CI.
+A native Android client must implement this protocol and the same identity storage semantics; it must not copy the browser's WebSocket session. Version every incompatible change. Python/Web Crypto interoperability and replay tests must remain required in CI.

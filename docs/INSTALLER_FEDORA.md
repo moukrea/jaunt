@@ -1,28 +1,33 @@
-# Correctif de lancement de l’installateur — 15 septembre 2026
+# Installer corrections — September 15, 2026
 
-Le signalement utilisateur concerne Fedora : la commande reste silencieuse et le binaire reste en beta.2. La cause exacte sur cette machine n’est pas établie ; aucun accès distant à cette machine ni diagnostic supplémentaire demandé.
+The initial user report concerned Fedora: the command produced no output and the executable remained on beta.2. There was no remote access to that machine. The initial bootstrap corrections did not establish the cause on the user's machine. A subsequent report provided `curl (23) Failed writing body` during the `config.json` download.
 
-## Défauts reproduits et corrections
+## Reproduced defects and corrections
 
-- L’ancienne commande `curl -fsSL … | bash` retourne 0 lorsque curl échoue et Bash reçoit une entrée vide. La commande officielle utilise maintenant Bash avec `pipefail`, une progression visible, un délai de connexion de 10 secondes et une durée maximale de 120 secondes pour télécharger le script.
-- Une configuration `.curlrc` avec une sortie fichier absorbe le script : rien n’est exécuté. Reproduit avec le vrai curl et un serveur HTTP local. L’option `-q` en première position ignore cette configuration dans la commande officielle ; les téléchargements internes utilisent `--disable`.
-- Le script annonce immédiatement son démarrage puis chaque téléchargement. Les erreurs inattendues indiquent l’étape, la ligne et le code de sortie, sans afficher de secrets ni de commande complète.
-- Les téléchargements HTTPS internes sont bornés à 120 secondes par tentative. Les erreurs de connexion/transfert sélectionnées déclenchent une seconde tentative IPv4 visible ; les erreurs HTTP et de certificat ne sont pas contournées. Les redirections HTTPS restent obligatoires.
-- Les gardes sur les shells actifs, la vérification du wheel et la conservation de l’identité restent en place.
+- The old `curl -fsSL … | bash` command returns 0 when curl fails and Bash receives empty input. The official command now uses Bash with `pipefail`, visible progress, a ten-second connection timeout, and a 120-second limit for the initial script download.
+- A `.curlrc` output-file setting can absorb the script so nothing runs. This was reproduced using real curl and a local HTTP server. The leading `-q` ignores that configuration in the official command; internal downloads use `--disable`.
+- The script immediately announces startup and each download. Unexpected errors identify the stage, line, and exit code without printing secrets or complete commands.
+- Internal HTTPS downloads are bounded at 120 seconds per attempt. Selected connection/transfer errors trigger one visible IPv4 retry; HTTP and certificate failures are not bypassed. Redirects remain restricted to HTTPS.
+- A curl process with a separate filesystem namespace cannot open the temporary-directory path created by Bash. A real Fedora-container curl reproduced exit 23 at `Downloading config.json`, before any installation mutation. Downloads now use shell output redirection: Bash opens the destination and curl writes through inherited stdout. This works even when curl cannot see the destination path. It does not bypass actual storage exhaustion or write denial.
+- Active-shell guards, wheel verification, and identity preservation remain in place.
+
+The curl documentation defines [exit 23 as a local write failure](https://curl.se/libcurl/c/libcurl-errors.html). That code alone does not identify the exact cause on the user's machine; filesystem isolation is the reproduced case addressed here.
 
 ## Observations
 
-- `pytest -q tests/test_installer_bootstrap.py` : 4 échecs avec les fichiers précédents, puis 4 succès avec le correctif. Les cas portent sur l’échec réseau, l’échec HTTP, le code de sortie du pipeline et le détournement du flux par `.curlrc`.
-- `pytest -q` : 49 tests réussis localement (Python 3.14.2).
-- `python scripts/build_release.py`, `npm run prepare-web`, `python scripts/check_project.py` : réussis.
-- `python tests/installer_e2e.py` : 8 contrôles réussis, dont checksum altéré, refus de tuer un vrai shell actif et restart explicitement autorisé.
-- Fedora 44, conteneur officiel neuf, ancien script public exécuté par `curl … | bash` : installation beta.5 réussie. Le problème utilisateur n’est donc pas reproduit par le seul choix de Fedora.
-- Fedora 44, conteneur officiel neuf, script corrigé transmis à Bash par un pipe : installation réelle du wheel public beta.5 réussie, Python privé 3.12.14 installé par uv ; code de sortie 0 et version 0.1.0b5.
-- Fedora 43, conteneur officiel neuf : ancien installateur et wheel public beta.2, puis script corrigé et wheel public beta.5 ; version vérifiée avant/après, identité et table des appareils identiques après upgrade.
-- La CI ajoute les installations réelles sur Fedora 43 et 44 au job requis `test`.
+- `pytest -q tests/test_installer_bootstrap.py`: four failures against the previous bootstrap files, then four passes after the first correction. These cover network failure, HTTP failure, pipeline exit status, and `.curlrc` output redirection.
+- `pytest -q`: 49 tests passed locally with Python 3.14.2 after the first correction.
+- `python scripts/build_release.py`, `npm run prepare-web`, `python scripts/check_project.py`: passed.
+- `python tests/installer_e2e.py`: eight checks passed, including tampered checksums, refusing to kill a real active shell, and explicitly authorized restart.
+- Fedora 44, fresh official container, previous public script through `curl … | bash`: beta.5 installation succeeded. Fedora alone did not reproduce the user's problem.
+- Fedora 44, fresh official container, corrected script piped into Bash: installed the real public beta.5 wheel, with private Python 3.12.14 installed by uv; exit 0 and version 0.1.0b5.
+- Fedora 43, fresh official container: previous installer and public beta.2 wheel, followed by the corrected installer and public beta.5 wheel. Versions checked before/after; identity and device table preserved.
+- The first corrected command was fetched from the published page and executed in a fresh Fedora 43 container after [Pages deployment](https://github.com/moukrea/jaunt/actions/runs/34931947575). Public installer bytes matched the reviewed source and version 0.1.0b5 was verified.
+- `python tests/installer_namespace_e2e.py`: real public wheel installation with curl in a Fedora 44 container and Bash/Python outside it. No host directories are mounted into curl's container. Before the output-redirection fix, config download failed with exit 23. After the fix, the wheel installed from the public release, imported from the private runtime, and started the daemon with automatic updates enabled.
+- Required CI includes real Fedora 43/44 installations. The Fedora 44 job additionally runs the separate-filesystem curl installation regression.
 
-Les essais Fedora utilisent des conteneurs isolés sans gestionnaire de service utilisateur (`JAUNT_NO_SERVICE=1`) et sans afficher de QR (`JAUNT_SKIP_PAIR=1`). Ils valident l’installation et le démarrage en arrière-plan, pas systemd/SELinux sur un poste Fedora physique. Le service utilisateur avait été validé sur Ubuntu ; aucune nouvelle validation Fedora physique n’est revendiquée.
+Fedora tests use isolated containers without a user service manager (`JAUNT_NO_SERVICE=1`) and suppress QR output (`JAUNT_SKIP_PAIR=1`). They validate installation and background startup, not systemd/SELinux on a physical Fedora workstation. The user service was previously validated on Ubuntu; no new physical Fedora validation is claimed.
 
-Ce correctif concerne le point d’entrée Pages et le script source. Les assets publiés beta.5 restent immuables, ainsi que l’APK beta.3 ; aucun nouveau numéro de version hôte n’est nécessaire pour utiliser le nouvel installateur Pages. La copie embarquée dans le wheel beta.5 conserve son ancien code jusqu’à une prochaine release hôte.
+These corrections apply to the Pages entry point and installer source. Published beta.5 assets and APK beta.3 remain immutable. The host does not need a new version number to use the updated Pages installer. The installer embedded in the beta.5 wheel retains its previous code until a future host release.
 
-Le protocole demeure sans audit de sécurité indépendant.
+The protocol remains without an independent security audit.
