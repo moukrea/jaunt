@@ -242,8 +242,8 @@ def main() -> None:
                     qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_L)
                     qr.add_data(result["url"])
                     qr.print_ascii(invert=True)
-                print("\nOpen or scan (expires in 10 minutes, one use):\n" + result["url"])
-                print("\nOr paste this complete string into jaunt:\n" + result["code"] + "\n")
+                print("\n" + tr("Open or scan (expires in 10 minutes, one use):") + "\n" + result["url"])
+                print("\n" + tr("Or paste this complete string into jaunt:") + "\n" + result["code"] + "\n")
                 print(tr('Treat this code like a password. Never put it in an issue or a build log.'))
         elif args.command == "revoke":
             print(json.dumps(control("revoke", {"id": args.id}), indent=2))

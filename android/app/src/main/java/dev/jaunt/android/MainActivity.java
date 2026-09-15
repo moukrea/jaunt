@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
         web=new WebView(this);
         android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.addView(web,new android.widget.FrameLayout.LayoutParams(-1,-1));
         loading=new android.widget.TextView(this);loading.setText(Lang.t("Opening jaunt…"));loading.setTextColor(0xffeeeeee);loading.setBackgroundColor(0xff121314);loading.setGravity(Gravity.CENTER);frame.addView(loading,new android.widget.FrameLayout.LayoutParams(-1,-1));setContentView(frame);
-        mainHandler.postDelayed(()->{if(!appReady&&!isFinishing()){loading.setText("jaunt could not open. Tap to retry.");loading.setOnClickListener(v->recreate());}},20000);
+        mainHandler.postDelayed(()->{if(!appReady&&!isFinishing()){loading.setText(Lang.t("jaunt could not open. Tap to retry."));loading.setOnClickListener(v->recreate());}},20000);
         // Insets belong to the outer layout: padding WebView does not resize its CSS viewport.
         if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
         frame.setOnApplyWindowInsetsListener((v,insets)->{
@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view,String url){view.postInvalidateOnAnimation();}
             @Override public boolean onRenderProcessGone(WebView view,RenderProcessGoneDetail detail){
                 view.destroy();web=null;
-                new AlertDialog.Builder(MainActivity.this).setTitle(Lang.t("Reopen your workspace")).setMessage(Lang.t("Android closed the display to free memory. Your shells are still running on the host.")).setPositiveButton("Reconnect",(d,w)->recreate()).setCancelable(false).show();return true;
+                new AlertDialog.Builder(MainActivity.this).setTitle(Lang.t("Reopen your workspace")).setMessage(Lang.t("Android closed the display to free memory. Your shells are still running on the host.")).setPositiveButton(Lang.t("Reconnect"),(d,w)->recreate()).setCancelable(false).show();return true;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest req){
                 WebResourceResponse result=assets.shouldInterceptRequest(req.getUrl());
@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
             }
         });
         if(!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)){
-            new AlertDialog.Builder(this).setTitle(Lang.t("Update Android System WebView")).setMessage("jaunt needs a current Android System WebView to safely connect its native functions.").setPositiveButton(Lang.t("Close"),(d,w)->finish()).show();return;
+            new AlertDialog.Builder(this).setTitle(Lang.t("Update Android System WebView")).setMessage(Lang.t("jaunt needs a current Android System WebView to safely connect its native functions.")).setPositiveButton(Lang.t("Close"),(d,w)->finish()).show();return;
         }
         WebViewCompat.addWebMessageListener(web,"jauntNative",Set.of(ORIGIN),(view,message,origin,main,proxy)->{
             if(!main||!ORIGIN.equals(origin.toString()))return;

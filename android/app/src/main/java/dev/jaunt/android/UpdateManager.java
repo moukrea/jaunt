@@ -56,14 +56,14 @@ final class UpdateManager {
             if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("jaunt is up to date",Lang.t("You already have the latest published Android release."));return;}
             String name="jaunt-"+tag+".apk";
             if(activity==null){notifyAvailable(tag);return;}
-            activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle("jaunt update available").setMessage(Lang.t("Version ")+tag.substring(9)+" is available. Your paired machines will be kept. Android will ask you to confirm installation.").setNegativeButton(Lang.t("Later"),null).setPositiveButton(Lang.t("Download and install"),(d,w)->download(tag,name)).show();}});
+            activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(Lang.t("jaunt update available")).setMessage(Lang.format("Version {0} is available. Your paired machines will be kept. Android will ask you to confirm installation.",tag.substring(9))).setNegativeButton(Lang.t("Later"),null).setPositiveButton(Lang.t("Download and install"),(d,w)->download(tag,name)).show();}});
         }catch(Exception e){if(explicit)message(Lang.t("Update check unavailable"),Lang.t("Could not verify the latest release. Check your connection and try again."));}finally{checkingBusy.set(false);if(checking!=null)activity.runOnUiThread(checking::dismiss);}});
     }
     private void notifyAvailable(String tag){
         NotificationManager manager=context.getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel("jaunt-updates",Lang.t("Application updates"),NotificationManager.IMPORTANCE_DEFAULT));
         Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("checkUpdate",true);
         PendingIntent open=PendingIntent.getActivity(context,77,intent,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("jaunt update available").setContentText(Lang.t("Tap to install ")+tag.substring(9)+". Your pairings will be kept.").setContentIntent(open).setAutoCancel(true).build());
+        manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("jaunt update available").setContentText(Lang.format("Tap to install {0}. Your pairings will be kept.",tag.substring(9))).setContentIntent(open).setAutoCancel(true).build());
     }
     private void download(String tag,String name){
         if(!downloadBusy.compareAndSet(false,true))return;
@@ -100,5 +100,5 @@ final class UpdateManager {
         }
         try{verifyPackage(pending);Uri uri=FileProvider.getUriForFile(context,context.getPackageName()+".updates",pending);activity.startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(Exception e){message(Lang.t("Could not open the update"),Lang.t("Please check for updates again. Your current installation is unchanged."));}
     }
-    private void message(String title,String text){if(activity!=null)activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(title).setMessage(text).setPositiveButton("OK",null).show();}});}
+    private void message(String title,String text){if(activity!=null)activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(Lang.t(title)).setMessage(text).setPositiveButton("OK",null).show();}});}
 }

@@ -893,5 +893,14 @@
   "1 minute": "1 minuto",
   "5 minutes": "5 minutos",
   "15 minutes": "15 minutos",
-  "1 hour": "1 hora"
+  "1 hour": "1 hora",
+  "jaunt update available": "Atualização do jaunt disponível",
+  "jaunt is up to date": "O jaunt está atualizado",
+  "jaunt could not open. Tap to retry.": "Não foi possível abrir o jaunt. Toque para tentar novamente.",
+  "jaunt needs a current Android System WebView to safely connect its native functions.": "O jaunt precisa de uma versão recente do Android System WebView para aceder com segurança às funções nativas.",
+  "{0} / {1} hosts connected · reconnects automatically": "{0} / {1} anfitriões ligados · reconexão automática",
+  "Version {0} is available. Your paired machines will be kept. Android will ask you to confirm installation.": "A versão {0} está disponível. As máquinas emparelhadas serão mantidas. O Android pedirá a confirmação da instalação.",
+  "Tap to install {0}. Your pairings will be kept.": "Toque para instalar {0}. Os emparelhamentos serão mantidos.",
+  "Open or scan (expires in 10 minutes, one use):": "Abra ou leia (expira em 10 minutos, utilização única):",
+  "Or paste this complete string into jaunt:": "Ou cole esta cadeia completa no jaunt:"
 }
