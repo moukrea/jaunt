@@ -48,6 +48,7 @@ def test_idle_update_strips_inherited_restart_and_development_overrides(release,
     assert len(observed)==1
     assert not {'jaunt_allow_restart','jaunt_dev_install','jaunt_release_base'} & {key.lower() for key in observed[0]}
     assert observed[0]['jaunt_SKIP_PAIR']=='1'
+    assert observed[0]['jaunt_NO_GUI']=='1'
 
 def test_explicit_restart_is_distinct_from_automatic_update(release,monkeypatch):
     monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[{'alive':True,'tmux':False}]})
