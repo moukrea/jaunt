@@ -18,16 +18,41 @@ jobs:
       - run: python scripts/check_project.py
   test:
     runs-on: ubuntu-latest
-    needs: [host, browser-and-relay]
+    needs: [host, browser-and-relay, installer-fedora]
     if: always()
     steps:
       - name: Require every real test suite to succeed
         env:
           HOST_RESULT: ${{ needs.host.result }}
           BROWSER_RELAY_RESULT: ${{ needs.browser-and-relay.result }}
+          FEDORA_RESULT: ${{ needs.installer-fedora.result }}
         run: |
           test "$HOST_RESULT" = success
           test "$BROWSER_RELAY_RESULT" = success
+          test "$FEDORA_RESULT" = success
+  installer-fedora:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        fedora: ['43', '44']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the public wheel with the candidate installer on Fedora
+        env:
+          FEDORA_VERSION: ${{ matrix.fedora }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" \
+            -e JAUNT_NO_SERVICE=1 -e JAUNT_SKIP_PAIR=1 \
+            "fedora:$FEDORA_VERSION" bash -c '
+              set -euo pipefail
+              cat /etc/fedora-release
+              cat /src/install.sh | bash
+              expected=$(cat /src/web/config.json | /root/.local/share/jaunt/runtime/current/bin/python -c "import json,sys; print(json.load(sys.stdin)[\"release\"])")
+              /root/.local/share/jaunt/runtime/current/bin/python -c "import json; from pathlib import Path; assert json.loads((Path.home()/\".local/share/jaunt/installation.json\").read_text())[\"tag\"] == \"$expected\""
+              /root/.local/bin/jaunt --version
+              /root/.local/bin/jaunt stop
+            '
   host:
     strategy:
       matrix:

@@ -9,10 +9,10 @@ Dernière livraison publique hôte beta.5 / Android beta.3 : [rapport consolidé
 **Release : [v0.1.0-beta.2](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.2)**
 
 ```sh
-curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
+bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Cette commande a été exécutée dans une VM Ubuntu propre, sans source editable.
+La forme précédente de cette commande (`curl -fsSL … | bash`) a été exécutée dans une VM Ubuntu propre, sans source editable. Voir [le correctif de lancement et les essais Fedora](INSTALLER_FEDORA.md) pour la commande actuelle.
 L’utilisateur final ne crée aucun compte GitHub/Cloudflare et ne configure ni
 serveur public ni VPN. **Le protocole et le produit restent sans audit de sécurité
 indépendant.** Les limites de SECURITY.md, notamment l’origine Pages partagée,

@@ -6,10 +6,10 @@
 - Relais propriétaire déployé : `wss://jaunt-relay.moukrea.workers.dev`, `APP_ORIGIN=https://moukrea.github.io`.
 
 ```sh
-curl -fsSL https://moukrea.github.io/jaunt/install.sh | bash
+bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Cette commande a été utilisée depuis la Page publique dans une VM Ubuntu 24.04 isolée. Le wheel est installé dans un environnement privé, sans source editable ; son checksum est vérifié et le service utilisateur est activé. Le poste utilisateur a également reçu beta.4 depuis la release publique, sans fermeture de shell actif, avec conservation de ses identités et activation effective du service. Son contrôle périodique a ensuite installé beta.5 automatiquement, sans déclenchement manuel ; version 0.1.0b5 et service actif vérifiés.
+La forme précédente de cette commande (`curl -fsSL … | bash`) a été utilisée depuis la Page publique dans une VM Ubuntu 24.04 isolée. Le correctif de lancement et ses essais Fedora sont décrits dans [INSTALLER_FEDORA.md](INSTALLER_FEDORA.md). Le wheel est installé dans un environnement privé, sans source editable ; son checksum est vérifié et le service utilisateur est activé. Le poste utilisateur a également reçu beta.4 depuis la release publique, sans fermeture de shell actif, avec conservation de ses identités et activation effective du service. Son contrôle périodique a ensuite installé beta.5 automatiquement, sans déclenchement manuel ; version 0.1.0b5 et service actif vérifiés.
 
 L’APK embarque l’interface WebView et utilise des intégrations Android natives pour la caméra, le presse-papiers, les fichiers et les notifications. Il ne nécessite aucun compte Cloudflare/GitHub pour se connecter. Il conserve une confirmation Android pour installer une mise à jour.
 
