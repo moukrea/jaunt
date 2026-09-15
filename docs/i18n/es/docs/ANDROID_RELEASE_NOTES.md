@@ -1,8 +1,8 @@
 [English](../../../ANDROID_RELEASE_NOTES.md) · [fr](../../fr/docs/ANDROID_RELEASE_NOTES.md) · [es](ANDROID_RELEASE_NOTES.md) · [it](../../it/docs/ANDROID_RELEASE_NOTES.md) · [pt](../../pt/docs/ANDROID_RELEASE_NOTES.md) · [de](../../de/docs/ANDROID_RELEASE_NOTES.md)
 
-# jaunt Android 0.1.0-beta.7
+# jaunt Android 0.1.0-beta.8
 
-Esta actualización agrega el desplazamiento táctil con el impulso, preserva la posición de lectura a través del tamaño del teclado, utiliza iconos de interfaz de Lucide agrupados, y envuelve el logotipo original en un icono de lanzador adaptativo. Utiliza el icono original de jaunt, proporciona el gestor de sesión compartido y temas, y recibe notificaciones automáticas terminal bell/program/session-exit cuando está habilitado.
+Esta actualización agrega el desplazamiento táctil con el impulso, preserva la posición de lectura a través del tamaño del teclado, utiliza iconos de interfaz de Lucide agrupados, y utiliza el logotipo original transparente como icono de lanzador. Utiliza el icono original de jaunt, proporciona el gestor de sesión compartido y temas, y recibe notificaciones automáticas terminal bell/program/session-exit cuando está habilitado.
 
 Esta versión regula la entrada rápida terminal para evitar el desbordamiento de la cola de entrada atada del host. La entrada pendiente se descarta si el canal cifrado cambia; los comandos nunca se reproducen después de la reconexión.
 
@@ -25,3 +25,5 @@ El APK verifica automáticamente las actualizaciones. Ajustes también ofrece un
 Los controles de sesión ahora mantienen abierto, renombrado, vista estrecha y terminan dentro de cada tarjeta de sesión sensible. shell crea un nombre automático terminal Inmediatamente nuevo shell en carpeta ofrece navegación de directorios y un nombre opcional. El host puede heredar el activo shell’s directorio actual. Escritorio tiene controles separados lado a lado y por encima de / por debajo de los controles de división, una elección inline de las sesiones nuevas o existentes, y un botón para mover cada panel en su propia pestaña. Mobile conserva las pestañas de sesión ordinarias. Cerrar una vista mantiene su shell viva; la terminación todavía requiere confirmación explícita.
 
 Las interrupciones de conexión ahora comparten un estandarte de estado persistente. Los resultados del apretón de manos asincrónico tardíos no pueden sobreescribir una conexión de reemplazo. Los errores de diálogo permanecen inline; los errores de acción persisten sin cascadas de tostadas. Las transferencias exponen la espera/cancelación/compleción, la actividad completa colapsa en la historia accesible, y la disponibilidad de actualización mantiene su acción visible.
+
+Esta versión añade seis idiomas UI detectados por el sistema con una anulación guardada, pestañas arrastrables estables con renombramiento de doble clic, retroalimentación de operación corregida y iconos de primer plano de Claude/OpenAI. La aplicación nativa abre el espacio de trabajo directamente; la página de presentación está reservada para el sitio web.

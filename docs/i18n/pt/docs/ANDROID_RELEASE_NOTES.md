@@ -1,8 +1,8 @@
 [English](../../../ANDROID_RELEASE_NOTES.md) · [fr](../../fr/docs/ANDROID_RELEASE_NOTES.md) · [es](../../es/docs/ANDROID_RELEASE_NOTES.md) · [it](../../it/docs/ANDROID_RELEASE_NOTES.md) · [pt](ANDROID_RELEASE_NOTES.md) · [de](../../de/docs/ANDROID_RELEASE_NOTES.md)
 
-# jaunt Android 0.1.0-beta.7
+# jaunt Android 0.1.0-beta.8
 
-Esta atualização adiciona rolagem de toque com momento, preserva a posição de leitura em todo o redimensionamento do teclado, usa ícones de interface Lucide empacotados e envolve o logotipo original em um ícone de lançador adaptativo. Ele usa o ícone jaunt original, fornece o gerenciador de sessão compartilhado e temas, e recebe notificações automáticas terminal bell/program/session-exit quando habilitado. Os layouts de divisão de área de trabalho permanecem abas de sessão comuns em larguras móveis.
+Esta atualização adiciona rolagem de toque com momento, preserva a posição de leitura através do redimensionamento do teclado, usa ícones de interface Lucide empacotados e usa o logotipo transparente original como seu ícone de lançador. Ele usa o original jaunt ícone, fornece o gerenciador de sessão compartilhada e temas, e recebe automático terminal Notificações de sino/programa/sessão-saída quando habilitadas. Os layouts de divisão de área de trabalho permanecem abas de sessão comuns em larguras móveis.
 
 Esta versão regula a entrada rápida do terminal para evitar transbordar a fila de entrada limitada da máquina. A entrada pendente é descartada se os comandos criptografados mudarem; os comandos nunca são reproduzidos após a reconexão.
 
@@ -25,3 +25,5 @@ O APK verifica as atualizações automaticamente. As configurações também ofe
 Os controles de sessão agora mantêm o Abrir, Renomear, Fechar e Terminar dentro de cada placa de sessão responsiva. O novo shell cria um terminal automaticamente chamado imediatamente. O novo shell na pasta oferece navegação de diretórios e um nome opcional. A máquina pode herdar o diretório atual do shell ativo. O desktop possui controles separados lado a lado e acima/abaixo/abaixo, uma escolha inline de sessões novas ou existentes, e um botão para mover cada painel para sua própria aba. O celular retém abas de sessão comuns. Fechando uma visão mantém o shell vivo; a terminação ainda requer confirmação explícita.
 
 Interrupções de conexão agora compartilham um banner de status persistente. Resultados de aperto de mão assíncronos tardios não podem substituir uma conexão de substituição. Erros de diálogo permanecem em linha; erros de ação persistem sem cascatas de torradas. Transferências expõem espera/cancelamento/completação, colapsam atividade completa no histórico acessível e a disponibilidade de atualização mantém sua ação visível.
+
+Esta versão adiciona seis linguagens de interface detectadas pelo sistema com uma página de sobreposição salva, arrastável estável com renomeação de duplo- clique, feedback de operação corrigido e ícones de primeiro plano do Claude/OpenAI localmente empacotados. A aplicação nativa abre o espaço de trabalho diretamente; a página inicial de apresentação está reservada para o site.

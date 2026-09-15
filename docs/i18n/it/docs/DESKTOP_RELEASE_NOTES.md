@@ -1,12 +1,12 @@
 [English](../../../DESKTOP_RELEASE_NOTES.md) · [fr](../../fr/docs/DESKTOP_RELEASE_NOTES.md) · [es](../../es/docs/DESKTOP_RELEASE_NOTES.md) · [it](DESKTOP_RELEASE_NOTES.md) · [pt](../../pt/docs/DESKTOP_RELEASE_NOTES.md) · [de](../../de/docs/DESKTOP_RELEASE_NOTES.md)
 
-# desktop jaunt 0.1.0-beta.9
+# jaunt desktop 0.1.0-beta.10
 
 Un'applicazione desktop nativo che condivide lo stesso responsive UI del browser e il client Android, con i controlli host locali. I dispositivi locali e remoti si attaccano allo stesso normale shells senza tmux. Le schede desktop supportano i riquadri divisi persistenti e resizionabili; i layout mobili mostrano quelle sessioni come schede separate.
 
 **Sessions** elenca le sessioni in esecuzione e in uscita, apre esistenti shells, chiude solo una vista, o termina esplicitamente una shell e i suoi lavori per tutti gli spettatori. Fare clic o digitare seleziona quale dispositivo controlla il condiviso terminal taglia.
 
-L'applicazione utilizza l'opera originale jaunt, temi dark/light/system/circadian, nomi host/order/defaults e notifiche del sistema operativo privato facoltative.
+L'applicazione utilizza l'opera originale jaunt, temi dark/light/system/circadian, nomi host/order/default e notifiche OS privati opzionali. Può avviare un servizio host installato e connettersi ad altri host. L'installatore ufficiale offre anche `--client-only`, che installa il client desktop senza un host locale o controlli host locali.
 
 Linux: installare il `.deb` o `.rpm`, oppure `jaunt gui` per un'installazione di archivio verificata per utente. macOS: aprire l'archivio/immagine dell'applicazione della CPU corrispondente, o utilizzare `jaunt gui` da un host installato. Le costruzioni desktop non sono firmate su macOS. Nessun launcher disabilita la sandbox di Chromium. Le notifiche richiedono che l'app sia in esecuzione.
 
@@ -19,3 +19,5 @@ I controlli di sessione ora mantengono Open, Rename, Close view e Terminate all'
 L'applicazione desktop ora controlla gli aggiornamenti automaticamente, scarica e verifica il rilascio corrispondente, e lo installa quando si chiude l'app. Impostazioni offre Controllare l'aggiornamento del desktop, un automatico-update toggle, e Installare e riaprire quando pronto. Le installazioni di sistema possono chiedere l'autorizzazione del sistema. Questo aggiorna l'interfaccia separatamente dall'host e non interrompe l'host shells.
 
 Gli errori di dialogo rimangono in linea; gli errori di azione persistono senza cascate di brindisi. I trasferimenti espongono l'attesa/cancellazione/complezione, l'attività completa crolla nella storia accessibile e l'aggiornamento della disponibilità mantiene visibile la sua azione.
+
+Questa versione corregge il layout Impostazioni, l'ordine stabile della scheda, il rinominamento del doppio clic, il ricollegamento/aggiornamento del feedback e l'ancoraggio della pergamena mobile. Aggiunge una barra laterale crolluta persistente e sei lingue cancellate dal sistema con un override esplicito. Il titolo della finestra è semplicemente `jaunt`. Claude e Codex le sessioni di primo piano utilizzano icone del marchio Meteor in bundle localmente.

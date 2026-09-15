@@ -1,6 +1,6 @@
-# jaunt Android 0.1.0-beta.7
+# jaunt Android 0.1.0-beta.8
 
-This update adds touch scrolling with momentum, preserves the reading position across keyboard resizing, uses bundled Lucide interface icons, and wraps the original logo in an adaptive launcher icon. It uses the original jaunt icon, provides the shared session manager and themes, and receives automatic terminal bell/program/session-exit notifications when enabled. Desktop split layouts remain ordinary session tabs at mobile widths.
+This update adds touch scrolling with momentum, preserves the reading position across keyboard resizing, uses bundled Lucide interface icons, and uses the original transparent logo as its launcher icon. It uses the original jaunt icon, provides the shared session manager and themes, and receives automatic terminal bell/program/session-exit notifications when enabled. Desktop split layouts remain ordinary session tabs at mobile widths.
 
 This release regulates rapid terminal input to avoid overflowing the host’s bounded input queue. Pending input is discarded if the encrypted channel changes; commands are never replayed after reconnection.
 
@@ -23,3 +23,5 @@ The APK checks for updates automatically. Settings also offers an immediate chec
 Session controls now keep Open, Rename, Close view and Terminate inside each responsive session card. New shell creates an automatically named terminal immediately. New shell in folder offers directory browsing and an optional name. The host can inherit the active shell’s current directory. Desktop has separate side-by-side and above/below split controls, an inline choice of new or existing sessions, and a button to move each pane into its own tab. Mobile retains ordinary session tabs. Closing a view keeps its shell alive; termination still requires explicit confirmation.
 
 Connection interruptions now share one persistent status banner. Late asynchronous handshake results cannot overwrite a replacement connection. Dialog errors stay inline; action errors persist without toast cascades. Transfers expose waiting/cancellation/completion, completed activity collapses into accessible history, and update availability keeps its action visible.
+
+This release adds six system-detected UI languages with a saved override, stable draggable tabs with double-click renaming, corrected operation feedback, and locally bundled Claude/OpenAI foreground icons. The native app opens the workspace directly; the presentation homepage is reserved for the website.

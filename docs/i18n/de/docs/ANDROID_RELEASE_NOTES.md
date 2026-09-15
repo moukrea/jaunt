@@ -1,8 +1,8 @@
 [English](../../../ANDROID_RELEASE_NOTES.md) · [fr](../../fr/docs/ANDROID_RELEASE_NOTES.md) · [es](../../es/docs/ANDROID_RELEASE_NOTES.md) · [it](../../it/docs/ANDROID_RELEASE_NOTES.md) · [pt](../../pt/docs/ANDROID_RELEASE_NOTES.md) · [de](ANDROID_RELEASE_NOTES.md)
 
-# jaunt Android 0.1.0-beta.7
+# jaunt Android 0.1.0-beta.8
 
-Dieses Update fügt Touch-Scrolling mit Momentum hinzu, behält die Leseposition über die Tastaturgröße bei, verwendet gebündelte Lucide-Interface-Symbole und wickelt das ursprüngliche Logo in ein adaptives Launcher-Symbol. Es verwendet das ursprüngliche jaunt-Symbol, stellt den freigegebenen Sitzungsmanager und die Themen bereit und erhält automatische terminal Bell / Programm / Session-Exit-Benachrichtigungen, wenn aktiviert. Desktop-Split-Layouts bleiben gewöhnliche Sitzungsregisterkarten bei mobilen Breiten.
+Dieses Update fügt Touch-Scrollen mit Momentum hinzu, behält die Leseposition über die Tastaturgröße bei, verwendet gebündelte Lucide-Interface-Symbole und verwendet das ursprüngliche transparente Logo als Launcher-Symbol. Es verwendet das ursprüngliche jaunt-Symbol, stellt den freigegebenen Sitzungsmanager und die Themen bereit und erhält automatische terminal Bell / Programm / Session-Exit-Benachrichtigungen, wenn aktiviert. Desktop-Split-Layouts bleiben gewöhnliche Sitzungsregisterkarten bei mobilen Breiten.
 
 Diese Version regelt den schnellen terminal-Eingang, um ein Überlaufen der begrenzten Eingangswarteschlange des Hosts zu vermeiden. Ausstehende Eingaben werden verworfen, wenn sich der verschlüsselte Kanal ändert; Befehle werden nach der Wiederverbindung nie wiedergegeben.
 
@@ -25,3 +25,5 @@ Die APK prüft automatisch nach Updates. Einstellungen bieten auch eine sofortig
 Sitzungssteuerelemente halten nun die Ansicht Offen, Umbenennen, Schließen und Beenden in jeder responsiven Sitzungskarte. Neues shell erstellt sofort einen automatisch benannten terminal. Neues shell im Ordner bietet Verzeichnis-Browsing und einen optionalen Namen. Der Host kann das aktuelle Verzeichnis des aktiven shell erben. Desktop verfügt über separate Side-by-Side- und oben/unten Split-Steuerelemente, eine Inline-Auswahl neuer oder bestehender Sitzungen und eine Schaltfläche, um jeden Bereich in seinen eigenen Tab zu verschieben. Mobile behält gewöhnliche Sitzungsregisterkarten. Schließen einer Ansicht hält sein shell am Leben; die Beendigung erfordert weiterhin eine explizite Bestätigung.
 
 Verbindungsunterbrechungen teilen sich jetzt ein persistentes Statusbanner. Späte asynchrone Handshake-Ergebnisse können eine Ersatzverbindung nicht überschreiben. Dialogfehler bleiben inline; Aktionsfehler bleiben ohne Toast-Kaskaden bestehen. Übertragungen zeigen Warten/Stornieren/Fertigstellen, abgeschlossene Aktivität bricht in einen barrierefreien Verlauf ein und die Updateverfügbarkeit hält ihre Aktion sichtbar.
+
+Diese Version fügt sechs systemdetektierte UI-Sprachen mit einem gespeicherten Override hinzu, stabile Draggable-Tabs mit Doppelklick-Umbenennung, korrigiertes Betriebs-Feedback und lokal gebündelte Claude/OpenAI-Vordergrundsymbole. Die native App öffnet den Workspace direkt; die Präsentations-Homepage ist für die Website reserviert.

@@ -32,7 +32,8 @@ async def test_foreground_job_and_return_to_shell(tmp_path, monkeypatch):
         assert session.program == ''  # A friendly name is not a running program.
         for name in ('claude', 'codex'):
             executable = tmp_path / name
-            shutil.copy2(shutil.which('sleep'), executable)
+            # Copy executable bytes/mode, not macOS system-protection flags.
+            shutil.copy(shutil.which('sleep'), executable)
             await sessions.write(session.id, (shlex.quote(str(executable)) + ' 30\n').encode())
             for _ in range(50):
                 await sessions.refresh_programs()

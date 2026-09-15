@@ -66,6 +66,7 @@ def restore(sessions,fd):
             if not stat.S_ISCHR(os.fstat(fd).st_mode) or not os.isatty(fd):raise ValueError('Invalid inherited terminal')
             os.set_inheritable(fd,False)
         s=Session(row['id'],row['name'],row['cwd'],row['pid'],fd,row['cols'],row['rows'],tmux=row['tmux'],process=InheritedChild(row['pid']))
+        s.program=row.get('program','') if row.get('program') in ('claude','codex') else ''
         s.created=row['created'];s.alive=row['alive'];s.exit_code=row['exitCode'];s.offset=row['offset']
         s.ring=deque((n,unb64(payload),cols,height) for n,payload,cols,height in row['ring']);s.ring_bytes=sum(len(r[1]) for r in s.ring)
         parser=row['parser'];s.attention.state=parser['state'];s.attention.payload=bytearray(unb64(parser['payload']));s.attention.overflow=parser['overflow']

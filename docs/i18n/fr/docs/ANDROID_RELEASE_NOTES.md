@@ -1,8 +1,8 @@
 [English](../../../ANDROID_RELEASE_NOTES.md) · [fr](ANDROID_RELEASE_NOTES.md) · [es](../../es/docs/ANDROID_RELEASE_NOTES.md) · [it](../../it/docs/ANDROID_RELEASE_NOTES.md) · [pt](../../pt/docs/ANDROID_RELEASE_NOTES.md) · [de](../../de/docs/ANDROID_RELEASE_NOTES.md)
 
-# jaunt Android 0,10-bêta.7
+# jaunt Android 0,10-bêta.8
 
-Cette mise à jour ajoute le défilement tactile avec l'impulsion, préserve la position de lecture à travers le redimensionnement du clavier, utilise les icônes d'interface de Lucide groupées, et enveloppe le logo original dans une icône de lancement adaptative. Il utilise l'icône originale jaunt, fournit le gestionnaire de session partagé et les thèmes, et reçoit automatiquement les notifications terminal bell/program/session-exit lorsque activé.
+Cette mise à jour ajoute le défilement tactile avec l'élan, préserve la position de lecture à travers le redimensionnement du clavier, utilise les icônes d'interface de Lucide groupées, et utilise le logo transparent original comme icône de lancement. Il utilise l'icône originale jaunt, fournit le gestionnaire de session partagé et les thèmes, et reçoit automatiquement des notifications terminal bell/program/session-exit lorsque activé.
 
 Cette version régule l'entrée rapide de terminal pour éviter de déborder la file d'attente d'entrée limitée de l'hôte. En attendant, l'entrée est supprimée si le canal crypté change ; les commandes ne sont jamais rejouées après la reconnexion.
 
@@ -25,3 +25,5 @@ Le APK vérifie automatiquement les mises à jour. Les paramètres offrent égal
 Le nouveau shell crée un répertoire terminal automatiquement nommé immédiatement. Le nouveau shell dans le dossier offre une navigation de répertoire et un nom optionnel. L'hôte peut hériter du répertoire courant actif shell. Le bureau dispose de contrôles séparés côte à côte et au-dessus/ci-dessous, d'un choix en ligne de sessions nouvelles ou existantes et d'un bouton pour déplacer chaque volet dans son propre onglet. Mobile conserve les onglets de session ordinaires. La fermeture d'une vue maintient son shell en vie; la terminaison nécessite toujours une confirmation explicite.
 
 Les interruptions de connexion partagent maintenant une bannière d'état persistante. Les résultats de la poignée de main asynchrone tardive ne peuvent pas écraser une connexion de remplacement. Les erreurs de dialogue restent en ligne; les erreurs d'action persistent sans cascades grillées. Les transferts exposent l'attente/annulation/achèvement, l'activité terminée s'effondre dans l'historique accessible, et la disponibilité de mise à jour garde son action visible.
+
+Cette version ajoute six langages d'interface utilisateur détectés par le système avec une préséance sauvegardée, des onglets draggables stables avec un double-clic renommage, des retours d'exploitation corrigés et des icônes locales de premier plan de Claude/OpenAI. L'application native ouvre directement l'espace de travail; la page d'accueil de la présentation est réservée au site Web.

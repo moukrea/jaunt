@@ -1,12 +1,12 @@
 [English](../../../DESKTOP_RELEASE_NOTES.md) · [fr](../../fr/docs/DESKTOP_RELEASE_NOTES.md) · [es](../../es/docs/DESKTOP_RELEASE_NOTES.md) · [it](../../it/docs/DESKTOP_RELEASE_NOTES.md) · [pt](DESKTOP_RELEASE_NOTES.md) · [de](../../de/docs/DESKTOP_RELEASE_NOTES.md)
 
-# Área de trabalho jaunt 0. 1. 0- beta. 9
+# Área de trabalho jaunt 0. 1. 0- beta. 10
 
 Um aplicativo de desktop nativo que compartilha a mesma interface de resposta que o navegador e o cliente Android, com controles de host locais. Dispositivos locais e remotos anexam ao mesmo shells comum sem tmux. Páginas de desktop suportam painéis de divisão persistentes e redimensionáveis; layouts móveis mostram essas sessões como abas separadas.
 
 **Sessions** lista sessões em execução e encerradas, abre shells existente, fecha apenas uma visão, ou termina explicitamente um shell e seus trabalhos para todos os espectadores. Clicando ou digitando seleciona qual dispositivo controla o tamanho compartilhado terminal.
 
-O aplicativo usa a arte original jaunt, temas escuros/luz/sistema/circadianos, nomes de host amigáveis/ordem/defaults e notificações privadas opcionais do sistema operacional. Ele pode instalar/iniciar o serviço de host e também se conectar a outros hosts.
+O aplicativo usa a arte original do jaunt, temas escuros/claros/sistemas/circadianos, nomes de host amigáveis/ordem/defaults e notificações privadas opcionais. Ele pode iniciar um serviço de host instalado e se conectar a outras máquinas. O instalador oficial também oferece `--client-only`, que instala o cliente de desktop sem um host local ou controles de host locais.
 
 Linux: instalar o `.deb` ou `.rpm`, ou usar o `jaunt gui` para uma instalação de arquivo verificada por usuário. macOS: abrir o arquivo/disco de aplicativos da CPU correspondente, ou usar o `jaunt gui` de um host instalado. As construções do desktop não são assinadas no macOS. Nenhum lançador desabilita a caixa de areia do Chromium. As notificações exigem que o aplicativo esteja rodando.
 
@@ -19,3 +19,5 @@ Os controles de sessão agora mantêm o Abrir, Renomear, Fechar e Terminar dentr
 A aplicação de ecrã verifica agora as actualizações automaticamente, baixa e verifica a versão correspondente e instala- a quando fecha a aplicação. As opções oferecem Verificar a actualização da área de trabalho, uma actualização automática comuta e Instalar e reabrir quando estiver pronto. As instalações do sistema podem pedir autorização do sistema. Esta actualização da interface separadamente da máquina e não impede a máquina shells. Os envios e as verificações de actualização mostram agora o progresso visível e um resultado retido em vez de apenas um brinde inicial.
 
 Interrupções de conexão agora compartilham um banner de status persistente. Resultados de aperto de mão assíncronos tardios não podem substituir uma conexão de substituição. Erros de diálogo permanecem em linha; erros de ação persistem sem cascatas de torradas. Transferências expõem espera/cancelamento/completação, colapsam atividade completa no histórico acessível e a disponibilidade de atualização mantém sua ação visível.
+
+Esta versão corrige a disposição de Configurações, a ordenação de tabulações estáveis, o renomeamento de duplo- click, o feedback de reconexão/ atualização e a ancoragem de rolagem móvel. Ele adiciona uma barra lateral colapsada persistente e seis idiomas detectados pelo sistema com uma sobreposição explícita. O título da janela é simplesmente `jaunt`. As sessões de primeiro plano de Claude e Codex usam ícones de marca Meteor localmente empacotados.
