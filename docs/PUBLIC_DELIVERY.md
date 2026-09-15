@@ -1,5 +1,7 @@
 # Public delivery — September 15, 2026
 
+For the subsequent host beta.9 / desktop beta.7 / Android beta.5 corrections and public verification, see [delivery regression results](DELIVERY_REGRESSIONS.md). The observations below describe the earlier release.
+
 The published application is **https://moukrea.github.io/jaunt/**. End users do not need a GitHub or Cloudflare account, VPN, or inbound server configuration.
 
 - Host: [v0.1.0-beta.8](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.8), Python version `0.1.0b8`.
