@@ -139,3 +139,9 @@ See [workspace validation](WORKSPACE_VALIDATION.md) for the current desktop/shar
 ## Subsequent delivery regressions
 
 See [delivery regression fixes](DELIVERY_REGRESSIONS.md) for the user-reported shell environment, Ubuntu startup, launcher/icon, Android scrolling and notification defects discovered after the earlier delivery. Earlier passing tests did not cover these paths.
+
+## Hero preview alignment — 2026-09-15
+
+The web presentation now mirrors the application's sidebar, machine card, connection header, session controls, tab icons, terminal footer and transfer controls. The phone preview includes the session list, key row and labeled bottom navigation. Shell, Codex and Claude previews remain synchronized; the latter two use the same bundled Meteor icons as live sessions. The preview uses illustrative terminal output, not a live connection.
+
+Playwright checks at 1440, 1024 and 390 CSS pixels passed: all three preview selections and matching phone icons, no JavaScript errors, no horizontal page overflow, and entry into the actual workspace. Desktop and mobile screenshots were inspected. Decorative orbit overflow at 1024 pixels was corrected. The presentation remains hidden in native apps and installed PWA mode.

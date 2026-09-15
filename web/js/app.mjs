@@ -59,12 +59,13 @@ $('site-client-install').onclick=()=>showInstallation(true);
 const previews={
  shell:'~/work/project $ git status --short\n M src/app.ts\n A tests/app.test.ts\n\n~/work/project $ pwd\n/home/me/work/project\n\n~/work/project $ ▌',
  codex:'~/work/project $ codex\n\n> Explain how this project works\n\n• Reading README.md\n• Exploring src/\n\n  src/\n  ├── app.ts\n  └── terminal.ts',
- files:'~/work/project\n\n▸ src/\n▸ tests/\n  README.md\n  screenshot.png\n  notes.txt'
+ claude:'~/work/project $ claude\n\n> Explain how this project works\n\n• Reading README.md\n• Exploring src/\n\n  src/\n  ├── app.ts\n  └── terminal.ts'
 };
 for(const button of document.querySelectorAll('[data-preview]'))button.onclick=()=>{
  const key=button.dataset.preview;
  for(const tab of document.querySelectorAll('[data-preview]'))tab.setAttribute('aria-selected',String(tab===button));
- $('preview-desktop-output').textContent=previews[key];$('preview-phone-output').textContent=previews[key];$('preview-phone-tab').textContent=key==='files'?tr('Files'):key;
+ $('preview-desktop-output').textContent=previews[key];$('preview-phone-output').textContent=previews[key];$('preview-phone-tab').textContent=key;
+ $('preview-phone-icon').replaceChildren(icon(key==='codex'?'openai':key==='claude'?'claude':'terminal',12));
 };
 document.querySelector('[data-preview=shell]').click();
 
