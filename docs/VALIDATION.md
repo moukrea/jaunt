@@ -135,3 +135,7 @@ The automatic-update shutdown guard now also defers during file transfers. An ac
 ## Shared workspace release
 
 See [workspace validation](WORKSPACE_VALIDATION.md) for the current desktop/shared-session, terminal geometry, Android insets and notification changes. Earlier beta observations above remain historical and do not imply that every new platform combination was tested.
+
+## Subsequent delivery regressions
+
+See [delivery regression fixes](DELIVERY_REGRESSIONS.md) for the user-reported shell environment, Ubuntu startup, launcher/icon, Android scrolling and notification defects discovered after the earlier delivery. Earlier passing tests did not cover these paths.

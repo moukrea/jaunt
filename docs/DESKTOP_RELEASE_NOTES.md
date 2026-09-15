@@ -9,3 +9,5 @@ The app uses the original jaunt artwork, dark/light/system/circadian themes, fri
 Linux: install the `.deb` or `.rpm`, or use `jaunt gui` for a verified per-user archive installation. macOS: open the matching CPU's application archive/disk image, or use `jaunt gui` from an installed host. Desktop builds are unsigned on macOS. No launcher disables Chromium's sandbox. Notifications require the app to be running.
 
 The protocol has not received an independent security audit. See `docs/WORKSPACE.md` and `docs/WORKSPACE_VALIDATION.md` for behavior, observed tests, and remaining validation limits.
+
+This update replaces interface pictograms with Lucide, makes Split view prominent, displays program notification text, and retains notification targets through reconnects. Linux packages contain standard icon-theme sizes and readable launcher metadata. On Ubuntu with restricted user namespaces, the host installer selects the system package to configure sandbox support.

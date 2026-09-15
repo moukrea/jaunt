@@ -30,6 +30,21 @@ async def main():
             assert screen['x']+screen['width']<=container['x']+container['width']+1,'Terminal columns overflow the visible pane'
             await page.locator('#select-terminal-text').click();assert 'LAST-ROW-PROVED' in await page.get_by_label('Select terminal text').input_value()
             await page.get_by_role('button',name='Back to terminal',exact=True).click()
+            # Resizing for the keyboard must preserve the reader's anchor, including
+            # when browsing older output; no jump to the first or newest row.
+            await page.set_viewport_size({'width':390,'height':780});await asyncio.sleep(.5)
+            await page.locator('#scroll-bottom').click()
+            await page.locator('.terminal-container').hover();await page.mouse.wheel(0,-900);await asyncio.sleep(.4)
+            anchor=(await page.locator('.xterm-rows > div').first.inner_text()).strip()
+            assert anchor and 'LAST-ROW-PROVED' not in await page.locator('.xterm-rows').inner_text()
+            await page.set_viewport_size({'width':390,'height':460});await asyncio.sleep(.5)
+            assert (await page.locator('.xterm-rows > div').first.inner_text()).strip()==anchor, ('Keyboard resize moved the reading anchor',anchor,(await page.locator('.xterm-rows > div').first.inner_text()).strip())
+            await page.set_viewport_size({'width':390,'height':780});await asyncio.sleep(.5)
+            assert (await page.locator('.xterm-rows > div').first.inner_text()).strip()==anchor, 'Keyboard dismissal moved the reading anchor'
+            await page.locator('#scroll-bottom').click();await asyncio.sleep(.2)
+            await page.set_viewport_size({'width':390,'height':460});await asyncio.sleep(.5)
+            await expect(page.locator('.xterm-rows')).to_contain_text('LAST-ROW-PROVED')
+            await page.set_viewport_size({'width':1100,'height':800});await asyncio.sleep(.4)
             await page.locator('#settings-button').click();await page.get_by_label('Color theme').select_option('light');assert await page.locator('html').get_attribute('data-theme')=='light'
             # onchange persists asynchronously. Observe the actual committed vault
             # before navigating away; an immediate reload can abort its transaction.
@@ -47,7 +62,7 @@ async def main():
                 config=h.root/name;config.mkdir()
                 env=['env','-i','HOME='+str(config),'PATH=/usr/local/bin:/usr/bin:/bin','TERM=xterm-256color',setting+'='+str(config),'DISABLE_AUTOUPDATER=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',executable]
                 await terminal_command(page,shlex.join(env))
-                await expect(page.locator('.terminal-container:not([hidden]) .xterm-rows')).to_contain_text('Claude Code' if name=='claude' else 'Welcome to Codex',timeout=20000)
+                await expect(page.locator('.terminal-container:not([hidden]) .xterm-rows')).to_contain_text('Choose the text style' if name=='claude' else 'Welcome to Codex',timeout=20000)
                 assert not await page.locator('#modal').is_visible(),await page.locator('#modal').inner_text()
                 text=await scrollback(page)
                 (ROOT/('test-results/'+name+'-startup.txt')).write_text(text)

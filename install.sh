@@ -240,7 +240,9 @@ if [[ "${jaunt_NO_SERVICE:-0}" != 1 ]]; then
     "$BIN/jaunt" start
   fi
 else "$BIN/jaunt" start; fi
-if [[ "${jaunt_NO_GUI:-0}" != 1 && ( -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" || "$(uname -s)" == Darwin ) ]]; then
+# Desktop setup may require system authorization. Never open a password prompt
+# from an unattended host updater, including older updater versions.
+if [[ -t 1 && "${jaunt_NO_GUI:-0}" != 1 && ( -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" || "$(uname -s)" == Darwin ) ]]; then
   if "$PY" -c 'import json,sys;sys.exit(not bool(json.load(open(sys.argv[1])).get("desktopRelease")))' "$jaunt_INSTALL_TMP/config.json"; then
     STAGE='desktop app installation'
     "$BIN/jaunt" gui --install-only

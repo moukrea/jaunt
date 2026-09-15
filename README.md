@@ -14,7 +14,7 @@ jaunt provides native desktop and Android applications, a mobile/desktop web cli
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. It never runs `sudo` implicitly. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled and wait until ordinary shells and transfers finish.
+Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled and wait until ordinary shells and transfers finish.
 
 On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.4/jaunt-android-v0.1.0-beta.4.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
@@ -41,7 +41,7 @@ Pairing grants access as the **system account running the host**, with all of th
 |---|---|
 | Terminals | Real PTYs, interactive keyboard, multiple tabs, create/rename/open/detach/terminate, shared sizing, mobile Ctrl/Alt/Esc/Tab/arrow keys |
 | Reconnection | Bounded history, automatic reconnection, remembered state; a browser disconnect does not close the shell |
-| tmux | Create or attach to a tmux session when tmux is installed; closing its view does not kill the tmux server |
+| Existing tmux sessions | Legacy tmux sessions remain supported; new sessions in the UI are ordinary shared shells |
 | Files | Browsing, hidden files, pagination, create directories, rename, non-recursive deletion, upload/download, text/image previews |
 | Transfers | Contextual tracking in Files → Transfer activity; 48 KiB chunks, network resume offsets, upload SHA-256, atomic finalization, cancellation |
 | Images | Gallery, file picker, paste, and drag-and-drop; PNG conversion for browser-decodable formats; path insertion or conditional native paste |
@@ -54,7 +54,7 @@ Pairing grants access as the **system account running the host**, with all of th
 
 Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and remote clients share the same ordinary shells without tmux. **Sessions** lists every session: open it, close only your view, or explicitly terminate it for everyone. The device you interact with controls the shared terminal size.
 
-**Arrange panes** creates resizable split tabs on desktop. Layouts survive reopening; mobile displays their sessions as normal tabs. Settings includes host names/order/defaults, dark/light/system/circadian themes, and notification controls. The native desktop app also manages the local host service and pairs to other hosts. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
+**Split view** creates resizable split tabs on desktop. Layouts survive reopening; mobile displays their sessions as normal tabs. Settings includes host names/order/defaults, dark/light/system/circadian themes, and notification controls. The native desktop app also manages the local host service and pairs to other hosts. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
 
 ## Image handling
 

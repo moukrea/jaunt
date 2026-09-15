@@ -163,9 +163,13 @@ def main() -> None:
             from .desktop import install_gui
             desktop = Path.home() / ".local/share/jaunt-desktop/current" / ("jaunt.app/Contents/MacOS/jaunt" if platform.system() == "Darwin" else "jaunt-desktop")
             system_desktop = shutil.which("jaunt-desktop") if platform.system() == "Linux" else None
-            if system_desktop:
+            restricted=Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+            needs_package=restricted.exists() and restricted.read_text().strip()=="1" and not system_desktop
+            if args.install_only or needs_package:
+                desktop = install_gui()
+            elif system_desktop:
                 desktop = Path(system_desktop)
-            elif args.install_only or not desktop.is_file():
+            elif not desktop.is_file():
                 desktop = install_gui()
             if not args.install_only:
                 subprocess.Popen([str(desktop)], start_new_session=True, stdin=subprocess.DEVNULL)

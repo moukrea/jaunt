@@ -130,7 +130,7 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
                         del env[key]
                 env.update(jaunt_STATE=str(root), jaunt_PAGE_URL=page, jaunt_REPO=repo,
                            jaunt_VERSION=tag, jaunt_PREFIX=config["prefix"], jaunt_BIN_DIR=config["bin"],
-                           jaunt_SKIP_PAIR="1")
+                           jaunt_SKIP_PAIR="1", jaunt_NO_GUI="1")
                 if config.get("noService"):
                     env["jaunt_NO_SERVICE"] = "1"
                 if authorized:

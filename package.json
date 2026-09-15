@@ -1,6 +1,6 @@
 {
   "name": "jaunt-desktop",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "private": true,
   "type": "module",
   "engines": {
@@ -16,13 +16,15 @@
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
-    "jsqr": "1.4.0"
+    "jsqr": "1.4.0",
+    "lucide": "1.46.0"
   },
   "devDependencies": {
     "electron": "44.3.0",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
     "miniflare": "4.20260730.0",
+    "sharp": "0.35.4",
     "wrangler": "4.131.2"
   },
   "overrides": {
@@ -48,11 +50,11 @@
     ],
     "linux": {
       "executableName": "jaunt-desktop",
-      "icon": "web/assets/jaunt.png",
+      "icon": "desktop/icons",
       "category": "TerminalEmulator",
       "desktop": {
         "entry": {
-          "StartupWMClass": "dev.jaunt.desktop",
+          "StartupWMClass": "jaunt",
           "Comment": "Shared local and remote terminal workspace"
         }
       },
@@ -67,7 +69,7 @@
     "artifactName": "jaunt-desktop-${version}-${arch}.${ext}",
     "extraResources": [
       {
-        "from": "web/assets/jaunt.png",
+        "from": "desktop/icons/512x512.png",
         "to": "jaunt.png"
       }
     ],
@@ -114,7 +116,8 @@
         "libxkbcommon",
         "libsecret"
       ]
-    }
+    },
+    "beforePack": "desktop/before-pack.cjs"
   },
   "desktopName": "dev.jaunt.desktop.desktop"
 }

@@ -8,6 +8,7 @@ const {createInterface}=require('node:readline');
 const {promisify}=require('node:util');
 const execute=promisify(execFile);
 app.setName('jaunt');
+if(process.platform==='linux')app.commandLine.appendSwitch('class','jaunt');
 protocol.registerSchemesAsPrivileged([{scheme:'jaunt',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 if(!app.requestSingleInstanceLock())app.quit();
 let win,bridge;
@@ -45,7 +46,7 @@ app.whenReady().then(()=>{
     const result=await execute(executable(),commands[name],{timeout:45000,maxBuffer:1000000});
     return ['status','pair','update','restart'].includes(name)?JSON.parse(result.stdout):{message:result.stdout.trim()};
   });
-  ipcMain.handle('desktop.notify',(e,data)=>{allowed(e);if(win.isFocused()||!Notification.isSupported())return;const notice=new Notification({title:'jaunt',body:'A terminal needs your attention.',icon:app.isPackaged?join(process.resourcesPath,'jaunt.png'):join(root,'assets/jaunt.png')});notice.on('click',()=>{win.show();win.focus();win.webContents.send('host.frame',{type:'desktop.open',session:String(data.session||'').slice(0,80),host:String(data.host||'').slice(0,80)});});notice.show();});
+  ipcMain.handle('desktop.notify',(e,data)=>{allowed(e);if(win.isFocused()||!Notification.isSupported())return;const notice=new Notification({title:String(data.title||'jaunt').slice(0,100),body:String(data.body||'').slice(0,400),icon:app.isPackaged?join(process.resourcesPath,'jaunt.png'):join(root,'assets/jaunt.png')});notice.on('click',()=>{win.show();win.focus();win.webContents.send('host.frame',{type:'desktop.open',session:String(data.session||'').slice(0,80),host:String(data.host||'').slice(0,80)});});notice.show();});
   win.loadURL('jaunt://app/');
 });
 app.on('second-instance',()=>{win?.show();win?.focus();});
