@@ -37,7 +37,7 @@ async def main():
             await page.locator('#add-machine').click();await page.get_by_label('Pairing code').fill(h.pair()['code'])
             await page.get_by_role('button',name='Pair machine',exact=True).click()
             await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
-            await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill('Remote desktop fixture');await page.get_by_label('Working directory').fill(str(h.work))
+            await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill('Remote desktop fixture');await page.get_by_label('Working directory').fill(str(h.work))
             await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
             await terminal_command(page,"printf 'native-remote-proof' > native-remote.txt")
             await until(lambda:(h.work/'native-remote.txt').exists())

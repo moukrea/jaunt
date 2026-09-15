@@ -109,7 +109,7 @@ async def main():
         pair=h.pair();await page.goto(pair['url']);await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
         assert '#pair' not in page.url;passed('URL pairing, encrypted authentication, secret removed from URL')
         original=json.loads(h.cli('status'))['pid']
-        await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill('Workspace')
+        await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill('Workspace')
         await page.get_by_label('Working directory').fill(str(h.work))
         await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
         await expect(page.locator('#tabs')).to_contain_text('Workspace');await page.wait_for_timeout(400)
@@ -129,7 +129,7 @@ async def main():
         assert (h.work/'burst-input.txt').read_text()==burst
         await expect(page.locator('#connection span')).to_have_text('Encrypted')
         passed('rapid 512-character keyboard input retains every byte without overflowing the peer queue')
-        await page.locator('#new-session-top').click();await page.get_by_label('Session name').fill('Builds');await page.get_by_label('Working directory').fill(str(h.work))
+        await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill('Builds');await page.get_by_label('Working directory').fill(str(h.work))
         await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#tabs')).to_contain_text('Builds')
         assert len(json.loads(h.cli('status'))['sessions'])==2;passed('multiple arbitrary shell sessions')
         await page.locator('#tabs').get_by_role('tab',name='Workspace',exact=False).click()

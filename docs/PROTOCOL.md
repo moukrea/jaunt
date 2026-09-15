@@ -49,3 +49,5 @@ A welcome optionally includes `peer`, the current view identifier. Session infor
 The desktop bridge sends the same RPC/stream messages through the 0600 Unix control socket after `ui.connect`. The socket's 0700 parent directory confines access to the host account. No pairing secret is generated for this same-account channel; remote connections retain the existing cryptographic handshake. Input is never replayed when either channel reconnects.
 
 New pairing text uses the lowercase `jaunt1.` prefix. Updated clients also accept the original uppercase prefix; pairing URL fragments and cryptographic transcript labels are unchanged. Existing environment variable overrides are accepted as compatibility aliases while new documentation uses lowercase product prefixes.
+
+Hosts advertising `sessionDirectory: true` accept `session.directory(id)` and the optional `sourceSession` on `session.create`. An explicit nonempty `cwd` takes precedence. The host reads the shell process's current directory on Linux/macOS and falls back to its initial directory if the process has exited or the OS cannot supply it. This introduces no new transport or authorization boundary.

@@ -179,7 +179,7 @@ function render() {
   for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || view !== v;
   for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
-  $('arrange-panes').disabled = !a?.active || a?.link.state !== 'online';
+  for(const id of ['arrange-panes','split-below']) $(id).disabled = !a?.active || a?.link.state !== 'online';
   $('terminal-empty').hidden = !!a?.active;
   for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || !visibleSessions(a).includes(id);
   if (a) layoutPanes(a);
@@ -207,6 +207,7 @@ function renderTabs(a) {
     const ids=leaves(tree), group=sessions.filter(s=>ids.includes(s.id));if(!group.length)return el('span');
     const active=ids.includes(a.active), target=active?a.active:group[0].id, name=group.map(s=>s.name).join(' + ');
     const label=button(name,()=>selectSession(a,target),'tab-label');
+    label.ondblclick=()=>renameSession(a,a.sessions.find(s=>s.id===target));
     label.setAttribute('role','tab');label.setAttribute('aria-selected',String(active));
     const close=button('',async()=>{for(const s of group)await closeView(a,s.id);},'icon-button tab-close','close');close.setAttribute('aria-label',`Close view of ${name}`);
     return el('div',{class:'session-tab'+(active?' active':'')},el('span',{class:'tab-symbol'},icon('terminal',15)),label,el('span',{class:`status-dot${group.some(s=>s.alive)?' online':''}`}),close);
@@ -215,7 +216,10 @@ function renderTabs(a) {
 function createTerm(a, session) {
   const node = el('div', {class: 'terminal-container', hidden: a !== current() || session.id !== a.active, 'data-session': session.id});
   $('terminal-containers').append(node);
-  node.append(el('div',{class:'pane-caption',text:session.name}));
+  const title=button(session.name,()=>renameSession(a,session),'pane-name');
+  const undock=button('',()=>undockPane(a,session.id),'icon-button','external');
+  undock.setAttribute('aria-label','Move pane to its own tab');
+  node.append(el('div',{class:'pane-caption'},title,undock));
   const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
     cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, convertEol: false,
     screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
@@ -304,6 +308,7 @@ async function attachTerm(a, t) {
   try { await promise; } finally { if (t.attaching?.promise === promise) t.attaching = null; }
 }
 async function selectSession(a, id) {
+  document.querySelectorAll('.split-picker').forEach(n=>n.remove());
   document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
   const session = a.sessions.find(s => s.id === id);
   if (!session) throw new Error('This terminal no longer exists.');
@@ -381,7 +386,7 @@ function layoutPanes(a) {
       const t = a.terms.get(tree.id) || createTerm(a, session);
       Object.assign(t.node.style, {left: x+'%', top: y+'%', width: w+'%', height: h+'%', right: 'auto', bottom: 'auto'});
       t.node.hidden = false; t.node.classList.toggle('pane-active', tree.id === a.active);t.node.classList.toggle('pane-tiled',visibleSessions(a).length>1);
-      t.node.querySelector('.pane-caption').textContent=session.name;
+      t.node.querySelector('.pane-name').textContent=session.name;
       if (!t.attached && !t.attaching && a.link.state === 'online') attachTerm(a, t).catch(report);
       return;
     }
@@ -411,15 +416,29 @@ function selectTerminalText() {
   $('terminal-stage').append(overlay);text.scrollTop=text.scrollHeight;
   // A native text control gives Android/iOS their own selection handles and copy menu.
 }
-function arrangePanes() {
-  const a = checked(current());
-  const other = a.sessions.filter(s => !visibleSessions(a).includes(s.id));
-  const body = el('div', {class:'file-menu'}, el('p',{text:'Split the current pane with another session. On mobile, each pane becomes a normal session tab.'}));
-  for (const s of other) body.append(el('div',{class:'settings-row'},el('span',{text:s.name}),
-    ...[['x','Side by side'],['y','Above / below']].map(([axis,label]) => button(label,async()=>{a.machine.layout=split(a.machine.layout||{id:a.active},a.active,s.id,axis);a.machine.openSessions||=[];if(!a.machine.openSessions.includes(s.id))a.machine.openSessions.push(s.id);rememberLayout(a,a.machine.layout);await persist();closeModal();render();}))));
-  body.append(button('Single pane',async()=>{rememberLayout(a,{id:a.active});await persist();closeModal();render();}));
-  body.prepend(el('div',{class:'modal-actions'},button('New shell beside',()=>newSession('x')),button('New shell below',()=>newSession('y'))));
-  modal('Arrange panes',body);
+function arrangePanes(axis) {
+  const a = online(), target = a.active;
+  const old = document.querySelector('.split-picker');
+  if (old) old.remove();
+  const picker = el('div', {class:'split-picker', role:'region', 'aria-label':'Choose pane session'});
+  const add = async id => {
+    picker.remove();
+    a.machine.openSessions ||= [];
+    if (!a.machine.openSessions.includes(id)) a.machine.openSessions.push(id);
+    rememberLayout(a, split(a.machine.layout || {id:target}, target, id, axis));
+    await selectSession(a,id);
+  };
+  picker.append(button('New shell',async()=>{picker.remove();await newSession(axis);},'button','plus'));
+  for (const session of a.sessions.filter(s=>!leaves(a.machine.layout || {id:target}).includes(s.id)))
+    picker.append(button(session.name,()=>add(session.id),'button','terminal'));
+  picker.append(button('Cancel',()=>picker.remove(),'button','close'));
+  $('terminal-stage').append(picker);
+  picker.querySelector('button').focus();
+  picker.onkeydown=e=>{if(e.key==='Escape')picker.remove();};
+}
+async function undockPane(a,id) {
+  rememberLayout(a,{id});
+  await selectSession(a,id);
 }
 async function sendInput(a, t, text) {
   if (a.link.state !== 'online' || !t.session.alive || !t.attached) throw new Error('This terminal is not ready for input.');
@@ -448,23 +467,42 @@ function terminalText(t) {
   }
   return lines.join('\n').replace(/\n+$/, '');
 }
-async function newSession(splitAxis = null) {
-  const a = online(), id = random(12), splitTarget=a.active;
-  const name = el('input', {value: `Shell ${a.sessions.length + 1}`, maxLength: 80});
-  const cwd = el('input', {value: a.info?.home || '~', spellcheck: false, autocapitalize: 'off'});
-  const body = el('div', {}, field('Session name', name), field('Working directory', cwd),
-    el('div', {class: 'modal-actions'}, button('Cancel', closeModal), button('Create shell', async () => {
-      const result = await a.link.request('session.create', {id, name: name.value, cwd: cwd.value,
-        cols: 100, rows: 30});
-      if (!a.sessions.some(s => s.id === result.id)) a.sessions.push(result);
-      if(['x','y'].includes(splitAxis) && splitTarget) {
-        const tree=split(a.machine.layout||{id:splitTarget},splitTarget,result.id,splitAxis);
-        rememberLayout(a,tree);
-      }
-      closeModal(); view = 'terminal'; await selectSession(a, result.id);
-      if (!isMobile()) activeTerm(a)?.term.focus();
-    }, 'button primary')));
-  modal('New terminal', body); name.focus(); name.select();
+async function newSession(splitAxis = null, options = {}) {
+  const a = online(), splitTarget = a.active;
+  const result = await a.link.request('session.create', {id:random(12),
+    sourceSession:splitTarget || undefined, cwd:a.info?.sessionDirectory ? undefined : a.sessions.find(s=>s.id===splitTarget)?.cwd, ...options, cols:100, rows:30});
+  if (!a.sessions.some(s=>s.id===result.id)) a.sessions.push(result);
+  if (['x','y'].includes(splitAxis) && splitTarget) {
+    a.machine.openSessions ||= [];
+    if (!a.machine.openSessions.includes(result.id)) a.machine.openSessions.push(result.id);
+    rememberLayout(a,split(a.machine.layout || {id:splitTarget},splitTarget,result.id,splitAxis));
+  }
+  closeModal(); view='terminal'; await selectSession(a,result.id);
+  if (!isMobile()) activeTerm(a)?.term.focus();
+}
+async function browseNewSession() {
+  const a=online(), active=a.sessions.find(s=>s.id===a.active);
+  const directory=active && a.info?.sessionDirectory ? (await a.link.request('session.directory',{id:active.id})).path : active?.cwd;
+  const name=el('input',{maxLength:80,placeholder:'Automatic'});
+  const cwd=el('input',{value:directory || a.info?.home || '~',spellcheck:false,autocapitalize:'off'});
+  const folders=el('div',{class:'folder-picker'});
+  let listing, request=0;
+  const navigate=async(path,append=false)=>{
+    const version=++request;
+    const result=await a.link.request('files.list',{path,offset:append?listing.next:0,limit:100,hidden:false});
+    if(version!==request)return;
+    if(append)result.entries=[...listing.entries,...result.entries];
+    listing=result;cwd.value=result.path;
+    folders.replaceChildren(button('Parent folder',()=>navigate(result.parent),'button','arrowUp'),
+      ...result.entries.filter(e=>e.directory).map(e=>button(e.name,()=>navigate(result.path.replace(/\/$/,'')+'/'+e.name),'button','folder')),
+      ...(result.next!==null?[button('Load more',()=>navigate(result.path,true))]:[]));
+  };
+  cwd.oninput=()=>{request++;};
+  cwd.onchange=()=>navigate(cwd.value).catch(report);
+  await navigate(cwd.value);
+  modal('New terminal',el('div',{},field('Session name',name,'Optional — leave blank for an automatic name.'),
+    field('Working directory',cwd),folders,
+    el('div',{class:'modal-actions'},button('Cancel',closeModal),button('Create shell',()=>newSession(null,{name:name.value,cwd:cwd.value}),'button primary'))));
 }
 async function closeView(a, id) {
   a.machine.openSessions = (a.machine.openSessions || a.sessions.map(s=>s.id)).filter(s=>s!==id);
@@ -477,12 +515,13 @@ async function closeView(a, id) {
   a.machine.lastSession=a.active;await persist();render();
 }
 function sessionList() {
-  const a=checked(current()), body=el('div',{class:'file-menu'});
+  const a=checked(current()), body=el('div',{class:'session-manager'});
   for(const s of a.sessions) body.append(el('div',{class:'settings-row'},
     el('div',{class:'settings-label'},el('strong',{text:s.name}),el('p',{text:`${s.alive?'Running':'Exited'} · ${s.cwd}`}),el('p',{text:(s.viewers||[]).map(v=>v.name).join(', ')||'No open views'})),
-    button('Open',async()=>{closeModal();await selectSession(a,s.id);}),
+    el('div',{class:'session-actions'},button('Open',async()=>{closeModal();view='terminal';await selectSession(a,s.id);}),
+    button('Rename',()=>renameSession(a,s)),
     ...(a.machine.openSessions?.includes(s.id)?[button('Close view',async()=>{await closeView(a,s.id);sessionList();})]:[]),
-    button('Terminate',()=>terminateSession(a,s),'button danger')));
+    button('Terminate',()=>terminateSession(a,s),'button danger'))));
   if(!a.sessions.length)body.append(el('p',{text:'No sessions are running on this host.'}));
   body.append(button('New shell',newSession,'button primary'));
   modal('Sessions on this host',body);
@@ -496,11 +535,11 @@ function terminateSession(a, session) {
       a.sessions = a.sessions.filter(s => s.id !== session.id); syncSessions(a); await persist(); render();
     }, true);
 }
-function renameSession() {
-  const a = online(), s = a.sessions.find(s => s.id === a.active); if (!s) return;
+function renameSession(a = online(), s = a.sessions.find(s => s.id === a.active)) {
+  if (!s) return;
   const input = el('input', {value: s.name, maxLength: 80});
   modal('Rename terminal', el('div', {}, field('Name', input), el('div', {class: 'modal-actions'}, button('Save', async () => {
-    await a.link.request('session.rename', {id: s.id, name: input.value}); closeModal();
+    await a.link.request('session.rename', {id: s.id, name: input.value}); s.name=input.value.trim() || s.name; closeModal(); render();
   }, 'button primary')))); input.focus(); input.select();
 }
 
@@ -1002,10 +1041,12 @@ function bindEvents() {
   for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => setView(b.dataset.view);
   $('select-terminal-text').onclick = () => {try{selectTerminalText();}catch(e){report(e);}};
   $('list-sessions').onclick = () => {try{sessionList();}catch(e){report(e);}};
-  $('arrange-panes').onclick = () => { try { arrangePanes(); } catch(e) { report(e); } };
+  $('arrange-panes').onclick = () => { try { arrangePanes('x'); } catch(e) { report(e); } };
   $('scroll-bottom').onclick = () => activeTerm(current())?.term.scrollToBottom();
   $('settings-button').onclick = () => setView('settings'); $('lock-button').onclick = () => lockWorkspace().catch(report);
   for (const id of ['new-session-top', 'new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
+  $('split-below').onclick = () => {try {arrangePanes('y');} catch(e) {report(e);}};
+  $('new-session-folder').onclick = () => browseNewSession().catch(report);
   $('rename-session').onclick = () => { try { renameSession(); } catch(e) { report(e); } };
   $('close-files').onclick = () => setView('terminal');
   $('file-path').oninput = () => { if (current()) current().pathDraft = $('file-path').value; };

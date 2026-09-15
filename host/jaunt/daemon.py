@@ -221,7 +221,7 @@ class Host:
                 "version": __version__, "platform": platform.system(), "user": getpass.getuser(),
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
-                "replayBytes": 2 * 1024 * 1024, "sharedViews": True,
+                "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True,
                 "updates": update_status(self.state.root),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
@@ -284,6 +284,8 @@ class Host:
             raise ValueError("Invalid request parameters")
         if method == "session.list":
             return self.sessions.list()
+        if method == "session.directory":
+            return {"path": await self.sessions.directory(p["id"])}
         if method == "session.create":
             return await self.sessions.create(p)
         if method == "session.attach":

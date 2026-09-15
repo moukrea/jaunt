@@ -83,7 +83,7 @@ def main():
                 page=browser.new_page()
                 page.goto(json.loads(cli('pair','--json'))['url'])
                 expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
-                page.locator('#new-session-top').click()
+                page.locator('#new-session-folder').click()
                 page.get_by_label('Working directory').fill(str(t))
                 page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
                 expect(page.locator('#tabs')).to_contain_text('Shell 1')
