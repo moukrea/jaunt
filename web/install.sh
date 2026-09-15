@@ -14,8 +14,57 @@ PAGE="${JAUNT_PAGE_URL:-https://moukrea.github.io/jaunt}"
 REPO="${JAUNT_REPO:-moukrea/jaunt}"
 PREFIX="${JAUNT_PREFIX:-$HOME/.local/share/jaunt/runtime}"
 BIN="${JAUNT_BIN_DIR:-$HOME/.local/bin}"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/jaunt-install.XXXXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
+# Stage on the destination filesystem, not an inherited or memory-backed /tmp.
+# pip and uv also use this private directory, including during a full-/tmp install.
+STAGE='installation storage preparation'
+JAUNT_INSTALL_PARENT="$(dirname "$PREFIX")"
+mkdir -p "$JAUNT_INSTALL_PARENT"
+JAUNT_INSTALL_TMP="$(mktemp -d "$JAUNT_INSTALL_PARENT/.jaunt-install.XXXXXXXX")"
+trap 'rm -rf "$JAUNT_INSTALL_TMP"' EXIT
+if ! dd if=/dev/zero of="$JAUNT_INSTALL_TMP/.write-test" bs=1024 count=1024 2>/dev/null; then
+  fail 'Cannot write to the installation filesystem. Check free disk space, quota, and directory permissions.'
+fi
+rm -f "$JAUNT_INSTALL_TMP/.write-test"
+python_fetch() {
+  "$PY" - "$1" "$2" <<'PYFETCH'
+import os, signal, sys, urllib.parse, urllib.request
+url, destination = sys.argv[1:]
+def https_only(value):
+    if urllib.parse.urlsplit(value).scheme != 'https':
+        raise ValueError('Installer download redirects must remain HTTPS')
+class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        https_only(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+def timed_out(*_):
+    raise TimeoutError('Installer download exceeded 120 seconds')
+https_only(url)
+signal.signal(signal.SIGALRM, timed_out)
+signal.alarm(120)
+try:
+    request = urllib.request.Request(url, headers={'User-Agent': 'Jaunt-Installer/1'})
+    opener = urllib.request.build_opener(HTTPSRedirect())
+    with opener.open(request, timeout=20) as response, open(destination, 'wb') as output:
+        https_only(response.url)
+        expected = response.headers.get('Content-Length')
+        total = 0
+        while chunk := response.read(64 * 1024):
+            total += len(chunk)
+            if total > 128 * 1024 * 1024:
+                raise ValueError('Installer download exceeds 128 MiB')
+            output.write(chunk)
+        if expected is not None and total != int(expected):
+            raise ValueError('Incomplete installer download')
+        output.flush()
+        os.fsync(output.fileno())
+except Exception as error:
+    # A filesystem failure here includes the real OS error instead of curl's 23.
+    print(f'jaunt: Python download failed: {error}', file=sys.stderr)
+    sys.exit(1)
+finally:
+    signal.alarm(0)
+PYFETCH
+}
 fetch() {
   local url="$1" destination="$2" rc
   # Bash owns the temporary directory. Open the destination here: a confined
@@ -28,6 +77,14 @@ fetch() {
         return 0
       else rc=$?; fi
       case "$rc" in
+        23)
+          if [[ -n "${PY:-}" ]]; then
+            printf '  Jaunt · curl could not write the download; retrying with Python.\n' >&2
+            python_fetch "$url" "$destination"
+          else
+            fail 'curl could not write the download and Python is not available yet. Check installation storage and curl restrictions.'
+          fi
+          ;;
         5|6|7|28|35|52|55|56)
           printf '  Jaunt · Download failed (curl %s); retrying over IPv4.\n' "$rc" >&2
           curl --disable --ipv4 --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" > "$destination"
@@ -54,30 +111,30 @@ if [[ -z "$PY" ]]; then
   if command -v uv >/dev/null; then UV="$(command -v uv)";
   elif [[ -x "$HOME/.local/bin/uv" ]]; then UV="$HOME/.local/bin/uv";
   else
-    fetch 'https://astral.sh/uv/install.sh' "$TMP/uv-install.sh"
-    UV_INSTALL_DIR="$HOME/.local/bin" UV_NO_MODIFY_PATH=1 sh "$TMP/uv-install.sh"
+    fetch 'https://astral.sh/uv/install.sh' "$JAUNT_INSTALL_TMP/uv-install.sh"
+    TMPDIR="$JAUNT_INSTALL_TMP" UV_INSTALL_DIR="$HOME/.local/bin" UV_NO_MODIFY_PATH=1 sh "$JAUNT_INSTALL_TMP/uv-install.sh"
     UV="$HOME/.local/bin/uv"
   fi
-  "$UV" python install 3.12
+  TMPDIR="$JAUNT_INSTALL_TMP" "$UV" python install 3.12
   PY="$("$UV" python find 3.12)"
 fi
 STAGE='deployment configuration download'
-fetch "${PAGE%/}/config.json" "$TMP/config.json"
-"$PY" - "$TMP/config.json" "${JAUNT_DEV_INSTALL:-0}" <<'PY'
+fetch "${PAGE%/}/config.json" "$JAUNT_INSTALL_TMP/config.json"
+"$PY" - "$JAUNT_INSTALL_TMP/config.json" "${JAUNT_DEV_INSTALL:-0}" <<'PY'
 import json,sys,urllib.parse
 c=json.load(open(sys.argv[1]));r=c.get('relay');u=urllib.parse.urlparse(r or '')
 assert c.get('version') == 1, 'Unsupported deployment configuration'
 assert r and u.hostname and (u.scheme=='wss' or (sys.argv[2]=='1' and u.scheme=='ws' and u.hostname in ('localhost','127.0.0.1'))), 'Relay has not been deployed. The repository owner must deploy it once before this installer can work.'
 assert not (u.username or u.password or u.query or u.fragment), 'Invalid relay URL'
 PY
-TAG="${JAUNT_VERSION:-$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["release"])' "$TMP/config.json")}"
+TAG="${JAUNT_VERSION:-$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["release"])' "$JAUNT_INSTALL_TMP/config.json")}"
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || fail 'Invalid release tag.'
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail 'Invalid repository name.'
 BASE="${JAUNT_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}"
 STAGE="release $TAG download and checksum verification"
 say "Downloading $TAG"
-fetch "${BASE%/}/host-manifest.json" "$TMP/host-manifest.json"
-WHEEL="$("$PY" - "$TMP/host-manifest.json" <<'PY'
+fetch "${BASE%/}/host-manifest.json" "$JAUNT_INSTALL_TMP/host-manifest.json"
+WHEEL="$("$PY" - "$JAUNT_INSTALL_TMP/host-manifest.json" <<'PY'
 import json,re,sys
 m=json.load(open(sys.argv[1]));w=m['wheel']
 assert re.fullmatch(r'jaunt_host-[A-Za-z0-9_.]+-py3-none-any\.whl',w), 'Invalid wheel name'
@@ -85,16 +142,16 @@ assert re.fullmatch(r'[a-f0-9]{64}',m['sha256']), 'Invalid checksum'
 print(w)
 PY
 )"
-fetch "${BASE%/}/$WHEEL" "$TMP/$WHEEL"
-"$PY" - "$TMP/host-manifest.json" "$TMP/$WHEEL" <<'PY'
+fetch "${BASE%/}/$WHEEL" "$JAUNT_INSTALL_TMP/$WHEEL"
+"$PY" - "$JAUNT_INSTALL_TMP/host-manifest.json" "$JAUNT_INSTALL_TMP/$WHEEL" <<'PY'
 import hashlib,json,sys
 m=json.load(open(sys.argv[1]));actual=hashlib.sha256(open(sys.argv[2],'rb').read()).hexdigest()
 assert actual==m['sha256'],'Release checksum mismatch; nothing installed'
 PY
 # Never silently destroy a user's running plain shells during an upgrade.
 if [[ -x "$PREFIX/current/bin/python" ]]; then
-  if "$PREFIX/current/bin/python" -m jaunt.cli status >"$TMP/status.json" 2>/dev/null; then
-    COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$TMP/status.json")"
+  if "$PREFIX/current/bin/python" -m jaunt.cli status >"$JAUNT_INSTALL_TMP/status.json" 2>/dev/null; then
+    COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$JAUNT_INSTALL_TMP/status.json")"
     if [[ "$COUNT" != 0 && "${JAUNT_ALLOW_RESTART:-0}" != 1 ]]; then
       fail "$COUNT plain shells are running. Finish them before updating. JAUNT_ALLOW_RESTART=1 explicitly authorizes terminating them."
     fi
@@ -107,23 +164,23 @@ say 'Installing into a private environment'
 VENV_ARGS=()
 # An explicit test-only switch allows offline CI to reuse installed dependencies.
 if [[ "${JAUNT_DEV_INSTALL:-0}" == 1 && "${JAUNT_TEST_SYSTEM_SITE:-0}" == 1 ]]; then VENV_ARGS+=(--system-site-packages); fi
-if ! "$PY" -m venv "${VENV_ARGS[@]}" "$TARGET"; then
+if ! TMPDIR="$JAUNT_INSTALL_TMP" "$PY" -m venv "${VENV_ARGS[@]}" "$TARGET"; then
   rm -rf "$TARGET"
   if [[ -z "$UV" ]]; then
-    fetch 'https://astral.sh/uv/install.sh' "$TMP/uv-install.sh"
-    UV_INSTALL_DIR="$HOME/.local/bin" UV_NO_MODIFY_PATH=1 sh "$TMP/uv-install.sh"
+    fetch 'https://astral.sh/uv/install.sh' "$JAUNT_INSTALL_TMP/uv-install.sh"
+    TMPDIR="$JAUNT_INSTALL_TMP" UV_INSTALL_DIR="$HOME/.local/bin" UV_NO_MODIFY_PATH=1 sh "$JAUNT_INSTALL_TMP/uv-install.sh"
     UV="$HOME/.local/bin/uv"
   fi
-  "$UV" venv --python "$PY" --seed "$TARGET"
+  TMPDIR="$JAUNT_INSTALL_TMP" "$UV" venv --python "$PY" --seed "$TARGET"
 fi
 # venv may bundle an outdated pip. Update before resolving release dependencies.
 if [[ "${JAUNT_DEV_INSTALL:-0}" != 1 || "${JAUNT_PIP_NO_DEPS:-0}" != 1 ]]; then
-  "$TARGET/bin/python" -m pip install --disable-pip-version-check --upgrade 'pip==26.2.1' || fail 'Could not install the reviewed pip version; previous runtime retained.'
+  TMPDIR="$JAUNT_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-pip-version-check --upgrade 'pip==26.2.1' || fail 'Could not install the reviewed pip version; previous runtime retained.'
 fi
 # JAUNT_PIP_NO_DEPS is only for explicit offline integration tests, never the normal installer.
 PIP_ARGS=()
 if [[ "${JAUNT_DEV_INSTALL:-0}" == 1 && "${JAUNT_PIP_NO_DEPS:-0}" == 1 ]]; then PIP_ARGS+=(--no-deps); fi
-if ! "$TARGET/bin/python" -m pip install --disable-pip-version-check "${PIP_ARGS[@]}" "$TMP/$WHEEL"; then
+if ! TMPDIR="$JAUNT_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-pip-version-check "${PIP_ARGS[@]}" "$JAUNT_INSTALL_TMP/$WHEEL"; then
   rm -rf "$TARGET"; fail 'Package installation failed. The previous version was retained.'
 fi
 # On upgrade, only switch the pointer after the new environment has been verified.
@@ -132,8 +189,8 @@ STAGE='safe runtime replacement'
 # Only now stop the old runtime. A failed download, checksum, venv or pip install
 # leaves the previous daemon running. Recheck: a shell could have started meanwhile.
 if [[ -x "$PREFIX/current/bin/python" ]]; then
-  if "$PREFIX/current/bin/python" -m jaunt.cli status >"$TMP/status.json" 2>/dev/null; then
-    COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$TMP/status.json")"
+  if "$PREFIX/current/bin/python" -m jaunt.cli status >"$JAUNT_INSTALL_TMP/status.json" 2>/dev/null; then
+    COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$JAUNT_INSTALL_TMP/status.json")"
     [[ "$COUNT" == 0 || "${JAUNT_ALLOW_RESTART:-0}" == 1 ]] || fail 'A plain shell started during the upgrade; not stopping it.'
     "$PREFIX/current/bin/python" -c 'import os; from jaunt.cli import control; control("upgrade.stop", {"allowRestart": os.environ.get("JAUNT_ALLOW_RESTART") == "1"})' || fail 'Host refused the upgrade shutdown; previous runtime retained.'
     "$PREFIX/current/bin/python" -m jaunt.cli service stop >/dev/null 2>&1 || true
@@ -157,7 +214,7 @@ prefix,bindir,page,repo,tag,no_service=sys.argv[1:]
 old=installation()
 atomic_json(state_dir()/'installation.json', {'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)})
 PYUPDATE
-RELAY="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["relay"])' "$TMP/config.json")"
+RELAY="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["relay"])' "$JAUNT_INSTALL_TMP/config.json")"
 STAGE='host configuration and service startup'
 "$BIN/jaunt" init --relay "$RELAY" --page "${PAGE%/}/"
 export PATH="$BIN:$PATH"

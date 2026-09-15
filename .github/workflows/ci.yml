@@ -56,6 +56,9 @@ jobs:
       - name: Install with curl isolated from the installer temporary directory
         if: matrix.fedora == '44'
         run: python3 tests/installer_namespace_e2e.py
+      - name: Install with full temporary storage and recover from curl write errors
+        if: matrix.fedora == '44'
+        run: python3 tests/installer_storage_e2e.py
   host:
     strategy:
       matrix:

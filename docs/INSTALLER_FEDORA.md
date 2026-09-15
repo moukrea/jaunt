@@ -8,7 +8,7 @@ The initial user report concerned Fedora: the command produced no output and the
 - A `.curlrc` output-file setting can absorb the script so nothing runs. This was reproduced using real curl and a local HTTP server. The leading `-q` ignores that configuration in the official command; internal downloads use `--disable`.
 - The script immediately announces startup and each download. Unexpected errors identify the stage, line, and exit code without printing secrets or complete commands.
 - Internal HTTPS downloads are bounded at 120 seconds per attempt. Selected connection/transfer errors trigger one visible IPv4 retry; HTTP and certificate failures are not bypassed. Redirects remain restricted to HTTPS.
-- A curl process with a separate filesystem namespace cannot open the temporary-directory path created by Bash. A real Fedora-container curl reproduced exit 23 at `Downloading config.json`, before any installation mutation. Downloads now use shell output redirection: Bash opens the destination and curl writes through inherited stdout. This works even when curl cannot see the destination path. It does not bypass actual storage exhaustion or write denial.
+- A curl process with a separate filesystem namespace cannot open the temporary-directory path created by Bash. A real Fedora-container curl reproduced exit 23 at `Downloading config.json`, before any installation mutation. Downloads now use shell output redirection: Bash opens the destination and curl writes through inherited stdout. This works even when curl cannot see the destination path. It does not bypass storage exhaustion or write denial on the destination filesystem.
 - Active-shell guards, wheel verification, and identity preservation remain in place.
 
 The curl documentation defines [exit 23 as a local write failure](https://curl.se/libcurl/c/libcurl-errors.html). That code alone does not identify the exact cause on the user's machine; filesystem isolation is the reproduced case addressed here.
@@ -31,3 +31,22 @@ Fedora tests use isolated containers without a user service manager (`JAUNT_NO_S
 These corrections apply to the Pages entry point and installer source. Published beta.5 assets and APK beta.3 remain immutable. The host does not need a new version number to use the updated Pages installer. The installer embedded in the beta.5 wheel retains its previous code until a future host release.
 
 The protocol remains without an independent security audit.
+
+## Follow-up: persistent exit 23 after shell redirection
+
+The user subsequently reported the same write failure at line 65. The namespace regression had passed, but it had not resolved the remote user's failure. No claim is made that the remote filesystem or curl configuration has been diagnosed.
+
+A separate Fedora 44 test with Python 3.14.7 and a completely full 4 KiB `/tmp` tmpfs reproduced the exact `curl: Failed writing body` error and the line-65 failure. A directory and empty file could still be created there, but writing the response failed. This test uses only a disposable Docker container; it does not fill any host or personal filesystem.
+
+The installer now stages beside the runtime on the destination filesystem, checks that it can write 1 MiB there, and supplies that private temporary directory to pip/uv during installation. It does not change the host daemon's or shell sessions' TMPDIR. The staging directory is removed on exit. A full destination filesystem still produces a clear storage error; the installer does not delete user files to make room.
+
+When curl returns 23 and Python is available, a standard-library HTTPS downloader retries the file independently. It uses normal certificate validation, rejects non-HTTPS redirects, bounds the whole transfer to 120 seconds and 128 MiB, detects incomplete bodies, and flushes/fsyncs the result. Wheel checksum verification still happens before runtime replacement. This fallback does not handle arbitrary TLS/HTTP failures by weakening validation.
+
+Validation commands for this follow-up:
+
+- `pytest -q`: 53 tests passed locally. Four new checks exercise the Python fallback's HTTPS and redirect boundaries.
+- `python tests/installer_storage_e2e.py`: real Fedora installations with a full `/tmp`, and with every internal curl download forced to write to `/dev/full`. The second scenario exercises actual curl exit 23 followed by real public HTTPS downloads through Python. Both scenarios check the running daemon, staging cleanup, and absence of a deleted staging path in the daemon environment.
+- `python tests/installer_e2e.py`: all eight existing checks passed, including active-shell preservation, checksum rejection, and explicit restart authorization.
+- `python scripts/build_release.py`, `npm run prepare-web`, and `python scripts/check_project.py`: passed.
+
+The required Fedora CI job runs both new installation scenarios in addition to the earlier namespace test. These are test-environment observations, not a claim of successful execution on the user's inaccessible Fedora machine.

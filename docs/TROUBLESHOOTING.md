@@ -4,7 +4,7 @@
 |---|---|
 | “Relay has not been deployed” | The page still contains `relay:null`. Complete the owner deployment. Do not substitute a fictional URL. |
 | `jaunt` not found after installation | Open a new shell or use `~/.local/bin/jaunt`. Add `~/.local/bin` to PATH if your shell configuration excludes it. |
-| `curl (23)` while downloading configuration | curl could not write the received data. The installer now opens download files in Bash so a confined curl does not need access to the installer's temporary-directory path. Actual storage exhaustion or write denial still causes an error. See [installer validation](INSTALLER_FEDORA.md). |
+| `curl (23)` while downloading configuration | curl could not write the received data. The installer stages on the runtime filesystem instead of `/tmp`, opens download files in Bash, and retries curl write failures through Python. Actual exhaustion or write denial on the installation filesystem still causes a storage error. See [installer validation](INSTALLER_FEDORA.md). |
 | Consumed or expired QR code | On a remembered device, open the host card instead of reusing the old QR code. For a new device, run `jaunt pair`. |
 | Host offline | Check `jaunt status`, outbound WSS/443 connectivity, sleep/hibernation, and `jaunt doctor`. No new QR code is needed. |
 | User service unavailable | `jaunt start` runs in the background. Configure a real user service for startup after reboot. On Linux, running while logged out also depends on systemd linger, which may require an administrator. |
