@@ -43,4 +43,4 @@ jobs:
             echo 'Release already exists; refusing to silently replace immutable artifacts.' >&2
             exit 1
           fi
-          gh release create "$TAG" dist/*.whl dist/host-manifest.json dist/SHA256SUMS --verify-tag --title "Jaunt $TAG" --notes-file docs/RELEASE_NOTES.md "${FLAGS[@]}"
+          gh release create "$TAG" dist/*.whl dist/host-manifest.json dist/SHA256SUMS --verify-tag --title "jaunt $TAG" --notes-file docs/RELEASE_NOTES.md "${FLAGS[@]}"

@@ -1,0 +1,53 @@
+const {app,BrowserWindow,protocol,net,ipcMain,shell,Notification}=require('electron');
+const {spawn,execFile}=require('node:child_process');
+const {join,resolve,sep}=require('node:path');
+const {pathToFileURL}=require('node:url');
+const {homedir}=require('node:os');
+const {existsSync}=require('node:fs');
+const {createInterface}=require('node:readline');
+const {promisify}=require('node:util');
+const execute=promisify(execFile);
+app.setName('jaunt');
+protocol.registerSchemesAsPrivileged([{scheme:'jaunt',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
+if(!app.requestSingleInstanceLock())app.quit();
+let win,bridge;
+const executable=()=>process.env.jaunt_host_executable || (existsSync(join(homedir(),'.local/bin/jaunt'))?join(homedir(),'.local/bin/jaunt'):'jaunt');
+const allowed=e=>{if(e.sender!==win?.webContents||e.senderFrame!==win.webContents.mainFrame||!e.senderFrame.url.startsWith('jaunt://app/'))throw new Error('Untrusted frame');};
+function disconnect(){bridge?.kill();bridge=null;}
+function connect(){
+  disconnect();
+  const child=spawn(executable(),['desktop-bridge'],{stdio:['pipe','pipe','pipe']});bridge=child;
+  createInterface({input:child.stdout}).on('line',line=>{if(bridge!==child||line.length>7000000)return;try{win?.webContents.send('host.frame',JSON.parse(line));}catch{disconnect();}});
+  child.stderr.resume(); // Never forward private host logs into renderer or public diagnostics.
+  const closed=()=>{if(bridge===child){bridge=null;win?.webContents.send('host.frame',{type:'bridge.closed'});}};
+  child.on('error',closed);child.on('exit',closed);
+}
+app.whenReady().then(()=>{
+  const root=resolve(__dirname,'../web');
+  protocol.handle('jaunt',request=>{
+    const url=new URL(request.url), file=resolve(root,'.'+decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname));
+    if(url.host!=='app'||!file.startsWith(root+sep))return new Response('Forbidden',{status:403});
+    return net.fetch(pathToFileURL(file).href);
+  });
+  win=new BrowserWindow({width:1280,height:840,minWidth:380,minHeight:360,title:'jaunt',icon:app.isPackaged?join(process.resourcesPath,'jaunt.png'):join(root,'assets/jaunt.png'),backgroundColor:'#121314',webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  win.setMenuBarVisibility(false);
+  win.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return {action:'deny'};});
+  win.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('jaunt://app/')){event.preventDefault();if(/^https?:\/\//.test(url))shell.openExternal(url);}});
+  win.webContents.session.setPermissionRequestHandler((_wc,permission,callback)=>callback(['clipboard-sanitized-write','notifications'].includes(permission)||(permission==='clipboard-read'&&win.isFocused())));
+  ipcMain.handle('host.connect',async e=>{allowed(e);try{await execute(executable(),['start'],{timeout:15000,maxBuffer:65536});}catch{}connect();});
+  ipcMain.handle('host.disconnect',e=>{allowed(e);disconnect();});
+  ipcMain.handle('host.send',async(e,frame)=>{allowed(e);const data=JSON.stringify(frame);if(data.length>200000||!bridge)throw new Error('Host connection unavailable');await new Promise((resolve,reject)=>bridge.stdin.write(data+'\n',err=>err?reject(err):resolve()));});
+  ipcMain.handle('host.action',async(e,name)=>{
+    allowed(e);
+    if(name==='install'){const result=await execute('bash',['-o','pipefail','-c','curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'],{env:{...process.env,jaunt_SKIP_PAIR:'1',jaunt_NO_GUI:'1',['jaunt_SKIP_PAIR'.toUpperCase()]:'1'},timeout:600000,maxBuffer:1000000});return {message:'Host installed. Your computer is ready to share shells.'};}
+    const commands={start:['start'],update:['update'],restart:['update','--allow-restart'],service:['service','install'],status:['status'],pair:['pair','--json','--qr-svg']};
+    if(!commands[name])throw new Error('Unknown host action');
+    const result=await execute(executable(),commands[name],{timeout:45000,maxBuffer:1000000});
+    return ['status','pair','update','restart'].includes(name)?JSON.parse(result.stdout):{message:result.stdout.trim()};
+  });
+  ipcMain.handle('desktop.notify',(e,data)=>{allowed(e);if(win.isFocused()||!Notification.isSupported())return;const notice=new Notification({title:'jaunt',body:'A terminal needs your attention.',icon:app.isPackaged?join(process.resourcesPath,'jaunt.png'):join(root,'assets/jaunt.png')});notice.on('click',()=>{win.show();win.focus();win.webContents.send('host.frame',{type:'desktop.open',session:String(data.session||'').slice(0,80),host:String(data.host||'').slice(0,80)});});notice.show();});
+  win.loadURL('jaunt://app/');
+});
+app.on('second-instance',()=>{win?.show();win?.focus();});
+app.on('window-all-closed',()=>app.quit());
+app.on('before-quit',disconnect);

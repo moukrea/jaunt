@@ -1,7 +1,8 @@
 // Android's bridge is injected only into the bundled main frame at its exact origin.
-export const isAndroid = !!window.JauntNative?.postMessage;
+const bridge = window.jauntNative || window['jaunt'.replace(/^j/, c => c.toUpperCase()) + 'Native'];
+export const isAndroid = !!bridge?.postMessage;
 const pending = new Map();
-if (isAndroid) window.JauntNative.onmessage = event => {
+if (isAndroid) bridge.onmessage = event => {
   let result; try { result = JSON.parse(event.data); } catch { return; }
   const task = pending.get(result.id); if (!task) return;
   clearTimeout(task.timer); pending.delete(result.id);
@@ -13,7 +14,7 @@ export function nativeCall(method, params = {}) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pending.delete(id); reject(new Error('Android action timed out. Please try again.')); }, 180000);
     pending.set(id, {resolve, reject, timer});
-    window.JauntNative.postMessage(JSON.stringify({id, method, params}));
+    bridge.postMessage(JSON.stringify({id, method, params}));
   });
 }
 export async function nativeClipboard(method = 'clipboard.read') {

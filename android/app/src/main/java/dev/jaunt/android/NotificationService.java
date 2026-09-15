@@ -30,21 +30,21 @@ public class NotificationService extends Service {
     }
     private PendingIntent open(String room,String session){Intent intent=new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("host",room).putExtra("session",session);return PendingIntent.getActivity(this,Objects.hash(room,session),intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);}
     private Notification ongoing(String text){PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,NotificationService.class).setAction("stop"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this,CONNECTION).setSmallIcon(dev.jaunt.android.R.drawable.ic_jaunt).setContentTitle("Jaunt · background connection").setContentText(text).setContentIntent(open("","")).setOngoing(true).setVisibility(Notification.VISIBILITY_PRIVATE).addAction(new Notification.Action.Builder(null,"Stop",stop).build()).build();}
+        return new Notification.Builder(this,CONNECTION).setSmallIcon(dev.jaunt.android.R.drawable.ic_jaunt).setContentTitle("jaunt · background connection").setContentText(text).setContentIntent(open("","")).setOngoing(true).setVisibility(Notification.VISIBILITY_PRIVATE).addAction(new Notification.Action.Builder(null,"Stop",stop).build()).build();}
     @Override public int onStartCommand(Intent intent,int flags,int id){
         if(intent!=null&&"stop".equals(intent.getAction())){getSharedPreferences("native",0).edit().putBoolean("notifications",false).apply();stopSelf();return START_NOT_STICKY;}
         startForeground(1,ongoing("Connecting to your hosts…"));getSharedPreferences("native",0).edit().putBoolean("notifications",true).apply();
         serial.execute(()->{try{JSONObject all=IdentityStore.get(this).read();Set<String> wanted=new HashSet<>();for(Iterator<String> it=all.keys();it.hasNext();){String room=it.next();wanted.add(room);if(connections.containsKey(room)&&connections.get(room).closed)connections.remove(room);if(!connections.containsKey(room)){JSONObject m=all.getJSONObject(room);validate(m);Connection c=new Connection(m);connections.put(room,c);c.connect();}}
             for(String room:new HashSet<>(connections.keySet()))if(!wanted.contains(room))connections.remove(room).close();
             if(connections.isEmpty())stopSelf();else status();
-        }catch(Exception e){getSystemService(NotificationManager.class).notify(1,ongoing("Open Jaunt to restore your connection."));}});
+        }catch(Exception e){getSystemService(NotificationManager.class).notify(1,ongoing("Open jaunt to restore your connection."));}});
         return START_STICKY;
     }
     private void status(){long online=connections.values().stream().filter(c->c.online).count();getSystemService(NotificationManager.class).notify(1,ongoing(online+" / "+connections.size()+" hosts connected · reconnects automatically"));}
     private void notifyEvent(JSONObject machine,JSONObject value){
         // Never expose terminal output or arbitrary notification bodies on a locked screen.
         String room=machine.optString("room"),session=value.optString("session");
-        Notification n=new Notification.Builder(this,EVENTS).setSmallIcon(dev.jaunt.android.R.drawable.ic_jaunt).setContentTitle("Jaunt").setContentText(machine.optString("name","Your host")+" needs your attention.").setContentIntent(open(room,session)).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build();
+        Notification n=new Notification.Builder(this,EVENTS).setSmallIcon(dev.jaunt.android.R.drawable.ic_jaunt).setContentTitle("jaunt").setContentText(machine.optString("name","Your host")+" needs your attention.").setContentIntent(open(room,session)).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build();
         getSystemService(NotificationManager.class).notify(100+Math.floorMod(Objects.hash(room,session),100000),n);
     }
     private class Connection {
@@ -55,7 +55,7 @@ public class NotificationService extends Service {
             ws=client.newWebSocket(request,new WebSocketListener(){
                 private void dispatch(Runnable action){if(!stopped)try{serial.execute(()->{if(current==generation&&!closed)action.run();});}catch(RejectedExecutionException ignored){}}
                 @Override public void onOpen(WebSocket socket,Response response){dispatch(()->{try{socket.send(new JSONObject().put("type","auth").put("role","client").put("token",machine.getString("relayToken")).toString());}catch(Exception e){fail();}});}
-                @Override public void onMessage(WebSocket socket,String text){dispatch(()->{try{receive(text);}catch(Exception e){close();getSystemService(NotificationManager.class).notify(1,ongoing("Secure connection could not be verified. Open Jaunt."));}});}
+                @Override public void onMessage(WebSocket socket,String text){dispatch(()->{try{receive(text);}catch(Exception e){close();getSystemService(NotificationManager.class).notify(1,ongoing("Secure connection could not be verified. Open jaunt."));}});}
                 @Override public void onClosed(WebSocket socket,int code,String reason){dispatch(()->fail());}
                 @Override public void onFailure(WebSocket socket,Throwable error,Response response){dispatch(()->fail());}
             });

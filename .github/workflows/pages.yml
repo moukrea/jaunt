@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: vars.JAUNT_RELAY_URL != ''
+    if: vars.jaunt_RELAY_URL != ''
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -26,11 +26,12 @@ jobs:
       - run: npm ci
       - run: npm run prepare-web
         env:
-          JAUNT_PRODUCTION: '1'
-          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
-          JAUNT_RELEASE_TAG: ${{ vars.JAUNT_RELEASE_TAG }}
-          JAUNT_ANDROID_RELEASE_TAG: ${{ vars.JAUNT_ANDROID_RELEASE_TAG }}
-          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+          jaunt_PRODUCTION: '1'
+          jaunt_RELAY_URL: ${{ vars.jaunt_RELAY_URL }}
+          jaunt_RELEASE_TAG: ${{ vars.jaunt_RELEASE_TAG }}
+          jaunt_ANDROID_RELEASE_TAG: ${{ vars.jaunt_ANDROID_RELEASE_TAG }}
+          jaunt_DESKTOP_RELEASE_TAG: ${{ vars.jaunt_DESKTOP_RELEASE_TAG }}
+          jaunt_PAGE_URL: ${{ vars.jaunt_PAGE_URL }}
       - run: python scripts/check_project.py
       - name: Require published host assets
         env:
@@ -75,6 +76,21 @@ jobs:
               seen.add(name)
           assert len(seen)==2 and 'SIGNING-CERTIFICATE.txt' in seen
           PYANDROID
+          fi
+      - name: Require verified published desktop archive when advertised
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).desktopRelease || ''")
+          if [ -n "$TAG" ]; then
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-x64.tar.gz' --pattern SHA256SUMS --dir /tmp/jaunt-desktop-release
+            python3 - <<'PYDESKTOP'
+          import hashlib,pathlib
+          root=pathlib.Path('/tmp/jaunt-desktop-release')
+          archive,=root.glob('*-x64.tar.gz')
+          checks=dict(row.split('  ',1)[::-1] for row in (root/'SHA256SUMS').read_text().splitlines())
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
+          PYDESKTOP
           fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

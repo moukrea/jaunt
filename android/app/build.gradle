@@ -6,17 +6,17 @@ android {
         applicationId 'dev.jaunt.android'
         minSdk 26
         targetSdk 36
-        versionCode 3
-        versionName '0.1.0-beta.3'
+        versionCode 4
+        versionName '0.1.0-beta.4'
         testInstrumentationRunner 'dev.jaunt.android.ClipboardFixture'
     }
     signingConfigs {
         release {
-            if (System.getenv('JAUNT_ANDROID_KEYSTORE')) {
-                storeFile file(System.getenv('JAUNT_ANDROID_KEYSTORE'))
-                storePassword System.getenv('JAUNT_ANDROID_STORE_PASSWORD')
-                keyAlias System.getenv('JAUNT_ANDROID_KEY_ALIAS')
-                keyPassword System.getenv('JAUNT_ANDROID_STORE_PASSWORD')
+            if (System.getenv('jaunt_ANDROID_KEYSTORE')) {
+                storeFile file(System.getenv('jaunt_ANDROID_KEYSTORE'))
+                storePassword System.getenv('jaunt_ANDROID_STORE_PASSWORD')
+                keyAlias System.getenv('jaunt_ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('jaunt_ANDROID_STORE_PASSWORD')
             }
         }
     }
@@ -37,9 +37,9 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20260814'
 }
-tasks.register('bundleJauntWeb', Copy) {
+tasks.register('bundlejauntWeb', Copy) {
     from('../../web')
     into(layout.buildDirectory.dir('generated/jauntAssets/jaunt'))
     exclude 'install.sh'
 }
-tasks.named('preBuild').configure { dependsOn 'bundleJauntWeb' }
+tasks.named('preBuild').configure { dependsOn 'bundlejauntWeb' }

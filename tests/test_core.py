@@ -150,12 +150,12 @@ async def test_real_pty_replay_lifecycle(tmp_path):
         assert (await sessions.create({'id':'test_pty_123'}))['pid']==first['pid']
         await sessions.attach('one',{'id':first['id']})
         # Marker is not present contiguously in the echoed command.
-        await sessions.write(first['id'],b"printf 'JAUNT_%s\\n' 'ACTUAL_RESULT'\r")
+        await sessions.write(first['id'],b"printf 'jaunt_%s\\n' 'ACTUAL_RESULT'\r")
         for _ in range(100):
             raw=b''.join(unb64(v['data']) for _,v in events if v.get('type')=='terminal.output')
-            if b'JAUNT_ACTUAL_RESULT' in raw:break
+            if b'jaunt_ACTUAL_RESULT' in raw:break
             await asyncio.sleep(.03)
-        assert b'JAUNT_ACTUAL_RESULT' in raw
+        assert b'jaunt_ACTUAL_RESULT' in raw
         sid=first['id'];sessions.detach('one');assert sessions.get(sid).alive
         before=sessions.get(sid).offset
         await sessions.write(sid,b"printf 'OFFLINE_%s\\n' 'CONTINUES'\r")

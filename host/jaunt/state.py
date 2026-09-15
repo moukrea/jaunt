@@ -9,7 +9,7 @@ from .crypto import token
 
 
 def state_dir() -> Path:
-    return Path(os.environ.get("JAUNT_STATE", Path.home() / ".local/share/jaunt")).expanduser()
+    return Path(os.environ.get("jaunt_STATE", Path.home() / ".local/share/jaunt")).expanduser()
 
 
 def atomic_json(path: Path, value: object) -> None:

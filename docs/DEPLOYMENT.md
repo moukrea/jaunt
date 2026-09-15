@@ -23,7 +23,7 @@ Deployment tools are pinned and the resolved lockfile is committed. The sharp/un
 
 1. Pass CI. Create the host tag, currently `v0.1.0-beta.5` (Python version `0.1.0b5`). The release workflow builds the wheel and publishes it with `host-manifest.json` and `SHA256SUMS`. Beta releases are explicitly marked as prereleases. Never overwrite an existing release's assets.
 2. For Android, publish the tag, currently `android-v0.1.0-beta.3`, with its signed APK, `SIGNING-CERTIFICATE.txt`, and `SHA256SUMS`; verify the public assets. Keep the same signing key for updates.
-3. Set repository variables `JAUNT_RELAY_URL` (actual WSS URL), `JAUNT_RELEASE_TAG` (`v0.1.0-beta.5`), `JAUNT_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.3`), and optionally `JAUNT_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
+3. Set repository variables `jaunt_RELAY_URL` (actual WSS URL), `jaunt_RELEASE_TAG` (`v0.1.0-beta.5`), `jaunt_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.3`), and optionally `jaunt_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
 4. Enable Pages in GitHub Actions mode. `pages.yml` builds the web app, validates configuration, copies the installer, and publishes it.
 5. Do not run Pages with a nonexistent release. The deployment prompt requires this order.
 

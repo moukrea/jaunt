@@ -32,12 +32,12 @@ def main():
                         ' run --rm --network host fedora:44 curl "$@"\n')
         curl.chmod(0o755)
         env = {k: v for k, v in os.environ.items()
-               if not k.startswith('JAUNT_') and k != 'PYTHONPATH'}
+               if not k.lower().startswith('jaunt_') and k != 'PYTHONPATH'}
         env.update(PATH=f'{wrappers}:{os.environ["PATH"]}',
-                   JAUNT_PREFIX=str(root / 'runtime'),
-                   JAUNT_BIN_DIR=str(root / 'bin'),
-                   JAUNT_STATE=str(root / 'state'),
-                   JAUNT_NO_SERVICE='1', JAUNT_SKIP_PAIR='1')
+                   jaunt_PREFIX=str(root / 'runtime'),
+                   jaunt_BIN_DIR=str(root / 'bin'),
+                   jaunt_STATE=str(root / 'state'),
+                   jaunt_NO_SERVICE='1', jaunt_SKIP_PAIR='1')
         executable = root / 'bin/jaunt'
         try:
             result = subprocess.run(['bash', str(args.installer)], env=env,

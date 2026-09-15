@@ -35,3 +35,21 @@ test('disconnect while terminal input is queued never replays it into a new chan
  const results=await Promise.allSettled(Array.from({length:20},(_,index)=>link.send({type:'terminal.input',index})));
  assert.deepEqual(sent,[0]);assert.equal(results.filter(r=>r.status==='rejected').length,19);
 });
+
+import {leaves,prune,split,themeMode} from '../web/js/workspace.mjs';
+test('split groups retain independent sessions and collapse only removed panes',()=>{
+  const tree=split(split({id:'a'},'a','b'),'b','c','y');
+  assert.deepEqual(leaves(tree),['a','b','c']);
+  assert.deepEqual(leaves(prune(tree,new Set(['a','c']))),['a','c']);
+  assert.deepEqual(prune(tree,new Set(['c'])),{id:'c'});
+  assert.equal(prune(tree,new Set()),null);
+  assert.deepEqual(split(tree,'a','c'),tree);
+});
+test('theme defaults to dark; system and circadian choices are deterministic',()=>{
+  assert.equal(themeMode(undefined,12,true),'dark');
+  assert.equal(themeMode('system',12,true),'light');
+  assert.equal(themeMode('system',12,false),'dark');
+  assert.equal(themeMode('circadian',6,false),'dark');
+  assert.equal(themeMode('circadian',7,false),'light');
+  assert.equal(themeMode('circadian',19,true),'dark');
+});

@@ -23,7 +23,7 @@ class Clipboard:
             return {"text": True, "image": True, "backend": "Wayland"}
         if os.environ.get("DISPLAY") and shutil.which("xclip"):
             return {"text": True, "image": True, "backend": "X11"}
-        return {"text": False, "image": False, "backend": "Jaunt buffer (headless)"}
+        return {"text": False, "image": False, "backend": "jaunt buffer (headless)"}
 
     async def run(self, args: list[str], data: bytes | None = None) -> bytes:
         proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE,
@@ -48,7 +48,7 @@ class Clipboard:
         elif backend == "X11":
             text = await self.run(["xclip", "-selection", "clipboard", "-o"])
         else:
-            return {"text": self.text, "source": "Jaunt buffer"}
+            return {"text": self.text, "source": "jaunt buffer"}
         if len(text) > 1024 * 1024:
             raise ValueError("The desktop clipboard exceeds 1 MiB; export it to a file instead.")
         return {"text": text.decode("utf-8", errors="replace"), "source": backend}

@@ -19,3 +19,29 @@
 .paste-zone{min-height:150px;padding:16px;margin:18px 0;border:1px dashed var(--muted);border-radius:12px;background:var(--surface);font-size:16px;white-space:pre-wrap;overflow-wrap:anywhere}.paste-zone:empty:before{content:attr(data-placeholder);color:var(--muted);pointer-events:none}.paste-zone:focus{outline:2px solid var(--accent);outline-offset:2px}
 
 .android-download{margin:24px 0 40px;padding:20px;border:1px solid var(--border);border-radius:12px}.android-download .button{display:inline-flex;text-decoration:none}.android-download p{margin:12px 0 0}
+
+/* Shared workspace: reserve chrome space, never cover the last terminal row. */
+.terminal-stage{min-height:0;flex:1 1 0;isolation:isolate}
+.tabs-row,.terminal-footer,.keybar,.actionbar{flex-shrink:0}
+.terminal-footer{min-height:30px;height:auto;overflow:hidden}
+#terminal-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.terminal-container{box-sizing:border-box;min-width:0;min-height:0;padding-bottom:12px;overflow:auto}
+.terminal-container .xterm{height:100%;min-height:0}
+.terminal-container.pane-active{box-shadow:inset 0 0 0 1px var(--line)}
+.pane-divider{position:absolute;z-index:4;background:var(--line);touch-action:none}
+.pane-divider:hover,.pane-divider:focus{background:var(--accent)}
+.pane-divider.x{width:6px;transform:translateX(-3px);cursor:col-resize}
+.pane-divider.y{height:6px;transform:translateY(-3px);cursor:row-resize}
+:root[data-theme="light"]{color-scheme:light;--bg:#f5f6f2;--panel:#eff1eb;--surface:#e8ece3;--surface-hover:#dce3d6;--line:#cbd3c5;--line-soft:#dce1d6;--text:#252b24;--muted:#55614f;--faint:#6b7565;--accent:#875512;--accent-soft:#eee0c7;--good:#397c48;--danger:#ad392d}
+:root[data-theme="light"] .terminal-stage{background:#f7f8f5}
+:root[data-theme="light"] .terminal-container{background:#f7f8f5}
+@media(max-width:760px){.desktop-only{display:none!important}.terminal-footer{min-height:30px;gap:8px}.terminal-footer .text-button{flex-shrink:0;min-height:28px}.terminal-container{padding-bottom:10px}.terminal-hint{display:none}}
+
+.terminal-selection-overlay{position:absolute;inset:0;z-index:8;background:var(--bg);display:flex;flex-direction:column;padding:8px;gap:8px}.terminal-selection-overlay>.button{align-self:flex-end;flex-shrink:0}.terminal-selection{flex:1;min-height:0;resize:none;white-space:pre;overflow:auto;font:14px/1.3 ui-monospace,monospace;user-select:text;-webkit-user-select:text;touch-action:pan-x pan-y;background:var(--bg);color:var(--text);border:0;padding:8px}
+
+.pane-caption{display:none}.pane-tiled{padding-top:35px}.pane-tiled>.pane-caption{display:block;position:absolute;left:12px;right:12px;top:8px;height:20px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+
+/* FitAddon measures its immediate parent. Keep that parent free of padding. */
+.terminal-mount{width:100%;height:100%;min-width:0;min-height:0}
+
+.pair-qr{display:block;width:min(100%,320px);height:auto;margin:0 auto 16px;background:white;padding:10px;image-rendering:pixelated}

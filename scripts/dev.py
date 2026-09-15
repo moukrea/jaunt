@@ -15,7 +15,7 @@ def main():
     parser.add_argument('--relay-port', type=int, default=8787)
     parser.add_argument('--state', type=Path, default=ROOT / '.dev-state')
     args = parser.parse_args(); args.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    env = {**os.environ, 'PYTHONPATH': str(ROOT / 'host'), 'JAUNT_STATE': str(args.state.resolve())}
+    env = {**os.environ, 'PYTHONPATH': str(ROOT / 'host'), 'jaunt_STATE': str(args.state.resolve())}
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *_): pass
         def end_headers(self):
@@ -28,14 +28,14 @@ def main():
         return subprocess.run([sys.executable, '-m', 'jaunt.cli', *values], env=env, check=True, text=True, capture_output=capture, cwd=ROOT)
     host = None
     try:
-        cli('init', '--relay', f'ws://127.0.0.1:{args.relay_port}', '--page', f'http://127.0.0.1:{args.port}/', '--name', 'Jaunt · local development', capture=True)
+        cli('init', '--relay', f'ws://127.0.0.1:{args.relay_port}', '--page', f'http://127.0.0.1:{args.port}/', '--name', 'jaunt · local development', capture=True)
         host = subprocess.Popen([sys.executable, '-m', 'jaunt.cli', 'daemon'], env=env, stdout=log, stderr=log, cwd=ROOT)
         for _ in range(100):
             if (args.state / 'control.sock').exists(): break
             if host.poll() is not None: raise RuntimeError('Host exited; read development.log')
             time.sleep(.1)
         result = json.loads(cli('pair', '--json', capture=True).stdout)
-        print(f'\nJaunt development workspace: http://127.0.0.1:{args.port}/\n', flush=True)
+        print(f'\njaunt development workspace: http://127.0.0.1:{args.port}/\n', flush=True)
         print('Pairing link (one use, ten minutes; do not publish):\n' + result['url'], flush=True)
         print('\nCtrl+C stops the development host and its plain shells.\n', flush=True)
         if not args.no_browser: webbrowser.open(result['url'])

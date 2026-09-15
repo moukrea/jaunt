@@ -37,12 +37,22 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::goBack);
         web=new WebView(this);
         android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.addView(web,new android.widget.FrameLayout.LayoutParams(-1,-1));
-        loading=new android.widget.TextView(this);loading.setText("Opening Jaunt…");loading.setTextColor(0xffeeeeee);loading.setBackgroundColor(0xff121314);loading.setGravity(Gravity.CENTER);frame.addView(loading,new android.widget.FrameLayout.LayoutParams(-1,-1));setContentView(frame);
-        mainHandler.postDelayed(()->{if(!appReady&&!isFinishing()){loading.setText("Jaunt could not open. Tap to retry.");loading.setOnClickListener(v->recreate());}},20000);
-        web.setOnApplyWindowInsetsListener((v,insets)->{
-            if(Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.ime());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);}
+        loading=new android.widget.TextView(this);loading.setText("Opening jaunt…");loading.setTextColor(0xffeeeeee);loading.setBackgroundColor(0xff121314);loading.setGravity(Gravity.CENTER);frame.addView(loading,new android.widget.FrameLayout.LayoutParams(-1,-1));setContentView(frame);
+        mainHandler.postDelayed(()->{if(!appReady&&!isFinishing()){loading.setText("jaunt could not open. Tap to retry.");loading.setOnClickListener(v->recreate());}},20000);
+        // Insets belong to the outer layout: padding WebView does not resize its CSS viewport.
+        if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
+        frame.setOnApplyWindowInsetsListener((v,insets)->{
+            if(Build.VERSION.SDK_INT>=30){
+                android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()|WindowInsets.Type.ime());
+                v.setPadding(bars.left,bars.top,bars.right,bars.bottom);
+                boolean keyboard=insets.isVisible(WindowInsets.Type.ime());
+                web.evaluateJavascript("window.jauntKeyboardVisible="+keyboard+";window.dispatchEvent(new Event('jaunt-insets'))",null);
+                return WindowInsets.CONSUMED;
+            }
+            // Older Android uses adjustResize and the decor's existing system bar insets.
             return insets;
         });
+        frame.requestApplyInsets();
         WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
         s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(true);
@@ -79,9 +89,9 @@ public class MainActivity extends Activity {
             }
         });
         if(!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)){
-            new AlertDialog.Builder(this).setTitle("Update Android System WebView").setMessage("Jaunt needs a current Android System WebView to safely connect its native functions.").setPositiveButton("Close",(d,w)->finish()).show();return;
+            new AlertDialog.Builder(this).setTitle("Update Android System WebView").setMessage("jaunt needs a current Android System WebView to safely connect its native functions.").setPositiveButton("Close",(d,w)->finish()).show();return;
         }
-        WebViewCompat.addWebMessageListener(web,"JauntNative",Set.of(ORIGIN),(view,message,origin,main,proxy)->{
+        WebViewCompat.addWebMessageListener(web,"jauntNative",Set.of(ORIGIN),(view,message,origin,main,proxy)->{
             if(!main||!ORIGIN.equals(origin.toString()))return;
             try{
                 JSONObject request=new JSONObject(message.getData());String id=request.getString("id");
@@ -102,14 +112,14 @@ public class MainActivity extends Activity {
                 case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);updater.check(getIntent().getBooleanExtra("checkUpdate",false));getIntent().removeExtra("checkUpdate");return;
                 case "app.updates":updater.check(true);reply.done(true,null);return;
                 case "clipboard.read":{
-                    if(!foreground)throw new SecurityException("Open Jaunt before reading the clipboard.");
+                    if(!foreground)throw new SecurityException("Open jaunt before reading the clipboard.");
                     ClipboardManager manager=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData clip=manager.getPrimaryClip();
                     if(clip==null||clip.getItemCount()==0){reply.done(new JSONObject().put("text",""),null);return;}
                     ClipData.Item item=clip.getItemAt(0);Uri uri=item.getUri();
                     if(uri!=null && "content".equals(uri.getScheme())){String type=getContentResolver().getType(uri);if(type!=null&&type.startsWith("image/")){openRead(uri,type,reply);return;}}
                     reply.done(new JSONObject().put("text",item.coerceToText(this).toString()),null);return;
                 }
-                case "clipboard.write":((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Jaunt",p.getString("text")));reply.done(true,null);return;
+                case "clipboard.write":((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("jaunt",p.getString("text")));reply.done(true,null);return;
                 case "shared.read":{Uri uri=sharedImage;sharedImage=null;if(uri==null){reply.done(null,null);return;}openRead(uri,getContentResolver().getType(uri),reply);return;}
                 case "read.chunk":io.execute(()->{try{String token=p.getString("token");InputStream in=reads.get(token);if(in==null)throw new IOException("Image read expired");byte[] b=new byte[49152];int n=in.read(b);if(n<0){in.close();reads.remove(token);reply.done(new JSONObject().put("done",true),null);}else reply.done(new JSONObject().put("data",android.util.Base64.encodeToString(Arrays.copyOf(b,n),android.util.Base64.NO_WRAP)),null);}catch(Exception e){reply.done(null,"Could not read the image.");}});return;
                 case "read.close":io.execute(()->{try{InputStream in=reads.remove(p.optString("token"));if(in!=null)in.close();reply.done(true,null);}catch(Exception e){reply.done(null,"Could not close image");}});return;

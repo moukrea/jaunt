@@ -1,12 +1,12 @@
 # Security model — unaudited beta
 
-Jaunt provides a full shell under the host account. There is no filesystem sandbox or read-only role: an authorized device can act as that user. Do not run the host with privileges that remote devices do not need.
+jaunt provides a full shell under the host account. There is no filesystem sandbox or read-only role: an authorized device can act as that user. Do not run the host with privileges that remote devices do not need.
 
 ## What is protected
 
 Commands, output, files, and clipboard data are encrypted between the browser and host. The relay sees network addresses, rooms, presence, packet sizes and timing, and ephemeral public keys. It does not hold pairing or device secrets. The channel is authenticated by a random 256-bit secret, with ephemeral ECDH and AES-GCM. See [the protocol specification](docs/PROTOCOL.md).
 
-The primitives come from cryptography and Web Crypto. **Their composition into this protocol is new and has not received an external audit.** Tamper/replay and interoperability tests do not replace an audit. Do not describe Jaunt as certified, invulnerable, or ready by default for sensitive production environments.
+The primitives come from cryptography and Web Crypto. **Their composition into this protocol is new and has not received an external audit.** Tamper/replay and interoperability tests do not replace an audit. Do not describe jaunt as certified, invulnerable, or ready by default for sensitive production environments.
 
 ## What is not protected
 
@@ -15,12 +15,12 @@ The primitives come from cryptography and Web Crypto. **Their composition into t
 - Without a password, keys are stored unencrypted in IndexedDB, like a remembered session. A password/PIN encrypts them at rest; a short PIN remains vulnerable to offline guessing. Prefer a long passphrase.
 - Locking stops connections and clears active views. It does not guarantee cryptographic erasure of browser RAM.
 - A complete QR code grants shell access for ten minutes. Never put it in an issue, public screenshot, CI log, or analytics.
-- Browser notifications are delivered through the browser's push service. Jaunt hides command content by default, but machine names and timing remain sensitive.
+- Browser notifications are delivered through the browser's push service. jaunt hides command content by default, but machine names and timing remain sensitive.
 - A revoked device can no longer authenticate to the channel, but knows the previous shared routing capability. It may still disrupt relay availability until the host identity is rotated. Routing secrets are not a complete quota or anti-DDoS system.
 
 ## Shared GitHub Pages origin
 
-Sites at `moukrea.github.io/another-project/` and `moukrea.github.io/jaunt/` share a browser origin. Another vulnerable project on that origin could target Jaunt's storage. Paths are not a security boundary. For sensitive use, serve Jaunt on a dedicated origin (its own domain/subdomain) and pair again there. A PIN protects keys at rest but does not replace origin isolation or trust in the JavaScript being served.
+Sites at `moukrea.github.io/another-project/` and `moukrea.github.io/jaunt/` share a browser origin. Another vulnerable project on that origin could target jaunt's storage. Paths are not a security boundary. For sensitive use, serve jaunt on a dedicated origin (its own domain/subdomain) and pair again there. A PIN protects keys at rest but does not replace origin isolation or trust in the JavaScript being served.
 
 ## Storage and permissions
 
@@ -35,3 +35,9 @@ Use HTTPS/WSS outside loopback, restrict APP_ORIGIN to the exact Pages origin, e
 ## Reporting a vulnerability
 
 Use the repository's private vulnerability reporting channel when available. Never publish a key, QR code, confidential terminal log, host.json file, or vault export. Before public disclosure, the maintainer must establish a private reporting channel and rotation policy.
+
+## Desktop boundary
+
+The desktop renderer is sandboxed, with Node integration disabled and context isolation enabled. It receives a narrow preload IPC interface, validated against the application's main frame. Bundled resources are served through the secure `jaunt://app/` scheme; external navigation opens the system browser and never receives the host bridge. Local access uses the existing private Unix control socket and grants the same account privileges as the CLI. It is not a second network listener and does not bypass remote authentication.
+
+The desktop release and host installer are part of the trusted update surface. Checksums detect corrupt/mismatched artifacts; they do not protect against a compromised repository/release publisher. Desktop packages contain only allowlisted application files and runtime dependencies, not host state or user profiles. Test-only renderer sandbox overrides must never enter production launchers.

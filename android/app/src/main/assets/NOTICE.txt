@@ -1,6 +1,6 @@
-Jaunt Android
+jaunt Android
 
-Jaunt: MIT license (below).
+jaunt: MIT license (below).
 AndroidX libraries: Apache License 2.0 — https://android.googlesource.com/platform/frameworks/support/
 ZXing and ZXing Android Embedded: Apache License 2.0 — https://github.com/zxing/zxing and https://github.com/journeyapps/zxing-android-embedded
 OkHttp and Okio: Apache License 2.0 — https://github.com/square/okhttp and https://github.com/square/okio

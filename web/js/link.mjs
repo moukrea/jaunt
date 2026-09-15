@@ -2,12 +2,12 @@ import {b64, unb64, random, ephemeral, proof, verify, transcript, channel} from 
 
 export function parsePairing(value) {
   let encoded = value.trim();
-  if (encoded.startsWith('JAUNT1.')) encoded = encoded.slice(7);
+  if (encoded.slice(0,7).toLowerCase() === 'jaunt1.') encoded = encoded.slice(7);
   else if (encoded.includes('#pair=')) encoded = new URLSearchParams(encoded.split('#')[1]).get('pair');
-  if (!encoded || encoded.length > 6000) throw new Error('Paste a complete Jaunt pairing string or link.');
+  if (!encoded || encoded.length > 6000) throw new Error('Paste a complete jaunt pairing string or link.');
   let p;
   try { p = JSON.parse(new TextDecoder().decode(unb64(encoded))); }
-  catch { throw new Error('This is not a valid Jaunt pairing code.'); }
+  catch { throw new Error('This is not a valid jaunt pairing code.'); }
   if (p.v !== 1 || !/^[A-Za-z0-9_-]{24}$/.test(p.h) || !/^[A-Za-z0-9_-]{16}$/.test(p.p)) {
     throw new Error('Unsupported or incomplete pairing code.');
   }

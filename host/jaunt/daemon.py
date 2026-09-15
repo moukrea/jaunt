@@ -115,7 +115,7 @@ class Peer:
             self.host.state.save()
             self.ready = True
             await self.send({"type": "welcome", "machine": self.host.info(),
-                             "sessions": self.host.sessions.list(), "device": self.device_id})
+                             "sessions": self.host.sessions.list(), "device": self.device_id, "peer": self.routing_id})
             while True:
                 raw = await self.queue.get()
                 if self.device_id not in self.host.state.data["devices"]:
@@ -140,6 +140,7 @@ class Peer:
             self.host.sessions.detach(self.routing_id)
             if self.host.peers.get(self.routing_id) is self:
                 self.host.peers.pop(self.routing_id, None)
+            await self.host.sessions_changed()
             # Ask the relay to close this client. It cannot receive terminal data after this.
             with contextlib.suppress(Exception):
                 await self.host.transport.send({"type": "disconnect", "to": self.routing_id})
@@ -156,13 +157,48 @@ class Peer:
             except (ValueError, OSError, KeyError, TypeError, asyncio.TimeoutError) as exc:
                 await self.send({"type": "reply", "id": rid, "ok": False, "error": str(exc)[:240]})
         elif kind == "terminal.input":
+            if message.get("active"):
+                await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
             await self.host.sessions.write(message["id"], unb64(message["data"], 65536))
         elif kind == "terminal.resize":
-            self.host.sessions.resize(message["id"], message)
+            await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
         elif kind == "ping":
             await self.send({"type": "pong", "at": message.get("at")})
         else:
             raise ValueError("Unknown application message")
+
+    @property
+    def display_name(self):
+        return self.host.state.data['devices'].get(self.device_id, {}).get('name', 'Remote device')
+
+
+class LocalPeer:
+    """Same-account UI connection over the private 0600 Unix socket.
+
+    It never crosses the network and does not create a reusable pairing secret.
+    Remote peers still require the existing authenticated encrypted handshake.
+    """
+    dispatch = Peer.dispatch
+    local = True
+    ready = True
+    display_name = 'Host desktop'
+
+    def __init__(self, host, writer):
+        self.host, self.writer = host, writer
+        self.routing_id = 'local-' + token(12)
+        self.device_id = "local-desktop"
+        self.clipboard_read = b''
+        self.clipboard_write = bytearray()
+        self.task = asyncio.current_task()
+        self.lock = asyncio.Lock()
+
+    async def send(self, data):
+        async with self.lock:
+            self.writer.write((compact(data) + '\n').encode())
+            try:
+                await asyncio.wait_for(self.writer.drain(), 10)
+            except asyncio.TimeoutError as exc:
+                raise ConnectionError('Local UI stopped reading') from exc
 
 
 class Host:
@@ -171,7 +207,7 @@ class Host:
         self.peers: dict[str, Peer] = {}
         self.stopping = asyncio.Event()
         self.transport = Transport(state.data, self.receive, self.disconnected)
-        self.sessions = Sessions(self.send, self.sessions_changed, state.root)
+        self.sessions = Sessions(self.send, self.sessions_changed, state.root, self.attention)
         self.files = Files(state.root, state.data.get("maxFileBytes", 512 * 1024 * 1024))
         self.clipboard = Clipboard()
         self.last_notification = 0.0
@@ -185,7 +221,16 @@ class Host:
                 "version": __version__, "platform": platform.system(), "user": getpass.getuser(),
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
-                "replayBytes": 2 * 1024 * 1024, "updates": update_status(self.state.root)}
+                "replayBytes": 2 * 1024 * 1024, "sharedViews": True,
+                "updates": update_status(self.state.root),
+                "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
+
+    def attention(self, session, event):
+        if not self.state.data.get('attention', {}).get(event, True):
+            return
+        title = f'{session.name} finished' if event == 'exit' else f'{session.name} needs attention'
+        task = asyncio.create_task(self.notify(title, '', session.id))
+        task.add_done_callback(lambda future: future.exception() if not future.cancelled() else None)
 
     async def send(self, peer: str, data: dict) -> None:
         item = self.peers.get(peer)
@@ -225,10 +270,12 @@ class Host:
             peer.ready = False
             peer.task.cancel()
             self.sessions.detach(routing_id)
+            await self.sessions_changed()
 
     async def disconnected(self) -> None:
-        for routing_id in tuple(self.peers):
-            await self.drop(routing_id)
+        for routing_id, peer in tuple(self.peers.items()):
+            if not getattr(peer, 'local', False):
+                await self.drop(routing_id)
 
     async def rpc(self, peer: Peer, method: str, p: dict):
         if self.stopping.is_set():
@@ -240,12 +287,26 @@ class Host:
         if method == "session.create":
             return await self.sessions.create(p)
         if method == "session.attach":
-            return await self.sessions.attach(peer.routing_id, p)
+            result = await self.sessions.attach(peer.routing_id, p)
+            await self.sessions.add_view(peer.routing_id, p['id'], peer.display_name)
+            return result
         if method == "session.detach":
-            self.sessions.get(p["id"]).subscribers.discard(peer.routing_id)
+            session = self.sessions.get(p["id"])
+            session.subscribers.discard(peer.routing_id)
+            session.viewers.pop(peer.routing_id, None)
+            if session.active_view == peer.routing_id:
+                session.active_view = ""
+            await self.sessions_changed()
+            return {}
+        if method == "session.terminate":
+            await self.sessions.terminate(p["id"])
             return {}
         if method == "session.close":
-            await self.sessions.close(p["id"])
+            # Legacy clients use close for plain-shell termination and tmux detach.
+            if self.sessions.get(p["id"]).tmux:
+                await self.sessions.close(p["id"])
+            else:
+                await self.sessions.terminate(p["id"])
             return {}
         if method == "session.rename":
             return await self.sessions.rename(p["id"], p["name"])
@@ -290,7 +351,7 @@ class Host:
         if method == "clipboard.image":
             source = Path(p["path"]).resolve(strict=True)
             if not source.is_relative_to((self.state.root / "attachments").resolve()):
-                raise ValueError("Image clipboard only accepts a Jaunt attachment")
+                raise ValueError("Image clipboard only accepts a jaunt attachment")
             result = await self.clipboard.image(source)
             if p.get("paste"):
                 await self.sessions.write(p["session"], b"\x16")  # Ctrl+V, never Enter.
@@ -319,12 +380,17 @@ class Host:
             self.state.data["push"][peer.device_id] = p
             self.state.save()
             return {"registered": True}
+        if method == 'notifications.configure':
+            settings = {key: p.get(key, True) is True for key in ('bell', 'program', 'exit')}
+            self.state.data['attention'] = settings
+            self.state.save()
+            return settings
         if method == "notifications.unsubscribe":
             self.state.data["push"].pop(peer.device_id, None)
             self.state.save()
             return {"removed": True}
         if method == "notifications.test":
-            return await self.notify("Connected to Jaunt", "This machine can reach your phone.", "", only=peer.device_id)
+            return await self.notify("Connected to jaunt", "This machine can reach your phone.", "", only=peer.device_id)
         if method == "machine.info":
             return self.info()
         raise ValueError("Unknown method")
@@ -358,7 +424,7 @@ class Host:
                 "t": self.state.data["clientToken"], "p": pid, "s": secret,
                 "n": self.state.data["name"]}
         encoded = b64(compact(data).encode())
-        return {"code": "JAUNT1." + encoded,
+        return {"code": "jaunt1." + encoded,
                 "url": self.state.data["page"].rstrip("/") + "/#pair=" + encoded,
                 "expires": now + 600}
 
@@ -375,7 +441,7 @@ class Host:
             if only and only != device_id:
                 continue
             private = not subscription.get("showDetails", False)
-            payload = {"title": "Jaunt" if private else event["title"],
+            payload = {"title": "jaunt" if private else event["title"],
                        "body": f'{self.state.data["name"]} needs your attention.' if private else event["body"],
                        "host": event["host"], "session": session,
                        "tag": "jaunt-" + (session or "host")}
@@ -390,9 +456,9 @@ class Host:
     def stop_for_upgrade(self, allow_restart: bool = False) -> dict:
         # Check and close admission in one event-loop turn: no new PTY can appear
         # between the installer's status check and the actual shutdown.
-        active = sum(s.alive and not s.tmux for s in self.sessions.items.values())
+        active = sum(not s.tmux and self.sessions.has_jobs(s) for s in self.sessions.items.values())
         if active and allow_restart is not True:
-            raise ValueError(f"{active} plain shells are running. JAUNT_ALLOW_RESTART=1 explicitly authorizes terminating them.")
+            raise ValueError(f"{active} plain shells are running. jaunt_ALLOW_RESTART=1 explicitly authorizes terminating them.")
         if (self.files.uploads or self.files.downloads) and allow_restart is not True:
             raise ValueError("File transfers are active; the update will wait until they finish")
         self.sessions.accepting = False
@@ -406,6 +472,23 @@ class Host:
                 raise ValueError("Command too large")
             command = json.loads(raw)
             method, p = command.get("method"), command.get("params", {})
+            if method == 'ui.connect':
+                peer = LocalPeer(self, writer)
+                self.peers[peer.routing_id] = peer
+                try:
+                    await peer.send({'type': 'welcome', 'peer': peer.routing_id,
+                                     'machine': self.info(), 'sessions': self.sessions.list()})
+                    while raw := await reader.readline():
+                        if len(raw) > 200_000:
+                            raise ValueError('Local UI frame too large')
+                        await peer.dispatch(json.loads(raw))
+                finally:
+                    self.peers.pop(peer.routing_id, None)
+                    self.sessions.detach(peer.routing_id)
+                    peer.ready = False
+                    await self.sessions_changed()
+                    writer.close()
+                return
             if method == "status":
                 result = {"running": True, "connected": self.transport.ready.is_set(),
                           "pid": os.getpid(), "machine": self.info(), "sessions": self.sessions.list(),
@@ -418,7 +501,7 @@ class Host:
                 await self.revoke(p["id"])
                 result = {"revoked": True}
             elif method == "notify":
-                result = await self.notify(p.get("title", "Jaunt"), p.get("body", ""), p.get("session", ""))
+                result = await self.notify(p.get("title", "jaunt"), p.get("body", ""), p.get("session", ""))
             elif method == "clipboard":
                 if "text" in p:
                     result = await self.clipboard.set_text(p["text"])
@@ -466,7 +549,7 @@ class Host:
             args.append("--automatic")
         elif allow_restart is True:
             args.append("--allow-restart")
-        env = os.environ.copy(); env["JAUNT_STATE"] = str(self.state.root)
+        env = os.environ.copy(); env["jaunt_STATE"] = str(self.state.root)
         self.update_process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         self.last_update_check = time.monotonic()
@@ -479,7 +562,7 @@ class Host:
         try:
             fcntl.flock(self.lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("Jaunt is already running") from None
+            raise RuntimeError("jaunt is already running") from None
         control_path = self.state.root / "control.sock"
         control_path.unlink(missing_ok=True)
         server = await asyncio.start_unix_server(self.control, path=control_path, limit=7_000_001)

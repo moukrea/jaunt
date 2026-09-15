@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaunt-host"
-version = "0.1.0b5"
-description = "Jaunt — your own shell, anywhere. Encrypted mobile remote terminals and files."
+version = "0.1.0b8"
+description = "jaunt — your own shell, anywhere. Encrypted mobile remote terminals and files."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 license = "MIT"

@@ -30,7 +30,7 @@ final class UpdateManager {
     }
     static boolean newer(String candidate,String current){int[] a=version(candidate),b=version(current);for(int i=0;i<a.length;i++)if(a[i]!=b[i])return a[i]>b[i];return false;}
     private byte[] fetch(String url,int maximum)throws Exception{
-        Request req=new Request.Builder().url(url).header("Cache-Control","no-cache").header("User-Agent","Jaunt Android updater").build();
+        Request req=new Request.Builder().url(url).header("Cache-Control","no-cache").header("User-Agent","jaunt Android updater").build();
         try(Response response=HTTP.newCall(req).execute()){
             if(!response.isSuccessful()||response.body()==null)throw new IOException("Release download failed (HTTP "+response.code()+")");
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[16384];int n;
@@ -48,20 +48,20 @@ final class UpdateManager {
             // No per-user GitHub API account or shared-IP API quota is required.
             JSONObject channel=new JSONObject(new String(fetch(CHANNEL,16384),java.nio.charset.StandardCharsets.UTF_8));
             String tag=channel.optString("androidRelease");
-            if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("Jaunt is up to date","You already have the latest published Android release.");return;}
+            if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("jaunt is up to date","You already have the latest published Android release.");return;}
             String name="jaunt-"+tag+".apk";
             if(activity==null){notifyAvailable(tag);return;}
-            activity.runOnUiThread(()->{if(!activity.isFinishing())new AlertDialog.Builder(activity).setTitle("Jaunt update available").setMessage("Version "+tag.substring(9)+" is available. Your paired machines will be kept. Android will ask you to confirm installation.").setNegativeButton("Later",null).setPositiveButton("Download and install",(d,w)->download(tag,name)).show();});
+            activity.runOnUiThread(()->{if(!activity.isFinishing())new AlertDialog.Builder(activity).setTitle("jaunt update available").setMessage("Version "+tag.substring(9)+" is available. Your paired machines will be kept. Android will ask you to confirm installation.").setNegativeButton("Later",null).setPositiveButton("Download and install",(d,w)->download(tag,name)).show();});
         }catch(Exception e){if(explicit)message("Update check unavailable","Could not verify the latest release. Check your connection and try again.");}});
     }
     private void notifyAvailable(String tag){
         NotificationManager manager=context.getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel("jaunt-updates","Application updates",NotificationManager.IMPORTANCE_DEFAULT));
         Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("checkUpdate",true);
         PendingIntent open=PendingIntent.getActivity(context,77,intent,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("Jaunt update available").setContentText("Tap to install "+tag.substring(9)+". Your pairings will be kept.").setContentIntent(open).setAutoCancel(true).build());
+        manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("jaunt update available").setContentText("Tap to install "+tag.substring(9)+". Your pairings will be kept.").setContentIntent(open).setAutoCancel(true).build());
     }
     private void download(String tag,String name){
-        ProgressDialog progress=new ProgressDialog(activity);progress.setMessage("Downloading and verifying Jaunt…");progress.setCancelable(false);progress.show();
+        ProgressDialog progress=new ProgressDialog(activity);progress.setMessage("Downloading and verifying jaunt…");progress.setCancelable(false);progress.show();
         IO.execute(()->{try{
             String base=RELEASES+tag+"/";String sums=new String(fetch(base+"SHA256SUMS",16384),java.nio.charset.StandardCharsets.UTF_8),expected=null;
             for(String row:sums.split("\\n")){String[] parts=row.trim().split("  ",2);if(parts.length==2&&parts[1].equals(name)&&parts[0].matches("[a-f0-9]{64}"))expected=parts[0];}
@@ -84,7 +84,7 @@ final class UpdateManager {
     }
     void installPending(){if(pending==null||activity==null)return;
         if(!context.getPackageManager().canRequestPackageInstalls()){
-            new AlertDialog.Builder(activity).setTitle("Allow this update").setMessage("Android needs permission for Jaunt to open its APK installer. Enable “Allow from this source”, then return here.").setNegativeButton("Later",null).setPositiveButton("Open Android settings",(d,w)->activity.startActivityForResult(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+context.getPackageName())),44)).show();return;
+            new AlertDialog.Builder(activity).setTitle("Allow this update").setMessage("Android needs permission for jaunt to open its APK installer. Enable “Allow from this source”, then return here.").setNegativeButton("Later",null).setPositiveButton("Open Android settings",(d,w)->activity.startActivityForResult(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+context.getPackageName())),44)).show();return;
         }
         try{verifyPackage(pending);Uri uri=FileProvider.getUriForFile(context,context.getPackageName()+".updates",pending);activity.startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(Exception e){message("Could not open the update","Please check for updates again. Your current installation is unchanged.");}
     }

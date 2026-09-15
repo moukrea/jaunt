@@ -18,7 +18,7 @@ ROOT_FILES = (
     'LICENSE', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md', '.gitignore',
     'pyproject.toml', 'requirements-dev.txt', 'package.json', 'install.sh',
 )
-SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs', 'android')
+SOURCE_DIRS = ('.github', 'host/jaunt', 'relay', 'scripts', 'tests', 'web', 'docs', 'android', 'desktop')
 EXCLUDE_DIRS = {'__pycache__', '.pytest_cache', '.dev-state', 'node_modules', '.wrangler', '.venv', 'evidence', '.gradle', '.kotlin', 'build'}
 EXCLUDE_SUFFIXES = {'.pyc', '.pyo', '.log', '.sock', '.apk', '.aab', '.jks', '.keystore'}
 EVIDENCE = ('browser-report.json', 'browser-worker-report.json', 'installer-report.json', 'public-report.json', 'native-clipboard-report.json', 'run-summary.json', 'android-report.json', 'android-dependency-audit.json', 'update-report.json',
@@ -66,7 +66,7 @@ def collect() -> dict[str, bytes]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT.parent / 'Jaunt-0.1.0-beta.5.zip')
+    parser.add_argument('--output', type=Path, default=ROOT.parent / 'jaunt-0.1.0-beta.8.zip')
     output = parser.parse_args().output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     files = collect()

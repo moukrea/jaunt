@@ -8,9 +8,9 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws://127.0.0.1:* ws://localhost:*; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="Your own shell, anywhere. Encrypted remote terminals, files and image transfers, designed for your phone.">
-  <title>Jaunt — Your machine. Within reach.</title>
-  <link rel="icon" type="image/png" href="./assets/favicon.png">
-  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <title>jaunt — Your machine. Within reach.</title>
+  <link rel="icon" type="image/png" href="./assets/jaunt.png">
+  <link rel="apple-touch-icon" href="./assets/jaunt.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./vendor/xterm.css">
   <link rel="stylesheet" href="./style.css">
@@ -20,7 +20,7 @@
 <div id="app" class="app">
   <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
   <aside id="sidebar" class="sidebar" aria-label="Machines and navigation">
-    <a class="brand" href="./" aria-label="Jaunt home"><img src="./assets/jaunt.png" alt="" width="33" height="33"><span>jaunt</span><span class="version">BETA</span></a>
+    <a class="brand" href="./" aria-label="jaunt home"><img src="./assets/jaunt.png" alt="" width="33" height="33"><span>jaunt</span><span class="version">BETA</span></a>
     <div class="sidebar-section"><span>WORKSPACE</span><span class="tiny-pill" id="machine-count">0</span></div>
     <div id="machine-list" class="machine-list"></div>
     <button class="add-machine" id="add-machine"><span data-icon="plus"></span>Pair a machine</button>
@@ -62,7 +62,7 @@
           <button id="scan-welcome" class="scan-button"><span data-icon="qr" data-size="28"></span><strong>Scan QR code</strong><small>Camera access stays on this device</small></button>
           <div class="divider"><span>or use a pairing string</span></div>
           <label class="sr-only" for="pair-code">Pairing string or link</label>
-          <textarea id="pair-code" class="pair-code" rows="3" placeholder="JAUNT1.eyJ2Ijox…" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+          <textarea id="pair-code" class="pair-code" rows="3" placeholder="jaunt1.eyJ2Ijox…" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
           <button id="pair-submit" class="button primary wide">Pair machine<span data-icon="arrowRight" data-size="18"></span></button>
           <div class="pair-footnote"><span data-icon="lock" data-size="14"></span>One pairing. Remembered on this device.</div>
         </div>
@@ -71,13 +71,13 @@
     </section>
     <section id="workspace" class="workspace" hidden>
       <div id="terminal-view" class="terminal-view">
-        <div class="tabs-row"><div id="tabs" class="tabs" role="tablist" aria-label="Shell sessions"></div><button id="new-session-tab" class="icon-button" aria-label="Create shell"><span data-icon="plus" data-size="18"></span></button></div>
+        <div class="tabs-row"><button id="list-sessions" class="text-button">Sessions</button><div id="tabs" class="tabs" role="tablist" aria-label="Shell sessions"></div><button id="new-session-tab" class="icon-button" aria-label="Create shell"><span data-icon="plus" data-size="18"></span></button></div>
         <div id="terminal-stage" class="terminal-stage">
           <div id="terminal-empty" class="terminal-empty"><span class="empty-icon" data-icon="terminal" data-size="32"></span><h2>A shell of your own.</h2><p>Create a fresh terminal, or attach to a running tmux session.<br>Closing this page won't close your shell.</p><button id="new-session-empty" class="button primary"><span data-icon="plus" data-size="17"></span>New shell</button></div>
           <div id="terminal-containers" class="terminal-containers"></div>
           <div id="drop-target" class="drop-target" hidden><span data-icon="upload" data-size="32"></span><strong>Drop to send to this machine</strong><span>Files and images travel through the encrypted channel.</span></div>
         </div>
-        <div class="terminal-footer"><span id="terminal-meta">No active shell</span><span class="terminal-hint">Sessions live on the host</span><button id="rename-session" class="text-button" hidden>Rename</button></div>
+        <div class="terminal-footer"><button id="arrange-panes" class="text-button desktop-only">Arrange panes</button><button id="select-terminal-text" class="text-button">Select</button><button id="scroll-bottom" class="text-button" aria-label="Scroll to latest output">↓ Latest</button><span id="terminal-meta">No active shell</span><span class="terminal-hint">Sessions live on the host</span><button id="rename-session" class="text-button" hidden>Rename</button></div>
         <div class="keybar" id="keybar" aria-label="Terminal keys">
           <button data-key="\u001b">Esc</button><button data-key="\u0009">Tab</button><button id="ctrl-key" aria-pressed="false">Ctrl</button><button id="alt-key" aria-pressed="false">Alt</button>
           <span class="key-divider"></span><button data-key="\u001b[D" aria-label="Left arrow"><span data-icon="arrowLeft" data-size="17"></span></button><button data-key="\u001b[B" aria-label="Down arrow"><span data-icon="arrowDown" data-size="17"></span></button><button data-key="\u001b[A" aria-label="Up arrow"><span data-icon="arrowUp" data-size="17"></span></button><button data-key="\u001b[C" aria-label="Right arrow"><span data-icon="arrowRight" data-size="17"></span></button>
@@ -101,11 +101,11 @@
     <nav id="mobile-nav" class="mobile-nav" aria-label="Views"><button data-view="terminal" class="selected"><span data-icon="terminal"></span><span>Shell</span></button><button data-view="files"><span data-icon="folder"></span><span>Files</span></button><button data-view="settings"><span data-icon="settings"></span><span>Settings</span></button></nav>
   </main>
 </div>
-<div id="lock-screen" class="lock-screen" hidden><div class="lock-card"><img src="./assets/jaunt.png" width="65" height="65" alt="Jaunt"><div class="eyebrow">YOUR WORKSPACE IS LOCKED</div><h1>Welcome back.</h1><p>Unlock this device to reconnect.<br>Your remote shells keep running.</p><form id="unlock-form"><label class="sr-only" for="unlock-password">Passphrase or PIN</label><input id="unlock-password" type="password" autocomplete="current-password" placeholder="Passphrase or PIN" required><button class="button primary wide" type="submit">Unlock workspace<span data-icon="arrowRight" data-size="17"></span></button><div id="unlock-error" class="form-error" role="alert"></div></form><button id="forget-vault" class="text-button muted">Forgot it? Reset this device</button></div></div>
+<div id="lock-screen" class="lock-screen" hidden><div class="lock-card"><img src="./assets/jaunt.png" width="65" height="65" alt="jaunt"><div class="eyebrow">YOUR WORKSPACE IS LOCKED</div><h1>Welcome back.</h1><p>Unlock this device to reconnect.<br>Your remote shells keep running.</p><form id="unlock-form"><label class="sr-only" for="unlock-password">Passphrase or PIN</label><input id="unlock-password" type="password" autocomplete="current-password" placeholder="Passphrase or PIN" required><button class="button primary wide" type="submit">Unlock workspace<span data-icon="arrowRight" data-size="17"></span></button><div id="unlock-error" class="form-error" role="alert"></div></form><button id="forget-vault" class="text-button muted">Forgot it? Reset this device</button></div></div>
 <dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="modal-close" class="icon-button" aria-label="Close dialog"><span data-icon="close"></span></button></div><div id="modal-content"></div></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <input id="attachment-input" type="file" multiple hidden>
 <input id="upload-input" type="file" multiple hidden>
-<noscript><div class="fatal-note">Jaunt requires JavaScript and a modern browser with Web Crypto.</div></noscript>
+<noscript><div class="fatal-note">jaunt requires JavaScript and a modern browser with Web Crypto.</div></noscript>
 </body>
 </html>

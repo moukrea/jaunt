@@ -1,6 +1,10 @@
+# jaunt Android 0.1.0-beta.4
+
+This update fixes system-bar and keyboard insets by resizing the WebView's outer container. It uses the original jaunt icon, provides the shared session manager and themes, and receives automatic terminal bell/program/session-exit notifications when enabled. Desktop split layouts remain ordinary session tabs at mobile widths.
+
 This release regulates rapid terminal input to avoid overflowing the host’s bounded input queue. Pending input is discarded if the encrypted channel changes; commands are never replayed after reconnection.
 
-Install the signed `.apk` asset below on Android 8 or newer. Allow installation from your browser when Android asks, open Jaunt, then scan the QR produced by `jaunt pair` on your host. No Android, GitHub or Cloudflare account is required to connect.
+Install the signed `.apk` asset below on Android 8 or newer. Allow installation from your browser when Android asks, open jaunt, then scan the QR produced by `jaunt pair` on your host. No Android, GitHub or Cloudflare account is required to connect.
 
 This is an installable Android APK with a bundled WebView interface and native integrations, not a PWA and not an entirely rewritten Android UI:
 
