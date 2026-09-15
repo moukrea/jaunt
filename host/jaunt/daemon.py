@@ -456,7 +456,7 @@ class Host:
     def stop_for_upgrade(self, allow_restart: bool = False) -> dict:
         # Check and close admission in one event-loop turn: no new PTY can appear
         # between the installer's status check and the actual shutdown.
-        active = sum(s.alive and not s.tmux for s in self.sessions.items.values())
+        active = sum(not s.tmux and self.sessions.has_jobs(s) for s in self.sessions.items.values())
         if active and allow_restart is not True:
             raise ValueError(f"{active} plain shells are running. jaunt_ALLOW_RESTART=1 explicitly authorizes terminating them.")
         if (self.files.uploads or self.files.downloads) and allow_restart is not True:

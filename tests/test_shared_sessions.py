@@ -43,6 +43,7 @@ async def test_shared_geometry_and_jobs(tmp_path,monkeypatch,exit_parent):
             assert not sessions.get(sid).alive
             assert sessions.get(sid).process.returncode is None, 'Leader PID must remain reserved'
             os.kill(child,0)
+            assert sessions.has_jobs(sessions.get(sid)), 'Surviving jobs must still block automatic restart'
         await sessions.terminate(sid)
         assert sid not in sessions.items
         for _ in range(100):

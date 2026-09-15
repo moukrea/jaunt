@@ -379,6 +379,25 @@ class Sessions:
             if s.active_view == peer:
                 s.active_view = ""
 
+    def has_jobs(self, s: Session) -> bool:
+        if s.alive:
+            return True
+        if s.process is None or s.process.returncode is not None:
+            return False
+        # The retained leader reserves this session ID. Ignore only exited jobs;
+        # a background command must still block an unapproved daemon restart.
+        raw = subprocess.check_output(['ps', '-e', '-o', 'pid=,stat='], timeout=5, text=True)
+        for row in raw.splitlines():
+            pid, state = row.split(None, 1)
+            if state.startswith('Z'):
+                continue
+            try:
+                if os.getsid(int(pid)) == s.pid:
+                    return True
+            except (ProcessLookupError, PermissionError):
+                pass
+        return False
+
     async def terminate(self, sid: str) -> None:
         s = self.get(sid)
         if s.tmux:
