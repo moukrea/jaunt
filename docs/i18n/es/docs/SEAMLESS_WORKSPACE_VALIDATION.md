@@ -2,7 +2,7 @@
 
 # Validación de actualización de espacio de trabajo y tiempo de ejecución — 2026-09-15
 
-Versiones candidatas: host `0.1.0b11`, escritorio `0.1.0-beta.10`, Android `0.1.0-beta.8` / código de versión 8. La verificación de la publicación está pendiente mientras esta rama está bajo prueba. No se detuvo ningún host de producción o usuario ordinario shell para estas pruebas.
+Se verificaron las versiones públicas: host `0.1.0b11`, escritorio `0.1.0-beta.10` y Android `0.1.0-beta.8`. En una VM Ubuntu aislada se comprobaron la página pública, las sumas de comprobación, el instalador oficial y el servicio de usuario. Pasaron la conexión WebSocket real, los comandos de shell, las transferencias comparadas byte a byte, la reconexión y la revocación. La instalación solo cliente en una cuenta nueva no añadió CLI ni servicio host. La actualización nativa del escritorio 9 a 10 conservó los PID del host y de los shells; se ejecutó un comando antes y después. Android 7 se actualizó a 8 en un emulador y conservó el emparejamiento. Las comprobaciones repetidas terminan con un único diálogo que confirma que está actualizado.
 
 ## Resultados observados
 
@@ -29,10 +29,10 @@ TEN Android Gradle release/debug construye, pruebas unitarias y lint Silencio Pa
 
 El escenario solo cliente nativo utiliza el relé WSS real del propietario porque un relé inseguro no debe ser aceptado de un origen de aplicación empaquetado. Su estado anfitrión y shell son accesorios de prueba temporales. No se incluye material de emparejamiento en este informe.
 
-## Límites de validación restantes
+## Verificación de las versiones publicadas
 
-Public release instalación, actualizaciones de aplicaciones instaladas, la página publicada y la final firmada APK son revisados después de la publicación; sus observaciones serán anexadas aquí. Android cámara, galería, empuje de pantalla cerrada y Wi-Fi/mobile handover no se ha probado en un teléfono físico autorizado. Las observaciones del emulador se reportan por separado. Un lanzador o navegador puede controlar el icono máscara y aprobación de instalado PWA nombre/icon cambia.
+Se verificaron las versiones públicas: host `0.1.0b11`, escritorio `0.1.0-beta.10` y Android `0.1.0-beta.8`. En una VM Ubuntu aislada se comprobaron la página pública, las sumas de comprobación, el instalador oficial y el servicio de usuario. Pasaron la conexión WebSocket real, los comandos de shell, las transferencias comparadas byte a byte, la reconexión y la revocación. La instalación solo cliente en una cuenta nueva no añadió CLI ni servicio host. La actualización nativa del escritorio 9 a 10 conservó los PID del host y de los shells; se ejecutó un comando antes y después. Android 7 se actualizó a 8 en un emulador y conservó el emparejamiento. Las comprobaciones repetidas terminan con un único diálogo que confirma que está actualizado.
 
-Los huéspedes sin pasar el tiempo necesitan una migración protegida. El shells corriente existente en esas versiones no puede ser preservado retroactivamente por el nuevo código. Actualizaciones compatibles conservan procesos; una parada demonio explícita, fallo o reinicio de máquina no se hace sobrevivible por este mecanismo.
+La sustitución compatible del runtime del host 11 conservó los procesos y la identidad. Fue una reinstalación de la misma versión. El antiguo host 10 aún requiere una primera migración protegida: sus shells activos no pueden conservarse retroactivamente. No se detuvo ningún shell personal. No se utilizó un teléfono físico: quedan pendientes cámara, galería, notificaciones con pantalla bloqueada y cambio Wi-Fi/móvil. El protocolo no ha recibido una auditoría de seguridad independiente.
 
-El protocolo de cifrado **no ha recibido una auditoría de seguridad independiente**. Las pruebas funcionales no cambian ese estado.
+[https://moukrea.github.io/jaunt/](https://moukrea.github.io/jaunt/) · [English — public release verification](../../../SEAMLESS_WORKSPACE_VALIDATION.md#public-release-verification)

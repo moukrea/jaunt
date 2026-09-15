@@ -2,7 +2,7 @@
 
 # Validierung von Workspace- und Laufzeitupdates — 2026-09-15
 
-Kandidatenversionen: Host `0.1.0b11`, Desktop `0.1.0-beta.10`, Android `0.1.0-beta.8` / Versionscode 8. Die Überprüfung der Veröffentlichung steht noch aus, während dieser Zweig getestet wird. Kein Produktionshost oder gewöhnlicher Benutzer shell wurde für diese Tests gestoppt.
+Die öffentlichen Versionen wurden geprüft: Host `0.1.0b11`, Desktop `0.1.0-beta.10` und Android `0.1.0-beta.8`. In einer isolierten Ubuntu-VM wurden die öffentliche Seite, Prüfsummen, der offizielle Installer und der Benutzerdienst geprüft. Echte WebSocket-Verbindung, Shell-Befehle, bytegenau verglichene Übertragungen, Wiederverbindung und Widerruf waren erfolgreich. Die reine Client-Installation in einem neuen Konto legte weder CLI noch Host-Dienst an. Das native Desktop-Update von 9 auf 10 behielt die PIDs des Hosts und der Shells bei; ein Befehl wurde davor und danach ausgeführt. Android 7 wurde im Emulator auf 8 aktualisiert und behielt die Kopplung. Wiederholte Prüfungen enden mit einem einzigen Dialog, der den aktuellen Versionsstand bestätigt.
 
 ## Beobachtete Ergebnisse
 
@@ -29,10 +29,10 @@ Befehl | Beobachtetes Ergebnis |
 
 Das native Client-only-Szenario verwendet das tatsächliche WSS-Relay des Besitzers, da ein unsicheres Loopback-Relay nicht von einem verpackten Anwendungs-Ursprung akzeptiert werden darf. Sein Host-Zustand und shell sind temporäre Testvorrichtungen. In diesem Bericht ist kein Paarungsmaterial enthalten.
 
-## Verbleibende Validierungsgrenzen
+## Prüfung der veröffentlichten Versionen
 
-Die Installation der öffentlichen Veröffentlichung, die installierten Anwendungsupdates, die veröffentlichte Seite und das endgültige signierte APK werden nach der Veröffentlichung überprüft; ihre Beobachtungen werden hier angehängt. Physische Android-Kamera, Galerie, Sperrbildschirm-Push und Wi-Fi/Mobile-Handover wurden nicht auf einem autorisierten physischen Telefon getestet. Emulator-Beobachtungen werden separat gemeldet. Ein Launcher oder Browser kann die Maskierung von Symbolen und die Genehmigung installierter PWA-Namen/Icon-Änderungen steuern.
+Die öffentlichen Versionen wurden geprüft: Host `0.1.0b11`, Desktop `0.1.0-beta.10` und Android `0.1.0-beta.8`. In einer isolierten Ubuntu-VM wurden die öffentliche Seite, Prüfsummen, der offizielle Installer und der Benutzerdienst geprüft. Echte WebSocket-Verbindung, Shell-Befehle, bytegenau verglichene Übertragungen, Wiederverbindung und Widerruf waren erfolgreich. Die reine Client-Installation in einem neuen Konto legte weder CLI noch Host-Dienst an. Das native Desktop-Update von 9 auf 10 behielt die PIDs des Hosts und der Shells bei; ein Befehl wurde davor und danach ausgeführt. Android 7 wurde im Emulator auf 8 aktualisiert und behielt die Kopplung. Wiederholte Prüfungen enden mit einem einzigen Dialog, der den aktuellen Versionsstand bestätigt.
 
-Hosts ohne Runtime Handoff benötigen eine geschützte Migration. Bestehende gewöhnliche shells auf diesen Versionen können nicht rückwirkend durch den neuen Code erhalten werden. Kompatible Updates behalten Prozesse bei; ein expliziter Daemon Stop, Crash oder Maschinenneustart wird durch diesen Mechanismus nicht überlebensfähig gemacht.
+Der kompatible Austausch der Host-11-Laufzeit behielt Prozesse und Identität bei. Es war eine Neuinstallation derselben Version. Der alte Host 10 benötigt weiterhin eine erste geschützte Migration: Seine aktiven Shells können nicht rückwirkend erhalten werden. Keine persönliche Shell wurde beendet. Es wurde kein physisches Telefon benutzt: Kamera, Galerie, Benachrichtigungen bei gesperrtem Bildschirm und Wechsel zwischen WLAN und Mobilfunk sind noch ungeprüft. Das Protokoll hat kein unabhängiges Sicherheitsaudit erhalten.
 
-Das Verschlüsselungsprotokoll hat **kein unabhängiges Sicherheitsaudit erhalten ** Funktionelle Tests ändern diesen Status nicht.
+[https://moukrea.github.io/jaunt/](https://moukrea.github.io/jaunt/) · [English — public release verification](../../../SEAMLESS_WORKSPACE_VALIDATION.md#public-release-verification)
