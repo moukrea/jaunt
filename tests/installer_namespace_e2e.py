@@ -32,7 +32,7 @@ def main():
                         ' run --rm --network host fedora:44 curl "$@"\n')
         curl.chmod(0o755)
         env = {k: v for k, v in os.environ.items()
-               if not k.startswith('jaunt_') and k != 'PYTHONPATH'}
+               if not k.lower().startswith('jaunt_') and k != 'PYTHONPATH'}
         env.update(PATH=f'{wrappers}:{os.environ["PATH"]}',
                    jaunt_PREFIX=str(root / 'runtime'),
                    jaunt_BIN_DIR=str(root / 'bin'),

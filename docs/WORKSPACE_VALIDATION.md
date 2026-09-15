@@ -30,7 +30,9 @@ Version references were checked against [Electron's official release record](htt
 - The original Android icon was an unrelated terminal drawing. Android now ships the exact supplied PNG; the browser/favicon/notification/desktop references use the same artwork.
 - The supplied terminal bundle lacked exact build provenance. It is now rebuilt from pinned npm dependencies and both upstream licenses.
 - Closing only a view and killing the underlying shell were conflated. They now have distinct UI actions and tests.
-- Desktop package permissions inherited a private build umask, making the installed directory inaccessible to ordinary users. The packaging hook now normalizes application directories and executable/data permissions. Packaged sandbox validation is tracked separately from source-mode renderer tests.
+- Desktop package permissions inherited a private build umask, making the installed directory inaccessible to ordinary users. The packaging hook now normalizes application directories and executable/data permissions. Packaged sandbox validation is tracked separately from source-mode renderer tests. Explicit ALSA/GBM/DRM dependencies were also added after installation in the clean Ubuntu VM exposed a missing library.
+
+CI additionally caught macOS Bash 3.2 compatibility in the environment-alias bootstrap and an old-wheel/new-installer state-directory mismatch. The compatibility bootstrap now runs before importing an old wheel, including subsequent CLI invocations. The real Fedora confined-curl test passes with the public beta.5 wheel and candidate installer.
 
 The source-mode headless Electron test uses a test-only sandbox override in an isolated X server. That is not evidence that the packaged production sandbox works; the installed-package check must run without that override. Production main/preload code never disables the sandbox.
 

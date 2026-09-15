@@ -3,11 +3,17 @@
 # Production: bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 set -Eeuo pipefail
 umask 077
-# Preserve environment overrides from earlier releases, without changing their values.
+# Accept existing overrides and pass canonical values to older installed runtimes.
 while IFS= read -r jaunt_env_key; do
   if [[ "$jaunt_env_key" == "$(printf jaunt_ | tr '[:lower:]' '[:upper:]')"* ]]; then
     jaunt_env_alias="jaunt_${jaunt_env_key:6}"
-    if [[ ! -v "$jaunt_env_alias" ]]; then export "$jaunt_env_alias=${!jaunt_env_key}"; fi
+    if [[ -z "${!jaunt_env_alias+x}" ]]; then export "$jaunt_env_alias=${!jaunt_env_key}"; fi
+  fi
+done < <(compgen -e)
+while IFS= read -r jaunt_env_key; do
+  if [[ "$jaunt_env_key" == jaunt_* ]]; then
+    jaunt_env_alias="$(printf '%s' "$jaunt_env_key" | tr '[:lower:]' '[:upper:]')"
+    export "$jaunt_env_alias=${!jaunt_env_key}"
   fi
 done < <(compgen -e)
 STAGE='initialization'
@@ -211,7 +217,9 @@ import os,pathlib,shlex,sys
 prefix,target,bindir=map(pathlib.Path,sys.argv[1:]);tmp=prefix/'current.new'
 if tmp.is_symlink():tmp.unlink()
 os.symlink(target,tmp);os.replace(tmp,prefix/'current')
-wrapper=bindir/'jaunt';wrapper.write_text('#!/bin/sh\nexec '+shlex.quote(str(prefix/'current/bin/python'))+' -m jaunt.cli "$@"\n');wrapper.chmod(0o755)
+# Normalize before importing even an older wheel, including later CLI invocations.
+bootstrap='import os; os.environ.update({k.upper(): v for k,v in tuple(os.environ.items()) if k.startswith("jaunt_")}); from jaunt.cli import main; main()'
+wrapper=bindir/'jaunt';wrapper.write_text('#!/bin/sh\nexec '+shlex.quote(str(prefix/'current/bin/python'))+' -c '+shlex.quote(bootstrap)+' "$@"\n');wrapper.chmod(0o755)
 PY
 "$TARGET/bin/python" - "$PREFIX" "$BIN" "$PAGE" "$REPO" "$TAG" "${jaunt_NO_SERVICE:-0}" <<'PYUPDATE'
 import sys
