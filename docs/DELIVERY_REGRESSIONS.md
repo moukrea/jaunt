@@ -6,6 +6,7 @@ This report follows user-reported failures after the previous release. Previous 
 
 - Bash login profiles can omit `.bashrc`. The service-launched shell therefore missed interactive PATH additions and prompt colors. New sessions load login environment and then the interactive bash configuration; missing SHELL uses the account shell.
 - The published desktop archive aborts under Ubuntu 24.04 restricted user namespaces with a sandbox-helper error. The installer now selects the verified system package there, allowing its scoped AppArmor support to be installed without disabling Chromium sandboxing.
+- The native logo extraResource excluded its source from the packaged web assets, breaking the in-app logo. The native resource now uses a generated desktop icon, retaining the original in web assets.
 - Linux icon packaging used an unindexed 547×547 theme directory. It now includes eight standard sizes derived from the original artwork. Build hooks and explicit icon permissions remove umask-dependent unreadable launcher files.
 - UI pictograms now come from pinned Lucide 1.46.0, bundled locally with its ISC license. Android uses an adaptive launcher wrapper around the supplied artwork.
 - New-session UI no longer offers tmux. Existing tmux sessions and host compatibility remain intact.
