@@ -6,7 +6,7 @@ installer downloads them from PyPI. This test does not validate external network
 or a real systemd/launchd service manager.
 """
 from __future__ import annotations
-import functools,http.server,json,os,shutil,socket,subprocess,sys,tempfile,threading,time
+import functools,http.server,json,os,shutil,socket,subprocess,sys,tempfile,threading,time,tomllib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -15,16 +15,19 @@ def freeport():
 
 def main():
     checks=[]
+    version=tomllib.loads((ROOT/'pyproject.toml').read_text())['project']['version']
+    tag='v'+version.replace('b','-beta.')
     def passed(s):checks.append(s);print('PASS',s,flush=True)
     with tempfile.TemporaryDirectory(prefix='jaunt-install-test-') as tmp:
         t=Path(tmp);mirror=t/'mirror';mirror.mkdir();relayport=freeport()
         shutil.copytree(ROOT/'web',mirror,dirs_exist_ok=True)
-        for p in (ROOT/'dist').iterdir():shutil.copy2(p,mirror/p.name)
+        release=json.loads((ROOT/'dist/host-manifest.json').read_text())
+        for name in ('host-manifest.json','SHA256SUMS',release['wheel']):shutil.copy2(ROOT/'dist'/name,mirror/name)
         class Handler(http.server.SimpleHTTPRequestHandler):
             def log_message(self,*_):pass
         server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(mirror)))
         threading.Thread(target=server.serve_forever,daemon=True).start();url=f'http://127.0.0.1:{server.server_port}'
-        config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':'v0.1.0-beta.5','page':url+'/'}
+        config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':tag,'page':url+'/'}
         (mirror/'config.json').write_text(json.dumps(config))
         env={**os.environ,'jaunt_DEV_INSTALL':'1','jaunt_TEST_SYSTEM_SITE':'1','jaunt_PIP_NO_DEPS':'1',
              'jaunt_PREFIX':str(t/'runtime'),'jaunt_BIN_DIR':str(t/'bin'),'jaunt_STATE':str(t/'state'),
@@ -59,7 +62,7 @@ def main():
                 if status['connected']:break
                 time.sleep(.1)
             assert status['connected'];room=status['machine']['room'];pid=status['pid']
-            assert cli('--version').strip()=='0.1.0b5';passed('wheel installed in private runtime; actual daemon connects to relay')
+            assert cli('--version').strip()==version;passed('wheel installed in private runtime; actual daemon connects to relay')
             py=t/'runtime/current/bin/python'
             origin=subprocess.check_output([str(py),'-c','import jaunt;print(jaunt.__file__)'],env=env,text=True).strip()
             assert Path(origin).resolve().is_relative_to(t/'runtime/versions') and '/site-packages/' in origin

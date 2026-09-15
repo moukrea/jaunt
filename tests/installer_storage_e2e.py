@@ -31,13 +31,18 @@ else
   export PATH="/wrappers:$PATH"
 fi
 bash /installer.sh
-test "$(/root/.local/bin/jaunt --version)" = 0.1.0b5
+/root/.local/bin/jaunt --version > /var/tmp/jaunt-test-version.txt
 /root/.local/bin/jaunt status > /var/tmp/jaunt-test-status.json
 python3 - <<'PYVERIFY'
-import json, pathlib
+import json, pathlib, urllib.request
 status=json.loads(pathlib.Path('/var/tmp/jaunt-test-status.json').read_text())
 assert status['sessions'] == []
-assert status['machine']['version'] == '0.1.0b5'
+deployed=json.load(urllib.request.urlopen('https://moukrea.github.io/jaunt/config.json', timeout=30))
+installed=json.loads((pathlib.Path.home()/'.local/share/jaunt/installation.json').read_text())
+assert installed['tag']==deployed['release']
+expected=deployed['release'].removeprefix('v').replace('-beta.','b')
+assert status['machine']['version']==expected
+assert pathlib.Path('/var/tmp/jaunt-test-version.txt').read_text().strip()==expected
 environment=pathlib.Path(f'/proc/{status["pid"]}/environ').read_bytes().split(b'\0')
 assert not any(v.startswith(b'TMPDIR=') and b'.jaunt-install.' in v for v in environment)
 assert not list((pathlib.Path.home()/'.local/share/jaunt').glob('.jaunt-install.*'))
