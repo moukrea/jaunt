@@ -1,109 +1,111 @@
 # Jaunt
 
-<img src="web/assets/jaunt.png" width="96" alt="Logo Jaunt">
+<img src="web/assets/jaunt.png" width="96" alt="Jaunt logo">
 
-**Vos shells, vos fichiers, votre machine. Depuis votre téléphone.**
+**Your shells, your files, your machine. From your phone.**
 
-Jaunt propose un client Android installable en APK, une interface web mobile/PC et un hôte POSIX. Il donne accès à de vrais terminaux, pas seulement à Claude Code ou Codex. La page est statique ; un relais partagé transporte les connexions chiffrées sortantes de l'hôte et du navigateur.
+Jaunt provides an installable Android APK, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
 
-**Hôte : 0.1.0-beta.5 · Android : 0.1.0-beta.3.** [Ouvrir Jaunt](https://moukrea.github.io/jaunt/). Le relais et la release hôte sont déployés ; le protocole reste sans audit de sécurité externe. Voir le [rapport de validation](docs/PUBLIC_DELIVERY.md) pour les tests réellement exécutés et les limites non validées.
+**Host: 0.1.0-beta.5 · Android: 0.1.0-beta.3.** [Open Jaunt](https://moukrea.github.io/jaunt/). The relay and host release are deployed. The protocol has **not received an independent security audit**. See the [validation report](docs/PUBLIC_DELIVERY.md) for observed test results and unvalidated limitations.
 
-## Installer l'hôte
+## Install the host
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Linux, macOS ou WSL. `curl` est nécessaire. L'installateur utilise un Python 3.11–3.14 compatible ou installe un Python privé via uv. Aucun `sudo` implicite. Le service tourne en arrière-plan et les mises à jour sont activées automatiquement ; elles attendent la fin des shells ordinaires et des transferts. Il vérifie le SHA-256 de la release, crée un environnement privé et démarre un service utilisateur lorsque disponible.
+Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. It never runs `sudo` implicitly. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled and wait until ordinary shells and transfers finish.
 
-Sur Android, [installer l’APK signé](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), puis scanner le QR affiché par l’hôte. Sur PC ou dans un navigateur, ouvrir **https://moukrea.github.io/jaunt/**. La chaîne `JAUNT1.…` peut aussi être collée. Le QR expire après dix minutes et n'est utilisable qu'une fois. L'appareil mémorisé utilise ensuite sa propre clé : un changement de Wi-Fi ou de 4G/5G ne nécessite pas de réappairage. Conserver l'onglet ouvert pour reprendre automatiquement ; si le système mobile suspend/tue le navigateur, rouvrir l'application.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `JAUNT1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
-jaunt pair                       # Appairer un autre appareil
-jaunt service install            # Installer/activer le service utilisateur
-jaunt status                     # État de l'hôte et des shells
-jaunt update                     # Vérifier une mise à jour sans fermer les shells
-jaunt doctor                     # Diagnostic sans afficher les secrets
-jaunt devices                    # Appareils autorisés
-jaunt revoke IDENTIFIANT          # Révoquer un appareil perdu
-jaunt notify "Build terminé"      # Notifier les appareils
-jaunt run -- make test            # Notification de fin de commande
-jaunt clipboard < notes.txt       # Mettre du texte à disposition du client
-jaunt stop                       # Arrête l'hôte ET ses shells non-tmux
+jaunt pair                       # Pair another device
+jaunt service install            # Install and enable the user service
+jaunt status                     # Host and shell status
+jaunt update                     # Check for an update without closing shells
+jaunt doctor                     # Diagnostics without exposing secrets
+jaunt devices                    # List authorized devices
+jaunt revoke DEVICE_ID           # Revoke a lost device
+jaunt notify "Build finished"     # Notify connected devices
+jaunt run -- make test            # Notify when a command finishes
+jaunt clipboard < notes.txt      # Make text available to the client
+jaunt stop                       # Stop the host AND its non-tmux shells
 ```
 
-L'appairage autorise le **compte système qui exécute l'hôte**, avec toutes ses permissions. Ne pas installer en root pour un usage ordinaire. Un QR est un secret donnant accès au shell : ne pas le publier.
+Pairing grants access as the **system account running the host**, with all of that account's permissions. Do not run as root for ordinary use. A QR code grants shell access: never publish it.
 
-## Fonctions livrées
+## Features
 
-| Domaine | Comportement |
+| Area | Behavior |
 |---|---|
-| Terminaux | PTY réel, clavier interactif, plusieurs onglets, création/renommage/fermeture, redimensionnement, touches Ctrl/Alt/Esc/Tab/flèches mobiles |
-| Reprise | Historique borné, reconnexion automatique, état mémorisé ; une coupure navigateur ne ferme pas le shell |
-| tmux | Créer une session tmux ou rattacher une session existante, si tmux est installé ; fermer sa vue ne tue pas le serveur tmux |
-| Fichiers | Navigation, fichiers cachés, pagination, création de dossier, renommage, suppression non récursive, upload/download, aperçu texte/image |
-| Transferts | Suivi contextuel dans Files → Transfer activity ; morceaux de 48 Kio, offsets de reprise réseau, SHA-256 d'upload, finalisation atomique, annulation |
-| Images | Galerie, fichier, collage et drag-and-drop ; conversion PNG des formats décodables par le navigateur ; insertion du chemin ou collage natif conditionnel |
-| Presse-papiers | Sélection, copie du scrollback conservé, lecture/écriture du presse-papiers hôte quand disponible, buffer texte headless, OSC 52 en copie seulement |
-| Protection | QR à usage unique, clés propres aux appareils, révocation, coffre navigateur facultativement protégé par PIN/mot de passe et verrouillage automatique |
-| Notifications | Service natif Android facultatif ou Web Push dans le navigateur ; test dans Settings et CLI `notify`/`run` |
-| Interface | Client Android APK avec interface embarquée et intégrations natives ; web mobile/PC et PWA ; JavaScript local |
+| Terminals | Real PTYs, interactive keyboard, multiple tabs, create/rename/close, resizing, mobile Ctrl/Alt/Esc/Tab/arrow keys |
+| Reconnection | Bounded history, automatic reconnection, remembered state; a browser disconnect does not close the shell |
+| tmux | Create or attach to a tmux session when tmux is installed; closing its view does not kill the tmux server |
+| Files | Browsing, hidden files, pagination, create directories, rename, non-recursive deletion, upload/download, text/image previews |
+| Transfers | Contextual tracking in Files → Transfer activity; 48 KiB chunks, network resume offsets, upload SHA-256, atomic finalization, cancellation |
+| Images | Gallery, file picker, paste, and drag-and-drop; PNG conversion for browser-decodable formats; path insertion or conditional native paste |
+| Clipboard | Selection, retained scrollback copying, host clipboard read/write when available, headless text buffer, copy-only OSC 52 |
+| Protection | Single-use QR codes, per-device keys, revocation, optional PIN/password-protected browser vault and automatic locking |
+| Notifications | Optional native Android service or browser Web Push; Settings test and CLI `notify`/`run` |
+| Interface | Android APK with a bundled interface and native integrations; mobile/desktop web app and PWA; local JavaScript |
 
-## Images : la distinction importante
+## Image handling
 
-**Paste :** une image est envoyée automatiquement au presse-papiers de l’hôte puis collée avec Ctrl+V dans la session choisie, si le backend natif est disponible. Si le navigateur renvoie du vide, une zone de collage riche et un choix d’image sont proposés. Attach conserve les deux modes explicites. Aucun Enter n’est envoyé.
+**Paste:** when a native backend is available, an image is uploaded to the host clipboard and pasted into the selected session with Ctrl+V. If the browser returns an empty clipboard, the UI offers a rich paste area and image picker. Attach retains both explicit modes. No Enter key is sent.
 
-**Fallback disponible avec une connexion active :** sélectionner/coller l'image, l'envoyer sur l'hôte et insérer son chemin correctement échappé dans le terminal. Aucune validation automatique par Entrée. Claude/Codex ou un autre outil peut lire ce fichier si son propre mode l'autorise.
+**Fallback with an active connection:** select or paste an image, upload it to the host, and insert its properly escaped path into the terminal. Nothing submits the command automatically. Claude, Codex, or another tool can read the file if its own mode supports it.
 
-**Collage natif conditionnel :** quand l'hôte dispose d'un presse-papiers graphique accessible (macOS, Wayland avec `wl-clipboard`, X11 avec `xclip`), Jaunt y place le PNG puis envoie Ctrl+V au terminal. Cela dépend aussi du raccourci et du comportement de l'outil CLI. **Sur une machine headless, Jaunt ne simule pas une pièce jointe native Claude/Codex par magie : le fallback est le fichier et son chemin.** HEIC et autres formats non décodés par le navigateur restent transférables comme fichiers, mais ne sont pas convertis en PNG.
+**Conditional native paste:** when the host has an accessible graphical clipboard (macOS, Wayland with `wl-clipboard`, or X11 with `xclip`), Jaunt puts the PNG there and sends Ctrl+V to the terminal. This also depends on the CLI tool's shortcut and behavior. **On a headless host, Jaunt cannot manufacture a native Claude/Codex attachment: it falls back to a file and its path.** HEIC and other formats the browser cannot decode can still be transferred as files, but are not converted to PNG.
 
-## Limites explicites
+## Known limitations
 
-- 16 shells actifs, 32 vues retenues, 2 Mio de replay brut par PTY et 10 000 lignes de scrollback côté xterm. La copie intégrale concerne l'historique encore conservé, pas une journalisation infinie.
-- Maximum 512 Mio par fichier côté hôte ; téléchargement en mémoire limité à 128 Mio dans les navigateurs sans écriture directe de fichier ; aperçu limité à 16 Mio. Huit uploads simultanés, 1 Gio déclaré total.
-- La reprise d'upload fonctionne après coupure réseau tant que l'hôte et la page conservent le transfert. Après redémarrage de l'hôte ou rechargement complet de la page, recommencer l'upload ; aucun accès persistant non autorisé aux fichiers locaux du téléphone.
-- Les shells ordinaires survivent à la déconnexion, **pas au redémarrage du daemon ou de la machine**. tmux permet la survie à un redémarrage du daemon, pas à un reboot de l'OS.
-- Un seul onglet d'application Jaunt par profil navigateur peut posséder le coffre en même temps. Les onglets de terminal dans Jaunt et plusieurs appareils sont supportés.
-- Dans le navigateur, les notifications requièrent les permissions et le support Web Push. Dans l’APK, activer Android background notifications dans Settings ; les restrictions de batterie Android peuvent retarder la livraison. Sur iOS, utiliser la PWA installée. La livraison dépend du réseau et du fournisseur push ; aucune garantie temps réel.
-- Une machine en veille/éteinte n'est pas joignable. Pas de réveil à distance, pas de tunnel TCP arbitraire, pas de bureau graphique, pas de shell Windows natif.
-- Les coûts, limites et disponibilité du relais de production relèvent du compte Cloudflare. Le relais comporte des garde-fous de base, pas une protection commerciale anti-abus garantie.
+- Up to 16 active shells, 32 retained views, 2 MiB of raw replay per PTY, and 10,000 xterm scrollback lines. Copy-all covers retained history, not an unlimited log.
+- Host file limit: 512 MiB. In-memory downloads are limited to 128 MiB in browsers without direct file writing; previews are limited to 16 MiB. Up to eight simultaneous uploads and 1 GiB of declared total size.
+- Uploads resume after network interruptions while the host and page retain the transfer. Restart the upload after a host restart or full page reload; Jaunt does not obtain unauthorized persistent access to the phone's local files.
+- Ordinary shells survive disconnection, **not a daemon restart or machine reboot**. tmux can survive a daemon restart, but not an OS reboot.
+- Only one Jaunt application tab per browser profile may own the vault at a time. Multiple terminal tabs inside Jaunt and multiple devices are supported.
+- Browser notifications require permission and Web Push support. In the APK, enable Android background notifications in Settings; Android battery restrictions may delay delivery. On iOS, use the installed PWA. Delivery depends on the network and push provider; it is not guaranteed in real time.
+- A sleeping or powered-off host is unreachable. There is no remote wake-up, arbitrary TCP tunnel, graphical desktop, or native Windows shell support.
+- Production relay costs, quotas, and availability depend on the Cloudflare account. Basic relay safeguards are not a guaranteed commercial abuse-protection service.
 
-## Développement local
+## Local development
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e . -r requirements-dev.txt
-npm install
+npm ci
 npm run prepare-web
 python scripts/dev.py
 ```
 
-Le runner n'écoute que sur `127.0.0.1`, démarre hôte et relais local et affiche un QR de test. **Ce n'est pas un mode d'exposition à Internet.** Sur un téléphone physique, utiliser le déploiement HTTPS ; `localhost` désigne le téléphone, pas le PC.
+The runner listens only on `127.0.0.1`, starts a host and local relay, and displays a test QR code. **This does not expose the host to the Internet.** Use the HTTPS deployment on a physical phone: `localhost` refers to the phone, not the PC.
 
 ```sh
-pytest -q                         # Tests Python + tests d'interopérabilité avec Node
-node --test tests/relay.test.mjs   # Modèle déterministe du Worker
-npm run test:relay                # Runtime Miniflare réel, dépendances npm requises
-python scripts/check_project.py   # Cohérence des ressources et syntaxe
-python scripts/build_release.py   # Wheel + manifeste + SHA256SUMS
-python tests/browser_e2e.py       # Navigateur et hôte réels, isolation temporaire
+pytest -q                        # Python tests and Node interoperability tests
+node --test tests/relay.test.mjs  # Deterministic Worker model
+npm run test:relay               # Real Miniflare runtime; npm dependencies required
+python scripts/check_project.py  # Resource consistency and syntax
+python scripts/build_release.py  # Wheel, manifest, and SHA256SUMS
+python tests/browser_e2e.py       # Real browser and host in temporary isolation
 ```
 
-`JAUNT_BROWSER_EXECUTABLE=/chemin/vers/chromium` permet d'utiliser un navigateur système. Sinon : `python -m playwright install chromium`. Les tests ne modifient jamais les politiques de sécurité de votre navigateur.
+Set `JAUNT_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.
 
-## Première mise en ligne — une fois pour le propriétaire du projet
+## Initial deployment — once, by the project owner
 
-Confier [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) à l'agent qui a accès à GitHub. Il configure GitHub Pages, une release hôte et **un relais Cloudflare pour le projet entier**. Il faut une autorisation Cloudflare : un token GitHub ne la remplace pas. Aucune infrastructure à créer par les utilisateurs finaux.
+Give [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) to an agent with GitHub access. It configures GitHub Pages, a host release, and **one Cloudflare relay for the entire project**. Cloudflare authorization is required; a GitHub token does not provide it. End users do not create infrastructure.
 
-Le relais n'est pas emprunté à sshx, Happy ou Zedra. Aucune dépendance à leurs serveurs, à Tailscale ou à un compte utilisateur Jaunt. Le compte Cloudflare du propriétaire peut avoir des quotas/coûts : aucune promesse de relais gratuit ou illimité.
+Jaunt does not borrow relays from sshx, Happy, or Zedra. It does not depend on their servers, Tailscale, or a Jaunt user account. The owner's Cloudflare account may incur quotas or costs; no free or unlimited relay is promised.
 
-## Documents
+## Documentation
 
-[Déploiement](docs/DEPLOYMENT.md) · [Sécurité](SECURITY.md) · [Protocole](docs/PROTOCOL.md) · [Dépannage](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Licences tierces](THIRD_PARTY_NOTICES.md)
+[Deployment](docs/DEPLOYMENT.md) · [Security](SECURITY.md) · [Protocol](docs/PROTOCOL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-## Application Android
+English is the default language for repository documentation and contribution guidance. Application localization is separate from the documentation language.
 
-Le client Android est un APK avec interface WebView embarquée et intégrations natives pour le presse-papiers, la caméra, les fichiers et les notifications en arrière-plan. Voir [installation, architecture et validation Android](docs/ANDROID.md). La page propose l’APK après vérification de ses assets publics.
+## Android app
 
-L’hôte se met à jour automatiquement depuis le canal publié. Il attend la fin des shells ordinaires et des transferts avant d’installer. Android cherche automatiquement un nouvel APK et propose sa mise à jour vérifiée via l’installateur système. Voir [les mises à jour et l’autorisation explicite de redémarrage](docs/UPDATES.md).
+The Android client is an APK with a bundled WebView interface and native clipboard, camera, file, and background-notification integrations. See [Android installation, architecture, and validation](docs/ANDROID.md). The page advertises the APK after its public assets have been verified.
+
+The host updates automatically from the published channel, waiting until ordinary shells and transfers finish. Android automatically checks for a new APK and offers a verified update through the system installer. See [updates and explicit restart authorization](docs/UPDATES.md).

@@ -53,6 +53,9 @@ jobs:
               /root/.local/bin/jaunt --version
               /root/.local/bin/jaunt stop
             '
+      - name: Install with curl isolated from the installer temporary directory
+        if: matrix.fedora == '44'
+        run: python3 tests/installer_namespace_e2e.py
   host:
     strategy:
       matrix:

@@ -1,21 +1,19 @@
-# Commencer avec cette archive
+# Getting started with this archive
 
-**Jaunt 0.1.0-beta.5 — projet complet, livraison source et wheel hôte.**
+**Jaunt 0.1.0-beta.5 — complete project, source distribution, and host wheel.**
 
-La livraison est publiée : https://moukrea.github.io/jaunt/.
-L’utilisateur final installe l’hôte avec la commande du README, puis appaire le
-client Android APK ou son navigateur. Le propriétaire a déjà configuré GitHub Pages et le relais Cloudflare Jaunt.
-Pour maintenir ou redéployer ce projet, consulter docs/DEPLOYMENT.md.
+The application is published at https://moukrea.github.io/jaunt/.
+End users install the host with the README command, then pair the Android APK or their browser. The owner has already configured GitHub Pages and the Jaunt Cloudflare relay. For maintenance or redeployment, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-**Pour essayer localement sans déployer :** suivre la section Développement local du README (`python scripts/dev.py`). Ce mode n'est accessible que depuis la même machine et ne remplace pas le relais de production.
+**To try it locally without deploying:** follow the README's Local development section (`python scripts/dev.py`). This mode is reachable only from the same machine and does not replace the production relay.
 
-## Où regarder
+## Where to look
 
-- `README.md` : fonctionnalités, installation et limites.
-- `DEPLOY_AGENT_PROMPT.md` : prompt prêt à donner à l'agent.
-- `docs/VALIDATION.md` : résultats réellement observés et périmètre non testé.
-- `docs/evidence/` : preuves JSON et captures navigateur.
-- `SECURITY.md` : permissions, secrets, protocole non audité et précautions GitHub Pages.
-- `release/` : wheel hôte construit et ses checksums, identiques aux assets de la release publique.
+- `README.md`: features, installation, and limitations.
+- `DEPLOY_AGENT_PROMPT.md`: instructions for the deployment agent.
+- `docs/VALIDATION.md`: observed results and untested scope.
+- `docs/evidence/`: JSON evidence and browser screenshots.
+- `SECURITY.md`: permissions, secrets, unaudited protocol, and GitHub Pages precautions.
+- `release/`: built host wheel and checksums, identical to the public release assets.
 
-L'archive ne contient aucun secret d'appairage ni aucun compte préconfiguré. Le client Android installable en APK utilise l’interface embarquée et des intégrations natives pour la caméra, le presse-papiers, les fichiers et les notifications. Voir docs/ANDROID.md ; la version web reste disponible sur mobile et PC.
+The archive contains no pairing secrets or preconfigured accounts. The installable Android APK uses a bundled interface and native camera, clipboard, file, and notification integrations. See [docs/ANDROID.md](docs/ANDROID.md); the web client remains available on mobile and desktop.

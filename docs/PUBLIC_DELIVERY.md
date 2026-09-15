@@ -1,80 +1,80 @@
-# Livraison publique — 15 septembre 2026
+# Public delivery — September 15, 2026
 
-- Application : https://moukrea.github.io/jaunt/
-- Hôte : [v0.1.0-beta.5](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.5).
-- Android : [APK signé 0.1.0-beta.3](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), [release et checksums](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.3).
-- Relais propriétaire déployé : `wss://jaunt-relay.moukrea.workers.dev`, `APP_ORIGIN=https://moukrea.github.io`.
+- Application: https://moukrea.github.io/jaunt/
+- Host: [v0.1.0-beta.5](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.5).
+- Android: [signed APK 0.1.0-beta.3](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.3/jaunt-android-v0.1.0-beta.3.apk), [release and checksums](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.3).
+- Deployed project relay: `wss://jaunt-relay.moukrea.workers.dev`, `APP_ORIGIN=https://moukrea.github.io`.
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-La forme précédente de cette commande (`curl -fsSL … | bash`) a été utilisée depuis la Page publique dans une VM Ubuntu 24.04 isolée. Le correctif de lancement et ses essais Fedora sont décrits dans [INSTALLER_FEDORA.md](INSTALLER_FEDORA.md). Le wheel est installé dans un environnement privé, sans source editable ; son checksum est vérifié et le service utilisateur est activé. Le poste utilisateur a également reçu beta.4 depuis la release publique, sans fermeture de shell actif, avec conservation de ses identités et activation effective du service. Son contrôle périodique a ensuite installé beta.5 automatiquement, sans déclenchement manuel ; version 0.1.0b5 et service actif vérifiés.
+The previous form of this command (`curl -fsSL … | bash`) was used from the public page in an isolated Ubuntu 24.04 VM. Bootstrap fixes and Fedora testing are documented in [INSTALLER_FEDORA.md](INSTALLER_FEDORA.md). The wheel was installed in a private environment, not as editable source; its checksum was verified and the user service enabled. The user's workstation also received beta.4 from the public release without closing active shells, preserving identities and enabling the service. Its periodic check subsequently installed beta.5 automatically, with no manual trigger; version 0.1.0b5 and the active service were verified.
 
-L’APK embarque l’interface WebView et utilise des intégrations Android natives pour la caméra, le presse-papiers, les fichiers et les notifications. Il ne nécessite aucun compte Cloudflare/GitHub pour se connecter. Il conserve une confirmation Android pour installer une mise à jour.
+The APK bundles the WebView interface and uses native Android integrations for camera, clipboard, files, and notifications. Connecting requires no Cloudflare/GitHub account. Android still requires confirmation to install an update.
 
-## Contrôles exécutés
+## Executed checks
 
-La [CI de la release](https://github.com/moukrea/jaunt/actions/runs/34904297741) et le [build Android](https://github.com/moukrea/jaunt/actions/runs/34904297775) ont réussi avant fusion de la PR #13. Les releases ont été publiées avant Pages : [hôte](https://github.com/moukrea/jaunt/actions/runs/34902465073), [APK signé](https://github.com/moukrea/jaunt/actions/runs/34904737541), puis [Pages](https://github.com/moukrea/jaunt/actions/runs/34905023100).
+The [release CI](https://github.com/moukrea/jaunt/actions/runs/34904297741) and [Android build](https://github.com/moukrea/jaunt/actions/runs/34904297775) passed before PR #13 was merged. Releases preceded Pages: [host](https://github.com/moukrea/jaunt/actions/runs/34902465073), [signed APK](https://github.com/moukrea/jaunt/actions/runs/34904737541), then [Pages](https://github.com/moukrea/jaunt/actions/runs/34905023100).
 
-| Commande / contrôle | Résultat observé |
+| Command / check | Observed result |
 |---|---|
-| `pytest -q` | 45 tests, Linux/macOS, Python 3.11 et 3.13 |
-| `npm test` | 19 tests Node |
-| `npm run test:relay` | 1 intégration réelle Miniflare/workerd, Durable Object et WebSockets |
-| `python scripts/check_project.py` | Imports, ressources et syntaxe valides |
-| `python scripts/build_release.py` | Wheel, manifeste et SHA256SUMS produits |
-| `python tests/browser_e2e.py` | 23 scénarios par backend : relais Python puis vrai Worker local |
-| `python tests/installer_e2e.py` | 8 contrôles, dont checksum altéré, véritable PTY, refus de restart implicite et upgrade autorisé |
-| `android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` | 3 tests JVM, lint et builds réussis |
-| `:app:assembleRelease :app:lintRelease`, `apksigner verify --verbose --print-certs` | APK public signé, non debuggable, signature vérifiée |
-| Téléchargement des releases publiques | Les trois assets hôte et les trois assets Android vérifiés ; checksums, nom/version et certificat conformes |
-| Page publiée | Configuration hôte/APK correcte, 26 ressources sous `/jaunt/` comparées aux fichiers construits ; lien APK visible en viewport mobile, aucune exception JS observée |
-| Relais public | `/health` 200 avec curl, authentification et routage bidirectionnel sur de vraies WebSockets ; origine étrangère refusée 403 |
+| `pytest -q` | 45 tests on Linux/macOS with Python 3.11 and 3.13 at release time; later installer regressions are reported separately |
+| `npm test` | 19 Node tests |
+| `npm run test:relay` | 1 real Miniflare/workerd integration covering Durable Objects and WebSockets |
+| `python scripts/check_project.py` | Valid imports, resources, and syntax |
+| `python scripts/build_release.py` | Wheel, manifest, and SHA256SUMS produced |
+| `python tests/browser_e2e.py` | 23 scenarios per backend: Python relay and real local Worker |
+| `python tests/installer_e2e.py` | 8 checks, including a tampered checksum, real PTY, refusal of implicit restart, and authorized upgrade |
+| `android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` | 3 JVM tests, lint, and builds passed |
+| `:app:assembleRelease :app:lintRelease`, `apksigner verify --verbose --print-certs` | Signed, non-debuggable public APK with verified signature |
+| Public release downloads | Three host assets and three Android assets checked; checksums, names/versions, and certificate match |
+| Published page | Correct host/APK configuration; 26 resources under `/jaunt/` compared with built files; APK link visible in a mobile viewport; no observed JS exception |
+| Public relay | `/health` returned 200 with curl; real WebSocket authentication and bidirectional routing passed; foreign origin rejected with 403 |
 
-Versions locales observées : Python 3.14.2, Node 25.5.0, npm 11.8.0 ; Python de la VM publique 3.12.3. Android : JDK 17, Gradle 9.5.0, AGP 9.3.2, SDK compile 37.0 / target 36 / minimum 26 ; émulateur Android 14/API 34, WebView 113.0.5672.136. CI Node 22. Dépendances épinglées et verrous générés par les outils réels.
+Observed local versions: Python 3.14.2, Node 25.5.0, npm 11.8.0; public VM Python 3.12.3. Android: JDK 17, Gradle 9.5.0, AGP 9.3.2, compile SDK 37.0 / target 36 / minimum 26; Android 14/API 34 emulator, WebView 113.0.5672.136. CI uses Node 22. Dependencies are pinned and lockfiles were generated by real tools.
 
-`npm audit` : aucun avis connu. `pip-audit --local --skip-editable` : aucun avis connu. OSV : 21 dépendances Maven runtime résolues, aucun avis connu au contrôle. Ces résultats dépendent de la couverture des bases et ne constituent pas un audit de sécurité.
+`npm audit`: no known advisories. `pip-audit --local --skip-editable`: no known advisories. OSV: 21 resolved Maven runtime dependencies, no known advisories at the time of checking. These results depend on database coverage and are not a security audit.
 
-## Recette finale des fichiers publiés
+## Final acceptance test of published files
 
-La recette finale a utilisé la Page et les releases publiques sans substitution de module : **12 contrôles réussis**. Appairage, shell et commande prouvée, saisie rapide de 512 caractères, second onglet et retour au premier, upload/download avec comparaison des octets, image + chemin sans Enter sur hôte headless, rechargement sans QR, véritable coupure IPv4/IPv6 puis même PID de shell, refus d’upgrade implicite, upgrade explicitement autorisé avec identités conservées, révocation et absence d’exception navigateur. Voir [public-report.json](evidence/public-report.json).
+The final acceptance test used the public page and releases without module substitution: **12 checks passed**. Pairing, shell with proven command output, a 512-character input burst, a second tab and return to the first, upload/download byte comparison, image-plus-path without Enter on a headless host, reload without QR, a real IPv4/IPv6 outage followed by the same shell PID, refusal of an implicit upgrade, an explicitly authorized upgrade preserving identities, revocation, and no browser exceptions. See [public-report.json](evidence/public-report.json).
 
-## Mises à jour réellement installées
+## Actually installed updates
 
-Sur les installations publiques beta.4 du poste utilisateur et de la VM, le contrôle automatique initial s’est déclenché seul. Pour ne pas attendre chaque intervalle de quinze minutes pendant la recette, le processus exact installé `python -m jaunt.updates --automatic` a ensuite été déclenché manuellement dans la VM :
+The automatic initial check ran by itself on both public beta.4 installations: the user's workstation and the VM. To avoid waiting through each fifteen-minute interval during testing, the exact installed `python -m jaunt.updates --automatic` process was subsequently triggered manually in the VM:
 
-1. Téléchargement du wheel public beta.5 et comparaison avec son manifeste public.
-2. Avec un shell ordinaire actif : report de l’installation, même PID hôte, même PID de shell et mêmes clés. Une variable héritée `JAUNT_ALLOW_RESTART=1` n’a pas autorisé l’auto-update à tuer le shell.
-3. Fermeture du shell par la confirmation explicite de l’UI, puis nouvelle exécution du processus automatique : installation de beta.5, service actif et activé, import depuis `site-packages`, identités hôte/appareils inchangées.
+1. Downloaded the public beta.5 wheel and compared it with the public manifest.
+2. With an ordinary shell active, deferred installation while retaining the host PID, shell PID, and keys. An inherited `JAUNT_ALLOW_RESTART=1` did not authorize automatic updates to kill the shell.
+3. Closed the shell through the UI's explicit confirmation, then reran the automatic process: beta.5 installed, service active and enabled, import from `site-packages`, host/device identities unchanged.
 
-L’APK public beta.1 a détecté beta.2 depuis le canal public, téléchargé les assets, vérifié le checksum et le certificat existant, puis ouvert les réglages Android « Allow from this source » et le véritable installateur système. Après confirmation et ouverture, `versionCode=2`, mode non debuggable, même appairage et même PID de shell ; une commande a créé le fichier attendu sur l’hôte. Aucun `adb install` n’a remplacé ce parcours de mise à jour. Le contrôle de découverte a été demandé via Settings ; aucune attente réelle de six heures n’est revendiquée. Après l’upgrade automatique de l’hôte, l’APK a également reconnecté sans QR.
+The public beta.1 APK discovered beta.2 through the public channel, downloaded the assets, verified the checksum and existing certificate, and opened Android's “Allow from this source” settings and real system installer. After confirmation and opening, `versionCode=2`, non-debuggable mode, pairing, and shell PID were verified; a command created the expected host file. No `adb install` substituted for this update flow. Discovery was requested through Settings; no actual six-hour wait is claimed. The APK also reconnected without a QR code after the automatic host upgrade.
 
-Le même parcours a ensuite installé l’APK public beta.3 depuis beta.2. VersionCode 3, mode non debuggable, appairage conservé et nouvelle commande shell vérifiée après installation. L’APK téléchargé contient exactement le module de régulation d’entrée revu.
+The same flow then installed public APK beta.3 from beta.2. VersionCode 3, non-debuggable mode, retained pairing, and a new shell command were verified after installation. The downloaded APK contains exactly the reviewed input-pacing module.
 
-Preuves synthétiques : [update-report.json](evidence/update-report.json).
+Structured evidence: [update-report.json](evidence/update-report.json).
 
-## Android et images
+## Android and images
 
-Le premier APK signé public a exécuté une commande shell vérifiée sur la VM. Un PNG synthétique du presse-papiers Android a été transféré jusque dans le presse-papiers X11 de l’hôte : comparaison exacte des octets, et lecture PTY égale à `16` (Ctrl+V), sans Enter. Le même shell est resté vivant. L’APK public a aussi reçu une notification native avec l’écran de l’émulateur éteint.
+The first signed public APK ran a verified shell command on the VM. A synthetic PNG in the Android clipboard reached the host's X11 clipboard: exact bytes matched, and the PTY received only `16` (Ctrl+V), without Enter. The same shell stayed alive. The public APK also received a native notification with the emulator screen off.
 
-Les essais Android précédents comprennent le dialogue système Save avec comparaison binaire, rotation et coupure/rétablissement réseau avec même session, trois démarrages à froid du build signé, appairage par QR choisi dans la galerie, demande de permission caméra et lancement du scanner. Les tests de clipboard utilisent une instrumentation séparée, absente de l’APK public. Le presse-papiers et les dossiers personnels de l’utilisateur n’ont pas servi aux essais.
+Earlier Android tests covered the system Save dialog with binary comparison, rotation and network interruption/recovery with the same session, three cold starts of the signed build, pairing from a gallery QR image, camera permission, and scanner launch. Clipboard tests use separate instrumentation absent from the public APK. The user's clipboard and personal directories were not test fixtures.
 
-Un premier tap de recette a rencontré l’aperçu presse-papiers d’Android superposé à l’application ; après sa disparition, le vrai bouton Paste a été exercé et les octets vérifiés. Le contrôle après ouverture de l’APK attend le retour de l’état Encrypted, au lieu de supposer un démarrage instantané. Une sonde urllib avec son User-Agent par défaut a reçu 403 ; la même sonde avec un User-Agent Jaunt et curl ont reçu 200, et les WebSockets réelles ont réussi. La première coupure réseau de la dernière recette ne bloquait qu’IPv4, alors que le socket de la VM utilisait IPv6 (confirmé avec `ss`). Le test a été corrigé pour interrompre les deux familles, avec restauration des règles dans un bloc finally. Aucun contrôle fonctionnel n’a été supprimé pour obtenir un résultat vert.
+One initial test tap encountered Android's clipboard-preview overlay on top of the app; after it disappeared, the real Paste button was exercised and bytes verified. The post-open check waits for the Encrypted state rather than assuming instant startup. A urllib probe with its default User-Agent received 403; the same probe with a Jaunt User-Agent and curl received 200, and real WebSockets passed. The first network interruption in the final acceptance test blocked only IPv4 while the VM socket used IPv6, confirmed with `ss`. The test was corrected to interrupt both families and restore rules in a finally block. No functional check was removed to obtain a passing result.
 
-## Correction de saisie rapide
+## Rapid input correction
 
-La recette publique a aussi révélé une entrée partiellement reçue pendant une rafale de petites trames. La file par client de l’hôte est bornée à 64 messages ; le client web ne régulait pas ces rafales. La fermeture observée venait de l’hôte, et les commandes suivantes restaient exécutables après reconnexion. La régulation d’envoi du client suit maintenant celle du transport hôte ; une génération de canal différente annule toujours les entrées en attente. Deux tests de régression échouaient avant cette correction (débordement de file et changement de canal pendant la rafale), puis ont réussi. Le navigateur exerce également une saisie rapide de 512 caractères avec comparaison exacte du fichier produit.
+Public testing also revealed partially received input during a burst of small frames. The host's per-client queue is bounded at 64 messages; the web client did not pace these bursts. The observed closure originated on the host, and subsequent commands worked after reconnecting. Client send pacing now follows the host transport; a changed channel generation still cancels queued input. Two regression tests failed before the fix (queue overflow and channel change during a burst), then passed. Browser testing also types 512 characters rapidly and compares the resulting file exactly.
 
-## Limites conservées
+## Retained limitations
 
-- Aucun téléphone physique n’a été utilisé par l’agent. Caméra réelle, IME/claviers constructeurs, variantes de galerie, rotation physique et passage réel Wi-Fi/mobile restent à confirmer sur appareil.
-- Une notification sur émulateur écran éteint ne prouve pas la livraison en Doze profond, après force-stop ou sous restrictions de batterie constructeur. Aucune garantie de push instantané.
-- Les octets de clipboard et Ctrl+V sont prouvés ; la reconnaissance visuelle d’un attachment par une version réelle de Claude Code/Codex n’a pas été validée par l’agent. Upload + chemin reste distinct, sans Enter. Sur headless, aucun presse-papiers graphique inexistant n’est promis.
-- Le protocole personnalisé et le client Android restent **sans audit de sécurité indépendant**.
+- The agent used no physical phone. Real camera decoding, vendor IMEs/keyboards, gallery variants, physical rotation, and actual Wi-Fi/mobile handoff remain unvalidated on hardware.
+- An emulator notification with the screen off does not establish delivery during deep Doze, after force-stop, or under vendor battery restrictions. Instant push is not guaranteed.
+- Clipboard bytes and Ctrl+V delivery are proven; visual recognition as an attachment by an actual Claude Code/Codex version was not agent-validated. Upload-plus-path remains distinct, with no Enter. No nonexistent graphical clipboard is promised on headless hosts.
+- The custom protocol and Android client remain **without an independent security audit**.
 
-## Historique et archive
+## History and archive
 
-L’ancien état est conservé sur la branche `backup/pre-rewrite-20260914` (`eb71cfe9b80749d3c53f11e428f027b0d64fb372`). Les changements ont été intégrés par branches et PR, sans force-push ni suppression d’historique. Le dossier `release/` contient les trois assets hôte téléchargés de la release publique ; l’APK reste un asset de release séparé. Les workflows de publication et les contenus des archives ont été inspectés.
+The previous state is preserved on `backup/pre-rewrite-20260914` (`eb71cfe9b80749d3c53f11e428f027b0d64fb372`). Changes were integrated through branches and PRs without force-push or history deletion. `release/` contains the three host assets downloaded from the public release; the APK remains a separate release asset. Publication workflows and archive contents were inspected.
 
-L’archive source contient 132 fichiers, avec un inventaire CHECKSUMS.sha256 ; le ZIP a passé la vérification CRC et la relecture complète. Le scan du snapshot extrait ne signale qu’un faux positif revu dans xterm (`FourKeyMap`/`TwoKeyMap`). Aucun état hôte, QR, export de coffre, clé de signature ou log privé n’est inclus. Les wheels publics ont également passé le scan sans détection.
+The original beta.5 source archive contained 132 files and a CHECKSUMS.sha256 inventory; it passed CRC verification and a complete read-back. Scanning the extracted snapshot found only a reviewed xterm false positive (`FourKeyMap`/`TwoKeyMap`). No host state, QR code, vault export, signing key, or private log was included. Public wheels also passed scanning with no findings. Later documentation and installer fixes are tracked separately in Git history; these archive observations describe the original delivery.

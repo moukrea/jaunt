@@ -1,52 +1,46 @@
-# Déploiement mainteneur
+# Maintainer deployment
 
-Le produit final demande uniquement une installation de l'hôte à ses utilisateurs. Le **propriétaire du projet** doit mettre en ligne les deux composants suivants une fois :
+End users only install the host. The **project owner** deploys these two components once:
 
-1. GitHub Pages : HTML, JS, CSS, logo, installateur et configuration publique.
-2. Cloudflare Worker + SQLite Durable Object : relais WebSocket. Ne pas remplacer cela par GitHub Actions en boucle, un tunnel personnel ou les serveurs publics d'un autre projet.
+1. GitHub Pages: HTML, JavaScript, CSS, logo, installer, and public configuration.
+2. Cloudflare Worker with a SQLite Durable Object: WebSocket relay. Do not replace it with a looping GitHub Actions job, a personal tunnel, or another project's public servers.
 
-## Préparation
+## Preparation
 
-Préserver le dépôt existant sur une branche de sauvegarde, puis intégrer ces fichiers sur une branche de travail. Ne pas écraser l'historique ni force-push. Installer Python, Node 22+, `pip install -e . -r requirements-dev.txt`, `npm ci`, `npm run prepare-web`. Le build copie jsQR 1.4.0 localement, sa licence, et génère un cache PWA versionné. Committer le `package-lock.json` réellement résolu et vérifier les licences ; ne pas inventer un lockfile.
+Preserve the existing repository on a backup branch, then integrate the files on a working branch. Do not overwrite history or force-push. Install Python and Node 22+, then run `pip install -e . -r requirements-dev.txt`, `npm ci`, and `npm run prepare-web`. The build copies jsQR 1.4.0 and its license locally and generates a versioned PWA cache. Commit the genuinely resolved `package-lock.json` and review licenses; never invent a lockfile.
 
-Les versions des outils de déploiement sont épinglées et le lockfile réellement résolu est committé. Les overrides sharp/undici corrigent les avis connus du Miniflare 4 utilisé pour les tests ; voir VALIDATION.md.
+Deployment tools are pinned and the resolved lockfile is committed. The sharp/undici overrides address known advisories in the Miniflare 4 test dependency; see [VALIDATION.md](VALIDATION.md).
 
-## Relais
+## Relay
 
-- Créer/choisir un compte Cloudflare autorisé à exécuter Workers et Durable Objects SQLite. Vérifier les conditions/quotas actuels dans ce compte.
-- Donner à l'agent l'autorisation de déployer, ou renseigner les secrets Actions `CLOUDFLARE_API_TOKEN` et `CLOUDFLARE_ACCOUNT_ID` via l'interface sécurisée GitHub. Le token doit permettre les déploiements Workers et la migration Durable Object du compte concerné.
-- Le workflow `relay.yml` lance Wrangler avec `relay/wrangler.jsonc`. Nom initial `jaunt-relay`, binding `ROOMS`, classe `Room`, migration SQLite `v1`.
-- APP_ORIGIN doit être `https://moukrea.github.io` (origin sans `/jaunt/`). Ne pas ouvrir `*` en production. `config.json` doit utiliser l'URL WSS réelle du Worker, sans `/v1/room/...` ajouté : le client construit ce chemin.
-- Vérifier `/health`, puis **un vrai appairage et une commande chiffrée**. Un HTTP 200 de health ne valide pas les WebSockets.
+- Create or select a Cloudflare account authorized for Workers and SQLite Durable Objects. Check the account's current terms and quotas.
+- Authorize the agent to deploy, or set Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` through GitHub's secure interface. The token must permit Worker deployment and Durable Object migration in that account.
+- `relay.yml` runs Wrangler with `relay/wrangler.jsonc`: initial name `jaunt-relay`, binding `ROOMS`, class `Room`, SQLite migration `v1`.
+- APP_ORIGIN must be `https://moukrea.github.io` (the origin, without `/jaunt/`). Do not use `*` in production. `config.json` must contain the Worker's actual WSS URL, without an appended `/v1/room/...` path; the client constructs that path.
+- Verify `/health`, then **real pairing and an encrypted command**. An HTTP 200 health response does not validate WebSockets.
 
-## Releases hôte et Android, puis Pages
+## Host and Android releases, then Pages
 
-1. Passer la CI. Créer le tag `v0.1.0-beta.5` (version Python correspondante `0.1.0b5`). Le workflow release construit le wheel et publie `host-manifest.json`, `SHA256SUMS` et le wheel. La release bêta est explicitement marquée prerelease.
-2. Pour Android, publier le tag `android-v0.1.0-beta.3` avec son APK signé, `SIGNING-CERTIFICATE.txt` et `SHA256SUMS`, puis vérifier les assets publics. Conserver la même clé de signature pour les mises à jour.
-3. Définir les variables repository `JAUNT_RELAY_URL` (WSS réel), `JAUNT_RELEASE_TAG` (`v0.1.0-beta.5`) `JAUNT_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.3`) et éventuellement `JAUNT_PAGE_URL` (défaut URL du repo). Ni token hôte ni secret de pairing dans les variables publiques.
-4. Activer Pages en mode GitHub Actions. `pages.yml` construit le web, valide la configuration, copie l'installateur et publie.
-5. Le workflow Pages ne doit pas être lancé avec une release inexistante. Le prompt agent impose cet ordre.
+1. Pass CI. Create the host tag, currently `v0.1.0-beta.5` (Python version `0.1.0b5`). The release workflow builds the wheel and publishes it with `host-manifest.json` and `SHA256SUMS`. Beta releases are explicitly marked as prereleases. Never overwrite an existing release's assets.
+2. For Android, publish the tag, currently `android-v0.1.0-beta.3`, with its signed APK, `SIGNING-CERTIFICATE.txt`, and `SHA256SUMS`; verify the public assets. Keep the same signing key for updates.
+3. Set repository variables `JAUNT_RELAY_URL` (actual WSS URL), `JAUNT_RELEASE_TAG` (`v0.1.0-beta.5`), `JAUNT_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.3`), and optionally `JAUNT_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
+4. Enable Pages in GitHub Actions mode. `pages.yml` builds the web app, validates configuration, copies the installer, and publishes it.
+5. Do not run Pages with a nonexistent release. The deployment prompt requires this order.
 
-## Recette distante obligatoire
+## Required remote acceptance testing
 
-Sur une machine Linux non exposée : installer depuis la Page publiée, scanner le QR sur Chrome Android, créer un shell, exécuter une commande, uploader et télécharger un fichier, coller une image, tester les deux modes d'image selon capacités hôte, fermer/rouvrir la PWA, changer Wi-Fi↔mobile, retrouver le même shell sans QR, tester push écran verrouillé, révoquer l'appareil. Recommencer le chemin minimal sur macOS et Firefox/Safari lorsque disponibles.
+On a Linux machine without an exposed incoming port: install from the published page, scan the QR code in Chrome Android, create a shell, run a command, upload and download a file, paste an image, test both image modes according to host capabilities, close/reopen the PWA, switch Wi-Fi/mobile networks, return to the same shell without a QR code, test push with the screen locked, and revoke the device. Repeat the minimal path on macOS and Firefox/Safari when available.
 
-Ne jamais appeler « validé » un test non exécuté. Le rapport local inclus ne prouve ni la connectivité Cloudflare en production ni le comportement d'un vrai téléphone.
+Never mark an unexecuted test as validated. The included local report does not by itself prove production Cloudflare connectivity or physical-phone behavior.
 
-## Publication et exploitation
+## Publication and operations
 
-Conserver logs techniques sans payloads, surveiller erreurs/quotas, prévoir rotation des identités et sauvegarde privée de l'état hôte, ne pas transformer le relais en dépôt de fichiers. Une mise à jour Worker peut rompre les connexions ; les hôtes et clients doivent se reconnecter sans réappairage. Les migrations DO ne sont pas annulées en supprimant seulement le code.
+Keep technical logs without payloads, monitor errors and quotas, plan identity rotation and private host-state backups, and do not turn the relay into file storage. Worker updates may break connections; hosts and clients must reconnect without pairing again. Removing code does not roll back Durable Object migrations.
 
-Sources primaires : https://developers.cloudflare.com/durable-objects/best-practices/websockets/ ; https://developers.cloudflare.com/workers/wrangler/commands/ ; https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages ; https://docs.astral.sh/uv/getting-started/installation/ .
+Primary sources: [Durable Object WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/), [Wrangler commands](https://developers.cloudflare.com/workers/wrangler/commands/), [GitHub Pages workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages), [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
 
-## Déploiement observé du 14 septembre 2026
+## Observed deployment, September 14–15, 2026
 
-Pages : https://moukrea.github.io/jaunt/ ; relais :
-`wss://jaunt-relay.moukrea.workers.dev` ; release hôte : `v0.1.0-beta.5` ; APK : `android-v0.1.0-beta.3`.
-Le Worker a été déployé avec l’OAuth Wrangler autorisé par le propriétaire,
-stocké chiffré localement avec une clé dans le trousseau système.
-`CLOUDFLARE_ACCOUNT_ID` est renseigné dans GitHub ; le workflow relais Actions
-nécessitera son propre `CLOUDFLARE_API_TOKEN` pour un futur déploiement depuis CI.
-Aucun token OAuth temporaire n’a été copié comme secret API permanent.
-Cela ne demande aucune démarche Cloudflare ou GitHub aux utilisateurs finaux.
-Voir VALIDATION.md pour les résultats réellement observés et leurs limites.
+Pages: https://moukrea.github.io/jaunt/ ; relay: `wss://jaunt-relay.moukrea.workers.dev` ; host release: `v0.1.0-beta.5` ; APK: `android-v0.1.0-beta.3`.
+
+The Worker was deployed using owner-authorized Wrangler OAuth, stored locally with encryption and a key in the system keyring. `CLOUDFLARE_ACCOUNT_ID` is set in GitHub; a future relay deployment through Actions will need its own `CLOUDFLARE_API_TOKEN`. No temporary OAuth token was copied into a permanent API secret. End users do not need to take any Cloudflare or GitHub action. See [VALIDATION.md](VALIDATION.md) for observed results and their limitations.

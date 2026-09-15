@@ -18,23 +18,26 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/jaunt-install.XXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 fetch() {
   local url="$1" destination="$2" rc
+  # Bash owns the temporary directory. Open the destination here: a confined
+  # curl can have a different /tmp namespace and cannot reopen this path itself.
+  # Its inherited stdout still writes to the file Bash opened.
   printf '  Jaunt · Downloading %s\n' "${url##*/}" >&2
   case "$url" in
     https://*)
-      if curl --disable --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" -o "$destination"; then
+      if curl --disable --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" > "$destination"; then
         return 0
       else rc=$?; fi
       case "$rc" in
         5|6|7|28|35|52|55|56)
           printf '  Jaunt · Download failed (curl %s); retrying over IPv4.\n' "$rc" >&2
-          curl --disable --ipv4 --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" -o "$destination"
+          curl --disable --ipv4 --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --show-error --progress-bar --location --connect-timeout 10 --max-time 120 "$url" > "$destination"
           ;;
         *) return "$rc" ;;
       esac
       ;;
     http://127.0.0.1:*|http://localhost:*)
       [[ "${JAUNT_DEV_INSTALL:-0}" == 1 ]] || fail 'HTTP downloads are allowed only in explicit local installer tests.'
-      curl --fail --show-error --silent --location "$1" -o "$2" ;;
+      curl --fail --show-error --silent --location "$1" > "$2" ;;
     *) fail 'Downloads must use HTTPS.' ;;
   esac
 }

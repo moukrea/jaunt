@@ -1,37 +1,37 @@
-# Modèle de sécurité — bêta non auditée
+# Security model — unaudited beta
 
-Jaunt donne un shell complet sous le compte de l'hôte. Il n'y a pas de sandbox filesystem ni de rôles lecture seule : un appareil autorisé peut agir comme cet utilisateur. Ne pas lancer l'hôte avec des privilèges dont les appareils distants n'ont pas besoin.
+Jaunt provides a full shell under the host account. There is no filesystem sandbox or read-only role: an authorized device can act as that user. Do not run the host with privileges that remote devices do not need.
 
-## Ce qui est protégé
+## What is protected
 
-Les commandes, sorties, fichiers et presse-papiers sont chiffrés entre navigateur et hôte. Le relais voit les adresses réseau, les salles, la présence, les tailles et horaires des paquets, ainsi que les clés publiques éphémères. Il ne possède pas les secrets d'appairage ou des appareils. Le canal est authentifié par un secret aléatoire de 256 bits, avec ECDH éphémère et AES-GCM. Voir PROTOCOL.md.
+Commands, output, files, and clipboard data are encrypted between the browser and host. The relay sees network addresses, rooms, presence, packet sizes and timing, and ephemeral public keys. It does not hold pairing or device secrets. The channel is authenticated by a random 256-bit secret, with ephemeral ECDH and AES-GCM. See [the protocol specification](docs/PROTOCOL.md).
 
-Les primitives viennent de cryptography et Web Crypto. **L'assemblage du protocole est nouveau et n'a pas reçu d'audit externe.** Des tests de tamper/replay et d'interopérabilité ne remplacent pas un audit. Ne pas l'annoncer comme certifié, invulnérable ou adapté d'emblée à des environnements de production sensibles.
+The primitives come from cryptography and Web Crypto. **Their composition into this protocol is new and has not received an external audit.** Tamper/replay and interoperability tests do not replace an audit. Do not describe Jaunt as certified, invulnerable, or ready by default for sensitive production environments.
 
-## Ce qui n'est pas protégé
+## What is not protected
 
-- Un navigateur, une machine ou un compte système compromis reste compromis.
-- GitHub Pages sert du code exécuté avec accès aux secrets après déverrouillage : un attaquant contrôlant le dépôt/Page peut remplacer le JavaScript. E2E ne protège pas contre une mise à jour malveillante du client lui-même.
-- Sans mot de passe, les clés sont conservées en clair dans IndexedDB, comme une session mémorisée. Avec mot de passe/PIN, elles sont chiffrées au repos ; un PIN court reste attaquable hors ligne. Préférer une longue phrase secrète.
-- Le verrouillage arrête les connexions et efface les vues actives. Il ne garantit pas une purge cryptographique de la RAM du navigateur.
-- Le QR complet est une capacité d'accès au shell pendant dix minutes ; ne jamais le mettre dans une issue, capture publique, log de CI ou analytics.
-- Les notifications sont délivrées par le service push du navigateur. Jaunt masque par défaut le contenu de la commande, mais le nom de machine et la temporalité restent sensibles.
-- Un appareil révoqué ne peut plus s'authentifier au canal, mais connaît l'ancienne capacité de routage partagée. Il peut encore perturber la disponibilité du relais jusqu'à rotation de l'identité de l'hôte. Les secrets de routage ne sont pas un système complet de quota/anti-DDoS.
+- A compromised browser, machine, or system account remains compromised.
+- GitHub Pages serves code that can access secrets after unlocking: an attacker controlling the repository or page can replace the JavaScript. End-to-end encryption does not protect against a malicious client update.
+- Without a password, keys are stored unencrypted in IndexedDB, like a remembered session. A password/PIN encrypts them at rest; a short PIN remains vulnerable to offline guessing. Prefer a long passphrase.
+- Locking stops connections and clears active views. It does not guarantee cryptographic erasure of browser RAM.
+- A complete QR code grants shell access for ten minutes. Never put it in an issue, public screenshot, CI log, or analytics.
+- Browser notifications are delivered through the browser's push service. Jaunt hides command content by default, but machine names and timing remain sensitive.
+- A revoked device can no longer authenticate to the channel, but knows the previous shared routing capability. It may still disrupt relay availability until the host identity is rotated. Routing secrets are not a complete quota or anti-DDoS system.
 
-## Origine GitHub Pages partagée
+## Shared GitHub Pages origin
 
-Les sites `moukrea.github.io/autre-projet/` et `moukrea.github.io/jaunt/` partagent la même origine navigateur. Un autre projet vulnérable sur cette origine peut donc viser le stockage de Jaunt. Les chemins ne sont pas une frontière de sécurité. Pour un service sensible, servir Jaunt sur une origine dédiée (domaine/sous-domaine propre) et y refaire l'appairage. Le PIN protège les clés au repos, mais ne remplace pas cette isolation ni la confiance dans le JavaScript servi.
+Sites at `moukrea.github.io/another-project/` and `moukrea.github.io/jaunt/` share a browser origin. Another vulnerable project on that origin could target Jaunt's storage. Paths are not a security boundary. For sensitive use, serve Jaunt on a dedicated origin (its own domain/subdomain) and pair again there. A PIN protects keys at rest but does not replace origin isolation or trust in the JavaScript being served.
 
-## Stockage et permissions
+## Storage and permissions
 
-`~/.local/share/jaunt/host.json` et le socket de contrôle sont privés au compte courant. Dossier 0700, état 0600, écriture atomique. `attachments/` contient les fichiers réellement envoyés : ils ne disparaissent pas quand l'utilisateur verrouille l'app. Supprimer les pièces jointes devenues inutiles depuis le navigateur de fichiers.
+`~/.local/share/jaunt/host.json` and the control socket are private to the current account. The directory uses mode 0700, state uses 0600, and writes are atomic. `attachments/` contains uploaded files; locking the app does not delete them. Remove unneeded attachments through the file browser.
 
-Les clés persistantes ne sont jamais inscrites dans une URL de requête : le pairing utilise le fragment, aussitôt retiré de l'historique. Les capacités du relais sont transmises dans la première trame WebSocket sous TLS. Aucun payload n'est logué par le Worker.
+Persistent keys never appear in request URLs: pairing uses the fragment, which is immediately removed from history. Relay capabilities are sent in the first WebSocket frame over TLS. The Worker does not log payloads.
 
-## Déploiement
+## Deployment
 
-Utiliser HTTPS/WSS hors loopback, restreindre APP_ORIGIN au domaine Pages exact, activer MFA et protections de branche, réduire les droits Cloudflare/GitHub, surveiller quotas et coûts. Ne pas utiliser de scripts analytics/extensions tierces dans la page. La CSP statique interdit les scripts inline et évaluation dynamique ; les dépendances sont locales. GitHub Pages ne permet pas de définir tous les headers de sécurité serveur : utiliser un domaine/proxy maîtrisé pour un durcissement supplémentaire.
+Use HTTPS/WSS outside loopback, restrict APP_ORIGIN to the exact Pages origin, enable MFA and branch protections, minimize Cloudflare/GitHub permissions, and monitor quotas and costs. Do not add third-party analytics scripts or extensions to the page. The static CSP blocks inline scripts and dynamic evaluation; dependencies are local. GitHub Pages cannot set every server security header; use a controlled domain/proxy for further hardening.
 
-## Signaler un problème
+## Reporting a vulnerability
 
-Créer un signalement de sécurité privé du dépôt quand disponible. Ne pas publier de clé, QR, log de terminal confidentiel, fichier host.json ou export de coffre. Avant ouverture publique, le mainteneur doit définir un canal privé et une politique de rotation.
+Use the repository's private vulnerability reporting channel when available. Never publish a key, QR code, confidential terminal log, host.json file, or vault export. Before public disclosure, the maintainer must establish a private reporting channel and rotation policy.
