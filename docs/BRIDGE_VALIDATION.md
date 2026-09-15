@@ -47,3 +47,7 @@ Cost per run: about five Claude turns and three Codex turns on the user's accoun
 - Android and desktop UI for the new Settings group were not exercised on devices; the web UI was exercised through the same code path used by both.
 - Behaviour of Claude Code versions other than 2.1.272/2.1.273 and Codex versions other than 0.154.0. The inbox mechanism used for Claude delivery is versioned but not a documented public API.
 - Long-running coordination scenarios (hours of collaboration, many sessions). Rate limits and hop limits are enforced but only exercised in unit tests.
+
+## Follow-up (beta.14)
+
+After publishing beta.13 and updating the real local host (running as a systemd user service), the Settings switch did not appear: the service's PATH does not contain `~/.local/bin`, and a plain login shell on this workstation does not add it either (the interactive shell does). Detection now runs a login + interactive shell like jaunt's own PTYs and falls back to well-known per-user locations; covered by a unit test with a minimal PATH.

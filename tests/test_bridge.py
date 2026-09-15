@@ -227,3 +227,15 @@ async def test_mcp_calls_resolve_their_terminal_by_process_ancestry(host,monkeyp
     assert resolved['session']=='s2' and resolved['conversation']=='codex-thread-00001'
     with pytest.raises(ValueError,match='not started from a jaunt shell'):
         h.bridge.sender_of(h.bridge.resolve({'runtime':'codex','session':'','conversation':'current','pid':999}))
+
+@pytest.mark.asyncio
+async def test_detection_finds_per_user_installs_outside_the_service_path(host,tmp_path,monkeypatch):
+    # A user service has a minimal PATH; runtimes installed under ~/.local/bin must still be found.
+    home=tmp_path/'home';(home/'.local/bin').mkdir(parents=True)
+    for name in ('claude','codex'):
+        exe=home/'.local/bin'/name;exe.write_text('#!/bin/sh\necho "%s 9.9.9"\n'%name);exe.chmod(0o755)
+    monkeypatch.setenv('HOME',str(home));monkeypatch.setenv('PATH','/usr/bin:/bin');monkeypatch.setenv('SHELL','/bin/sh')
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
+    detected=await host.bridge.detect(force=True)
+    assert detected['visible'] and detected['available'],detected
+    assert detected['runtimes']['claude']['path']==str(home/'.local/bin/claude') and detected['runtimes']['codex']['version']=='9.9.9'
