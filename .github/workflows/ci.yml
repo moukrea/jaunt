@@ -96,6 +96,7 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_e2e.py
       - run: xvfb-run -a python tests/shared_workspace_e2e.py
+      - run: python tests/feedback_e2e.py
       - run: python tests/terminal_render_e2e.py
       - run: python tests/browser_e2e.py
         env:

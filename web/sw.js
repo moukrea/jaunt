@@ -1,5 +1,5 @@
 // precache:begin
-const CACHE = 'jaunt-static-b792f45fc8712994';
+const CACHE = 'jaunt-static-1695878fe7b07866';
 const STATIC = ["./","./assets/jaunt.png","./index.html","./js/activity.mjs","./js/app.mjs","./js/crypto.mjs","./js/desktop.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/touch-scroll.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./js/workspace.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/lucide.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
 // precache:end
 const base = new URL('./', self.location.href);

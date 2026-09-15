@@ -53,3 +53,20 @@ test('theme defaults to dark; system and circadian choices are deterministic',()
   assert.equal(themeMode('circadian',7,false),'light');
   assert.equal(themeMode('circadian',19,true),'dark');
 });
+
+test('a handshake interrupted during key generation cannot modify its replacement',async()=>{
+ const link=new Link({room:'fixture',deviceId:'fixture'},async()=>{});link.enabled=true;
+ const sent=[];link.ws={readyState:WebSocket.OPEN,send:raw=>sent.push(raw)};
+ const pending=link.handshake();
+ link.generation++;link.status('connecting');const replacement={};link.channel=replacement;
+ await pending;
+ assert.equal(link.channel,replacement);assert.equal(link.state,'connecting');assert.deepEqual(sent,[]);
+});
+test('a decrypted welcome from an obsolete channel cannot make it online again',async()=>{
+ const link=new Link({},async()=>{});link.enabled=true;let release;
+ link.channel={open:()=>new Promise(resolve=>{release=resolve;})};
+ const pending=link.receive({type:'box'});
+ link.generation++;const replacement={};link.channel=replacement;link.status('connecting');
+ release({type:'welcome',machine:{name:'obsolete'},sessions:[]});await pending;
+ assert.equal(link.channel,replacement);assert.equal(link.state,'connecting');assert.equal(link.machine.name,undefined);
+});

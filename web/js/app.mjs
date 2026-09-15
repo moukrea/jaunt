@@ -9,7 +9,7 @@ import {Vault} from './vault.mjs';
 import {b64, unb64, random, utf8} from './crypto.mjs';
 import {upload, download, toPNG, saveBlob, quotePath} from './transfers.mjs';
 import {fillIcons, icon} from './icons.mjs';
-import {$, el, button, toast, modal, closeModal, field, confirmAction, copyText, size} from './ui.mjs';
+import {$, el, button, toast, reportError, clearError, clearFeedback, modal, closeModal, field, confirmAction, copyText, size} from './ui.mjs';
 import {scan} from './qr.mjs';
 import * as push from './push.mjs';
 
@@ -25,7 +25,15 @@ const prefs = () => vault.data?.preferences || {};
 const checked = p => { if (!p) throw new Error('Choose a connected machine first.'); return p; };
 const online = () => { const a = checked(current()); if (a.link.state !== 'online') throw new Error('Wait for the encrypted connection.'); return a; };
 const persist = () => vault.save();
-const report = error => toast(error.message || String(error), true);
+const report = error => {
+  if(/Connection (?:interrupted|changed|is offline)|Wait for the encrypted connection|Local host is offline/.test(error?.message||'') && current()?.link.state!=='online'){renderConnection();return;}
+  reportError(error);
+};
+
+function reportHost(a,error){
+  if((error?.code==='connection' || /Connection (?:interrupted|changed|is offline)|Local host is offline/.test(error?.message||'')) && a.link.state!=='online'){if(a===current())renderConnection();return;}
+  reportError(error,'host-'+a.machine.room,a.machine.friendlyName||a.machine.name);
+}
 
 // Never leave one-use secrets in navigation history or outgoing referrers.
 if (location.hash.includes('pair=')) {
@@ -40,6 +48,7 @@ function drawer(open = false) { $('sidebar').classList.toggle('open', open); $('
 function setView(value) {
   document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
   view = value; drawer(); render();
+  if(view==='transfers')renderTransfers();
   if (view === 'files' && current()?.link.state === 'online') listFiles(current()).catch(report);
   if (view === 'settings') { renderSettings(); const a = current(); if (a?.link.state === 'online' && a.info?.updates?.supported) a.link.request('updates.status').then(value => { a.info.updates = value; if (view === 'settings') renderSettings(); }).catch(report); }
 }
@@ -59,7 +68,7 @@ async function pairMachine(value) {
   vault.data.machines.push(machine); await persist();
   const app = makeMachine(machine); selected = machine.room;
   app.link.start(); view = 'terminal'; $('pair-code').value = ''; render();
-  toast('Verifying the host. You will not need to pair again when changing networks.');
+  clearError('action');clearError('pair'); renderConnection();
 }
 function makeMachine(machine) {
   const a = {machine, link: null, info: null, sessions: [], terms: new Map(), active: machine.lastSession || '',
@@ -70,28 +79,29 @@ function makeMachine(machine) {
       if (a.link.state !== 'online') t.attached = false;
       updateTermInput(a, t);
     }
+    if(a.link.state==='online'){a.connectionError='';clearError('connection');clearError('host-'+a.machine.room);}
     render();
   });
-  a.link.addEventListener('error', e => toast(`${machine.name}: ${e.detail}`, true));
-  a.link.addEventListener('revoked', () => toast(`${machine.name}: access revoked. Forget this machine or pair it again.`, true));
+  a.link.addEventListener('error', e => {if(a.link.state==='online')reportError(new Error(a.machine.name+': '+e.detail),'host-'+a.machine.room);else{a.connectionError=String(e.detail);if(a===current())renderConnection();}});
+  a.link.addEventListener('revoked', () => {a.connectionError='Access was revoked on the host. Pair this device again only if you want to authorize it again.';if(a===current())renderConnection();});
   a.link.addEventListener('latency', () => { if (selected === machine.room) renderConnection(); });
   a.link.addEventListener('welcome', e => {
     a.peer = e.detail.peer; a.info = e.detail.machine; a.sessions = e.detail.sessions; syncSessions(a);
     // Only attach terminal views this browser actually opened; sessions need no viewer to run.
-    for (const t of a.terms.values()) attachTerm(a, t).catch(report);
+    for (const t of a.terms.values()) attachTerm(a, t).catch(error=>reportHost(a,error));
     if (!a.machine.openSessions) a.machine.openSessions = a.sessions.map(s=>s.id);
     if (!a.active || !a.sessions.some(s => s.id === a.active)) a.active = a.machine.openSessions[0] || '';
     if (selected === machine.room) {
-      render(); if (a.active) selectSession(a, a.active).catch(report);
-      if (view === 'files') listFiles(a).catch(report);
+      render(); if (a.active) selectSession(a, a.active).catch(error=>reportHost(a,error));
+      if (view === 'files') listFiles(a).catch(error=>reportHost(a,error));
       if (view === 'settings') renderSettings();
     }
     if (machine.pending === false && machine.push) {
       // Refresh existing browser delivery settings without a permission prompt.
-      if(!desktop && !isAndroid)push.refresh(vault,a.link).catch(report);
+      if(!desktop && !isAndroid)push.refresh(vault,a.link).catch(error=>reportHost(a,error));
     }
     if (deepLink.get('host') === machine.room && deepLink.get('session')) {
-      selected = machine.room; setView('terminal'); if (a.sessions.some(s => s.id === deepLink.get('session'))) selectSession(a, deepLink.get('session')).catch(report);
+      selected = machine.room; setView('terminal'); if (a.sessions.some(s => s.id === deepLink.get('session'))) selectSession(a, deepLink.get('session')).catch(error=>reportHost(a,error));
       deepLink.delete('session'); render();
     }
   });
@@ -126,7 +136,7 @@ function handleMessage(a, message) {
     const t = a.terms.get(message.id); if (!t) return;
     const raw = unb64(message.data), expected = t.offset ?? message.offset;
     if (message.offset > expected) {
-      if (!t.repairing) { t.repairing = true; attachTerm(a, t).finally(() => { t.repairing = false; }).catch(report); }
+      if (!t.repairing) { t.repairing = true; attachTerm(a, t).finally(() => { t.repairing = false; }).catch(error=>reportHost(a,error)); }
       return;
     }
     const skip = Math.max(0, expected - message.offset);
@@ -137,9 +147,9 @@ function handleMessage(a, message) {
     const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
     render();
   } else if (message.type === 'notification') {
-    if(desktop && prefs().desktopNotifications) desktop.notify({title:message.title,body:message.body,session:message.session,host:a.machine.room}).catch(report);
+    if(desktop && prefs().desktopNotifications) desktop.notify({title:message.title,body:message.body,session:message.session,host:a.machine.room}).catch(error=>reportHost(a,error));
     toast(`${message.title}${message.body ? ' — ' + message.body : ''}`, false,
-      message.session ? {label: 'Open', run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(report); }} : null);
+      message.session ? {label: 'Open', run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null);
   } else if (message.type === 'clipboard.available') {
     toast(`${a.machine.name} shared clipboard text.`, false, {label: 'Open', run: () => showClipboard(a)});
   }
@@ -153,9 +163,13 @@ function renderConnection() {
   $('latency').hidden = !(state === 'online' && a.link.latency != null);
   $('latency').textContent = a?.link.latency != null ? `${a.link.latency} ms` : '';
   $('connection-banner').hidden = !a || state === 'online';
-  $('connection-banner').textContent = state === 'offline'
-    ? (a?.link.message || 'Not connected. Open Settings and choose Reconnect to use the saved pairing.')
-    : 'Reconnecting without a new pairing. Remote shells stay alive while the host daemon is running.';
+  if(!a || state==='online')return;
+  const messages={connecting:'Connecting with the saved device key…',authenticating:a.machine.pending?'Pairing this device and verifying the host…':'Verifying the saved encrypted connection…',waiting:'The host is offline. jaunt will reconnect automatically when it returns.',reconnecting:'Network interrupted. Reconnecting automatically with the same pairing.'};
+  const text=a.connectionError || messages[state] || a.link.message || 'Connection is paused. Reconnect using the saved device key.';
+  const action=a.link.enabled?button('Retry now',()=>a.link.reconnect(),'text-button'):button('Reconnect',()=>{a.connectionError='';a.link.start();},'text-button');
+  $('connection-banner').replaceChildren(el('span',{text:text+' Shells remain on the host while its daemon runs. Unsent terminal input is not replayed.'}),action);
+  if(a.connectionError || /revoked|expired|unknown device/i.test(a.link.message||''))$('connection-banner').append(button('Connection settings',()=>setView('settings'),'text-button'));
+
 }
 function renderMachines() {
   $('machine-count').textContent = machines.size;
@@ -247,9 +261,9 @@ function createTerm(a, session) {
     if (!t.attached || a.link.state !== 'online' || (a.info?.sharedViews && !t.ownsSize)) return;
     if (ctrl && data.length === 1) { data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 31); ctrl = false; }
     if (alt) { data = '\x1b' + data; alt = false; }
-    updateModifiers(); sendInput(a, t, data).catch(report);
+    updateModifiers(); sendInput(a, t, data).catch(error=>reportHost(a,error));
   });
-  term.onBinary(data => { if (t.attached && (!a.info?.sharedViews || t.ownsSize)) a.link.send({type: 'terminal.input', id: session.id, data: b64(Uint8Array.from(data, c => c.charCodeAt(0) & 255))}).catch(report); });
+  term.onBinary(data => { if (t.attached && (!a.info?.sharedViews || t.ownsSize)) a.link.send({type: 'terminal.input', id: session.id, data: b64(Uint8Array.from(data, c => c.charCodeAt(0) & 255))}).catch(error=>reportHost(a,error)); });
   node.addEventListener('pointerdown', () => { a.active = session.id; claimSize(a, t); renderTabs(a); }, {capture: true});
   node.addEventListener('keydown', () => claimSize(a, t), {capture: true});
   // ResizeObserver only resizes the controlling view. Passive views retain shared geometry.
@@ -269,16 +283,16 @@ function createTerm(a, session) {
   term.registerLinkProvider({provideLinks: (_line, callback) => callback(undefined)});
   term.attachCustomKeyEventHandler(event => {
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'KeyC' && event.type === 'keydown') {
-      copyText(term.getSelection() || terminalText(t)).catch(report); return false;
+      copyText(term.getSelection() || terminalText(t)).catch(error=>reportHost(a,error)); return false;
     }
     return true;
   });
   node.addEventListener('paste', event => {
     const files = clipboardFiles(event.clipboardData);
-    if (files.length) { event.preventDefault(); event.stopImmediatePropagation(); pasteFiles(a, t, files).catch(report); }
+    if (files.length) { event.preventDefault(); event.stopImmediatePropagation(); pasteFiles(a, t, files).catch(error=>reportHost(a,error)); }
     else {
       const text = event.clipboardData?.getData('text/plain');
-      if (text) { event.preventDefault(); event.stopImmediatePropagation(); insertText(a, t, text).catch(report); }
+      if (text) { event.preventDefault(); event.stopImmediatePropagation(); insertText(a, t, text).catch(error=>reportHost(a,error)); }
       else { event.preventDefault(); event.stopImmediatePropagation(); showPastePanel(a, t); }
     }
   }, true);
@@ -298,6 +312,7 @@ async function attachTerm(a, t) {
   const promise = (async () => {
     await a.link.request('session.attach', {id: t.session.id, after: t.offset});
     // xterm writes are asynchronous: drain replay before allowing parser responses/input.
+    if(generation!==a.link.generation || !a.terms.has(t.session.id))return;
     await new Promise(resolve => t.term.write('', resolve));
     if (generation !== a.link.generation || a.link.state !== 'online') return;
     t.generation = generation; t.attached = true; updateTermInput(a, t);
@@ -358,7 +373,7 @@ function claimSize(a, t) {
     const d = t.fit.proposeDimensions(); if (!d) return;
     if(owned && d.cols===t.term.cols && d.rows===t.term.rows)return;
     resizeTerminal(t, d.cols, d.rows);
-    a.link.send({type: 'terminal.resize', id: t.session.id, ...d}).catch(report);
+    a.link.send({type: 'terminal.resize', id: t.session.id, ...d}).catch(error=>reportHost(a,error));
   } catch { /* Retry after layout. */ }
 }
 let fitTimer;
@@ -517,7 +532,7 @@ async function browseNewSession() {
       ...(result.next!==null?[button('Load more',()=>navigate(result.path,true))]:[]));
   };
   cwd.oninput=()=>{request++;};
-  cwd.onchange=()=>navigate(cwd.value).catch(report);
+  cwd.onchange=()=>navigate(cwd.value).catch(error=>reportError(error,cwd.isConnected?'modal':'action'));
   await navigate(cwd.value);
   modal('New terminal',el('div',{},field('Session name',name,'Optional — leave blank for an automatic name.'),
     field('Working directory',cwd),folders,
@@ -644,7 +659,7 @@ function transferItem(a, name, direction, total) {
   }
   renderTransfers(); return item;
 }
-function progressFor(item) { return value => { Object.assign(item, value); renderTransfers(); }; }
+function progressFor(item) { return value => { Object.assign(item, value); if(view==='transfers')renderTransfers(); }; }
 function renderTransfers() {
   $('file-transfers').hidden = transfers.length === 0;
   $('transfer-count').textContent = transfers.filter(t => !t.done).length || '';
@@ -663,27 +678,30 @@ async function putFile(a, file, options = {}, operation = null) {
   if (file.size > (a.info?.maxFileBytes || 512 * 1024 * 1024)) throw new Error('This file exceeds the host’s transfer limit.');
   const item = transferItem(a, file.name, 'up', file.size);
   const job=operation || activity(item.key,`${file.name} → ${a.machine.name}`);
+  job.update({action:{label:'Cancel transfer',run:()=>item.controller.abort()}});
   try {
     const result = await upload(a.link, file, options, value=>{progressFor(item)(value);job.update({status:`${value.status} · ${size(value.offset)} / ${size(value.total)}`,percent:value.total?Math.round(value.offset/value.total*100):null});}, item.controller.signal);
     item.done = true; item.path = result.path; item.status = 'Verified · SHA-256'; item.offset = file.size; renderTransfers();
+    job.update({action:null});
     if(!operation)job.finish('Uploaded and verified · SHA-256');
     return result;
-  } catch (e) { job.fail(e);item.done = true; item.error = true; item.status = e.message; renderTransfers(); throw e; }
+  } catch (e) { job.fail(e);item.done = true; item.error = e.name!=='AbortError'&&e.message!=='Transfer cancelled'; item.status = item.error?e.message:'Cancelled'; renderTransfers(); throw e; }
 }
 async function getFile(a, path, name, writer) {
-  const item = transferItem(a, name, 'down', 0);
+  const item = transferItem(a, name, 'down', 0),job=activity(item.key,`${name} ← ${a.machine.name}`);
+  job.update({status:'Preparing download…',action:{label:'Cancel transfer',run:()=>item.controller.abort()}});
   try {
-    const result = await download(a.link, path, progressFor(item), {writer, signal: item.controller.signal});
+    const result = await download(a.link, path, value=>{progressFor(item)(value);job.update({status:value.status+' · '+size(value.offset)+(value.total?' / '+size(value.total):''),percent:value.total?Math.round(value.offset/value.total*100):null});}, {writer, signal: item.controller.signal});
     if (result.blob) await saveBlob(result.blob, result.name);
-    item.done = true; item.status = 'Downloaded'; item.offset = item.total; renderTransfers(); return result;
-  } catch (e) { item.done = true; item.error = true; item.status = e.message; renderTransfers(); throw e; }
+    item.done = true; item.status = 'Downloaded'; item.offset = item.total; renderTransfers();job.finish('Downloaded · '+size(item.offset)); return result;
+  } catch (e) { job.fail(e);item.done = true; item.error = e.name!=='AbortError'&&e.message!=='Transfer cancelled'; item.status = item.error?e.message:'Cancelled'; renderTransfers(); throw e; }
 }
 async function uploadFiles(a, files, path = a.path) {
   for (const file of files) {
     try { await putFile(a, file, {path}); }
-    catch (e) { toast(`${file.name}: ${e.message}`, true); }
+    catch (e) { report(e); }
   }
-  await listFiles(a, path);
+  if(a.link.state==='online')await listFiles(a, path);
 }
 async function attachFiles(a, t, files) {
   if (!t) throw new Error('Open a shell before attaching a file.');
@@ -902,16 +920,17 @@ function attentionSettings(a) {
   });
 }
 function desktopUpdateStatus(value) {
+  const changed=desktopUpdateState?.state!==value.state || desktopUpdateState?.automatic!==value.automatic;
   desktopUpdateState=value;
   if((!desktopUpdateOperation || desktopUpdateOperation.item.dismissed) && ['downloading','verifying','ready','installed','error'].includes(value.state))desktopUpdateOperation=activity('desktop-update','Desktop update');
   const job=desktopUpdateOperation;
   if(job){
-    job.update({status:value.message,percent:value.percent??null,done:false,error:false,waiting:false,action:null});
+    job.update({status:value.message+(value.target?' · '+value.target:''),percent:value.percent??null,done:false,error:false,waiting:false,action:null});
     if(value.state==='error'){job.fail(new Error(value.message));job.update({action:{label:'Try again',run:checkDesktopUpdate}});}
-    else if(value.state==='ready')job.update({done:true,waiting:true,status:value.message+(value.requiresAuthorization?' System authorization will be requested.':''),action:{label:'Install and reopen',run:()=>desktop.updates('install')}});
+    else if(value.state==='ready')job.update({done:true,waiting:true,status:value.message+(value.target?' · '+value.target:'')+(value.requiresAuthorization?' System authorization will be requested.':''),action:{label:'Install and reopen',run:()=>desktop.updates('install')}});
     else if(['current','installed'].includes(value.state))job.finish(value.message);
   }
-  if(view==='settings')renderSettings();
+  if(view==='settings' && changed)renderSettings();
 }
 async function checkDesktopUpdate(){
   desktopUpdateOperation=activity('desktop-update','Desktop update');
@@ -930,7 +949,7 @@ async function checkHostUpdate(a,allowRestart=false) {
     for(let i=0;i<600;i++) {
       await new Promise(resolve=>setTimeout(resolve,1000));
       if(!vault.data || !machines.has(a.machine.room))return;
-      if(a.link.state!=='online'){job.update({status:'Waiting for the host to reconnect…'});continue;}
+      if(a.link.state!=='online'){if(!a.link.enabled)throw new Error('Connection stopped. Reconnect to this host to check the update result.');job.update({status:'Waiting for the host to reconnect…'});continue;}
       let result;
       try {result=await a.link.request('updates.status');} catch(error) {
         if(a.link.state!=='online')continue;
@@ -946,14 +965,15 @@ async function checkHostUpdate(a,allowRestart=false) {
         if(result.state==='error')job.fail(new Error(message));
         else job.finish(message+(result.version?' · '+result.version:''));
         if(result.state==='deferred')job.update({waiting:true});
-        if(result.state==='error' || result.state==='deferred')job.update({action:{label:'Check again',run:()=>checkHostUpdate(a)}});
+        if(result.state==='error')job.update({action:{label:'Try again',run:()=>checkHostUpdate(a)}});
+        if(result.state==='deferred')job.update({action:{label:'Review update',run:()=>{selected=a.machine.room;setView('settings');}}});
         if(view==='settings')renderSettings();
         return;
       }
     }
     throw new Error('The host has not confirmed completion yet. Check again to see its current state.');
   } catch(error){job.fail(error);job.update({action:{label:'Try again',run:()=>checkHostUpdate(a)}});}
-  finally {hostUpdateJobs.delete(a.machine.room);}
+  finally {if(hostUpdateJobs.get(a.machine.room)===job)hostUpdateJobs.delete(a.machine.room);}
 }
 async function installLocalHost() {
   const job=activity('host-install','Install local host');job.update({status:'Downloading and installing the host…'});
@@ -998,7 +1018,7 @@ function renderSettings() {
       ...hostPreferences(a),
       settingsRow(a.machine.name, `${a.info?.platform || 'Remote host'} · ${a.info?.version || 'Connecting'} · ${a.link.state}`, button('Reconnect', () => { a.link.start(); })),
       ...(a.info?.updates?.supported ? [settingsRow('Automatic host updates', a.info.updates.message || 'Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.', button(a.info.updates.automatic ? 'Disable auto-update' : 'Enable auto-update', async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
-        settingsRow('Host version', a.info.version, button('Check for updates', ()=>checkHostUpdate(a))),
+        settingsRow('Host version', a.info.version+(a.info.updates?.state==='deferred'?' · update ready: '+a.info.updates.version:''), button('Check for updates', ()=>checkHostUpdate(a))),
         settingsRow('Update and restart now', 'This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.', button('Update and restart', () => confirmAction('Close active shells and update?', 'This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.', 'Close shells and update', ()=>checkHostUpdate(a,true), true), 'button danger'))] : []),
       settingsRow('Host clipboard', a.info?.clipboard?.backend || 'Unknown until connected', button('Open', () => showClipboard(a))),
       settingsRow('Authorized devices', 'Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.', button('Manage', () => manageDevices(a))),
@@ -1029,7 +1049,7 @@ function renderSettings() {
       settingsRow('Update safely','Checks the published host version. Active ordinary shells prevent a restart.',button('Check host update',()=>checkHostUpdate(checked(machines.get('local-host'))))),
       settingsRow('Restart for update','Explicitly closes ordinary shells on this computer. Use only when your jobs are finished.',button('Update and restart',()=>confirmAction('Close local shells and update?','This terminates ordinary shells and their foreground work on this computer.','Close shells and update',()=>checkHostUpdate(checked(machines.get('local-host')),true),true),'button danger')),
       settingsRow('Local host','Local and remote views share the same shells. Closing this window leaves them running.',button('Start host',async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
-      settingsRow('Start automatically','Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.',button('Install service',async()=>{const result=await desktop.action('service');toast(result.message);machines.get('local-host')?.link.start();})),
+      settingsRow('Start automatically','Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.',button('Install service',async()=>{const job=activity('host-service','Automatic host startup');try{job.update({status:'Installing and enabling the user service…'});const result=await desktop.action('service');job.finish(result.message);machines.get('local-host')?.link.start();}catch(error){job.fail(error);}})),
       settingsRow('Connect another device','Create a private one-use pairing link for this host.',button('Pair device',async()=>{const result=await desktop.action('pair');modal('Pair this computer',el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:'One-use pairing QR code'})]:[]),el('p',{text:'Open this one-use link on your other device. It expires after ten minutes. Keep it private.'}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button('Copy pairing link',()=>copyText(result.url))));})),
       settingsRow('Desktop notifications','Show the program’s notification when this window is in the background.',notifications)));
   }
@@ -1080,7 +1100,7 @@ function forgetMachine(a) {
 }
 async function lockWorkspace() {
   if (!vault.protected || !vault.data) return;
-  closeModal(); drawer(); clearActivity();
+  closeModal(); drawer(); clearActivity(); clearFeedback();hostUpdateJobs.clear();
   for (const a of machines.values()) { a.link.stop('Locked'); for (const t of a.terms.values()) { t.term.dispose(); t.node.remove(); } }
   for (const t of transfers) if (!t.done) t.controller.abort();
   machines.clear(); transfers.length = 0;
@@ -1118,7 +1138,7 @@ function viewport() {
 function bindEvents() {
   $('menu-button').onclick = () => drawer(!$('sidebar').classList.contains('open'));
   $('drawer-backdrop').onclick = () => drawer(); $('add-machine').onclick = showPair;
-  $('pair-submit').onclick = async () => { $('pair-submit').disabled = true; try { await pairMachine($('pair-code').value); } catch (e) { report(e); } finally { $('pair-submit').disabled = false; } };
+  $('pair-submit').onclick = async () => { $('pair-submit').disabled = true; try { await pairMachine($('pair-code').value); } catch (e) { reportError(e,'pair'); } finally { $('pair-submit').disabled = false; } };
   $('scan-welcome').onclick = () => scan(pairMachine).catch(report);
   $('copy-install').onclick = () => copyText($('install-command').textContent).catch(report);
   for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => setView(b.dataset.view);
@@ -1237,7 +1257,7 @@ function bindEvents() {
   let hadWebController=!!navigator.serviceWorker?.controller;
   navigator.serviceWorker?.addEventListener('controllerchange',()=>{
     if(!hadWebController){hadWebController=true;return;}
-    toast('A web update is ready. Reload to apply it; your shells will stay open.',false,{label:'Reload',run:()=>location.reload()});
+    const job=activity('web-update','Web update available');job.finish('Ready to apply. Reloading keeps your host shells open.');job.update({action:{label:'Reload now',run:()=>location.reload()}});
   });
   navigator.serviceWorker?.addEventListener('message', e => {
     if (e.data?.type !== 'open-session') return;

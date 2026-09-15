@@ -27,8 +27,8 @@ def port():
 class Harness:
     def __init__(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='jaunt-browser-');self.root=Path(self.tmp.name)
-        self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir()
-        self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state)}
+        self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir();(self.root/'home').mkdir()
+        self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state),'HOME':str(self.root/'home'),'XDG_CONFIG_HOME':str(self.root/'home/.config'),'XDG_DATA_HOME':str(self.root/'home/.local/share'),'XDG_CACHE_HOME':str(self.root/'home/.cache')}
         # Exercise the headless fallback without accessing the user's desktop clipboard
         # or sourcing personal login scripts in our real PTYs.
         for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'BASH_ENV', 'ENV'):
@@ -105,7 +105,7 @@ async def main():
         await page.goto(h.url);await expect(page.locator('#pair-submit')).to_be_visible()
         await page.screenshot(path=str(OUT/'desktop-welcome.png'))
         await page.locator('#pair-code').fill('invalid');await page.locator('#pair-submit').click()
-        await expect(page.locator('#toasts')).to_contain_text('not a valid');passed('invalid pairing rejected by UI')
+        await expect(page.locator('#pair-error')).to_contain_text('not a valid');passed('invalid pairing rejected by UI')
         pair=h.pair();await page.goto(pair['url']);await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
         assert '#pair' not in page.url;passed('URL pairing, encrypted authentication, secret removed from URL')
         original=json.loads(h.cli('status'))['pid']

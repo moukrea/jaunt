@@ -1,4 +1,4 @@
-import {Link} from './link.mjs';
+import {Link,ConnectionInterrupted} from './link.mjs';
 export const desktop = window.jauntDesktop;
 export class LocalLink extends EventTarget {
   constructor(machine) {
@@ -14,11 +14,11 @@ export class LocalLink extends EventTarget {
   }
   emit(type,detail){this.dispatchEvent(new CustomEvent(type,{detail}));}
   status(state,message=''){this.state=state;this.message=message;this.emit('status',{state,message});}
-  async start(){clearTimeout(this.timer);this.enabled=true;this.generation++;this.rejectPending();this.status('connecting');try{await desktop.connect();}catch(e){this.status('offline',e.message);}}
+  async start(){clearTimeout(this.timer);this.enabled=true;const generation=++this.generation;this.rejectPending();this.status('connecting');try{await desktop.connect();}catch(e){if(generation!==this.generation || !this.enabled)return;this.status('reconnecting','Local host unavailable. Retrying automatically.');this.timer=setTimeout(()=>{if(this.enabled)this.start();},5000);}}
   stop(){clearTimeout(this.timer);this.enabled=false;this.generation++;this.rejectPending();desktop.disconnect();this.status('offline');}
   reconnect(){if(this.enabled)this.start();}
-  rejectPending(){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new Error('Connection interrupted; input was not replayed.'));}this.pending.clear();}
-  send(value){if(this.state!=='online')return Promise.reject(new Error('Local host is offline.'));return desktop.send(value);}
+  rejectPending(){for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(new ConnectionInterrupted('Connection interrupted; input was not replayed.'));}this.pending.clear();}
+  send(value){if(this.state!=='online')return Promise.reject(new ConnectionInterrupted('Local host is offline.'));return desktop.send(value);}
   waitOnline(signal){return Link.prototype.waitOnline.call(this,signal);}
   request(...args){return Link.prototype.request.apply(this,args);}
 }

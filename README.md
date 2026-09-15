@@ -6,7 +6,7 @@
 
 jaunt provides native desktop and Android applications, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
 
-**Host: 0.1.0-beta.10 · Desktop: 0.1.0-beta.8 · Android: 0.1.0-beta.6.** [Open jaunt](https://moukrea.github.io/jaunt/). The relay and host release are deployed. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SESSION_CONTROLS_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.10 · Desktop: 0.1.0-beta.9 · Android: 0.1.0-beta.7.** [Open jaunt](https://moukrea.github.io/jaunt/). The relay and host release are deployed. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SESSION_CONTROLS_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -16,7 +16,7 @@ bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukr
 
 Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled and wait until ordinary shells and transfers finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.6/jaunt-android-v0.1.0-beta.6.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.7/jaunt-android-v0.1.0-beta.7.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -58,7 +58,7 @@ The two **split icons** arrange panes side by side or above/below on desktop, us
 
 ## Image handling
 
-Progress stays visible during upload and clipboard/path delivery. The final result states exactly what happened; errors stay visible with a retry action. A successful path insertion or Ctrl+V delivery does not prove that Claude Code or Codex recognized an attachment.
+Progress stays visible during upload and clipboard/path delivery. Completed operations collapse into a compact result; **Show history** retains the details. Cancelling a transfer is shown as cancellation, and errors stay with their operation. The final result states exactly what happened; errors stay visible with a retry action. A successful path insertion or Ctrl+V delivery does not prove that Claude Code or Codex recognized an attachment.
 
 **Paste:** when a native backend is available, an image is uploaded to the host clipboard and pasted into the selected session with Ctrl+V. If the browser returns an empty clipboard, the UI offers a rich paste area and image picker. Attach retains both explicit modes. No Enter key is sent.
 
@@ -76,6 +76,12 @@ Progress stays visible during upload and clipboard/path delivery. The final resu
 | Web client | Uses the version published on Pages. Reopen/reload to activate a downloaded service-worker update. |
 
 Existing installations need the release containing their updater before that updater can run. Re-running the official host command updates the host and installs the advertised desktop app; it refuses to silently close active ordinary shells. Pairing keys are retained. See [updates and restart protection](docs/UPDATES.md).
+
+## Connection and operation feedback
+
+A network interruption has one persistent connection banner with a retry action. jaunt reconnects using the saved device key; it does not replay unsent terminal input. Revocation and failed host verification stop the connection and explain the next step. Errors in a dialog stay in that dialog; other action errors remain visible until dismissed. Short confirmation toasts are deduplicated and limited to two.
+
+Uploads, downloads, service installation and update checks show progress and a final result in Activity. Network pauses are explicit, transfer cancellation is available, and completed history can be expanded. Available updates provide a direct action instead of an expiring toast.
 
 ## Notifications
 
