@@ -1,6 +1,6 @@
 # jaunt — delivery validated on September 14, 2026
 
-Latest public host beta.5 / Android beta.3 delivery: [consolidated report and limitations](PUBLIC_DELIVERY.md). The sections below retain historical observations; later reports supersede their test counts and version-specific status.
+Current delivery: [session controls, client feedback, public release tests and limitations](SESSION_CONTROLS_VALIDATION.md). Earlier host beta.5 / Android beta.3 delivery: [historical consolidated report](PUBLIC_DELIVERY.md). The sections below retain historical observations; later reports supersede their test counts and version-specific status.
 
 **Page: https://moukrea.github.io/jaunt/**
 
