@@ -1,6 +1,6 @@
 {
   "page": "https://moukrea.github.io/jaunt/",
-  "publicHostRelease": "v0.1.0-beta.5",
+  "publicHostRelease": "v0.1.0-beta.8",
   "passed": [
     "public wheel installed without editable source; enabled user service owns the connected daemon",
     "public Page pairing; real Cloudflare WebSockets and authenticated encrypted channel",

@@ -31,7 +31,9 @@ export default {
       return new Response('WebSocket required', {status: 426});
     }
     const origin = request.headers.get('Origin');
-    if (origin && origin !== (env.APP_ORIGIN || 'https://moukrea.github.io')) {
+    // The installed desktop serves its bundled renderer from this secure scheme.
+    // This gate never replaces routing capability or end-to-end authentication.
+    if (origin && origin !== (env.APP_ORIGIN || 'https://moukrea.github.io') && origin !== 'jaunt://app') {
       return new Response('Origin not allowed', {status: 403});
     }
     return env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
