@@ -32,4 +32,31 @@ Installed candidate `.deb` plus non-editable 0.1.0b9 wheel passed on Ubuntu 24.0
 
 A clean tracked-source export passed gitleaks. Scanning the binary ASAR produced two reviewed false positives in vendored JavaScript identifiers (`FourKeyMap` and `SequencerByKey`); no credential was present.
 
-Published-artifact and default-installer verification will be recorded after the immutable releases are available. Physical Android hardware, vendor-specific IMEs/battery policies, macOS runtime and ARM runtime are not validated by these tests. The protocol remains independently unaudited.
+## Published delivery
+
+PR [20](https://github.com/moukrea/jaunt/pull/20) merged as `cb0cb99910978e0874cf00235a046f47ff297d72` after all checks passed. Backup `backup/pre-delivery-fixes-20260915` preserves the previous state. No force-push or history deletion was used.
+
+- Public page: https://moukrea.github.io/jaunt/
+- Host: [v0.1.0-beta.9](https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.9), exactly three assets. All checksums, archive paths and all 16 Python/installer source files were verified against the delivered source.
+- Desktop: [desktop-v0.1.0-beta.7](https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.7), ten Linux/macOS packages plus SHA256SUMS. All ten downloads matched the checksums. Installed public Ubuntu package: real local and remote shell execution, shared browser/desktop session, termination from either side, decoded logo, readable standard icons, and sandboxed renderer.
+- Android: [android-v0.1.0-beta.5](https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.5), versionCode 5. The public APK's 27 bundled web resources matched the source; the host installer is intentionally excluded by the Android build. Its checksum and existing signing certificate were verified. Installing it over the public beta.4 APK retained pairing and reconnected. Native UI automation on the release APK then created a shell, proved a command result on the host, and terminated the session. No debuggable release build was used.
+
+The exact command extracted from the public page passed in a fresh Fedora 43 container and a fresh account in the Ubuntu 24.04 VM:
+
+```sh
+bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
+```
+
+The interactive graphical Ubuntu installation automatically selected the public system desktop package. The host service was enabled, running and connected; a valid QR SVG was generated without printing or publishing its secret. Unattended host updates skip GUI setup so they cannot trigger desktop authorization prompts.
+
+The public Page → Cloudflare → public wheel acceptance passed 12 checks: pairing, exact 512-character input, multiple shells, file byte comparison, image/path/no-Enter fallback, reload, real VM IPv4/IPv6 network interruption with the same session/PID, refusal to destroy active shells, explicitly authorized restart with retained identities, and revocation. See [the observed results](evidence/public-report-beta9.json).
+
+This maintainer PC was also updated through the public installer to host 0.1.0b9 with its existing host/device keys preserved. A temporary service-created shell found and ran `codex-cli 0.154.0` through PATH and produced a colored prompt; only that temporary session was terminated. The public desktop beta.7 was installed and remained running on Ubuntu.
+
+CI evidence: [PR checks](https://github.com/moukrea/jaunt/actions/runs/34960446113), [desktop packages](https://github.com/moukrea/jaunt/actions/runs/34960446067), [Android](https://github.com/moukrea/jaunt/actions/runs/34960446100). Publication: [host](https://github.com/moukrea/jaunt/actions/runs/34960988005), [desktop](https://github.com/moukrea/jaunt/actions/runs/34961170116), [Android](https://github.com/moukrea/jaunt/actions/runs/34961169894), [Pages](https://github.com/moukrea/jaunt/actions/runs/34961981670). The public page's 28 checked resources matched the delivered files under `/jaunt/`. The existing relay's health and real authenticated WebSockets passed; no relay URL or third-party relay was invented.
+
+![Public desktop package with the supplied logo and Lucide interface icons](evidence/desktop-release-beta7.png)
+
+## Remaining limits
+
+Physical Android hardware, vendor-specific keyboards/battery policies, real Wi-Fi/mobile switching, macOS runtime and ARM runtime are not validated by these tests. Android emulator tests are identified as such. Authenticated Claude Code/Codex conversations are not covered by isolated startup tests. **The protocol remains independently unaudited.**
