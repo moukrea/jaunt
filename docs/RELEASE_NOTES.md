@@ -1,11 +1,9 @@
-# jaunt 0.1.0-beta.11
+# jaunt 0.1.0-beta.12
 
-Compatible host updates now replace the runtime while preserving ordinary shell processes, their working directories, environment and terminal history. Clients reconnect automatically. Older hosts need one protected migration: their active shells cannot be preserved retroactively, and the installer still requires explicit authorization before terminating them.
+This release makes updating a host from any client reliable. The host now pushes every update step to connected clients (checking, downloading, verifying, preparing, installing, replacing the runtime), announces the in-place runtime restart before it happens so clients show *Updating host · shells are kept* instead of an outage, and drains in-flight client actions itself before replacing the runtime. The version that is really running is the reference: an interrupted earlier attempt can no longer leave a host that reports "up to date" while still serving the old runtime. A failed runtime replacement points the installation back at the previous runtime and reports the installer's own reason; network failures are marked as retryable. Deferred updates (file transfers in progress) resume by themselves.
 
-The shared workspace fixes squeezed Settings labels, unstable tab positions, mobile history jumps and oversized error messages. Tabs support drag-and-drop ordering and double-click renaming; the desktop sidebar can collapse. Claude and Codex foreground programs use locally bundled Meteor brand icons in tabs and pane captions. Other programs retain the terminal icon.
+The installer skips the pip self-upgrade when the reviewed version is already present, retries dependency downloads, keeps the previous runtime for rollback and prunes older ones. `jaunt start` waits for a host that is replacing its runtime instead of spawning a competing daemon, and `jaunt service install` never starts a second daemon next to one started outside the user service.
 
-Web, desktop, Android and CLI support system language detection and explicit English, French, Spanish, Italian, Portuguese and German preferences. English remains the canonical repository documentation, with linked translated copies. The web homepage introduces the project and provides copyable installation commands; native apps open the workspace directly.
+French, Spanish, Italian, Portuguese and German interface text was rewritten as native UI copy across the web, desktop, Android and CLI surfaces.
 
-The installer offers `--client-only` for a desktop client without installing a local host or exposing local host controls. Update and transfer operations retain visible progress and final results. Desktop windows are titled `jaunt`; the installed web app is named `jaunt (PWA)`. Launcher and web icons use the supplied transparent artwork.
-
-The protocol has not undergone an independent security audit. Physical-phone validation is not claimed. See [the validation report](SEAMLESS_WORKSPACE_VALIDATION.md) for observed tests and remaining platform boundaries.
+Hosts already running an older release still perform their next update with the previous updater; the reworked behavior applies from this release onward. The protocol has not undergone an independent security audit. See [the validation report](HOST_UPDATE_VALIDATION.md) for observed tests and remaining limits.

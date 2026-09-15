@@ -6,13 +6,27 @@ The public installer configures automatic updates by default. The host checks th
 
 A new wheel is downloaded over HTTPS and verified against its release manifest. The installer is read from that verified wheel. Compatible hosts replace the Python runtime in place with `exec`: the daemon PID, child shell processes and open PTY descriptors remain alive. The bounded replay buffer and terminal geometry pass through an unlinked private file descriptor. Shell environment variables, working directories and running commands remain in their original processes. Clients reconnect using their existing keys. This does not require tmux.
 
-File transfers defer installation until they finish. The installer validates the new runtime before requesting handoff and stops accepting new sessions during the switch. If preparation fails, the old host resumes serving its existing shells. Automatic mode never inherits `jaunt_ALLOW_RESTART` or developer download overrides.
+### How a client-driven update proceeds
+
+1. **Check for updates** in Settings sends one `updates.install` request. The daemon starts the detached updater and answers with an operation identifier.
+2. The updater writes every state change to the private `update-status.json` (`checking`, `downloading`, `verifying`, `installing` with a human-readable step, then `current`, `installed`, `deferred` or `error`). The daemon watches that file and **pushes** each change to all connected clients as `update.progress`; the client keeps only a slow fallback poll.
+3. The installer prepares the new runtime beside the old one (private virtual environment, pip with retries, import check, handoff capability check). Nothing running is touched until that succeeds.
+4. Right before replacing the runtime the daemon broadcasts `host.restarting`. Clients show *Updating host · shells are kept* instead of an outage, and the desktop app reconnects its local bridge within a second. The daemon itself waits for in-flight client actions to drain (up to 20 s) instead of failing when one is still running.
+5. After the `exec`, the client's welcome carries the final update state and the new host version. The activity row ends with *Update installed · shells were kept*.
+
+The truth of "which version is running" is the daemon's own runtime record, not the installed pointer. If a handoff ever fails, the installer points `current` back at the previous runtime, records nothing and reports the reason; the next check still offers the release instead of claiming the host is up to date. Installer failures surface their own last message (for example a dependency download failure) rather than a bare exit code. Old runtime directories are pruned, keeping the previous one for rollback.
+
+A `deferred` state (a file transfer in progress, or ordinary shells on a legacy host) resumes by itself as soon as the reason disappears; nobody has to click again. Automatic mode never inherits `jaunt_ALLOW_RESTART` or developer download overrides.
 
 **Migration from older hosts:** releases without runtime handoff cannot preserve their PTYs across a runtime replacement. The installer detects that capability and defers while ordinary shells are active. Ending them still requires explicit approval through **Update and restart** or `jaunt update --allow-restart`. An ordinary `jaunt update` never grants that permission. After this one-time migration, subsequent compatible updates use handoff automatically.
 
 Settings follows the update through its progress and reconnection automatically. Application updates preserve shells; explicitly stopping/restarting the daemon or rebooting the computer still ends ordinary shells. This mechanism is not recovery after a daemon crash or power loss.
 
-The detached updater uses a private lock to prevent overlapping updates and retains the old runtime until the verified replacement is ready. Host identity and device records are preserved. Private `installation.json`, `update-status.json`, `update.log` and staged wheels are never release assets. Failed checks do not revoke devices.
+The detached updater uses a private lock to prevent overlapping updates and retains the old runtime until the verified replacement is ready. Host identity and device records are preserved. Private `installation.json`, `runtime.json`, `update-status.json`, `update.log` and staged wheels are never release assets. Failed checks do not revoke devices.
+
+When the host was started outside its user service (for example by the desktop app before the service existed), `jaunt service install` enables the unit for the next login instead of starting a second daemon next to the running one. `jaunt start` prefers the installed service and waits for a daemon that is mid-handoff rather than spawning a competing process.
+
+`tests/client_update_e2e.py` exercises this whole path against a real installation with a private loopback mirror: an actual newer wheel, pushed progress, the in-place handoff with the same daemon and shell PIDs, a second "up to date" check and a broken release that is refused with its reason while the previous runtime keeps serving.
 
 ## Android
 

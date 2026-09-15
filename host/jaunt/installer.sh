@@ -24,6 +24,23 @@ trap 'rc=$?; printf "\njaunt: Installation failed during %s (line %s, exit %s). 
 printf '\n  jaunt · Starting installation\n'
 fail() { printf 'jaunt: %s\n' "$*" >&2; exit 1; }
 say() { printf '\n  jaunt · %s\n' "$*"; }
+# During a host self-update the daemon watches update-status.json and pushes
+# every change to connected clients. Only an existing status file is updated:
+# a first installation has nothing to report to.
+progress() {
+  local status_file="${jaunt_STATE:-}/update-status.json"
+  [[ -n "${jaunt_STATE:-}" && -f "$status_file" && -n "${PY:-}" ]] || return 0
+  "$PY" - "$status_file" "$1" "$2" <<'PYPROGRESS' || true
+import json,os,sys,tempfile,time
+path,state,message=sys.argv[1:]
+try:current=json.load(open(path))
+except Exception:current={}
+current.update(state=state,message=message,checkedAt=time.time())
+fd,tmp=tempfile.mkstemp(prefix='.state-',dir=os.path.dirname(path))
+with os.fdopen(fd,'w') as out:json.dump(current,out,separators=(',',':'))
+os.chmod(tmp,0o600);os.replace(tmp,path)
+PYPROGRESS
+}
 case "$(uname -s)" in Linux|Darwin) ;; *) fail 'Use Linux, macOS, or WSL. Windows native is not supported.';; esac
 command -v curl >/dev/null || fail 'curl is required to download the installer and release.'
 PAGE="${jaunt_PAGE_URL:-https://moukrea.github.io/jaunt}"
@@ -202,15 +219,22 @@ if ! TMPDIR="$jaunt_INSTALL_TMP" "$PY" -m venv "${VENV_ARGS[@]}" "$TARGET"; then
   fi
   TMPDIR="$jaunt_INSTALL_TMP" "$UV" venv --python "$PY" --seed "$TARGET"
 fi
-# venv may bundle an outdated pip. Update before resolving release dependencies.
+progress installing 'Preparing the new runtime…'
+# venv may bundle an outdated pip. Update before resolving release dependencies,
+# but skip the network round trip when the reviewed version is already there.
+PIP_NET=(--retries 5 --timeout 30)
 if [[ "${jaunt_DEV_INSTALL:-0}" != 1 || "${jaunt_PIP_NO_DEPS:-0}" != 1 ]]; then
-  TMPDIR="$jaunt_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-pip-version-check --upgrade 'pip==26.2.1' || fail 'Could not install the reviewed pip version; previous runtime retained.'
+  if ! "$TARGET/bin/python" -c 'import pip,sys;sys.exit(pip.__version__!="26.2.1")' 2>/dev/null; then
+    TMPDIR="$jaunt_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-pip-version-check "${PIP_NET[@]}" --upgrade 'pip==26.2.1' \
+      || { rm -rf "$TARGET"; fail 'Could not download the reviewed pip version. Check the internet connection; the previous runtime was retained.'; }
+  fi
 fi
 # jaunt_PIP_NO_DEPS is only for explicit offline integration tests, never the normal installer.
 PIP_ARGS=()
 if [[ "${jaunt_DEV_INSTALL:-0}" == 1 && "${jaunt_PIP_NO_DEPS:-0}" == 1 ]]; then PIP_ARGS+=(--no-deps); fi
-if ! TMPDIR="$jaunt_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-pip-version-check "${PIP_ARGS[@]}" "$jaunt_INSTALL_TMP/$WHEEL"; then
-  rm -rf "$TARGET"; fail 'Package installation failed. The previous version was retained.'
+progress installing 'Installing the new runtime and its dependencies…'
+if ! TMPDIR="$jaunt_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-pip-version-check "${PIP_NET[@]}" "${PIP_ARGS[@]}" "$jaunt_INSTALL_TMP/$WHEEL"; then
+  rm -rf "$TARGET"; fail 'Dependency installation failed (network or package problem). The previous version was retained.'
 fi
 # On upgrade, only switch the pointer after the new environment has been verified.
 "$TARGET/bin/python" -c 'from jaunt.daemon import Host; from jaunt.cli import main' || fail 'Runtime dependencies are missing.'
@@ -233,6 +257,7 @@ if [[ "$SEAMLESS" != 1 && -x "$PREFIX/current/bin/python" ]]; then
   fi
 fi
 
+PREVIOUS="$(readlink "$PREFIX/current" 2>/dev/null || true)"
 "$PY" - "$PREFIX" "$TARGET" "$BIN" <<'PY'
 import os,pathlib,shlex,sys
 prefix,target,bindir=map(pathlib.Path,sys.argv[1:]);tmp=prefix/'current.new'
@@ -242,37 +267,73 @@ os.symlink(target,tmp);os.replace(tmp,prefix/'current')
 bootstrap='import os; os.environ.update({k.upper(): v for k,v in tuple(os.environ.items()) if k.startswith("jaunt_")}); from jaunt.cli import main; main()'
 wrapper=bindir/'jaunt';wrapper.write_text('#!/bin/sh\nexec '+shlex.quote(str(prefix/'current/bin/python'))+' -c '+shlex.quote(bootstrap)+' "$@"\n');wrapper.chmod(0o755)
 PY
-"$TARGET/bin/python" - "$PREFIX" "$BIN" "$PAGE" "$REPO" "$TAG" "${jaunt_NO_SERVICE:-0}" <<'PYUPDATE'
+# Point the pointer back at the previous runtime if the live replacement fails.
+# The old daemon keeps running in that case, so the CLI must keep matching it.
+rollback_runtime() {
+  if [[ -n "$PREVIOUS" && -e "$PREVIOUS" ]]; then
+    "$PY" - "$PREFIX" "$PREVIOUS" <<'PYROLLBACK' || true
+import os,pathlib,sys
+prefix,previous=map(pathlib.Path,sys.argv[1:]);tmp=prefix/'current.new'
+if tmp.is_symlink():tmp.unlink()
+os.symlink(previous,tmp);os.replace(tmp,prefix/'current')
+PYROLLBACK
+  fi
+  rm -rf "$TARGET"
+}
+record_installation() {
+  "$TARGET/bin/python" - "$PREFIX" "$BIN" "$PAGE" "$REPO" "$TAG" "${jaunt_NO_SERVICE:-0}" "${jaunt_DEV_INSTALL:-0}" "${jaunt_RELEASE_BASE:-}" "${jaunt_TEST_SYSTEM_SITE:-0}" "${jaunt_PIP_NO_DEPS:-0}" <<'PYUPDATE'
 import sys
 from jaunt.state import state_dir, atomic_json
 from jaunt.updates import installation
-prefix,bindir,page,repo,tag,no_service=sys.argv[1:]
+prefix,bindir,page,repo,tag,no_service,dev,release_base,system_site,no_deps=sys.argv[1:]
 old=installation()
-atomic_json(state_dir()/'installation.json', {'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)})
+record={'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)}
+# Explicit local installer tests keep their mirror so self-updates can be tested too.
+if dev=='1':record['dev']={'releaseBase':release_base,'env':{'TEST_SYSTEM_SITE':system_site,'PIP_NO_DEPS':no_deps}}
+atomic_json(state_dir()/'installation.json', record)
 PYUPDATE
+}
 RELAY="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["relay"])' "$jaunt_INSTALL_TMP/config.json")"
 if [[ "$SEAMLESS" == 1 ]]; then
   STAGE='replacing the host runtime while preserving shells'
-  "$TARGET/bin/python" - "$TARGET/bin/python" <<'PYHANDOFF'
-import sys,time
+  progress installing 'Replacing the host runtime · shells are kept running…'
+  if ! "$TARGET/bin/python" - "$TARGET/bin/python" <<'PYHANDOFF'
+import os,sys,time
 from jaunt.cli import control
-for _ in range(100):
+target=os.path.realpath(sys.argv[1])
+# The daemon drains in-flight client actions itself; keep asking for a while in
+# case a long action or a transfer is still finishing on the host.
+deadline=time.monotonic()+120;last=''
+while time.monotonic()<deadline:
     try:
         control('upgrade.exec',{'python':sys.argv[1]});break
-    except ValueError as error:
-        if 'actions are still finishing' not in str(error):raise
-        time.sleep(.1)
-else:raise SystemExit('Host actions did not finish; existing shells were retained.')
+    except (RuntimeError,ValueError) as error:
+        last=str(error)
+        if 'still finishing' not in last and 'transfers are active' not in last and 'already restarting' not in last:
+            print('jaunt: '+last,file=sys.stderr);raise SystemExit(1)
+        time.sleep(1)
+    except OSError as error:
+        last=str(error);time.sleep(1)
+else:
+    print('jaunt: Host did not accept the runtime replacement ('+last+'); existing shells were retained.',file=sys.stderr);raise SystemExit(1)
 for _ in range(1200):
     time.sleep(.1)
     try:
-        if control('status').get('runtime')==sys.argv[1]:break
-    except (OSError,ValueError):pass
-else:raise SystemExit('Runtime replacement was not confirmed. Existing shells were not terminated.')
+        if os.path.realpath(control('status').get('runtime',''))==target:break
+    except (OSError,ValueError,RuntimeError):pass
+else:
+    print('jaunt: Runtime replacement was not confirmed; the previous runtime is still serving existing shells.',file=sys.stderr);raise SystemExit(1)
 PYHANDOFF
+  then
+    # The reason was already printed as a "jaunt:" line by the handoff step.
+    rollback_runtime
+    exit 1
+  fi
   export jaunt_PRESERVE_DAEMON=1
 fi
+record_installation
 STAGE='host configuration and service startup'
+progress installing 'Updating the host service…'
 if [[ "$SEAMLESS" != 1 ]]; then "$BIN/jaunt" init --relay "$RELAY" --page "${PAGE%/}/"; fi
 export PATH="$BIN:$PATH"
 if [[ "${jaunt_NO_SERVICE:-0}" != 1 ]]; then
@@ -291,6 +352,16 @@ if [[ -t 1 && "${jaunt_NO_GUI:-0}" != 1 && ( -n "${DISPLAY:-}" || -n "${WAYLAND_
   fi
 fi
 "$BIN/jaunt" --version >/dev/null
+# Keep the previous runtime for one rollback; older ones only consume disk.
+"$PY" - "$PREFIX" <<'PYPRUNE' || true
+import os,pathlib,shutil,sys
+prefix=pathlib.Path(sys.argv[1]);current=os.path.realpath(prefix/'current')
+versions=sorted((d for d in (prefix/'versions').iterdir() if d.is_dir()),key=lambda d:d.stat().st_mtime)
+keep={current}
+if len(versions)>1:keep.add(os.path.realpath(versions[-2] if os.path.realpath(versions[-1])==current else versions[-1]))
+for d in versions:
+    if os.path.realpath(d) not in keep:shutil.rmtree(d,ignore_errors=True)
+PYPRUNE
 if [[ "${jaunt_NO_GUI:-0}" != 1 ]]; then "$PREFIX/current/bin/python" -c 'import jaunt.desktop as d; getattr(d,"save_mode",lambda *_:None)(False)'; fi
 say 'Ready'
 printf 'Executable: %s/jaunt\n' "$BIN"

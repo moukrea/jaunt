@@ -39,16 +39,60 @@ def control(method: str, params: dict | None = None) -> object:
     return response["result"]
 
 
+def daemon_alive() -> bool:
+    """True while some process holds the daemon lock, including one mid-handoff."""
+    path = state_dir() / "daemon.lock"
+    try:
+        with open(path, "a+") as lock:
+            import fcntl
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(lock, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    return False
+
+
+def wait_for_control(seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            control("status")
+            return True
+        except (OSError, ValueError, RuntimeError):
+            time.sleep(0.1)
+    return False
+
+
+def service_unit_exists() -> bool:
+    if platform.system() == "Linux" and shutil.which("systemctl"):
+        return (Path.home() / ".config/systemd/user/jaunt.service").exists()
+    return False
+
+
 def start() -> None:
     try:
         control("status")
         return
     except (OSError, ValueError):
         pass
+    # A daemon replacing its runtime briefly has no control socket. Spawning a
+    # second daemon here would only fail on the lock after a slow timeout.
+    if daemon_alive():
+        if wait_for_control(15):
+            return
+        raise RuntimeError("A jaunt host is already running but did not answer. Read host.log.")
     state = State()
     if not state.data["relay"]:
         raise RuntimeError("Relay not configured. Run jaunt init --relay wss://YOUR-RELAY.workers.dev")
     logpath = state.root / "host.log"
+    # Prefer the installed user service so the daemon stays managed by it.
+    if service_unit_exists() and os.environ.get("jaunt_NO_SERVICE") != "1":
+        started = subprocess.run(["systemctl", "--user", "start", "jaunt.service"], capture_output=True, text=True)
+        if started.returncode == 0 and wait_for_control(10):
+            return
     fd = os.open(logpath, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
     with os.fdopen(fd, "a") as output:
         subprocess.Popen([sys.executable, "-m", "jaunt.cli", "daemon"],
@@ -90,7 +134,8 @@ TimeoutStopSec=15
 [Install]
 WantedBy=default.target
 ''')
-        if os.environ.get("jaunt_PRESERVE_DAEMON") != "1":
+        preserve = os.environ.get("jaunt_PRESERVE_DAEMON") == "1"
+        if not preserve:
           with contextlib.suppress(OSError):
             control("upgrade.stop", {"allowRestart": os.environ.get("jaunt_ALLOW_RESTART") == "1"})
             time.sleep(0.6)
@@ -98,8 +143,22 @@ WantedBy=default.target
         envs = [key for key in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XAUTHORITY") if os.environ.get(key)]
         if envs:
             subprocess.run(["systemctl", "--user", "import-environment", *envs], check=False)
-        subprocess.run(["systemctl", "--user", "enable", "--now", "jaunt.service"], check=True)
-        print(tr('User service installed. For startup before login: loginctl enable-linger "$USER"'))
+        running = False
+        if preserve:
+            try:
+                control("status"); running = True
+            except (OSError, ValueError, RuntimeError):
+                running = False
+        managed = subprocess.run(["systemctl", "--user", "is-active", "--quiet", "jaunt.service"]).returncode == 0
+        if running and not managed:
+            # The live daemon was started outside systemd (for example by the desktop
+            # app). Starting the unit now would spawn a second daemon that fails on
+            # the lock and restarts forever. Enable it for the next login instead.
+            subprocess.run(["systemctl", "--user", "enable", "jaunt.service"], check=True)
+            print(tr('User service enabled; the running host and its shells were kept.'))
+        else:
+            subprocess.run(["systemctl", "--user", "enable", "--now", "jaunt.service"], check=True)
+            print(tr('User service installed. For startup before login: loginctl enable-linger "$USER"'))
     elif platform.system() == "Darwin":
         import plistlib
         dest = Path.home() / "Library/LaunchAgents/dev.jaunt.host.plist"

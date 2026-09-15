@@ -132,6 +132,8 @@ function makeMachine(machine) {
   a.link.addEventListener('latency', () => { if (selected === machine.room) renderConnection(); });
   a.link.addEventListener('welcome', e => {
     a.peer = e.detail.peer; a.info = e.detail.machine; a.sessions = e.detail.sessions; syncSessions(a);
+    a.restartExpected = 0; if (a.link.expectRestart !== undefined) a.link.expectRestart = false;
+    if (a.info?.updates) hostUpdateJobs.get(a.machine.room)?.observe(a.info.updates);
     // Only attach terminal views this browser actually opened; sessions need no viewer to run.
     for (const t of a.terms.values()) attachTerm(a, t).catch(error=>reportHost(a,error));
     if (!a.machine.openSessions) a.machine.openSessions = a.sessions.map(s=>s.id);
@@ -198,20 +200,29 @@ function handleMessage(a, message) {
       message.session ? {label: tr('Open'), run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null);
   } else if (message.type === 'clipboard.available') {
     toast(`${a.machine.name} shared clipboard text.`, false, {label: tr('Open'), run: () => showClipboard(a)});
+  } else if (message.type === 'update.progress') {
+    const {type, ...status} = message; hostUpdateProgress(a, status);
+  } else if (message.type === 'host.restarting') {
+    // The daemon replaces its runtime in place: the coming disconnection is
+    // expected and shells survive it. Never show it as an outage.
+    a.restartExpected = Date.now(); if (a.link.expectRestart !== undefined) a.link.expectRestart = true;
+    hostUpdateJobs.get(a.machine.room)?.job.update({status: tr('Restarting the host runtime · shells are kept…')});
+    if (a === current()) renderConnection();
   }
 }
 
 function renderConnection() {
   const a = current(), state = a?.link.state || 'offline';
   const labels = {online: a?.machine.local ? tr('Local connection') : tr('Encrypted'), offline: tr('Not connected'), connecting: tr('Connecting'), authenticating: tr('Verifying host'), waiting: tr('Host offline'), reconnecting: tr('Reconnecting')};
-  $('connection').className = 'connection ' + state;
-  $('connection').lastElementChild.textContent = labels[state] || state;
+  const restarting = a && state !== 'online' && a.link.enabled && a.restartExpected && Date.now() - a.restartExpected < 180000;
+  $('connection').className = 'connection ' + (restarting ? 'reconnecting' : state);
+  $('connection').lastElementChild.textContent = restarting ? tr('Updating host') : labels[state] || state;
   $('latency').hidden = !(state === 'online' && a.link.latency != null);
   $('latency').textContent = a?.link.latency != null ? `${a.link.latency} ms` : '';
   $('connection-banner').hidden = !a || state === 'online';
   if(!a || state==='online')return;
   const messages={connecting:tr('Connecting with the saved device key…'),authenticating:a.machine.pending?tr('Pairing this device and verifying the host…'):tr('Verifying the saved encrypted connection…'),waiting:tr('The host is offline. jaunt will reconnect automatically when it returns.'),reconnecting:tr('Network interrupted. Reconnecting automatically with the same pairing.')};
-  const text=a.connectionError || messages[state] || a.link.message || tr('Connection is paused. Reconnect using the saved device key.');
+  const text=restarting ? tr('The host is restarting to finish its update. Shells are kept; reconnecting automatically.') : a.connectionError || messages[state] || a.link.message || tr('Connection is paused. Reconnect using the saved device key.');
   const actions=a.link.enabled?[]:[button(tr('Reconnect'),()=>{a.connectionError='';a.link.start();},'text-button')];
   $('connection-banner').setAttribute('aria-busy',String(a.link.enabled));
   $('connection-banner').replaceChildren(el('span',{text:text+' '+tr('Shells remain on the host while its daemon runs. Unsent terminal input is not replayed.')}),...actions);
@@ -980,6 +991,13 @@ function copyMenu() {
   modal(tr('Copy & clipboard'), body);
 }
 
+function hostVersionText(a) {
+  const status = a.info?.updates || {}, active = hostUpdateJobs.has(a.machine.room);
+  if (active) return `${a.info.version} · ${describeUpdate(status)}`;
+  if (status.state === 'deferred') return `${a.info.version} · ${tr('Update {0} is downloaded and waits to install', status.version || '')}`;
+  if (status.state === 'error') return `${a.info.version} · ${tr('Last update attempt failed')}`;
+  return a.info.version;
+}
 function settingsRow(title, description, control) {
   return el('div', {class: 'settings-row'}, el('div', {class: 'settings-label'}, el('strong', {text: title}), el('p', {text: description})), control);
 }
@@ -1033,44 +1051,71 @@ async function checkDesktopUpdate(){
   try{desktopUpdateStatus(await desktop.updates('check'));}catch(error){desktopUpdateOperation.fail(error);}
 }
 const hostUpdateJobs=new Map();
-async function checkHostUpdate(a,allowRestart=false) {
-  if(hostUpdateJobs.has(a.machine.room))return;
+function updateLabels(){return {checking:tr('Checking published version…'),downloading:tr('Downloading host update…'),verifying:tr('Verifying downloaded files…'),installing:tr('Installing · shells are kept running…'),current:tr('Up to date'),installed:tr('Update installed · shells were kept'),deferred:tr('Downloaded · waiting to install'),error:tr('Update failed'),disabled:tr('Automatic updates are disabled on this host')};}
+function describeUpdate(status){
+  if(!status||!status.state)return '';
+  const text=(status.message&&tr(status.message))||updateLabels()[status.state]||tr('Checking…');
+  return text+(status.version?' · '+status.version:'');
+}
+// Every source of update state converges here: pushed progress, the welcome
+// after a runtime handoff, and the slow fallback poll.
+function hostUpdateProgress(a,status){
+  if(!status||typeof status!=='object')return;
+  if(a.info)a.info.updates={...a.info.updates,...status};
+  // An update started elsewhere (another device, the automatic check) is shown
+  // here too once it starts changing the host, so the coming restart is explained.
+  if(!hostUpdateJobs.has(a.machine.room)&&['downloading','verifying','installing'].includes(status.state))followHostUpdate(a,null,status).catch(()=>{});
+  hostUpdateJobs.get(a.machine.room)?.observe(status);
+  if(view==='settings'&&a===current())renderSettings();
+}
+function checkHostUpdate(a,allowRestart=false){return followHostUpdate(a,()=>a.link.request('updates.install',{allowRestart}),null,allowRestart);}
+async function followHostUpdate(a,start,initial=null,allowRestart=false) {
+  const existing=hostUpdateJobs.get(a.machine.room);
+  if(existing){existing.job.update({});return;}
   const job=activity('host-update-'+a.machine.room,tr("Host update · {0}",a.machine.name));
-  hostUpdateJobs.set(a.machine.room,job);
+  const tracker={job,operation:initial?.operation||null,requestedAt:Date.now()/1000,settled:false};
+  hostUpdateJobs.set(a.machine.room,tracker);
+  let settle;const settled=new Promise(resolve=>{settle=resolve;});
+  const terminal=['current','installed','deferred','error','disabled'];
+  tracker.observe=status=>{
+    if(tracker.settled||!status.state)return;
+    if(tracker.operation&&status.operation&&status.operation!==tracker.operation)return;
+    if(!tracker.operation&&status.checkedAt&&status.checkedAt<Math.floor(tracker.requestedAt)-1)return;
+    const text=describeUpdate(status);
+    if(!terminal.includes(status.state)){job.update({status:text,waiting:false,error:false,action:null});return;}
+    tracker.settled=true;
+    if(status.state==='error'){job.fail(new Error(text));job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});}
+    else{job.finish(text);if(status.state==='deferred')job.update({waiting:true,action:{label:tr('Review update'),run:()=>{selected=a.machine.room;setView('settings');}}});}
+    settle();
+  };
+  const onStatus=()=>{
+    if(tracker.settled)return;
+    if(a.link.state==='online')return;
+    if(!a.link.enabled){job.update({status:tr('Connection stopped. Reconnect to this host to see the update result.')});return;}
+    job.update({status:a.restartExpected?tr('Restarting the host runtime · shells are kept…'):tr('Waiting for the host to reconnect…')});
+  };
+  a.link.addEventListener('status',onStatus);
+  const poll=setInterval(()=>{
+    if(tracker.settled||a.link.state!=='online')return;
+    a.link.request('updates.status',{},15000).then(status=>hostUpdateProgress(a,status)).catch(()=>{});
+  },5000);
+  const deadline=setTimeout(()=>{if(!tracker.settled){tracker.settled=true;job.fail(new Error(tr('The host has not confirmed completion yet. Check again to see its current state.')));job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});settle();}},30*60*1000);
   try {
-    job.update({status:tr('Checking published version…')});
-    const requestedAt=Date.now()/1000;
-    let started;
-    try{started=await a.link.request('updates.install',{allowRestart});}
-    catch(error){if(!/Host is restarting|Connection interrupted|Local host is offline/.test(error.message))throw error;started={};job.update({status:tr('Waiting for the host update to finish…')});a.link.reconnect();}
-    for(let i=0;i<600;i++) {
-      await new Promise(resolve=>setTimeout(resolve,1000));
-      if(!vault.data || !machines.has(a.machine.room))return;
-      if(a.link.state!=='online'){if(!a.link.enabled)throw new Error('Connection stopped. Reconnect to this host to check the update result.');job.update({status:tr('Waiting for the host to reconnect…')});continue;}
-      let result;
-      try {result=await a.link.request('updates.status');} catch(error) {
-        if(a.link.state!=='online' || /Host is restarting/.test(error.message)){job.update({status:tr('Waiting for the host to reconnect…')});if(a.link.state==='online')a.link.reconnect();continue;}
-        throw error;
-      }
-      if(started.operation && result.operation!==started.operation)continue;
-      if(!started.operation && result.checkedAt && result.checkedAt<Math.floor(requestedAt))continue;
-      a.info.updates=result;
-      const labels={checking:tr('Checking published version…'),downloading:tr('Downloading host update…'),verifying:tr('Verifying downloaded files…'),installing:tr('Installing · waiting for restart…'),current:tr('Up to date'),installed:tr('Update installed'),deferred:tr('Downloaded · waiting for active shells or transfers to finish'),error:tr('Update failed')};
-      const message=tr(result.message || '') || labels[result.state] || tr('Checking…');
-      job.update({status:message+(result.version?' · '+result.version:'')});
-      if(['current','installed','deferred','error','disabled'].includes(result.state)) {
-        if(result.state==='error')job.fail(new Error(message));
-        else job.finish(message+(result.version?' · '+result.version:''));
-        if(result.state==='deferred')job.update({waiting:true});
-        if(result.state==='error')job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a)}});
-        if(result.state==='deferred')job.update({action:{label:tr('Review update'),run:()=>{selected=a.machine.room;setView('settings');}}});
-        if(view==='settings')renderSettings();
-        return;
+    let started=initial||{};
+    if(start){
+      job.update({status:tr('Checking published version…')});
+      try{started=await start();}
+      catch(error){
+        if(!(error.code==='connection'||/Host is restarting|Connection interrupted|Local host is offline|Wait for the encrypted connection/.test(error.message)))throw error;
+        job.update({status:tr('Waiting for the host to reconnect…')});
+        if(a.link.enabled)a.link.reconnect();
       }
     }
-    throw new Error('The host has not confirmed completion yet. Check again to see its current state.');
-  } catch(error){job.fail(error);job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a)}});}
-  finally {if(hostUpdateJobs.get(a.machine.room)===job)hostUpdateJobs.delete(a.machine.room);}
+    if(started.operation)tracker.operation=started.operation;
+    if(started.state)tracker.observe(started);
+    await settled;
+  } catch(error){if(!tracker.settled){tracker.settled=true;job.fail(error);job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});}}
+  finally {clearInterval(poll);clearTimeout(deadline);a.link.removeEventListener('status',onStatus);if(hostUpdateJobs.get(a.machine.room)===tracker)hostUpdateJobs.delete(a.machine.room);if(view==='settings'&&a===current())renderSettings();}
 }
 function languagePicker(id) {
  const select=el('select',{'aria-label':tr('Language'),id});
@@ -1117,8 +1162,8 @@ function renderSettings() {
     groups.push(settingsGroup(tr('SELECTED MACHINE'),
       ...hostPreferences(a),
       settingsRow(a.machine.name, `${a.info?.platform || tr('Remote host')} · ${a.info?.version || tr('Connecting')} · ${a.link.state}`, button(tr('Reconnect'), () => { a.link.start(); })),
-      ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), a.info.updates.message || tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
-        settingsRow(tr('Host version'), a.info.version+(a.info.updates?.state==='deferred'?' · update ready: '+a.info.updates.version:''), button(tr('Check for updates'), ()=>checkHostUpdate(a))),
+      ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
+        settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
         ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
       settingsRow(tr('Host clipboard'), a.info?.clipboard?.backend || tr('Unknown until connected'), button(tr('Open'), () => showClipboard(a))),
       settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
