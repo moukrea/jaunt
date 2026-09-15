@@ -153,6 +153,8 @@ async def main():
         # a browser offline indicator. Host stays alive and re-registers its room.
         h.kill_relay()
         await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
+        await expect(page.locator('#connection-banner')).to_have_attribute('aria-busy','true')
+        await expect(page.locator('#connection-banner button')).to_have_count(0)
         h.restart_relay();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
         assert json.loads(h.cli('status'))['pid']==original
         await page.wait_for_timeout(300)

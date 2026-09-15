@@ -211,8 +211,9 @@ function renderConnection() {
   if(!a || state==='online')return;
   const messages={connecting:tr('Connecting with the saved device key…'),authenticating:a.machine.pending?tr('Pairing this device and verifying the host…'):tr('Verifying the saved encrypted connection…'),waiting:tr('The host is offline. jaunt will reconnect automatically when it returns.'),reconnecting:tr('Network interrupted. Reconnecting automatically with the same pairing.')};
   const text=a.connectionError || messages[state] || a.link.message || tr('Connection is paused. Reconnect using the saved device key.');
-  const action=a.link.enabled?button(tr('Retry now'),()=>a.link.reconnect(),'text-button'):button(tr('Reconnect'),()=>{a.connectionError='';a.link.start();},'text-button');
-  $('connection-banner').replaceChildren(el('span',{text:text+' '+tr('Shells remain on the host while its daemon runs. Unsent terminal input is not replayed.')}),action);
+  const actions=a.link.enabled?[]:[button(tr('Reconnect'),()=>{a.connectionError='';a.link.start();},'text-button')];
+  $('connection-banner').setAttribute('aria-busy',String(a.link.enabled));
+  $('connection-banner').replaceChildren(el('span',{text:text+' '+tr('Shells remain on the host while its daemon runs. Unsent terminal input is not replayed.')}),...actions);
   if(a.connectionError || /revoked|expired|unknown device/i.test(a.link.message||''))$('connection-banner').append(button(tr('Connection settings'),()=>setView('settings'),'text-button'));
 
 }
