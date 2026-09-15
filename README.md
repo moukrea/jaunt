@@ -6,7 +6,7 @@
 
 jaunt provides native desktop and Android applications, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
 
-**Host: 0.1.0-beta.12 · Desktop: 0.1.0-beta.11 · Android: 0.1.0-beta.9.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.13 · Desktop: 0.1.0-beta.12 · Android: 0.1.0-beta.10.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -16,7 +16,7 @@ bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukr
 
 Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled. Compatible hosts retain their shell processes during runtime replacement and wait for transfers to finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.9/jaunt-android-v0.1.0-beta.9.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.10/jaunt-android-v0.1.0-beta.10.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -67,6 +67,8 @@ The installed browser application is named **jaunt (PWA)** so it can be distingu
 Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and remote clients share the same ordinary shells without tmux. **New shell** opens an automatically named shell immediately, inheriting the previous active shell’s current directory. The folder button lets you browse the host’s directories and optionally name the new shell. **Sessions** lists running and exited sessions: open, rename, close only your view, or explicitly terminate a shell for everyone. You can also rename a tab by double-clicking its title, or double-click a pane’s title. Drag tabs to reorder them; selecting a tab never changes its position. The device you interact with controls the shared terminal size.
 
 The two **split icons** arrange panes side by side or above/below on desktop, using a new or existing session. Each pane can move into its own tab. Layouts survive reopening; mobile displays their sessions as normal tabs. The desktop sidebar can collapse, with the preference retained. Settings includes friendly host names, ordering and the default host, dark/light/system/circadian themes, and notification controls. Host settings follow the selected machine immediately, including its identity and update controls. The native desktop app also manages the local host service and pairs to other hosts; local service controls appear only for the local host, while desktop application updates remain separate. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
+
+**Claude Code ↔ Codex bridge.** When both `claude` and `codex` are installed on a host, Settings shows one switch. Turned on, real Claude Code and Codex sessions opened in jaunt shells on the same project automatically know about each other (as ordinary hook context) and can message each other's open conversation, at your request or on their own initiative. Off by default; turning it off removes everything jaunt added to both runtimes. See the [bridge guide](docs/BRIDGE.md).
 
 ## Image handling
 
@@ -135,6 +137,7 @@ python tests/shared_workspace_e2e.py # Electron + browser sharing real PTYs; nee
 python tests/terminal_render_e2e.py  # Scroll, selection and terminal geometry
 python tests/installer_e2e.py        # Real wheel install and protected upgrade
 python tests/client_update_e2e.py    # Browser-driven host self-update, pushed progress, refusal of a broken release
+python tests/bridge_e2e.py           # Real Claude Code and Codex sessions discover and message each other through the bridge (uses your real accounts)
 ```
 
 Set `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.

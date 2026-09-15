@@ -242,6 +242,8 @@ class Host:
         self.last_update_check = -float("inf")
         self.update_status_stamp = None
         self.update_watch_until = -float("inf")
+        from .bridge import Bridge
+        self.bridge = Bridge(self)
 
     def info(self) -> dict:
         from .updates import status as update_status
@@ -250,7 +252,7 @@ class Host:
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
                 "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
-                "updates": update_status(self.state.root),
+                "updates": update_status(self.state.root), "bridge": self.bridge.status(),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
     def attention(self, session, event, title="", body=""):
@@ -408,6 +410,11 @@ class Host:
             return configure(p.get("automatic"))
         if method == "updates.install":
             return self.launch_update(allow_restart=p.get("allowRestart") is True)
+        if method == "bridge.status":
+            await self.bridge.detect(force=p.get("refresh") is True)
+            return self.bridge.status()
+        if method == "bridge.configure":
+            return await self.bridge.configure(p.get("enabled"))
         if method == "notifications.subscribe":
             validate_subscription(p)
             self.state.data["push"][peer.device_id] = p
@@ -579,6 +586,14 @@ class Host:
                 result = await self.exec_for_upgrade(Path(p["python"]).absolute())
             elif method == "upgrade.stop":
                 result = self.stop_for_upgrade(p.get("allowRestart", False))
+            elif method == "bridge.register":
+                result = await self.bridge.register(p)
+            elif method == "bridge.peers":
+                result = self.bridge.peers_for(self.bridge.resolve(p))
+            elif method == "bridge.send":
+                result = await self.bridge.send(self.bridge.resolve(p))
+            elif method == "bridge.wait":
+                result = await self.bridge.wait_reply(self.bridge.resolve(p))
             elif method == "stop":
                 result = {"stopping": True}
                 asyncio.get_running_loop().call_later(0.1, self.stopping.set)
@@ -607,6 +622,11 @@ class Host:
             tick += 5
             if tick % 60 == 0:
                 self.files.cleanup()
+            if self.bridge.enabled and self.bridge.sweep():
+                await self.bridge.changed()
+            if tick % 300 == 0 and self.peers:
+                with contextlib.suppress(Exception):
+                    await self.bridge.detect(force=True)
             if self.update_process is not None:
                 self.update_process.poll()
             from .updates import installation, status
@@ -709,6 +729,8 @@ class Host:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self.stopping.set)
         transport_task = asyncio.create_task(self.transport.run())
+        detection = asyncio.create_task(self.bridge.detect())
+        detection.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
         maintenance = asyncio.create_task(self.maintenance())
         update_watch = asyncio.create_task(self.watch_update())
         programs = asyncio.create_task(self.watch_programs())

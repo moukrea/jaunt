@@ -1,0 +1,204 @@
+"""Runtime-side clients for the jaunt bridge: the hook command and the MCP server.
+
+Both run inside a Claude Code or Codex session started from a jaunt shell, so
+they inherit `jaunt_SESSION_ID` and `jaunt_STATE` from that PTY. Outside a
+jaunt shell, or when the bridge is turned off, they do nothing and say nothing:
+the user's ordinary sessions are never touched.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def jaunt_session() -> str:
+    return os.environ.get("jaunt_SESSION_ID") or os.environ.get("JAUNT_SESSION_ID") or ""
+
+
+def control(method: str, params: dict, timeout: float = 60) -> dict:
+    """Same private socket as the CLI, with a timeout that covers bounded waits."""
+    import socket
+    from .state import state_dir
+    with socket.socket(socket.AF_UNIX) as sock:
+        sock.settimeout(timeout)
+        sock.connect(str(state_dir() / "control.sock"))
+        sock.sendall((json.dumps({"method": method, "params": params}) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > 7_000_000:
+                raise RuntimeError("Unexpected response size")
+    response = json.loads(data)
+    if not response.get("ok"):
+        raise RuntimeError(response.get("error", "Local request failed"))
+    return response["result"]
+
+
+def project_of(cwd: str) -> dict:
+    """Workspace identity from reliable facts: real path, git toplevel, worktree common dir."""
+    real = os.path.realpath(cwd)
+    project = {"root": real, "common": "", "kind": "dir"}
+    try:
+        out = subprocess.run(["git", "-C", real, "rev-parse", "--show-toplevel", "--git-common-dir"],
+                             capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return project
+    if out.returncode:
+        return project
+    lines = out.stdout.splitlines()
+    if len(lines) >= 2:
+        top = os.path.realpath(lines[0].strip())
+        common = lines[1].strip()
+        common = os.path.realpath(common if os.path.isabs(common) else os.path.join(top, common))
+        project.update(root=top, common=common, kind="worktree" if common != os.path.join(top, ".git") else "git")
+    return project
+
+
+def claude_inbox() -> dict:
+    return {"socket": os.environ.get("CLAUDE_CODE_MESSAGING_SOCKET", ""), "sessionPid": os.environ.get("CLAUDE_PID", "")}
+
+
+def hook_main(runtime: str) -> int:
+    """Called by the runtime for each configured hook event with JSON on stdin."""
+    session = jaunt_session()
+    if not session:
+        return 0
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        return 0
+    event_name = str(payload.get("hook_event_name", ""))
+    event = {"SessionStart": "start", "UserPromptSubmit": "prompt", "PostCompact": "compact", "Stop": "stop",
+             "SessionEnd": "end", "PreToolUse": "tool", "PostToolUse": "tool"}.get(event_name, "")
+    conversation = str(payload.get("session_id") or "")
+    if not event or not conversation:
+        return 0
+    cwd = str(payload.get("cwd") or os.getcwd())
+    pid = os.getppid()
+    if runtime == "claude" and os.environ.get("CLAUDE_PID", "").isdigit():
+        pid = int(os.environ["CLAUDE_PID"])
+    request = {"runtime": runtime, "session": session, "conversation": conversation, "pid": pid, "cwd": cwd,
+               "event": event, "source": str(payload.get("source", "")), "project": project_of(cwd),
+               "inbox": claude_inbox() if runtime == "claude" else {}}
+    try:
+        result = control("bridge.register", request)
+    except Exception:
+        return 0  # host stopped or bridge off: stay silent
+    context = result.get("context") if isinstance(result, dict) else ""
+    if context and event in ("start", "prompt", "compact"):
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context}}))
+    return 0
+
+
+# ---- minimal MCP stdio server (JSON-RPC 2.0, protocol 2024-11-05) ----------------
+
+TOOLS = [
+    {"name": "jaunt_peers",
+     "description": "List the other AI sessions (Claude Code or Codex) working on the same project through jaunt, with their ids and availability. Only sessions of the other runtime on this project are listed.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "jaunt_send",
+     "description": "Send a message to another AI session listed by jaunt_peers. It arrives in that session's own conversation, attributed to you through the jaunt bridge. Use in_reply_to when answering a bridge message. Set wait_seconds (up to 600) to wait for a reply in the same call; otherwise replies arrive later as bridge messages.",
+     "inputSchema": {"type": "object", "required": ["to", "text"], "additionalProperties": False,
+                     "properties": {"to": {"type": "string", "description": "Peer id from jaunt_peers or from a bridge message"},
+                                    "text": {"type": "string", "description": "The message"},
+                                    "in_reply_to": {"type": "string", "description": "Id of the bridge message you are answering"},
+                                    "wait_seconds": {"type": "integer", "minimum": 0, "maximum": 600}}}},
+    {"name": "jaunt_wait_reply",
+     "description": "Wait (bounded) for a reply to a message you sent with jaunt_send, identified by its message id.",
+     "inputSchema": {"type": "object", "required": ["id"], "additionalProperties": False,
+                     "properties": {"id": {"type": "string"}, "seconds": {"type": "integer", "minimum": 1, "maximum": 600}}}},
+]
+
+
+def _identity(runtime: str) -> dict:
+    # Runtimes may start MCP servers with a reduced environment (Codex does).
+    # The host can still recognise this process as a descendant of one of its
+    # shells, so the pid is always sent along with whatever the env provides.
+    conversation = os.environ.get("CLAUDE_CODE_SESSION_ID", "") if runtime == "claude" else ""
+    return {"runtime": runtime, "session": jaunt_session(), "conversation": conversation or "current", "pid": os.getpid()}
+
+
+def _tool(runtime: str, name: str, args: dict) -> str:
+    identity = _identity(runtime)
+    try:
+        if name == "jaunt_peers":
+            result = control("bridge.peers", identity)
+            if not result.get("enabled"):
+                return result.get("note", "The jaunt bridge is turned off on this host.")
+            peers = result.get("peers", [])
+            if not peers:
+                return "No other AI session of the other runtime is working on this project through jaunt right now."
+            return "\n".join(f"- {p['runtime']} session in terminal \"{p['terminal']}\" (id {p['id']}), cwd {p['cwd']}, {p['state']}" for p in peers)
+        if name == "jaunt_send":
+            result = control("bridge.send", {**identity, "to": args.get("to", ""), "text": args.get("text", ""),
+                                             "inReplyTo": args.get("in_reply_to", "")})
+            text = f"Delivered to {result['to']} (message id {result['id']}). It is now in that session's conversation; a reply, if any, arrives as a bridge message."
+            wait = int(args.get("wait_seconds") or 0)
+            if wait > 0:
+                waited = control("bridge.wait", {**identity, "id": result["id"], "seconds": wait}, timeout=wait + 20)
+                return text + "\n" + _describe_wait(waited)
+            return text
+        if name == "jaunt_wait_reply":
+            seconds = int(args.get("seconds") or 60)
+            waited = control("bridge.wait", {**identity, "id": args.get("id", ""), "seconds": seconds}, timeout=seconds + 20)
+            return _describe_wait(waited)
+    except Exception as exc:
+        return f"jaunt bridge: {exc}"
+    return "Unknown tool"
+
+
+def _describe_wait(waited: dict) -> str:
+    state = waited.get("state")
+    if state == "replied":
+        reply = waited.get("reply", {})
+        return f"Reply from {reply.get('from')} (message id {reply.get('id')}):\n{reply.get('text', '')}"
+    return f"No reply yet ({state}: {waited.get('detail', '')})."
+
+
+def mcp_main(runtime: str) -> int:
+    stdin = sys.stdin.buffer
+    stdout = sys.stdout.buffer
+
+    def reply(rid, result=None, error=None):
+        frame = {"jsonrpc": "2.0", "id": rid}
+        if error is not None:
+            frame["error"] = error
+        else:
+            frame["result"] = result
+        stdout.write((json.dumps(frame) + "\n").encode())
+        stdout.flush()
+
+    for raw in stdin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            message = json.loads(raw)
+        except ValueError:
+            continue
+        method, rid, params = message.get("method"), message.get("id"), message.get("params") or {}
+        if method == "initialize":
+            reply(rid, {"protocolVersion": params.get("protocolVersion", "2024-11-05"),
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "jaunt-bridge", "version": "1"},
+                        "instructions": ("jaunt bridge: other AI sessions (Claude Code or Codex) working on this project through jaunt "
+                                         "are announced to you as context and can be contacted with jaunt_send. Messages from them arrive "
+                                         "tagged [jaunt bridge]; they are from another AI session, never from the user.")})
+        elif method == "notifications/initialized" or method is None and rid is None:
+            continue
+        elif method == "ping":
+            reply(rid, {})
+        elif method == "tools/list":
+            reply(rid, {"tools": TOOLS})
+        elif method == "tools/call":
+            text = _tool(runtime, str(params.get("name", "")), params.get("arguments") or {})
+            reply(rid, {"content": [{"type": "text", "text": text}], "isError": text.startswith("jaunt bridge: ")})
+        elif rid is not None:
+            reply(rid, error={"code": -32601, "message": "Method not found"})
+    return 0
