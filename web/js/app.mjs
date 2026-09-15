@@ -266,12 +266,12 @@ function rememberLayout(a, tree) {
 function renameGesture(node,run) {
   node.addEventListener('dblclick',e=>{e.preventDefault();run();});
 }
-function reorderTab(a,from,to) {
+async function reorderTab(a,from,to) {
   if(from===to)return;
   if(isMobile()) {
     const order=a.machine.tabOrder||a.sessions.map(s=>s.id),id=order.splice(from,1)[0];order.splice(to,0,id);a.machine.tabOrder=order;
   } else {const tree=a.machine.layouts.splice(from,1)[0];a.machine.layouts.splice(to,0,tree);}
-  renderTabs(a);persist().catch(report);
+  await persist();renderTabs(a);
 }
 function tabDrag(node,a,index) {
   let drag;
@@ -285,9 +285,9 @@ function tabDrag(node,a,index) {
     rows.forEach((row,i)=>row.classList.toggle('tab-drop-target',i===drag.to));
     const r=$('tabs').getBoundingClientRect();if(e.clientX>r.right-30)$('tabs').scrollLeft+=15;if(e.clientX<r.left+30)$('tabs').scrollLeft-=15;
   });
-  node.addEventListener('pointerup',e=>{const d=drag;drag=null;if(!d?.moving)return;e.preventDefault();node.dataset.dragged='1';setTimeout(()=>delete node.dataset.dragged,0);document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));if(d.to>=0)reorderTab(a,d.index,d.to);});
+  node.addEventListener('pointerup',e=>{const d=drag;drag=null;if(!d?.moving)return;e.preventDefault();node.dataset.dragged='1';setTimeout(()=>delete node.dataset.dragged,0);document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));if(d.to>=0)reorderTab(a,d.index,d.to).catch(report);});
   node.addEventListener('pointercancel',()=>{drag=null;document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));});
-  node.addEventListener('keydown',e=>{if(e.altKey&&e.shiftKey&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const to=index+(e.key==='ArrowLeft'?-1:1);if(to>=0&&to<$('tabs').children.length)reorderTab(a,index,to);}});
+  node.addEventListener('keydown',e=>{if(e.altKey&&e.shiftKey&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const to=index+(e.key==='ArrowLeft'?-1:1);if(to>=0&&to<$('tabs').children.length)reorderTab(a,index,to).catch(report);}});
 }
 function renderTabs(a) {
   const sessions=a.sessions.filter(s=>!a.machine.openSessions||a.machine.openSessions.includes(s.id));
@@ -532,6 +532,7 @@ function arrangePanes(axis) {
     a.machine.openSessions ||= [];
     if (!a.machine.openSessions.includes(id)) a.machine.openSessions.push(id);
     rememberLayout(a, split(a.machine.layout || {id:target}, target, id, axis));
+    await persist();
     await selectSession(a,id);
   };
   picker.append(button(tr('New shell'),async()=>{picker.remove();await newSession(axis);},'button','plus'));
@@ -544,6 +545,7 @@ function arrangePanes(axis) {
 }
 async function undockPane(a,id) {
   rememberLayout(a,{id});
+  await persist();
   await selectSession(a,id);
 }
 async function sendInput(a, t, text) {
@@ -594,6 +596,7 @@ async function newSession(splitAxis = null, options = {}) {
     a.machine.openSessions ||= [];
     if (!a.machine.openSessions.includes(result.id)) a.machine.openSessions.push(result.id);
     rememberLayout(a,split(a.machine.layout || {id:splitTarget},splitTarget,result.id,splitAxis));
+    await persist();
   }
   closeModal(); view='terminal'; await selectSession(a,result.id);
   } finally {

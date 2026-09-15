@@ -52,6 +52,9 @@ async def main():
             await local.get_by_label('Working directory').fill(str(h.work))
             await local.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
             await local.get_by_role('tab',name='Shared fixture',exact=True).click()
+            # Reproduce a slow durable write: the visible split must survive an
+            # immediate reload even before later selection metadata is saved.
+            await local.evaluate("""async()=>{const {Vault}=await import('./js/vault.mjs');const save=Vault.prototype.save;Vault.prototype.save=async function(){await new Promise(r=>setTimeout(r,300));return save.call(this);};}""")
             await local.locator('#arrange-panes').click()
             await local.locator('.split-picker').get_by_role('button',name='Second pane',exact=True).click()
             await expect(local.locator('.terminal-container:not([hidden])')).to_have_count(2)
