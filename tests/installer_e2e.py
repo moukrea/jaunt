@@ -33,6 +33,13 @@ def main():
              'jaunt_PREFIX':str(t/'runtime'),'jaunt_BIN_DIR':str(t/'bin'),'jaunt_STATE':str(t/'state'),
              'jaunt_PAGE_URL':url,'jaunt_RELEASE_BASE':url,'jaunt_NO_SERVICE':'1','jaunt_SKIP_PAIR':'1',
              'PIP_NO_INDEX':'1','PIP_DISABLE_PIP_VERSION_CHECK':'1'}
+        sentinels=t/'service-manager-sentinels';sentinels.mkdir()
+        service_calls=t/'unexpected-service-manager-call'
+        for binary in ('systemctl','launchctl'):
+            script=sentinels/binary
+            script.write_text('#!/bin/sh\nprintf called >> '+str(service_calls)+'\nexit 99\n')
+            script.chmod(0o700)
+        env['PATH']=str(sentinels)+os.pathsep+env['PATH']
         env.pop('PYTHONPATH',None) # The wheel, not the source tree, must be imported.
         # This tool environment itself is a venv; nested --system-site-packages
         # inherits its base interpreter rather than the outer venv dependencies.
@@ -107,6 +114,8 @@ def main():
                 assert set(json.loads((t/'state/host.json').read_text())['devices'])==devices
                 expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
                 passed('explicit restart ends plain shell, preserves identity/devices and reconnects browser')
+                assert not service_calls.exists(), 'No-service installation invoked the account service manager'
+                passed('no-service installation never calls systemctl or launchctl')
                 browser.close()
         finally:
             if exe.exists():subprocess.run([str(exe),'stop'],env=env,capture_output=True,timeout=15)

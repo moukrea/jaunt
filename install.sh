@@ -206,7 +206,9 @@ if [[ -x "$PREFIX/current/bin/python" ]]; then
     COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$jaunt_INSTALL_TMP/status.json")"
     [[ "$COUNT" == 0 || "${jaunt_ALLOW_RESTART:-0}" == 1 ]] || fail 'A plain shell started during the upgrade; not stopping it.'
     "$PREFIX/current/bin/python" -c 'import os; from jaunt.cli import control; control("upgrade.stop", {"allowRestart": os.environ.get("jaunt_ALLOW_RESTART") == "1"})' || fail 'Host refused the upgrade shutdown; previous runtime retained.'
-    "$PREFIX/current/bin/python" -m jaunt.cli service stop >/dev/null 2>&1 || true
+    if [[ "${jaunt_NO_SERVICE:-0}" != 1 ]]; then
+      "$PREFIX/current/bin/python" -m jaunt.cli service stop >/dev/null 2>&1 || true
+    fi
     "$PREFIX/current/bin/python" -m jaunt.cli stop >/dev/null 2>&1 || true
     sleep 1
   fi
