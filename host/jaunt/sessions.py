@@ -1,6 +1,7 @@
 """Real POSIX PTYs. Closing a network connection never closes a shell."""
 from __future__ import annotations
 
+import pwd
 import asyncio
 import errno
 import fcntl
@@ -33,9 +34,12 @@ class AttentionParser:
     """
     def __init__(self):
         self.state, self.payload = 'text', bytearray()
+        self.messages = []
+        self.overflow = False
 
     def feed(self, data: bytes) -> set[str]:
         events = set()
+        self.messages = []
         for byte in data:
             if self.state == 'text':
                 if byte == 7:
@@ -45,9 +49,18 @@ class AttentionParser:
             elif self.state == 'escape':
                 self.state = 'osc' if byte == 93 else 'text'
                 self.payload.clear()
+                self.overflow = False
             elif self.state in ('osc', 'osc-escape'):
                 if byte == 7 or (self.state == 'osc-escape' and byte == 92):
-                    if self.payload.startswith((b'9;', b'777;notify;')):
+                    if not self.overflow and self.payload.startswith((b'9;', b'777;notify;')):
+                        text = self.payload.decode('utf-8', errors='replace')
+                        if text.startswith('777;notify;'):
+                            parts = text.split(';', 3)
+                            title, body = parts[2], parts[3] if len(parts) > 3 else ''
+                        else:
+                            title, body = '', text[2:]
+                        clean = lambda value: ''.join(c for c in value if c >= ' ' or c == '\n')
+                        self.messages.append((clean(title)[:100], clean(body)[:400]))
                         events.add('program')
                     self.state = 'text'
                     self.payload.clear()
@@ -55,8 +68,10 @@ class AttentionParser:
                     self.state = 'osc-escape'
                 else:
                     self.state = 'osc'
-                    if len(self.payload) < 64:
+                    if len(self.payload) < 4096:
                         self.payload.append(byte)
+                    else:
+                        self.overflow = True
         return events
 
 
@@ -138,10 +153,14 @@ class Sessions:
         name = str(data.get("name") or f"Shell {len(self.items) + 1}")[:80]
         cols, rows = dimensions(data)
         tmux = str(data.get("tmux") or "")
-        shell = os.environ.get("SHELL") or "/bin/bash"
+        shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
         if not os.path.isfile(shell):
             shell = "/bin/sh"
-        command = [shell, "-l"]
+        # Bash login profiles may omit .bashrc entirely. Load the login environment,
+        # then start the same interactive shell, just as a desktop terminal does.
+        # Never source account startup files inside the daemon itself.
+        command = ([shell, "-l", "-c", 'exec "$0" -i', shell]
+                   if Path(shell).name == "bash" else [shell, "-i", "-l"])
         if tmux:
             if len(tmux) > 100 or "\0" in tmux:
                 raise ValueError("Invalid tmux session")
@@ -156,7 +175,7 @@ class Sessions:
                 command = ["tmux", "attach-session", "-t", "=" + tmux]
         fd, slave = pty.openpty()
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
-               "jaunt_SESSION_ID": sid, "jaunt_STATE": str(self.root)}
+               "SHELL": shell, "jaunt_SESSION_ID": sid, "jaunt_STATE": str(self.root)}
         # Old installed CLIs inside the shell keep working during a rolling upgrade.
         for key in ("jaunt_SESSION_ID", "jaunt_STATE"):
             env[key.upper()] = env[key]
@@ -220,7 +239,11 @@ class Sessions:
         while True:
             chunk = await s.queue.get()
             for event in s.attention.feed(chunk):
-                self.attention(s, event)
+                if event == 'program':
+                    for title, body in s.attention.messages:
+                        self.attention(s, event, title, body)
+                else:
+                    self.attention(s, event)
             if s.alive:
                 self._resume_reader(s)
             async with s.lock:

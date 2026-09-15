@@ -15,7 +15,7 @@ The primitives come from cryptography and Web Crypto. **Their composition into t
 - Without a password, keys are stored unencrypted in IndexedDB, like a remembered session. A password/PIN encrypts them at rest; a short PIN remains vulnerable to offline guessing. Prefer a long passphrase.
 - Locking stops connections and clears active views. It does not guarantee cryptographic erasure of browser RAM.
 - A complete QR code grants shell access for ten minutes. Never put it in an issue, public screenshot, CI log, or analytics.
-- Browser notifications are delivered through the browser's push service. jaunt hides command content by default, but machine names and timing remain sensitive.
+- Browser notifications are delivered through the browser's push service. Program-supplied notification titles and bodies are displayed and sent through that service; do not include secrets in notifications. Android follows system lock-screen privacy settings. Terminal output is not scraped for notifications.
 - A revoked device can no longer authenticate to the channel, but knows the previous shared routing capability. It may still disrupt relay availability until the host identity is rotated. Routing secrets are not a complete quota or anti-DDoS system.
 
 ## Shared GitHub Pages origin

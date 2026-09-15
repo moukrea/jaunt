@@ -225,11 +225,11 @@ class Host:
                 "updates": update_status(self.state.root),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
-    def attention(self, session, event):
+    def attention(self, session, event, title="", body=""):
         if not self.state.data.get('attention', {}).get(event, True):
             return
-        title = f'{session.name} finished' if event == 'exit' else f'{session.name} needs attention'
-        task = asyncio.create_task(self.notify(title, '', session.id))
+        title = title or (f'{session.name} finished' if event == 'exit' else session.name)
+        task = asyncio.create_task(self.notify(title, body, session.id))
         task.add_done_callback(lambda future: future.exception() if not future.cancelled() else None)
 
     async def send(self, peer: str, data: dict) -> None:

@@ -26,7 +26,7 @@ xterm 6 supports synchronized output (DEC mode 2026). Application-specific alter
 
 ## Tiled tabs
 
-On desktop, use **Arrange panes** to split the active pane side by side or above/below with another session. Drag the divider, or focus it and use arrow keys. Each tab can contain a split tree; selecting another tab preserves previous groups. **Single pane** removes the active session from its group without terminating other sessions.
+On desktop, use **Split view** to split the active pane side by side or above/below with another session. Drag the divider, or focus it and use arrow keys. Each tab can contain a split tree; selecting another tab preserves previous groups. **Single pane** removes the active session from its group without terminating other sessions.
 
 Layouts, ratios, open views, host order, friendly names, and the default host are stored in this device's vault. They survive reconnection and app reopening. On mobile, each session in a split group appears as an ordinary tab; returning to desktop width restores the split arrangement. Layout preferences are per client, so one device does not rearrange another device's workspace.
 
@@ -36,7 +36,7 @@ The graphical host installer installs the desktop application for the current us
 
 The desktop interface is the same bundled interface as the web client, with an additional **This computer** settings group: install/update the host, start it, install its login service, pair another device, and explicitly authorize an update/restart. It can also pair to other hosts as a normal client. Local shells are accessible through a private same-account Unix socket without requiring a relay connection; remote clients still authenticate through the encrypted relay.
 
-Linux user-space archives rely on the system permitting Chromium's user-namespace sandbox. On systems restricting that mechanism, install the `.deb`/`.rpm` package through the system package installer. Production launchers never add `--no-sandbox`. macOS desktop artifacts are unsigned; OS trust prompts may apply. Closing the desktop window leaves the daemon and shells running. Desktop notifications require the desktop app to remain running.
+Linux user-space archives rely on the system permitting Chromium's user-namespace sandbox. On Ubuntu restricting that mechanism, `jaunt gui` and the graphical installer automatically select the `.deb` package and request system authorization if required. The package configures its scoped AppArmor profile. Production launchers never add `--no-sandbox`. macOS desktop artifacts are unsigned; OS trust prompts may apply. Closing the desktop window leaves the daemon and shells running. Desktop notifications require the desktop app to remain running.
 
 ## Preferences and notifications
 
@@ -45,3 +45,7 @@ Settings uses a gear icon. Dark is the default. Light, System, and Circadian are
 Each host exposes event switches for terminal bells, program notifications (OSC 9 and OSC 777), and session exit. These switches affect that host's event generation. Enable delivery separately on each client: native Android background notifications, browser Web Push, or desktop OS notifications. `jaunt notify` and `jaunt run -- command` remain available for explicit notifications and individual command completion. The shell cannot reliably infer every application's notion of “finished thinking.”
 
 Notifications omit terminal output by default. Browser/OS permissions, force-stop, battery policies, network availability, and the host being online affect background delivery. No guaranteed delivery or independent security audit is claimed.
+
+Program notifications preserve OSC 9 message text and OSC 777 title/body. Clicking a native notification selects its host and session, including after reconnecting or unlocking. Android follows the OS lock-screen privacy settings. Terminal output is not scraped to invent notification text.
+
+Interface pictograms use pinned, locally bundled Lucide icons (ISC license). The supplied jaunt artwork remains the application logo; Linux packages include standard icon sizes and Android uses an adaptive launcher wrapper around that artwork.

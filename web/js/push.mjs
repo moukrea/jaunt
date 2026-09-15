@@ -24,7 +24,7 @@ export async function subscribe(vault, link) {
     await subscription.unsubscribe(); subscription = null;
   }
   subscription ||= await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: expected});
-  await link.request('notifications.subscribe', {subscription: subscription.toJSON(), vapidPrivate: vault.data.vapid.private, showDetails: false});
+  await link.request('notifications.subscribe', {subscription: subscription.toJSON(), vapidPrivate: vault.data.vapid.private, showDetails: true});
   link.machine.push = true; await vault.save();
   return true;
 }
@@ -34,4 +34,13 @@ export async function unsubscribe(vault, link) {
   // Removing it here would silently break push from the other hosts.
   await link.request('notifications.unsubscribe');
   link.machine.push = false; await vault.save();
+}
+
+// Refresh an already authorized subscription after client upgrades, without
+// requesting permission or creating another subscription.
+export async function refresh(vault, link) {
+  if(isAndroid || !vault.data.vapid || !('serviceWorker' in navigator))return;
+  const reg=await navigator.serviceWorker.getRegistration();
+  const subscription=await reg?.pushManager.getSubscription();
+  if(subscription)await link.request('notifications.subscribe',{subscription:subscription.toJSON(),vapidPrivate:vault.data.vapid.private,showDetails:true});
 }

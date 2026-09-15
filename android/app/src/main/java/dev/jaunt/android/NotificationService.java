@@ -42,9 +42,9 @@ public class NotificationService extends Service {
     }
     private void status(){long online=connections.values().stream().filter(c->c.online).count();getSystemService(NotificationManager.class).notify(1,ongoing(online+" / "+connections.size()+" hosts connected · reconnects automatically"));}
     private void notifyEvent(JSONObject machine,JSONObject value){
-        // Never expose terminal output or arbitrary notification bodies on a locked screen.
+        // Program notification text is shown; Android controls lock-screen visibility.
         String room=machine.optString("room"),session=value.optString("session");
-        Notification n=new Notification.Builder(this,EVENTS).setSmallIcon(dev.jaunt.android.R.drawable.ic_jaunt).setContentTitle("jaunt").setContentText(machine.optString("name","Your host")+" needs your attention.").setContentIntent(open(room,session)).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build();
+        Notification n=new Notification.Builder(this,EVENTS).setSmallIcon(dev.jaunt.android.R.drawable.ic_jaunt).setContentTitle(value.optString("title","jaunt")).setContentText(value.optString("body","")).setStyle(new Notification.BigTextStyle().bigText(value.optString("body",""))).setContentIntent(open(room,session)).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build();
         getSystemService(NotificationManager.class).notify(100+Math.floorMod(Objects.hash(room,session),100000),n);
     }
     private class Connection {

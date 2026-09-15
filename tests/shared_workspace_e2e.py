@@ -24,6 +24,7 @@ async def main():
             assert native,'Desktop did not start'
             local=native.contexts[0].pages[0]
             await expect(local.locator('#connection span')).to_have_text('Local connection',timeout=15000)
+            assert await local.evaluate('Array.from(document.images).every(i=>i.complete && i.naturalWidth>0)'), 'Bundled desktop logo did not load'
             await local.locator('#new-session-top').click()
             await local.get_by_label('Session name').fill('Shared fixture')
             await local.get_by_label('Working directory').fill(str(h.work))
@@ -54,6 +55,8 @@ async def main():
             await expect(local.locator('.terminal-container:not([hidden])')).to_have_count(2)
             await expect(local.get_by_role('tab',name='Shared fixture + Second pane')).to_be_visible()
             await local.reload()
+            await expect(local.locator('.terminal-container:not([hidden])')).to_have_count(2)
+            await local.reload();await expect(local.locator('#connection span')).to_have_text('Local connection',timeout=15000)
             await expect(local.locator('.terminal-container:not([hidden])')).to_have_count(2)
             await local.set_viewport_size({'width':390,'height':750})
             await expect(local.locator('.terminal-container:not([hidden])')).to_have_count(1)

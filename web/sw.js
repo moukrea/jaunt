@@ -1,10 +1,12 @@
 // precache:begin
-const CACHE = 'jaunt-static-3d23af9f862eb438';
-const STATIC = ["./","./assets/jaunt.png","./index.html","./js/app.mjs","./js/crypto.mjs","./js/desktop.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./js/workspace.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
+const CACHE = 'jaunt-static-2dc36d37e2d2e75e';
+const STATIC = ["./","./assets/jaunt.png","./index.html","./js/app.mjs","./js/crypto.mjs","./js/desktop.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/touch-scroll.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./js/workspace.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/lucide.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
 // precache:end
 const base = new URL('./', self.location.href);
 const resources = new Set(STATIC.map(path => new URL(path, base).href));
-self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(STATIC))));
+self.addEventListener('install', event => event.waitUntil((async()=>{
+  const cache=await caches.open(CACHE);await cache.addAll(STATIC);await self.skipWaiting();
+})()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const name of await caches.keys()) if (name.startsWith('jaunt-static-') && name !== CACHE) await caches.delete(name);
   await self.clients.claim();

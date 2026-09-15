@@ -5,8 +5,19 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {build} from 'esbuild';
+import sharp from 'sharp';
 for(const [key,value] of Object.entries(process.env)) if(key.toLowerCase().startsWith('jaunt_')) process.env['jaunt_'+key.slice(6)] ??= value;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), web = path.join(root, 'web');
+// Resize the supplied artwork into standard desktop icon-theme directories.
+// Nonstandard 547x547 entries are not indexed by common Linux icon themes.
+const iconDir=path.join(root,'desktop/icons');await fs.mkdir(iconDir,{recursive:true});
+for(const size of [16,24,32,48,64,128,256,512]) {
+  await sharp(path.join(web,'assets/jaunt.png')).resize(size,size).png().toFile(path.join(iconDir,`${size}x${size}.png`));
+  await fs.chmod(path.join(iconDir,`${size}x${size}.png`),0o644);
+}
+const icons = await build({stdin:{contents: "export {createElement, Terminal, Plus, X, ChevronRight, ChevronDown, Menu, Monitor, Folder, File, Image, Upload, Download, Copy, ClipboardPaste, Paperclip, Lock, ShieldCheck, QrCode, Settings, Bell, Check, RefreshCw, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Trash2, Pencil, Keyboard, Ellipsis, ExternalLink, Eye, Zap, Search, LogOut, TriangleAlert, ArrowDownUp, Sun} from 'lucide';",resolveDir:root},bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,write:false});
+await fs.writeFile(path.join(web,'vendor/lucide.mjs'),icons.outputFiles[0].contents);
+await fs.copyFile(path.join(root,'node_modules/lucide/LICENSE'),path.join(web,'vendor/LICENSE-lucide.txt'));
 const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/xterm'; import {FitAddon} from '@xterm/addon-fit'; export default {Terminal, FitAddon};", resolveDir: root}, bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false});
 await fs.writeFile(path.join(web, 'vendor/xterm.mjs'), terminal.outputFiles[0].contents);
 await fs.copyFile(path.join(root, 'node_modules/@xterm/xterm/css/xterm.css'), path.join(web, 'vendor/xterm.css'));

@@ -8,7 +8,7 @@ Install the signed APK from the Android release, then open jaunt and scan the ho
 
 Open a shell and use Paste after copying a screenshot. With a supported host clipboard the image is uploaded, copied into that clipboard and Ctrl+V is sent to the selected PTY without Enter. Otherwise the existing explicit path/attachment choices remain. Attach opens Android's file/gallery picker. Shared images from another app require a confirmation naming the destination shell. Downloads open Android's Save dialog.
 
-Enable Android background notifications under Settings for each host. Android requests notification permission; a persistent notification shows the connection count and offers Stop. Notifications show a generic host attention message, with no terminal output on the lock screen. `jaunt notify "Need your attention"` and `jaunt run -- command` can trigger them. The host's user service must be active.
+Enable Android background notifications under Settings for each host. Android requests notification permission; a persistent notification shows the connection count and offers Stop. Notifications display the program’s title and message and open its host/session when tapped. Android controls lock-screen visibility. jaunt does not scrape terminal output to fabricate notification text. `jaunt notify "Need your attention"` and `jaunt run -- command` can trigger them. The host's user service must be active.
 
 Android may restrict network access in deep idle or under vendor battery policies. Force-stop prevents automatic operation until the app is opened again. Notification delivery is not guaranteed. A foreground service is not a VPN and does not require Firebase/FCM credentials.
 

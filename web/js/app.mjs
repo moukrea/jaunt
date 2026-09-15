@@ -1,3 +1,4 @@
+import {bindTouchScroll} from './touch-scroll.mjs';
 import {desktop, LocalLink} from './desktop.mjs';
 import {leaves, prune, split, themeMode} from './workspace.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
@@ -85,10 +86,11 @@ function makeMachine(machine) {
       if (view === 'settings') renderSettings();
     }
     if (machine.pending === false && machine.push) {
-      // Host already retains subscription; no permission prompt on reconnect.
+      // Refresh existing browser delivery settings without a permission prompt.
+      if(!desktop && !isAndroid)push.refresh(vault,a.link).catch(report);
     }
     if (deepLink.get('host') === machine.room && deepLink.get('session')) {
-      selected = machine.room; if (a.sessions.some(s => s.id === deepLink.get('session'))) selectSession(a, deepLink.get('session')).catch(report);
+      selected = machine.room; setView('terminal'); if (a.sessions.some(s => s.id === deepLink.get('session'))) selectSession(a, deepLink.get('session')).catch(report);
       deepLink.delete('session'); render();
     }
   });
@@ -112,7 +114,7 @@ function handleMessage(a, message) {
     const t = a.terms.get(message.id); if (!t) return;
     Object.assign(t.session, message); t.ownsSize = message.activeView === a.peer;
     // Serialize geometry with xterm's asynchronous output parser, including replay.
-    t.term.write('', () => {t.term.resize(message.cols, message.rows);t.term.refresh(0,t.term.rows-1);
+    t.term.write('', () => {resizeTerminal(t, message.cols, message.rows);
       if(t.term.element)t.term.element.style.height=t.ownsSize?'100%':t.node.querySelector('.xterm-screen').getBoundingClientRect().height+'px';
       updateGeometryLabel(a, t);});
   } else if (message.type === 'terminal.reset') {
@@ -134,7 +136,7 @@ function handleMessage(a, message) {
     const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
     render();
   } else if (message.type === 'notification') {
-    if(desktop && prefs().desktopNotifications) desktop.notify({session:message.session,host:a.machine.room}).catch(report);
+    if(desktop && prefs().desktopNotifications) desktop.notify({title:message.title,body:message.body,session:message.session,host:a.machine.room}).catch(report);
     toast(`${message.title}${message.body ? ' — ' + message.body : ''}`, false,
       message.session ? {label: 'Open', run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(report); }} : null);
   } else if (message.type === 'clipboard.available') {
@@ -215,13 +217,21 @@ function createTerm(a, session) {
   node.append(el('div',{class:'pane-caption',text:session.name}));
   const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
     cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, convertEol: false,
-    screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: 100, rescaleOverlappingGlyphs: true,
+    screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
     linkHandler: {activate: (_event, uri) => { try { const u = new URL(uri); if (['https:', 'http:'].includes(u.protocol)) window.open(u.href, '_blank', 'noopener,noreferrer'); } catch {} }},
     theme: {background: '#111314', foreground: '#d9dfd3', cursor: '#e7a246', selectionBackground: '#455342', black: '#151918', brightBlack: '#70786f', red: '#d8897c', green: '#a3c391', yellow: '#e7bc73', blue: '#88adcb', magenta: '#c59bc7', cyan: '#8fc5bf', white: '#dbe0d3', brightWhite: '#f1f3eb'}});
   const mount = el('div',{class:'terminal-mount'});node.append(mount);
   const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
+  bindTouchScroll(mount,term);
   const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false};
   a.terms.set(session.id, t);
+  term.onScroll(() => {
+    const d=fit.proposeDimensions();
+    // Browser layout changes can reset xterm's viewport before its PTY resize.
+    // Only record deliberate scrolling at the last committed dimensions.
+    if(!t.resizing && d?.cols===term.cols && d?.rows===term.rows) rememberScroll(t);
+  });
+
   const area = node.querySelector('textarea');
   if (area) { area.setAttribute('autocorrect', 'off'); area.setAttribute('autocapitalize', 'off'); area.spellcheck = false; area.setAttribute('aria-label', `Terminal ${session.name}`); }
   updateTermInput(a, t); applyTheme();
@@ -315,6 +325,23 @@ function updateGeometryLabel(a, t) {
   const viewers = (t.session.viewers || []).map(v => v.name + (v.active ? ' • active' : '')).join(', ');
   $('terminal-meta').textContent = `${t.session.cwd} · ${t.term.cols} × ${t.term.rows}${viewers ? ' · ' + viewers : ''}${t.trimmed ? ' · older output trimmed' : ''}`;
 }
+function rememberScroll(t) {
+  const b=t.term.buffer.active;
+  t.scrollAnchor?.marker?.dispose();
+  t.scrollAnchor={bottom:b.viewportY>=b.baseY,line:b.viewportY,
+    marker:b.type==='normal' && b.viewportY<b.baseY ? t.term.registerMarker(b.viewportY-b.baseY-b.cursorY) : null};
+}
+function resizeTerminal(t, cols, rows) {
+  if(t.term.cols===cols && t.term.rows===rows)return;
+  if(!t.scrollAnchor)rememberScroll(t);
+  const anchor=t.scrollAnchor;t.resizing=true;
+  t.term.resize(cols, rows);
+  const restore=()=>{
+    t.term.scrollToLine(anchor.bottom ? t.term.buffer.active.baseY : anchor.marker && !anchor.marker.isDisposed ? anchor.marker.line : anchor.line);
+    t.term.refresh(0,t.term.rows-1);
+  };
+  restore();requestAnimationFrame(()=>{restore();t.resizing=false;rememberScroll(t);});
+}
 function claimSize(a, t) {
   if (!t.attached || a.link.state !== 'online' || t.node.hidden) return;
   const owned=t.ownsSize; t.ownsSize = true;
@@ -322,11 +349,16 @@ function claimSize(a, t) {
   try {
     const d = t.fit.proposeDimensions(); if (!d) return;
     if(owned && d.cols===t.term.cols && d.rows===t.term.rows)return;
-    t.fit.fit();
+    resizeTerminal(t, d.cols, d.rows);
     a.link.send({type: 'terminal.resize', id: t.session.id, ...d}).catch(report);
   } catch { /* Retry after layout. */ }
 }
+let fitTimer;
 function fitActive() {
+  if(isMobile()){clearTimeout(fitTimer);fitTimer=setTimeout(fitVisible,120);}
+  else fitVisible();
+}
+function fitVisible() {
   const a = current();
   if (!a || $('terminal-view').hidden || vault.locked) return;
   for (const id of visibleSessions(a)) {
@@ -385,7 +417,7 @@ function arrangePanes() {
   for (const s of other) body.append(el('div',{class:'settings-row'},el('span',{text:s.name}),
     ...[['x','Side by side'],['y','Above / below']].map(([axis,label]) => button(label,async()=>{a.machine.layout=split(a.machine.layout||{id:a.active},a.active,s.id,axis);a.machine.openSessions||=[];if(!a.machine.openSessions.includes(s.id))a.machine.openSessions.push(s.id);rememberLayout(a,a.machine.layout);await persist();closeModal();render();}))));
   body.append(button('Single pane',async()=>{rememberLayout(a,{id:a.active});await persist();closeModal();render();}));
-  if (!other.length) body.append(button('Create another shell',newSession));
+  body.prepend(el('div',{class:'modal-actions'},button('New shell beside',()=>newSession('x')),button('New shell below',()=>newSession('y'))));
   modal('Arrange panes',body);
 }
 async function sendInput(a, t, text) {
@@ -415,23 +447,19 @@ function terminalText(t) {
   }
   return lines.join('\n').replace(/\n+$/, '');
 }
-async function newSession() {
-  const a = online(), id = random(12);
+async function newSession(splitAxis = null) {
+  const a = online(), id = random(12), splitTarget=a.active;
   const name = el('input', {value: `Shell ${a.sessions.length + 1}`, maxLength: 80});
   const cwd = el('input', {value: a.info?.home || '~', spellcheck: false, autocapitalize: 'off'});
-  const mode = el('select', {}, el('option', {value: '', text: 'New shell — survives network disconnects'}));
-  let tmux = [];
-  if (a.info?.tmux) {
-    tmux = await a.link.request('tmux.list');
-    mode.append(el('option', {value: '__new__', text: 'New tmux session — survives host daemon restarts'}));
-    for (const s of tmux) mode.append(el('option', {value: s.name, text: `Attach tmux: ${s.name} (${s.windows} windows)`}));
-  }
-  const body = el('div', {}, field('Session name', name), field('Working directory', cwd), field('Session type', mode,
-    a.info?.tmux ? 'Closing a tmux view does not kill the underlying tmux session.' : 'Install tmux on the host for attachment to external terminals and survival across daemon restarts.'),
+  const body = el('div', {}, field('Session name', name), field('Working directory', cwd),
     el('div', {class: 'modal-actions'}, button('Cancel', closeModal), button('Create shell', async () => {
       const result = await a.link.request('session.create', {id, name: name.value, cwd: cwd.value,
-        tmux: mode.value === '__new__' ? `jaunt-${id}` : mode.value, tmuxCreate: mode.value === '__new__', cols: 100, rows: 30});
+        cols: 100, rows: 30});
       if (!a.sessions.some(s => s.id === result.id)) a.sessions.push(result);
+      if(['x','y'].includes(splitAxis) && splitTarget) {
+        const tree=split(a.machine.layout||{id:splitTarget},splitTarget,result.id,splitAxis);
+        rememberLayout(a,tree);
+      }
       closeModal(); view = 'terminal'; await selectSession(a, result.id);
       if (!isMobile()) activeTerm(a)?.term.focus();
     }, 'button primary')));
@@ -864,11 +892,11 @@ function renderSettings() {
           if (a.machine.push) await push.unsubscribe(vault, a.link); else await push.subscribe(vault, a.link);
           renderSettings(); toast('Notification preference saved.');
         }))] : []),
-      settingsRow('Test delivery', 'Background notifications omit command output by default.', button('Send test', async () => {
+      settingsRow('Test delivery', 'Notifications show the title and message sent by the program.', button('Send test', async () => {
         const result = await a.link.request('notifications.test');
         toast(desktop ? 'Test sent. Background the desktop app to see its OS notification.' : isAndroid ? 'Test sent. Check Android notifications after enabling the background connection.' : result.delivered ? 'Push sent to the notification provider.' : result.results?.join('; ') || 'No push subscription delivered; a live in-app notification may still appear.', !desktop && !isAndroid && !result.delivered);
       })),
-      el('p', {class: 'settings-notice', text: (isAndroid ? 'The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. No terminal output is shown on the lock screen. ' : '') + 'From any jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.'})));
+      el('p', {class: 'settings-notice', text: (isAndroid ? 'The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. Notification content follows your Android lock-screen privacy settings. ' : '') + 'From any jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.'})));
   }
   if (desktop) {
     const notifications=el('input',{type:'checkbox',checked:!!prefs().desktopNotifications,'aria-label':'Desktop notifications'});
@@ -880,7 +908,7 @@ function renderSettings() {
       settingsRow('Local host','Local and remote views share the same shells. Closing this window leaves them running.',button('Start host',async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
       settingsRow('Start automatically','Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.',button('Install service',async()=>{const result=await desktop.action('service');toast(result.message);machines.get('local-host')?.link.start();})),
       settingsRow('Connect another device','Create a private one-use pairing link for this host.',button('Pair device',async()=>{const result=await desktop.action('pair');modal('Pair this computer',el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:'One-use pairing QR code'})]:[]),el('p',{text:'Open this one-use link on your other device. It expires after ten minutes. Keep it private.'}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button('Copy pairing link',()=>copyText(result.url))));})),
-      settingsRow('Desktop notifications','Show a private OS notification when this window is in the background.',notifications)));
+      settingsRow('Desktop notifications','Show the program’s notification when this window is in the background.',notifications)));
   }
   if(desktopRelease && !desktop && !isAndroid) groups.push(settingsGroup('DESKTOP APP',settingsRow('Install jaunt on this computer','Shared local and remote shells, persistent tiled tabs, host controls and native notifications.',el('a',{class:'button primary',text:'Download desktop app',href:desktopRelease,target:'_blank',rel:'noopener noreferrer'}))));
   if (androidAPK && !isAndroid) groups.push(settingsGroup('ANDROID APP', settingsRow('Install the APK', 'Native Android clipboard, camera and background notifications. Your browser pairing stays separate.', el('a', {class: 'button primary', text: 'Download Android APK', href: androidAPK}))));
@@ -945,14 +973,24 @@ async function resumeWorkspace() {
   applyTheme();
   for (const a of machines.values()) a.link.start();
   $('lock-screen').hidden = true; activeAt = Date.now(); render(); renderTransfers();
+  if(isAndroid)window.dispatchEvent(new Event('jaunt-native-open'));
   if (pairedFromURL) { const code = pairedFromURL; pairedFromURL = ''; await pairMachine('jaunt1.' + code); }
 }
+function openNotification(host, session) {
+  deepLink.set('host',host);deepLink.set('session',session || '');
+  const a=machines.get(host);if(!a || !vault.data)return;
+  selected=host;setView('terminal');
+  if(a.sessions.some(s=>s.id===session)) {
+    deepLink.delete('session');selectSession(a,session).catch(report);
+  }
+}
 function updateModifiers() { $('ctrl-key').setAttribute('aria-pressed', String(ctrl)); $('alt-key').setAttribute('aria-pressed', String(alt)); }
+let viewportTimer;
 function viewport() {
   const v = window.visualViewport;
   document.documentElement.style.setProperty('--app-height', `${Math.round(v?.height || innerHeight)}px`);
   document.body.classList.toggle('keyboard-open', !!window.jauntKeyboardVisible || (!!v && innerHeight - v.height > 130));
-  fitActive();
+  clearTimeout(viewportTimer);viewportTimer=setTimeout(fitActive,150);
 }
 function bindEvents() {
   $('menu-button').onclick = () => drawer(!$('sidebar').classList.contains('open'));
@@ -1046,7 +1084,8 @@ function bindEvents() {
   });
   for (const event of ['pointerdown', 'keydown', 'input']) document.addEventListener(event, () => { activeAt = Date.now(); }, {passive: true});
   setInterval(() => { const minutes = prefs().autoLock; if (minutes && vault.protected && Date.now() - activeAt > minutes * 60000) lockWorkspace().catch(report); }, 10000);
-  window.addEventListener('resize', () => { viewport(); render(); });
+  let layoutMobile=isMobile();
+  window.addEventListener('resize', () => { viewport(); if(layoutMobile!==isMobile()){layoutMobile=isMobile();render();} });
   window.visualViewport?.addEventListener('resize', viewport);
   window.addEventListener('jaunt-insets',viewport);
   new ResizeObserver(fitActive).observe($('terminal-stage'));
@@ -1061,7 +1100,7 @@ function bindEvents() {
     if (view === 'settings') renderSettings();
     const target = await nativeCall('open.pending');
     const a = machines.get(target?.host);
-    if (a) { selected = a.machine.room; setView('terminal'); if (a.sessions.some(s => s.id === target.session)) await selectSession(a, target.session); }
+    if (a) openNotification(target.host, target.session);
     const shared = await nativeClipboard('shared.read');
     if (shared.files.length) { const selectedMachine = current(), term = activeTerm(selectedMachine);
       if (!selectedMachine || !term) { toast('Open a shell, then share the image to jaunt again.', true); return; }
@@ -1070,16 +1109,18 @@ function bindEvents() {
   }
   window.addEventListener('jaunt-native-open', () => nativeOpen().catch(report));
   if (isAndroid) setTimeout(() => nativeOpen().catch(report), 1500);
+  navigator.serviceWorker?.addEventListener('controllerchange',()=>{
+    toast('A web update is ready. Reload to apply it; your shells will stay open.',false,{label:'Reload',run:()=>location.reload()});
+  });
   navigator.serviceWorker?.addEventListener('message', e => {
-    if (e.data?.type !== 'open-session' || !vault.data) return;
-    const a = machines.get(e.data.host); if (!a) return;
-    selected = a.machine.room; setView('terminal'); if (a.sessions.some(s => s.id === e.data.session)) selectSession(a, e.data.session).catch(report);
+    if (e.data?.type !== 'open-session') return;
+    openNotification(e.data.host, e.data.session);
   });
 }
 async function bootstrap() {
   if (!window.isSecureContext || !crypto.subtle) throw new Error('jaunt requires HTTPS, or localhost for development. Do not open index.html directly.');
   bindEvents(); viewport();
-  if(desktop)desktop.onFrame(message=>{if(message.type!=='desktop.open'||!vault.data)return;const a=machines.get(message.host);if(a){selected=a.machine.room;setView('terminal');if(a.sessions.some(s=>s.id===message.session))selectSession(a,message.session).catch(report);}});
+  if(desktop)desktop.onFrame(message=>{if(message.type!=='desktop.open')return;openNotification(message.host,message.session);});
   await vault.load();
   if (vault.locked) { $('lock-screen').hidden = false; }
   else await resumeWorkspace();

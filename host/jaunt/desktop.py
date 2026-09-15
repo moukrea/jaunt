@@ -49,6 +49,12 @@ def install_gui() -> 'Path':
     if system not in ('Linux','Darwin'):raise ValueError('Desktop host integration requires Linux or macOS')
     arch={'x86_64':'x64','aarch64':'arm64','arm64':'arm64'}.get(platform.machine())
     if not arch:raise ValueError('No desktop build is available for this CPU')
+    # Ubuntu's restricted user namespaces cannot run an unprivileged Electron
+    # archive. Install the signed/checksummed distribution package so its scoped
+    # AppArmor profile and sandbox helper are configured by the package manager.
+    restricted=Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
+    if system=='Linux' and restricted.exists() and restricted.read_text().strip()=='1':
+        return install_linux_package(tag, arch)
     extension='tar.gz' if system=='Linux' else 'zip'
     name=f'jaunt-desktop-{tag.removeprefix("desktop-v")}-{arch}.{extension}'
     base=f'https://github.com/moukrea/jaunt/releases/download/{tag}'
@@ -100,9 +106,44 @@ def install_gui() -> 'Path':
     icon=root/'icon.png'
     # This is the original supplied artwork, shipped separately from the asar.
     shutil.copyfile(destination/'resources/jaunt.png',icon)
+    icon.chmod(0o644)
     applications=Path.home()/'.local/share/applications';applications.mkdir(parents=True,exist_ok=True)
     exe=root/'current/jaunt-desktop'
     quoted=str(exe).replace('%','%%').replace('\\','\\\\').replace('"','\\"').replace('`','\\`').replace('$','\\$')
-    (applications/'dev.jaunt.desktop.desktop').write_text(f'[Desktop Entry]\nType=Application\nName=jaunt\nComment=Shared local and remote shells\nExec="{quoted}"\nIcon={icon}\nTerminal=false\nCategories=System;TerminalEmulator;\nStartupWMClass=dev.jaunt.desktop\n')
+    (applications/'dev.jaunt.desktop.desktop').write_text(f'[Desktop Entry]\nType=Application\nName=jaunt\nComment=Shared local and remote shells\nExec="{quoted}"\nIcon={icon}\nTerminal=false\nCategories=System;TerminalEmulator;\nStartupWMClass=jaunt\n')
+    if shutil.which('update-desktop-database'):
+        subprocess.run(['update-desktop-database',str(applications)],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     print('jaunt: Desktop app installed. Open jaunt from your applications menu.',flush=True)
     return exe
+
+
+def install_linux_package(tag: str, arch: str):
+    """Use the system package on Linux hosts that restrict Chromium namespaces."""
+    import hashlib, os, re, shutil, subprocess, tempfile
+    from pathlib import Path
+    from .updates import fetch
+    apt=shutil.which('apt-get')
+    if not apt:
+        raise RuntimeError('This Linux security policy requires a system desktop package; no supported package manager was found.')
+    name=f'jaunt-desktop-{tag.removeprefix("desktop-v")}-{"amd64" if arch=="x64" else "arm64"}.deb'
+    base=f'https://github.com/moukrea/jaunt/releases/download/{tag}'
+    checks=dict(row.split('  ',1)[::-1] for row in fetch(base+'/SHA256SUMS',65536).decode().splitlines() if '  ' in row)
+    expected=checks.get(name,'')
+    if not re.fullmatch('[0-9a-f]{64}',expected):raise ValueError('Desktop package checksum is missing')
+    print('jaunt: Installing the Ubuntu desktop package with its sandbox support. Your system may ask for an administrator password.',flush=True)
+    payload=fetch(base+'/'+name,350*1024*1024)
+    if hashlib.sha256(payload).hexdigest()!=expected:raise ValueError('Desktop package checksum mismatch')
+    with tempfile.TemporaryDirectory(prefix='jaunt-desktop-',dir='/tmp') as folder:
+        directory=Path(folder);directory.chmod(0o755)
+        package=directory/name;package.write_bytes(payload);package.chmod(0o644)
+        command=[apt,'install','-y',str(package)]
+        if os.geteuid()!=0:
+            elevate=shutil.which('pkexec') or shutil.which('sudo')
+            if not elevate:raise RuntimeError('Installing the desktop sandbox requires pkexec or sudo.')
+            command.insert(0,elevate)
+        subprocess.run(command,check=True)
+    # An older per-account archive entry would shadow the working system entry.
+    shortcut=Path.home()/'.local/share/applications/dev.jaunt.desktop.desktop'
+    if shortcut.is_file() and '.local/share/jaunt-desktop/' in shortcut.read_text():
+        shortcut.unlink()
+    return Path('/usr/bin/jaunt-desktop')
