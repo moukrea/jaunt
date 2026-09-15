@@ -17,3 +17,15 @@ Hosts running an older version without the updater need one normal public-instal
 The APK checks public Android releases automatically, with a manual check in Settings. It verifies downloaded bytes, package identity, a strictly newer version and the same signing certificate before opening Android's installer. App data and pairing are retained during an update. Android requires user confirmation for APK installation and may ask once for permission to install updates from jaunt. This is an OS boundary, not a missing cloud service or end-user account.
 
 See [Android details and validation](ANDROID.md). Update checks, signature checks and functional tests do not constitute an independent security audit.
+
+## Desktop application
+
+The desktop GUI has its own release version and updater, separate from the host/CLI. It checks the published channel shortly after startup and every 15 minutes, selects the Linux/macOS package for the current CPU, and verifies SHA-256 after downloading and again before installation. Settings provides a manual check and an automatic-update toggle.
+
+A visible activity row follows checking, downloading, verification, readiness and errors. **Install and reopen** applies a verified package and reopens the same application profile. With automatic updates enabled, closing the app also applies a ready update. The detached GUI installer never stops the host service or terminates its shells. A system `.deb`/`.rpm` installation or protected macOS application location may require OS authorization. macOS builds remain unsigned and unnotarized.
+
+An installation result is retained in the private desktop profile. Failure is displayed on the next launch; it is not immediately hidden by the startup check. Older desktop builds need one installation of a release that includes this updater, using the public package or `jaunt gui --install-only`.
+
+## Visible progress
+
+Web and desktop image transfers retain their actual result: verified upload and quoted path insertion without Enter, or host clipboard completion plus Ctrl+V delivery. They do not claim that a CLI recognized an attachment. Host checks show completion, failure or explicit deferral for active work. Android uses native progress dialogs for checks and APK downloads, followed by the OS installer confirmation.
