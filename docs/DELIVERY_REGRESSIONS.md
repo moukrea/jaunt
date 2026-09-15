@@ -27,4 +27,8 @@ This report follows user-reported failures after the previous release. Previous 
 - `DISPLAY=:179 .venv/bin/python tests/shared_workspace_e2e.py`: shared local/remote PTY, geometry ownership, detachment/termination and mobile pane fallback passed.
 - Signed Android release/debug builds, lint and unit tasks passed. `tests/android_workspace_e2e.py` on Android 14/API 34 emulator passed real touch swipe, actual keyboard anchor, system insets, rotation, screen-off OSC title/body and tapping the notification into the correct session.
 
+Installed candidate `.deb` plus non-editable 0.1.0b9 wheel passed on Ubuntu 24.04: real PTY execution, Seccomp=2/NoNewPrivs=1 renderer, decoded in-app logos, locally available Lucide and readable standard launcher icons. The candidate desktop also authenticated through the public relay and proved a remote command. `scripts/check_desktop_package.mjs` now checks these packaged resource paths and Linux metadata in CI.
+
+A clean tracked-source export passed gitleaks. Scanning the binary ASAR produced two reviewed false positives in vendored JavaScript identifiers (`FourKeyMap` and `SequencerByKey`); no credential was present.
+
 Published-artifact and default-installer verification will be recorded after the immutable releases are available. Physical Android hardware, vendor-specific IMEs/battery policies, macOS runtime and ARM runtime are not validated by these tests. The protocol remains independently unaudited.

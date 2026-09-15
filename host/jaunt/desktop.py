@@ -50,7 +50,7 @@ def install_gui() -> 'Path':
     arch={'x86_64':'x64','aarch64':'arm64','arm64':'arm64'}.get(platform.machine())
     if not arch:raise ValueError('No desktop build is available for this CPU')
     # Ubuntu's restricted user namespaces cannot run an unprivileged Electron
-    # archive. Install the signed/checksummed distribution package so its scoped
+    # archive. Install the verified distribution package so its scoped
     # AppArmor profile and sandbox helper are configured by the package manager.
     restricted=Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
     if system=='Linux' and restricted.exists() and restricted.read_text().strip()=='1':

@@ -1110,7 +1110,9 @@ function bindEvents() {
   }
   window.addEventListener('jaunt-native-open', () => nativeOpen().catch(report));
   if (isAndroid) setTimeout(() => nativeOpen().catch(report), 1500);
+  let hadWebController=!!navigator.serviceWorker?.controller;
   navigator.serviceWorker?.addEventListener('controllerchange',()=>{
+    if(!hadWebController){hadWebController=true;return;}
     toast('A web update is ready. Reload to apply it; your shells will stay open.',false,{label:'Reload',run:()=>location.reload()});
   });
   navigator.serviceWorker?.addEventListener('message', e => {
