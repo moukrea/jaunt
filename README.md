@@ -6,7 +6,7 @@
 
 jaunt provides native desktop and Android applications, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
 
-**Host: 0.1.0-beta.7 · Desktop: 0.1.0-beta.6 · Android: 0.1.0-beta.4.** [Open jaunt](https://moukrea.github.io/jaunt/). The relay and host release are deployed. The protocol has **not received an independent security audit**. See the [validation report](docs/PUBLIC_DELIVERY.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.8 · Desktop: 0.1.0-beta.6 · Android: 0.1.0-beta.4.** [Open jaunt](https://moukrea.github.io/jaunt/). The relay and host release are deployed. The protocol has **not received an independent security audit**. See the [validation report](docs/PUBLIC_DELIVERY.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 

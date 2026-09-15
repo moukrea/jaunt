@@ -34,9 +34,11 @@ def test_tampered_release_does_not_reach_shutdown_or_installer(release,monkeypat
     assert result['state']=='error' and 'checksum mismatch' in result['message']
     assert not list((root/'updates').glob('*.whl'))
 
-def test_idle_update_strips_inherited_restart_and_development_overrides(release,monkeypatch):
-    monkeypatch.setenv('jaunt_ALLOW_RESTART','1');monkeypatch.setenv('jaunt_DEV_INSTALL','1')
-    monkeypatch.setenv('jaunt_RELEASE_BASE','https://attacker.invalid')
+@pytest.mark.parametrize("legacy", [False, True])
+def test_idle_update_strips_inherited_restart_and_development_overrides(release,monkeypatch,legacy):
+    prefix="jaunt_".upper() if legacy else "jaunt_"
+    monkeypatch.setenv(prefix+'ALLOW_RESTART','1');monkeypatch.setenv(prefix+'DEV_INSTALL','1')
+    monkeypatch.setenv(prefix+'RELEASE_BASE','https://attacker.invalid')
     monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[]})
     observed=[]
     def run(args,**kwargs):
@@ -44,7 +46,7 @@ def test_idle_update_strips_inherited_restart_and_development_overrides(release,
     monkeypatch.setattr(updates.subprocess,'run',run)
     assert updates.update(automatic=True)['state']=='installed'
     assert len(observed)==1
-    assert not {'jaunt_ALLOW_RESTART','jaunt_DEV_INSTALL','jaunt_RELEASE_BASE'} & observed[0].keys()
+    assert not {'jaunt_allow_restart','jaunt_dev_install','jaunt_release_base'} & {key.lower() for key in observed[0]}
     assert observed[0]['jaunt_SKIP_PAIR']=='1'
 
 def test_explicit_restart_is_distinct_from_automatic_update(release,monkeypatch):

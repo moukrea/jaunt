@@ -126,7 +126,7 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
                 env = os.environ.copy()
                 # Never inherit restart authorization or dev/source overrides into automatic work.
                 for key in list(env):
-                    if key.startswith("jaunt_"):
+                    if key.lower().startswith("jaunt_"):
                         del env[key]
                 env.update(jaunt_STATE=str(root), jaunt_PAGE_URL=page, jaunt_REPO=repo,
                            jaunt_VERSION=tag, jaunt_PREFIX=config["prefix"], jaunt_BIN_DIR=config["bin"],

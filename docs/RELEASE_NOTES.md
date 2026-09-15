@@ -1,4 +1,4 @@
-# jaunt 0.1.0-beta.7
+# jaunt 0.1.0-beta.8
 
 Shared ordinary shells are now accessible simultaneously from the host desktop app and authorized remote clients, without tmux. The active device controls PTY dimensions; passive views do not resize it. Replay carries the geometry associated with retained output.
 
