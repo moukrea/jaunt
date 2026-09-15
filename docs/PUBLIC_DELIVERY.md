@@ -27,7 +27,7 @@ Automatic host updates retain ordinary shells and transfers. Explicit restart au
 |---|---|
 | `pytest -q` | 61 passed; Linux/macOS, Python 3.11 and 3.13 |
 | `npm test` | 21 passed |
-| `npm run test:relay` | Real Miniflare/workerd Durable Object and WebSocket tests passed |
+| `npm run test:relay` | Two real Miniflare/workerd tests: web and native desktop origins, authenticated routing and hibernation ping; foreign origins rejected |
 | `npm run prepare-web`; `python scripts/check_project.py` | Pinned local jsQR/xterm assets and licenses generated; resource/import/syntax checks passed |
 | `python scripts/build_release.py` | Wheel, manifest and SHA256SUMS built |
 | `python tests/browser_e2e.py`, with development relay and `jaunt_E2E_RELAY=workerd` | 23 scenarios per backend, with real PTYs and transfers |
@@ -39,6 +39,7 @@ Automatic host updates retain ordinary shells and transfers. Explicit restart au
 | `python tests/android_workspace_e2e.py` | Android 14 emulator: real public relay and shell, actual keyboard opening/resize, system-bar bounds, rotation and terminal-BEL notification with screen off |
 | Public APK beta.3 → beta.4, installed with `adb install -r` | Same authorized device reconnects without pairing; this check does not claim an in-app system-installer flow |
 | Public Linux `.deb` installed in Ubuntu VM | Real shell command executed; renderer Seccomp=2 and NoNewPrivs=1, without a sandbox override |
+| `python tests/desktop_remote_e2e.py`; installed public desktop in VM | Native desktop authenticates as a remote client through public WSS, executes a proven command and terminates the session |
 | Public desktop + public Page + public wheel | Two proven commands in one shared PTY; close/reopen retains it; remote termination removes both views |
 | Public installed host, shell exited with stubborn background job | Unapproved restart refused; desktop Terminate kills the remaining job and removes the session |
 | Public assets | Three host assets, three Android assets and all ten desktop packages verified against checksums; archive paths, APK signer and original icon resources checked |
@@ -48,6 +49,8 @@ Automatic host updates retain ordinary shells and transfers. Explicit restart au
 | `npm audit`; `pip-audit --local --skip-editable` | No known vulnerabilities reported in the checked dependency environments |
 
 The public acceptance driver ran **12 checks** against the release-installed VM: pairing, proven arbitrary-shell output, a 512-character input burst, second tab and return, upload/download byte comparison, image upload plus quoted path without Enter on a headless host, reload without QR, real IPv4/IPv6 interruption with the same shell PID afterward, refusal of implicit upgrade, authorized restart retaining identities, revocation, and no uncaught browser errors. See [public-report.json](evidence/public-report.json). Each run used a fresh fixture directory; no personal folders were scanned or deleted.
+
+The final relay revision is `698962dd-b16a-49f8-b658-a3c5953b3da9` (Wrangler 4.131.2). It adds the exact native renderer origin `jaunt://app` alongside the configured web origin. Both public origins were checked with real WebSocket upgrades/ping-pong, and remote-client pairing/commands were verified from the unchanged installed desktop package. Routing and end-to-end authentication remain required.
 
 Tool versions and development findings are in [WORKSPACE_VALIDATION.md](WORKSPACE_VALIDATION.md). The delivered UI and package files use the original artwork. The beta.6 host candidate was superseded before it became the default channel; the beta.7 publishing workflow was cancelled before a release was created. Tags and history were retained.
 

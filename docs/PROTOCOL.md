@@ -6,7 +6,7 @@ This document describes the implementation, not a standard or security guarantee
 
 Endpoint: `wss://RELAY/v1/room/ROOM`. ROOM is 18 random bytes, encoded as unpadded base64url (24 characters). Routing capabilities are 32 bytes (43 characters). The host registers with `hostToken` and `clientToken`. The Durable Object stores their SHA-256 hashes in an initial atomic transaction; another host cannot replace them. The browser holds only clientToken. Client messages are routed using a peer ID assigned by the relay, not chosen by the client.
 
-The relay stores routing hashes and attachment state needed for hibernation, never terminal history. Encryption keys remain at the endpoints. Both connections are outbound; the host needs no incoming port.
+The relay stores routing hashes and attachment state needed for hibernation, never terminal history. Encryption keys remain at the endpoints. Both connections are outbound; the host needs no incoming port. Browser WebSockets must use the configured `APP_ORIGIN`; the packaged desktop uses the separately allowed `jaunt://app` origin. Origin-less native host/Android connections remain supported. All clients still authenticate routing capabilities and the end-to-end channel.
 
 ## Pairing
 
