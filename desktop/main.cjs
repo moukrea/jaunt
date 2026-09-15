@@ -63,7 +63,7 @@ app.whenReady().then(async()=>{
   });
   if(app.isPackaged){
     const check=()=>{if(updates.state.automatic&&!installingDesktop)updates.check().catch(()=>{});};
-    setTimeout(check,15000).unref();setInterval(check,15*60*1000).unref();
+    setTimeout(()=>{if(updates.state.state!=='error')check();},15000).unref();setInterval(check,15*60*1000).unref();
   }
   win.loadURL('jaunt://app/');
 });

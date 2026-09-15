@@ -72,10 +72,10 @@ async function main(file){
     for(let i=0;i<300;i++){try{process.kill(plan.parent,0);}catch{break;}if(i===299)throw new Error('Desktop app did not close; update deferred');await new Promise(r=>setTimeout(r,200));}
     const binary=await install(plan);
     await fs.writeFile(join(plan.cache,'result.json'),JSON.stringify({state:'installed',message:`Desktop update installed · ${plan.tag}`}),{mode:0o600});
-    if(plan.reopen){const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;spawn(binary,[...(plan.userData?['--user-data-dir='+plan.userData]:[]),...(plan.debugPort?['--remote-debugging-port='+plan.debugPort]:[])],{env,detached:true,stdio:'ignore'}).unref();}
+    if(plan.reopen){const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;spawn(binary,[...(plan.userData?['--user-data-dir='+plan.userData]:[])],{env,detached:true,stdio:'ignore'}).unref();}
   }catch(error){
     await fs.writeFile(join(plan.cache,'result.json'),JSON.stringify({state:'error',message:'Desktop installation failed. '+String(error.message).slice(0,300)}),{mode:0o600});
-    if(plan.reopen){const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;spawn(plan.executable,[...(plan.userData?['--user-data-dir='+plan.userData]:[]),...(plan.debugPort?['--remote-debugging-port='+plan.debugPort]:[])],{env,detached:true,stdio:'ignore'}).unref();}
+    if(plan.reopen){const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;spawn(plan.executable,[...(plan.userData?['--user-data-dir='+plan.userData]:[])],{env,detached:true,stdio:'ignore'}).unref();}
   }
 }
 if(require.main===module)main(process.argv[2]).catch(()=>{process.exitCode=1;});

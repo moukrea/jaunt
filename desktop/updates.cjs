@@ -27,7 +27,7 @@ class DesktopUpdates {
   async init(){
     await fs.mkdir(this.cache,{recursive:true,mode:0o700});
     try{this.state.automatic=JSON.parse(await fs.readFile(join(this.cache,'preferences.json'),'utf8')).automatic!==false;}catch{}
-    try{const result=JSON.parse(await fs.readFile(join(this.cache,'result.json'),'utf8'));this.publish(result);await fs.unlink(join(this.cache,'result.json'));}catch{}
+    try{const result=JSON.parse(await fs.readFile(join(this.cache,'result.json'),'utf8'));this.publish(result);}catch{}
     if(!this.kind && this.platform==='linux'){
       const systemInstall=this.app.getPath('exe').startsWith('/opt/jaunt/');
       if(systemInstall){
@@ -85,8 +85,6 @@ class DesktopUpdates {
         await fs.rename(payload+'.part',payload);
       }
       this.plan={tag,payload,digest,kind:this.kind||'archive',platform:this.platform,cache:this.cache,executable:this.app.getPath('exe'),userData:this.app.getPath('userData')};
-      const port=this.app.commandLine?.getSwitchValue('remote-debugging-port');
-      if(port && /^\d{1,5}$/.test(port))this.plan.debugPort=port;
       await fs.copyFile(join(__dirname,'update-install.cjs'),join(this.cache,'update-install.cjs'));
       return this.publish({state:'ready',target:tag,message:'Verified update ready · installs when you close jaunt. Shells stay running.',percent:100,requiresAuthorization:['deb','rpm'].includes(this.kind)});
     }catch(error){return this.publish({state:'error',message:error.message,percent:null});}
@@ -94,6 +92,7 @@ class DesktopUpdates {
   async install(reopen=false){
     if(!this.plan || this.state.state!=='ready')throw new Error('No verified desktop update is ready');
     if(await checksum(this.plan.payload)!==this.plan.digest)throw new Error('Cached desktop update changed; check again');
+    await fs.rm(join(this.cache,'result.json'),{force:true});
     const planFile=join(this.cache,'install-plan.json');
     await fs.writeFile(planFile,JSON.stringify({...this.plan,reopen,parent:process.pid}),{mode:0o600});
     const child=this.spawnProcess(this.app.getPath('exe'),[join(this.cache,'update-install.cjs'),planFile],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},detached:true,stdio:'ignore'});
