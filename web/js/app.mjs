@@ -314,12 +314,13 @@ async function selectSession(a, id) {
   if (!session) throw new Error('This terminal no longer exists.');
   selected = a.machine.room; a.active = id; a.machine.lastSession = id;
   a.machine.openSessions ||= []; if(!a.machine.openSessions.includes(id))a.machine.openSessions.push(id);
-  const t = a.terms.get(id) || createTerm(a, session);
   if (!leaves(a.machine.layout).includes(id)) a.machine.layout = a.machine.layouts?.find(tree=>leaves(tree).includes(id)) || {id};
   rememberLayout(a, a.machine.layout);
-  render();
-  if ((!t.attached || t.generation !== a.link.generation) && a.link.state === 'online') await attachTerm(a, t);
+  // Commit the workspace before displaying it or awaiting a network attach.
   await persist();
+  render();
+  const t = a.terms.get(id) || createTerm(a, session);
+  if ((!t.attached || t.generation !== a.link.generation) && a.link.state === 'online') await attachTerm(a, t);
   requestAnimationFrame(fitActive);
 }
 function visibleSessions(a) {
