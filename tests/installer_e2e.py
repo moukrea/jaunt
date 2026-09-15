@@ -86,7 +86,10 @@ def main():
                 page.locator('#new-session-folder').click()
                 page.get_by_label('Working directory').fill(str(t))
                 page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
-                expect(page.locator('#tabs')).to_contain_text('Shell 1')
+                expect(page.get_by_role('tab')).to_have_count(1)
+                created=json.loads(cli('status'))['sessions'][0]
+                expect(page.get_by_role('tab')).to_have_text(created['name'])
+                assert created['name'].endswith(' 1')
                 before=json.loads(cli('status'));pointer=(t/'runtime/current').resolve()
                 assert before['sessions'][0]['alive']
                 refused=install()

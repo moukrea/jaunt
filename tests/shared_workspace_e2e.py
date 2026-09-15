@@ -15,7 +15,9 @@ async def main():
         # The shell fixture is headless; Electron must retain xvfb-run's X cookie.
         if os.environ.get('XAUTHORITY'):env['XAUTHORITY']=os.environ['XAUTHORITY']
         env.pop('ELECTRON_RUN_AS_NODE',None)
-        electron=subprocess.Popen([str(ROOT/'node_modules/.bin/electron'),'.','--ozone-platform=x11','--disable-gpu',f'--user-data-dir={h.root}/desktop-profile','--no-sandbox',f'--remote-debugging-port={debug}'],cwd=ROOT,env=env,stdout=h.log,stderr=h.log)
+        executable=os.environ.get('jaunt_E2E_DESKTOP_EXECUTABLE')
+        command=[executable] if executable else [str(ROOT/'node_modules/.bin/electron'),'.']
+        electron=subprocess.Popen([*command,'--ozone-platform=x11','--disable-gpu',f'--user-data-dir={h.root}/desktop-profile','--no-sandbox',f'--remote-debugging-port={debug}'],cwd=ROOT,env=env,stdout=h.log,stderr=h.log)
         async with async_playwright() as pw:
             native=None
             for _ in range(100):
@@ -78,6 +80,9 @@ async def main():
             for width in (1300,390):
                 await local.set_viewport_size({'width':width,'height':750})
                 assert await row.evaluate('(row)=>Array.from(row.querySelectorAll("button")).every(b=>{const r=b.getBoundingClientRect(),p=row.getBoundingClientRect();return r.left>=p.left&&r.right<=p.right})'), 'Session actions overflow their row'
+            await local.screenshot(path=str(ROOT/'test-results/session-manager-mobile.png'))
+            await local.set_viewport_size({'width':1300,'height':900})
+            await local.screenshot(path=str(ROOT/'test-results/session-manager-desktop.png'))
             await row.get_by_role('button',name='Rename',exact=True).click()
             await local.get_by_label('Name',exact=True).fill('Renamed local shell')
             await local.get_by_role('button',name='Save',exact=True).click()

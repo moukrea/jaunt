@@ -120,3 +120,24 @@ async def test_new_session_inherits_live_directory_and_unique_name(tmp_path, mon
         assert third['name']!=second['name']
     finally:
         await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_late_stream_frames_after_termination_keep_peer_alive(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from jaunt.daemon import Peer
+    from jaunt.crypto import b64
+    monkeypatch.setenv('SHELL','/bin/sh')
+    async def noop(*args):pass
+    messages=[]
+    async def send(value):messages.append(value)
+    sessions=Sessions(noop,noop,tmp_path)
+    peer=SimpleNamespace(host=SimpleNamespace(sessions=sessions),routing_id='fixture',display_name='Fixture',send=send)
+    try:
+        shell=await sessions.create({'cwd':str(tmp_path)})
+        await sessions.terminate(shell['id'])
+        await Peer.dispatch(peer,{'type':'terminal.resize','id':shell['id'],'cols':80,'rows':24})
+        await Peer.dispatch(peer,{'type':'terminal.input','id':shell['id'],'active':True,'data':b64(b'never replay\n')})
+        await Peer.dispatch(peer,{'type':'ping','at':123})
+        assert messages==[{'type':'pong','at':123}]
+        assert not sessions.items
+    finally:await sessions.shutdown()

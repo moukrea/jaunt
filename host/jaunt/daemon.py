@@ -157,10 +157,21 @@ class Peer:
             except (ValueError, OSError, KeyError, TypeError, asyncio.TimeoutError) as exc:
                 await self.send({"type": "reply", "id": rid, "ok": False, "error": str(exc)[:240]})
         elif kind == "terminal.input":
+            data = unb64(message["data"], 65536)
+            session = self.host.sessions.items.get(message["id"])
+            # Input/geometry already in flight may outlive an explicit terminate.
+            # Discard it; never disconnect other shells or replay it later.
+            if session is None or not session.alive:
+                return
             if message.get("active"):
                 await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
-            await self.host.sessions.write(message["id"], unb64(message["data"], 65536))
+            session = self.host.sessions.items.get(message["id"])
+            if session is not None and session.alive:
+                await self.host.sessions.write(message["id"], data)
         elif kind == "terminal.resize":
+            session = self.host.sessions.items.get(message["id"])
+            if session is None or not session.alive:
+                return
             await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
         elif kind == "ping":
             await self.send({"type": "pong", "at": message.get("at")})
