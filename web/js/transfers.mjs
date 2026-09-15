@@ -1,3 +1,4 @@
+import {t as tr} from './i18n.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import {b64, unb64, random} from './crypto.mjs';
 import {SHA256} from './sha256.mjs';
@@ -22,32 +23,32 @@ export async function upload(link, file, options, progress, signal) {
   const args = {id, name: file.name, size: file.size, path: options.path || '~',
     attachment: !!options.attachment, overwrite: !!options.overwrite};
   // Hash in bounded slices; never allocate a video-sized ArrayBuffer.
-  progress({status: 'Checking file', offset: 0, total: file.size, id});
+  progress({status: tr('Checking file'), offset: 0, total: file.size, id});
   const hasher = new SHA256();
   for (let offset=0; offset<file.size; offset+=1024*1024) {
     if (signal?.aborted) throw new Error('Transfer cancelled');
     hasher.update(new Uint8Array(await file.slice(offset,offset+1024*1024).arrayBuffer()));
   }
   const expected = hasher.hex();
-  let result = await retryOnReconnect(link, () => link.request('upload.begin', args), signal,()=>progress({status:'Waiting for connection',offset:0,total:file.size,id}));
+  let result = await retryOnReconnect(link, () => link.request('upload.begin', args), signal,()=>progress({status:tr('Waiting for connection'),offset:0,total:file.size,id}));
   if (result.complete) return result;
   let offset = result.offset;
   try {
     while (offset < file.size) {
       if (signal?.aborted) throw new Error('Transfer cancelled');
       if (link.state !== 'online') {
-        progress({status: 'Waiting for connection', offset, total: file.size, id});
+        progress({status: tr('Waiting for connection'), offset, total: file.size, id});
         await link.waitOnline(signal);
         result = await link.request('upload.begin', args);
         if (result.complete) return result;
         offset = result.offset;
       }
       const chunk = new Uint8Array(await file.slice(offset, offset + CHUNK).arrayBuffer());
-      const ack = await retryOnReconnect(link, () => link.request('upload.chunk', {id, offset, data: b64(chunk)}), signal,()=>progress({status:'Waiting for connection',offset,total:file.size,id}));
+      const ack = await retryOnReconnect(link, () => link.request('upload.chunk', {id, offset, data: b64(chunk)}), signal,()=>progress({status:tr('Waiting for connection'),offset,total:file.size,id}));
       offset = ack.offset;
       progress({status: 'Uploading', offset, total: file.size, id});
     }
-    const done = await retryOnReconnect(link, () => link.request('upload.finish', {id, sha256: expected}), signal,()=>progress({status:'Waiting to verify with host',offset,total:file.size,id}));
+    const done = await retryOnReconnect(link, () => link.request('upload.finish', {id, sha256: expected}), signal,()=>progress({status:tr('Waiting to verify with host'),offset,total:file.size,id}));
     if (done.sha256 !== expected) throw new Error('The file checksum did not match.');
     progress({status: 'Verified', offset: file.size, total: file.size, id});
     return done;
@@ -58,7 +59,7 @@ export async function upload(link, file, options, progress, signal) {
 }
 
 export async function download(link, path, progress, options = {}) {
-  const info = await retryOnReconnect(link,()=>link.request('download.begin', {path}),options.signal,()=>progress?.({status:'Waiting for connection',offset:0,total:0}));
+  const info = await retryOnReconnect(link,()=>link.request('download.begin', {path}),options.signal,()=>progress?.({status:tr('Waiting for connection'),offset:0,total:0}));
   const limit = options.preview ? 16 * 1024 * 1024 : 128 * 1024 * 1024;
   if (!options.writer && info.size > limit) {
     await link.request('download.close', {id: info.id});
@@ -69,7 +70,7 @@ export async function download(link, path, progress, options = {}) {
   try {
     while (offset < info.size) {
       if (options.signal?.aborted) throw new Error('Transfer cancelled');
-      const result = await retryOnReconnect(link, () => link.request('download.chunk', {id: info.id, offset}), options.signal,()=>progress?.({status:'Waiting for connection',offset,total:info.size}));
+      const result = await retryOnReconnect(link, () => link.request('download.chunk', {id: info.id, offset}), options.signal,()=>progress?.({status:tr('Waiting for connection'),offset,total:info.size}));
       const data = unb64(result.data);
       if (result.offset !== offset || !data.length) throw new Error('Unexpected download offset');
       hasher.update(data);

@@ -1,11 +1,12 @@
+import {t as tr} from './i18n.mjs';
 import {$,el,button,markReported} from './ui.mjs';
 const items=new Map();let expanded=false,layout=null;
 export function activity(id,title) {
-  const item={id,title,status:'Starting…',done:false,error:false,percent:null};
+  const item={id,title,status:tr('Starting…'),done:false,error:false,percent:null};
   items.set(id,item);
   const update=patch=>{if(item.done && patch.done!==false && !('done' in patch)){patch={...patch};delete patch.status;delete patch.percent;}Object.assign(item,patch);render();};
   const finish=status=>update({status,done:true,waiting:false,percent:100,action:null});
-  const fail=error=>{markReported(error);if(error.name==='AbortError'||error.message==='Transfer cancelled'){finish('Cancelled');return;}update({status:error.message || String(error),done:true,error:true,percent:null,action:null});};
+  const fail=error=>{markReported(error);if(error.name==='AbortError'||error.message==='Transfer cancelled'){finish(tr('Cancelled'));return;}update({status:tr(error.message || String(error)),done:true,error:true,percent:null,action:null});};
   render();return {update,finish,fail,item};
 }
 export function clearActivity(){items.clear();expanded=false;layout=null;const root=$('activity');if(root){root.replaceChildren();root.hidden=true;}}
@@ -14,19 +15,19 @@ function render(){
   while(items.size>30){const old=[...items].find(([,item])=>item.done&&!item.waiting&&!item.error);if(!old)break;items.delete(old[0]);}
   root.hidden=items.size===0;
   if(!layout){
-    const summary=el('span',{class:'activity-summary'}),toggle=button('Show history',()=>{expanded=!expanded;render();},'text-button');
+    const summary=el('span',{class:'activity-summary'}),toggle=button(tr('Show history'),()=>{expanded=!expanded;render();},'text-button');
     const list=el('div',{class:'activity-items'});root.replaceChildren(el('div',{class:'activity-heading'},summary,toggle),list);layout={summary,toggle,list};
   }
   const all=[...items.values()].reverse(),ongoing=all.filter(i=>!i.done),attention=all.filter(i=>i.error||i.waiting);
-  layout.summary.textContent=ongoing.length?`${ongoing.length} operation${ongoing.length===1?'':'s'} in progress`:attention.length?`${attention.length} operation${attention.length===1?'':'s'} need attention`:'Activity';
-  layout.toggle.textContent=expanded?'Hide history':`Show history (${all.length})`;layout.toggle.hidden=all.length<2;
+  layout.summary.textContent=ongoing.length?tr(ongoing.length===1?'{0} operation in progress':'{0} operations in progress',ongoing.length):attention.length?tr(attention.length===1?'{0} operation needs attention':'{0} operations need attention',attention.length):tr('Activity');
+  layout.toggle.textContent=expanded?tr('Hide history'):tr("Show history ({0})",all.length);layout.toggle.hidden=all.length<2;
   layout.toggle.setAttribute('aria-expanded',String(expanded));
   const visible=new Set(expanded?all:ongoing.length||attention.length?[...ongoing,...attention]:all.slice(0,1));
   const keep=new Set();
   for(const [index,item] of all.entries()){
     if(!item.row){
       const status=el('span',{role:'status'}),progress=el('progress',{'aria-label':item.title+' progress',max:100});
-      const action=button('',()=>item.action?.run(),'text-button'),dismiss=button('Dismiss',()=>{item.dismissed=true;items.delete(item.id);render();},'text-button');
+      const action=button('',()=>item.action?.run(),'text-button'),dismiss=button(tr('Dismiss'),()=>{item.dismissed=true;items.delete(item.id);render();},'text-button');
       item.row=el('div',{class:'activity-row'},el('div',{class:'activity-description'},el('strong',{text:item.title}),status),progress,action,dismiss);
       item.elements={status,progress,action,dismiss};
     }

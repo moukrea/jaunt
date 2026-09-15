@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from . import __version__
+from .i18n import tr,configure as configure_language,save as save_language,LANGUAGES
 from .state import State, state_dir
 
 
@@ -89,7 +90,8 @@ TimeoutStopSec=15
 [Install]
 WantedBy=default.target
 ''')
-        with contextlib.suppress(OSError):
+        if os.environ.get("jaunt_PRESERVE_DAEMON") != "1":
+          with contextlib.suppress(OSError):
             control("upgrade.stop", {"allowRestart": os.environ.get("jaunt_ALLOW_RESTART") == "1"})
             time.sleep(0.6)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
@@ -97,7 +99,7 @@ WantedBy=default.target
         if envs:
             subprocess.run(["systemctl", "--user", "import-environment", *envs], check=False)
         subprocess.run(["systemctl", "--user", "enable", "--now", "jaunt.service"], check=True)
-        print("User service installed. For startup before login: loginctl enable-linger \"$USER\"")
+        print(tr('User service installed. For startup before login: loginctl enable-linger "$USER"'))
     elif platform.system() == "Darwin":
         import plistlib
         dest = Path.home() / "Library/LaunchAgents/dev.jaunt.host.plist"
@@ -108,55 +110,67 @@ WantedBy=default.target
                                         "RunAtLoad": True, "KeepAlive": True,
                                         "StandardOutPath": str(Path(root) / "host.log"),
                                         "StandardErrorPath": str(Path(root) / "host.log")}))
-        with contextlib.suppress(OSError):
+        if os.environ.get("jaunt_PRESERVE_DAEMON") != "1":
+          with contextlib.suppress(OSError):
             control("upgrade.stop", {"allowRestart": os.environ.get("jaunt_ALLOW_RESTART") == "1"})
             time.sleep(0.6)
+        if os.environ.get("jaunt_PRESERVE_DAEMON") == "1":
+            print(tr('Login service updated; active shells preserved.'))
+            return
         domain = f"gui/{os.getuid()}"
         subprocess.run(["launchctl", "bootout", domain, str(dest)], capture_output=True)
         subprocess.run(["launchctl", "bootstrap", domain, str(dest)], check=True)
-        print("Login service installed.")
+        print(tr('Login service installed.'))
     else:
         raise RuntimeError("No user service manager found. jaunt start still works; it won't auto-start after reboot.")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="jaunt", description="Your own shell. Anywhere.")
+    language_arg=next((arg.split('=',1)[1] for arg in sys.argv[1:] if arg.startswith('--language=')),None)
+    if '--language' in sys.argv and sys.argv.index('--language')+1<len(sys.argv):language_arg=sys.argv[sys.argv.index('--language')+1]
+    configure_language(language_arg);argparse._=tr
+    parser = argparse.ArgumentParser(prog="jaunt", description=tr('Your own shell. Anywhere.'))
+    parser.add_argument("--language",choices=("system",*LANGUAGES),help=tr('Override the display language'))
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
-    init = sub.add_parser("init", help="Configure this host (existing identity is preserved)")
+    language_parser=sub.add_parser("language",help=tr('Set the display language for this host'))
+    language_parser.add_argument("language",choices=("system",*LANGUAGES))
+    init = sub.add_parser("init", help=tr('Configure this host (existing identity is preserved)'))
     init.add_argument("--relay")
     init.add_argument("--page")
     init.add_argument("--name")
     sub.add_parser("desktop-bridge", help=argparse.SUPPRESS)
-    gui = sub.add_parser("gui", help="Install or open the desktop workspace")
-    gui.add_argument("--install-only", action="store_true", help="Install the desktop app and application icon without opening it")
-    sub.add_parser("start", help="Start the host in the background")
-    sub.add_parser("daemon", help="Run in the foreground (used by the service)")
-    sub.add_parser("stop", help="Stop the host; plain PTYs will close")
+    gui = sub.add_parser("gui", help=tr('Install or open the desktop workspace'))
+    gui.add_argument("--install-only", action="store_true", help=tr('Install the desktop app and application icon without opening it'))
+    sub.add_parser("start", help=tr('Start the host in the background'))
+    sub.add_parser("daemon", help=tr('Run in the foreground (used by the service)'))
+    sub.add_parser("stop", help=tr('Stop the host; plain PTYs will close'))
     sub.add_parser("status")
-    update = sub.add_parser("update", help="Check and apply a verified host release; active ordinary shells are preserved")
-    update.add_argument("--allow-restart", action="store_true", help="Explicitly authorize closing active ordinary shells")
-    sub.add_parser("doctor", help="Diagnose relay, runtime, clipboard and persistence")
-    pair = sub.add_parser("pair", help="Show a one-use, ten-minute QR and pairing string")
+    update = sub.add_parser("update", help=tr('Check and apply a verified host release; active ordinary shells are preserved'))
+    update.add_argument("--allow-restart", action="store_true", help=tr('Explicitly authorize closing active ordinary shells'))
+    sub.add_parser("doctor", help=tr('Diagnose relay, runtime, clipboard and persistence'))
+    pair = sub.add_parser("pair", help=tr('Show a one-use, ten-minute QR and pairing string'))
     pair.add_argument("--json", action="store_true")
-    pair.add_argument("--qr-svg", action="store_true", help="Include a QR image in JSON for the native desktop UI")
+    pair.add_argument("--qr-svg", action="store_true", help=tr('Include a QR image in JSON for the native desktop UI'))
     pair.add_argument("--no-qr", action="store_true")
     sub.add_parser("devices")
     rev = sub.add_parser("revoke")
     rev.add_argument("id")
-    notify = sub.add_parser("notify", help="Notify connected browsers and registered push subscriptions")
+    notify = sub.add_parser("notify", help=tr('Notify connected browsers and registered push subscriptions'))
     notify.add_argument("title")
     notify.add_argument("--body", default="")
     notify.add_argument("--session", default=os.environ.get("jaunt_SESSION_ID", ""))
-    clip = sub.add_parser("clip", aliases=["clipboard"], help="Share stdin as text with jaunt, or read the remote clipboard")
+    clip = sub.add_parser("clip", aliases=["clipboard"], help=tr('Share stdin as text with jaunt, or read the remote clipboard'))
     clip.add_argument("--get", action="store_true")
-    run = sub.add_parser("run", help="Run a local command, then notify on completion")
+    run = sub.add_parser("run", help=tr('Run a local command, then notify on completion'))
     run.add_argument("args", nargs=argparse.REMAINDER)
     service = sub.add_parser("service")
     service.add_argument("action", choices=["install", "stop", "uninstall"])
     args = parser.parse_args()
     try:
-        if args.command == "desktop-bridge":
+        if args.command == "language":
+            save_language(args.language);print(tr("Language preference saved."))
+        elif args.command == "desktop-bridge":
             from .desktop import bridge
             asyncio.run(bridge())
         elif args.command == "gui":
@@ -193,7 +207,7 @@ def main() -> None:
             from .transport import relay_url
             relay_url(state.data["relay"], state.data["room"])
             state.save()
-            print(f'Configured {state.data["name"]}. Identity saved privately in {state.root}.')
+            print(tr('Configured {0}. Identity saved privately in {1}.' ,state.data['name'],state.root))
         elif args.command == "daemon":
             logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
             from .daemon import Host
@@ -202,7 +216,7 @@ def main() -> None:
             asyncio.run(run_host())
         elif args.command == "start":
             start()
-            print("jaunt is running. Run jaunt pair to add a device.")
+            print(tr('jaunt is running. Run jaunt pair to add a device.'))
         elif args.command == "pair":
             start()
             for _ in range(80):
@@ -222,15 +236,15 @@ def main() -> None:
                     result["qr"] = base64.b64encode(output.getvalue()).decode()
                 print(json.dumps(result))
             else:
-                print("\n  jaunt  /  Pair this machine\n")
+                print(tr('\n  jaunt  /  Pair this machine\n'))
                 if not args.no_qr:
                     import qrcode
                     qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_L)
                     qr.add_data(result["url"])
                     qr.print_ascii(invert=True)
-                print("\nOpen or scan (expires in 10 minutes, one use):\n" + result["url"])
-                print("\nOr paste this complete string into jaunt:\n" + result["code"] + "\n")
-                print("Treat this code like a password. Never put it in an issue or a build log.")
+                print("\n" + tr("Open or scan (expires in 10 minutes, one use):") + "\n" + result["url"])
+                print("\n" + tr("Or paste this complete string into jaunt:") + "\n" + result["code"] + "\n")
+                print(tr('Treat this code like a password. Never put it in an issue or a build log.'))
         elif args.command == "revoke":
             print(json.dumps(control("revoke", {"id": args.id}), indent=2))
         elif args.command == "notify":
@@ -289,7 +303,7 @@ def main() -> None:
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception as exc:
-        print(f"jaunt: {exc}", file=sys.stderr)
+        print("jaunt: "+tr(str(exc)), file=sys.stderr)
         sys.exit(1)
 
 

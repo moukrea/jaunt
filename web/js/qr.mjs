@@ -1,3 +1,4 @@
+import {t as tr} from './i18n.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 // Scanning is entirely local. No QR image or pairing capability leaves this page.
 import {$, el, modal, closeModal, button, toast} from './ui.mjs';
@@ -30,14 +31,14 @@ async function decoder() {
 export async function scan(onCode) {
   let stop = false, stream, timer;
   const video = el('video', {class: 'scan-video', autoplay: true, playsInline: true, muted: true});
-  const status = el('p', {class: 'modal-copy', text: 'Starting the camera…'});
-  const pick = el('input', {type: 'file', accept: 'image/*', 'aria-label': 'Scan QR from an image'});
+  const status = el('p', {class: 'modal-copy', text: tr('Starting the camera…')});
+  const pick = el('input', {type: 'file', accept: 'image/*', 'aria-label': tr('Scan QR from an image')});
   const finish = async code => {
     if (!code || stop) return;
     stop = true; closeModal(); await onCode(code);
   };
-  const camera = isAndroid ? button('Open Android camera', async () => { const code = await nativeCall('qr.scan'); if (code) await finish(code); }, 'button primary wide') : null;
-  modal('Pair with a QR code', el('div', {}, camera, video, status, pick), () => {
+  const camera = isAndroid ? button(tr('Open Android camera'), async () => { const code = await nativeCall('qr.scan'); if (code) await finish(code); }, 'button primary wide') : null;
+  modal(tr('Pair with a QR code'), el('div', {}, camera, video, status, pick), () => {
     stop = true; clearTimeout(timer); stream?.getTracks().forEach(track => track.stop());
   });
   let decode;
@@ -52,16 +53,16 @@ export async function scan(onCode) {
       await finish(code);
     } catch (e) { toast(e.message, true); }
   };
-  if (isAndroid) { video.hidden = true; status.textContent = 'Scan with the camera, or choose a QR image below. Codes stay on this device.'; return; }
+  if (isAndroid) { video.hidden = true; status.textContent = tr('Scan with the camera, or choose a QR image below. Codes stay on this device.'); return; }
   try {
     stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}}, audio: false});
     if (stop) { stream.getTracks().forEach(track => track.stop()); return; }
-    video.srcObject = stream; await video.play(); status.textContent = 'Point the camera at the QR displayed by jaunt pair.';
+    video.srcObject = stream; await video.play(); status.textContent = tr('Point the camera at the QR displayed by jaunt pair.');
     const loop = async () => {
       if (stop) return;
       try { if (video.readyState >= 2) await finish(await decode(video)); } catch (e) { toast(e.message, true); }
       if (!stop) timer = setTimeout(loop, 180);
     };
     loop();
-  } catch { video.hidden = true; status.textContent = 'Camera unavailable or permission denied. Choose a QR image, or close this dialog and paste the pairing string.'; }
+  } catch { video.hidden = true; status.textContent = tr('Camera unavailable or permission denied. Choose a QR image, or close this dialog and paste the pairing string.'); }
 }

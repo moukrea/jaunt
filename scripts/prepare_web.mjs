@@ -15,9 +15,17 @@ for(const size of [16,24,32,48,64,128,256,512]) {
   await sharp(path.join(web,'assets/jaunt.png')).resize(size,size).png().toFile(path.join(iconDir,`${size}x${size}.png`));
   await fs.chmod(path.join(iconDir,`${size}x${size}.png`),0o644);
 }
+// Use exactly the desktop artwork for installable web icons and the favicon.
+await fs.copyFile(path.join(iconDir,'512x512.png'),path.join(web,'assets/app-icon-512.png'));
+await fs.copyFile(path.join(iconDir,'32x32.png'),path.join(web,'assets/favicon.png'));
+await sharp(path.join(web,'assets/jaunt.png')).resize(192,192).png().toFile(path.join(web,'assets/app-icon-192.png'));
+await fs.copyFile(path.join(web,'assets/jaunt.png'),path.join(root,'android/app/src/main/res/drawable-nodpi/ic_jaunt.png'));
 const icons = await build({stdin:{contents: "export {createElement, Terminal, Plus, X, ChevronRight, ChevronDown, Menu, Monitor, Folder, File, Image, Upload, Download, Copy, ClipboardPaste, Paperclip, Lock, ShieldCheck, QrCode, Settings, Bell, Check, RefreshCw, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Trash2, Pencil, Keyboard, Ellipsis, ExternalLink, Eye, Zap, Search, LogOut, TriangleAlert, ArrowDownUp, Sun, Columns2, Rows2} from 'lucide';",resolveDir:root},bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,write:false});
 await fs.writeFile(path.join(web,'vendor/lucide.mjs'),icons.outputFiles[0].contents);
 await fs.copyFile(path.join(root,'node_modules/lucide/LICENSE'),path.join(web,'vendor/LICENSE-lucide.txt'));
+const brands = await build({stdin:{contents:"export {default as claude} from 'meteor-icons/icons/claude'; export {default as openai} from 'meteor-icons/icons/openai';",resolveDir:root},bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,write:false});
+await fs.writeFile(path.join(web,'vendor/meteor.mjs'),brands.outputFiles[0].contents);
+await fs.copyFile(path.join(root,'node_modules/meteor-icons/LICENSE'),path.join(web,'vendor/LICENSE-meteor.txt'));
 const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/xterm'; import {FitAddon} from '@xterm/addon-fit'; export default {Terminal, FitAddon};", resolveDir: root}, bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false});
 await fs.writeFile(path.join(web, 'vendor/xterm.mjs'), terminal.outputFiles[0].contents);
 await fs.copyFile(path.join(root, 'node_modules/@xterm/xterm/css/xterm.css'), path.join(web, 'vendor/xterm.css'));
@@ -49,7 +57,9 @@ if (process.env.jaunt_PRODUCTION === '1') {
 }
 await fs.writeFile(path.join(web, 'config.json'), JSON.stringify(config, null, 2) + '\n');
 async function walk(dir) { const out=[]; for (const f of await fs.readdir(dir,{withFileTypes:true})) { const p=path.join(dir,f.name); if(f.isDirectory())out.push(...await walk(p)); else out.push(p); } return out; }
-const files = (await walk(web)).filter(f => /\.(?:mjs|css|html|png|webmanifest)$/.test(f)).sort();
+await fs.mkdir(path.join(web,'locales'),{recursive:true});
+for(const name of await fs.readdir(path.join(root,'host/jaunt/locales')))if(name.endsWith('.json'))await fs.copyFile(path.join(root,'host/jaunt/locales',name),path.join(web,'locales',name));
+const files = (await walk(web)).filter(f => (/\.(?:mjs|css|html|png|webmanifest)$/.test(f)||f.includes(path.sep+'locales'+path.sep))).sort();
 const hash = createHash('sha256'); for (const f of files) { hash.update(path.relative(web,f)); hash.update(await fs.readFile(f)); }
 const assets = ['./', ...files.map(f=>'./'+path.relative(web,f).split(path.sep).join('/'))];
 const sw = await fs.readFile(path.join(web,'sw.js'),'utf8');

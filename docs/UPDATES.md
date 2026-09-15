@@ -4,13 +4,15 @@
 
 The public installer configures automatic updates by default. The host checks the release selected by the published Page after startup and every 15 minutes. This keeps it on the owner's validated deployment channel. A source checkout has no automatic installation authority; it must first be installed through the public installer.
 
-A new wheel is downloaded over HTTPS and verified against its release manifest. The installer is read from that verified wheel. If ordinary shells or file transfers are still active, the update is staged and deferred. It is retried automatically after they finish. The installer checks again immediately before shutdown and atomically stops accepting new sessions, so a shell created during the download is also protected. Automatic mode never inherits `jaunt_ALLOW_RESTART` or developer download overrides.
+A new wheel is downloaded over HTTPS and verified against its release manifest. The installer is read from that verified wheel. Compatible hosts replace the Python runtime in place with `exec`: the daemon PID, child shell processes and open PTY descriptors remain alive. The bounded replay buffer and terminal geometry pass through an unlinked private file descriptor. Shell environment variables, working directories and running commands remain in their original processes. Clients reconnect using their existing keys. This does not require tmux.
 
-Settings shows the update state and allows automatic updates to be disabled. “Check for updates” preserves running ordinary shells. “Update and restart” requires a separate, explicit confirmation that it can close ordinary shells. The equivalent local command is `jaunt update --allow-restart`; `jaunt update` alone never grants that permission.
+File transfers defer installation until they finish. The installer validates the new runtime before requesting handoff and stops accepting new sessions during the switch. If preparation fails, the old host resumes serving its existing shells. Automatic mode never inherits `jaunt_ALLOW_RESTART` or developer download overrides.
 
-The detached updater survives the daemon's normal restart, uses a private lock to prevent overlapping automatic updates, retains the old runtime until the verified replacement is ready, and preserves host identity/device records. Private `installation.json`, `update-status.json`, `update.log` and staged wheels remain in the host state directory and are never release assets. Failed checks are retried; they do not revoke a device or silently erase shells.
+**Migration from older hosts:** releases without runtime handoff cannot preserve their PTYs across a runtime replacement. The installer detects that capability and defers while ordinary shells are active. Ending them still requires explicit approval through **Update and restart** or `jaunt update --allow-restart`. An ordinary `jaunt update` never grants that permission. After this one-time migration, subsequent compatible updates use handoff automatically.
 
-Hosts running an older version without the updater need one normal public-installer upgrade to receive this feature. That bootstrap must also preserve active shells unless explicit restart permission is given.
+Settings follows the update through its progress and reconnection automatically. Application updates preserve shells; explicitly stopping/restarting the daemon or rebooting the computer still ends ordinary shells. This mechanism is not recovery after a daemon crash or power loss.
+
+The detached updater uses a private lock to prevent overlapping updates and retains the old runtime until the verified replacement is ready. Host identity and device records are preserved. Private `installation.json`, `update-status.json`, `update.log` and staged wheels are never release assets. Failed checks do not revoke devices.
 
 ## Android
 

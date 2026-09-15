@@ -3,6 +3,9 @@
 # Production: bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 set -Eeuo pipefail
 umask 077
+CLIENT_ONLY=0
+if [[ "${1:-}" == --client-only && "$#" == 1 ]]; then CLIENT_ONLY=1;
+elif [[ "$#" != 0 ]]; then printf "Usage: install.sh [--client-only]\n" >&2; exit 2; fi
 # Accept existing overrides and pass canonical values to older installed runtimes.
 while IFS= read -r jaunt_env_key; do
   if [[ "$jaunt_env_key" == "$(printf jaunt_ | tr '[:lower:]' '[:upper:]')"* ]]; then
@@ -161,11 +164,24 @@ import hashlib,json,sys
 m=json.load(open(sys.argv[1]));actual=hashlib.sha256(open(sys.argv[2],'rb').read()).hexdigest()
 assert actual==m['sha256'],'Release checksum mismatch; nothing installed'
 PY
-# Never silently destroy a user's running plain shells during an upgrade.
+if [[ "$CLIENT_ONLY" == 1 ]]; then
+  STAGE='desktop client installation'
+  say 'Installing the desktop client without a host or CLI'
+  PYTHONPATH="$jaunt_INSTALL_TMP/$WHEEL" "$PY" - "$PAGE" <<'PYCLIENT'
+import sys
+from jaunt.desktop import install_gui
+install_gui(page=sys.argv[1],client_only=True)
+PYCLIENT
+  say 'Ready. Open jaunt from your applications menu and pair a host.'
+  exit 0
+fi
+SEAMLESS=0
+# Legacy hosts still require explicit permission to close their PTYs.
 if [[ -x "$PREFIX/current/bin/python" ]]; then
   if "$PREFIX/current/bin/python" -m jaunt.cli status >"$jaunt_INSTALL_TMP/status.json" 2>/dev/null; then
+    SEAMLESS="$("$PY" -c 'import json,sys;print(int(json.load(open(sys.argv[1]))["machine"].get("seamlessUpdates",False)))' "$jaunt_INSTALL_TMP/status.json")"
     COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$jaunt_INSTALL_TMP/status.json")"
-    if [[ "$COUNT" != 0 && "${jaunt_ALLOW_RESTART:-0}" != 1 ]]; then
+    if [[ "$SEAMLESS" != 1 && "$COUNT" != 0 && "${jaunt_ALLOW_RESTART:-0}" != 1 ]]; then
       fail "$COUNT plain shells are running. Finish them before updating. jaunt_ALLOW_RESTART=1 explicitly authorizes terminating them."
     fi
   fi
@@ -198,10 +214,13 @@ if ! TMPDIR="$jaunt_INSTALL_TMP" "$TARGET/bin/python" -m pip install --disable-p
 fi
 # On upgrade, only switch the pointer after the new environment has been verified.
 "$TARGET/bin/python" -c 'from jaunt.daemon import Host; from jaunt.cli import main' || fail 'Runtime dependencies are missing.'
+if [[ "$SEAMLESS" == 1 ]]; then
+  "$TARGET/bin/python" -c 'from jaunt.handoff import restore' || fail 'The new runtime cannot retain active sessions; previous host retained.'
+fi
 STAGE='safe runtime replacement'
 # Only now stop the old runtime. A failed download, checksum, venv or pip install
 # leaves the previous daemon running. Recheck: a shell could have started meanwhile.
-if [[ -x "$PREFIX/current/bin/python" ]]; then
+if [[ "$SEAMLESS" != 1 && -x "$PREFIX/current/bin/python" ]]; then
   if "$PREFIX/current/bin/python" -m jaunt.cli status >"$jaunt_INSTALL_TMP/status.json" 2>/dev/null; then
     COUNT="$("$PY" -c 'import json,sys;print(sum(bool(s["alive"] and not s.get("tmux")) for s in json.load(open(sys.argv[1]))["sessions"]))' "$jaunt_INSTALL_TMP/status.json")"
     [[ "$COUNT" == 0 || "${jaunt_ALLOW_RESTART:-0}" == 1 ]] || fail 'A plain shell started during the upgrade; not stopping it.'
@@ -232,8 +251,29 @@ old=installation()
 atomic_json(state_dir()/'installation.json', {'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)})
 PYUPDATE
 RELAY="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1]))["relay"])' "$jaunt_INSTALL_TMP/config.json")"
+if [[ "$SEAMLESS" == 1 ]]; then
+  STAGE='replacing the host runtime while preserving shells'
+  "$TARGET/bin/python" - "$TARGET/bin/python" <<'PYHANDOFF'
+import sys,time
+from jaunt.cli import control
+for _ in range(100):
+    try:
+        control('upgrade.exec',{'python':sys.argv[1]});break
+    except ValueError as error:
+        if 'actions are still finishing' not in str(error):raise
+        time.sleep(.1)
+else:raise SystemExit('Host actions did not finish; existing shells were retained.')
+for _ in range(1200):
+    time.sleep(.1)
+    try:
+        if control('status').get('runtime')==sys.argv[1]:break
+    except (OSError,ValueError):pass
+else:raise SystemExit('Runtime replacement was not confirmed. Existing shells were not terminated.')
+PYHANDOFF
+  export jaunt_PRESERVE_DAEMON=1
+fi
 STAGE='host configuration and service startup'
-"$BIN/jaunt" init --relay "$RELAY" --page "${PAGE%/}/"
+if [[ "$SEAMLESS" != 1 ]]; then "$BIN/jaunt" init --relay "$RELAY" --page "${PAGE%/}/"; fi
 export PATH="$BIN:$PATH"
 if [[ "${jaunt_NO_SERVICE:-0}" != 1 ]]; then
   if ! "$BIN/jaunt" service install; then
@@ -250,6 +290,8 @@ if [[ -t 1 && "${jaunt_NO_GUI:-0}" != 1 && ( -n "${DISPLAY:-}" || -n "${WAYLAND_
     "$BIN/jaunt" gui --install-only
   fi
 fi
+"$BIN/jaunt" --version >/dev/null
+if [[ "${jaunt_NO_GUI:-0}" != 1 ]]; then "$PREFIX/current/bin/python" -c 'import jaunt.desktop as d; getattr(d,"save_mode",lambda *_:None)(False)'; fi
 say 'Ready'
 printf 'Executable: %s/jaunt\n' "$BIN"
 printf 'Add %s to PATH if your next shell does not find jaunt.\n' "$BIN"

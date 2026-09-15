@@ -1,0 +1,24 @@
+[English](../../../DEPLOY_AGENT_PROMPT.md) · [fr](../fr/DEPLOY_AGENT_PROMPT.md) · [es](../es/DEPLOY_AGENT_PROMPT.md) · [it](../it/DEPLOY_AGENT_PROMPT.md) · [pt](../pt/DEPLOY_AGENT_PROMPT.md) · [de](DEPLOY_AGENT_PROMPT.md)
+
+# Lieferaufforderung — jaunt
+
+Sie haben den GitHub-Zugriff auf `moukrea/jaunt` autorisiert. Integrieren und Bereitstellen des Projekts in diesem Archiv. Lesen Sie nicht die alte Implementierung zur Inspiration: Dieses Projekt ist ein Umschreiben. Bewahren Sie den vorherigen Zustand auf einem Backup-Branch, dann arbeiten Sie einen Branch und PR durch. Erzwingen Sie nicht den Verlauf.
+
+Die nicht verhandelbare Anforderung ist der echte Zugriff auf beliebige shells über eine mobile / Desktop-Benutzeroberfläche, nicht nur Claude / Codex-Agenten. One-Command-Host-Installation, keine VPN / Tailscale oder Server-Konfiguration für Endbenutzer. Pair einmal von QR-Code, persistente Schlüssel, Netzwerkänderungen ohne erneute Kopplung, Dateien, Bilder, Zwischenablage, mehrere Sitzungen und Benachrichtigungen.
+
+## Ausführung
+
+1. Lesen Sie README.md, SECURITY.md, docs/VALIDATION.md und docs/DEPLOYMENT.md; prüfen Sie den gelieferten Code. Schreiben Sie die Arbeitskomponenten nicht um, nur um sie zu vereinfachen. Verstecken Sie keine dokumentierten Einschränkungen.
+2. Installieren Sie Build/Test-Abhängigkeiten und erzeugen und begehen Sie ein echtes Paket-lock.json. Überprüfen Sie aktuelle Versionen und Sicherheitshinweise. `npm run prepare-web` muss eine lokale jsQR-Kopie und deren Lizenz erstellen. Keine Laufzeit JavaScript von einem CDN. Überprüfen Sie jeden Import und jede Ressource unter dem veröffentlichten `/jaunt/` Pfad.
+3. Führen Sie pytest aus, leiten Sie Node-Tests, echte Miniflare-Tests, check_project, build_release und Browser-E2E-Tests weiter. Lesen Sie Fehler und beheben Sie deren Ursachen; entfernen Sie niemals nur Behauptungen oder Funktionen. Melden Sie Befehle, Versionen und tatsächlich beobachtete Ergebnisse.
+4. Bereitstellen des Workers mit dem autorisierten Cloudflare-Konto. Die erforderlichen Geheimnisse sind CLOUDFLARE_API_TOKEN und CLOUDFLARE_ACCOUNT_ID. Wenn die Cloudflare-Autorisierung nicht verfügbar ist, fordern Sie NUR diese fehlende Autorisierung über den entsprechenden sicheren Mechanismus an und erklären Sie, dass ein GitHub-Token sie nicht gewährt. Erfinden Sie niemals eine URL oder leihen Sie sich das öffentliche Relais eines anderen Projekts aus.
+5. Konfigurieren Sie APP_ORIGIN, überprüfen Sie Gesundheit UND echtes WebSockets, setzen Sie dann jaunt_RELAY_URL in GitHub. Veröffentlichen Sie das Host-Tag/Release und seine drei Assets vor Seiten. Setzen Sie jaunt_RELEASE_TAG und aktivieren Sie Seiten durch Aktionen. Triggern Sie den Seiten-Workflow und überprüfen Sie die tatsächliche URL.
+6. Führen Sie eine echte Installation aus der öffentlichen Version auf einer sauberen Maschine durch, die nicht editierbar ist. Überprüfen Sie die Prüfsumme, den Benutzerdienst, den Start und den QR-Code. Überprüfen Sie identitätserhaltende Upgrades und die Weigerung, aktive gewöhnliche shells stillschweigend zu töten.
+7. Führen Sie den End-to-End-Akzeptanzfluss aus: öffentliche Seite → Pairing → shell → Befehl mit bewährter Ausgabe → neuer Tab → Rückkehr zum ersten shell → Bild/Text-Upload → Download mit Byte-Vergleich → Relais/Netzwerkunterbrechung → gleiche Sitzung ohne neue QR → Widerruf. Testen Sie auf einem autorisierten physischen Telefon QR Scannen, Tastatur, Galerie, Rotation, Wi-Fi/Mobile Switching, PWA und drücken Sie mit dem Bildschirm gesperrt. Nie behaupten, ein Telefon verwendet zu haben, wenn keine verfügbar ist.
+8. Behalten Sie die Unterscheidung zwischen Upload-Plus-Pfad ohne Enter und bedingter nativer Paste. Beanspruchen Sie keinen Claude/Codex-Anhang, wenn nur ein Pfad eingefügt wurde. Machen Sie das Headless-Fallback explizit. Versprechen Sie niemals eine OS-Zwischenablage, die nicht existiert.
+9. Veröffentlichen Sie niemals host.json, .dev-state, Secrets, QR-Codes, Vault-Exporte oder private terminal-Logs. Überprüfen Sie ZIP/Release-Inhalte und Workflows vor der Veröffentlichung. Führen Sie keine destruktiven Scans in den persönlichen Verzeichnissen des Benutzers für Tests durch.
+10. Geben Sie die veröffentlichte URL, den validierten Installationsbefehl, Tag/Release, den Testbericht und die verbleibenden unvalidierten Einschränkungen an. Geben Sie keine 40 manuellen Aufgaben ab. Die Bereitstellung des Eigentümers erfolgt einmalig; Endbenutzer müssen keine Cloudflare/GitHub-Konten für die Verbindung benötigen.
+
+## Veröffentlichungsblocker
+
+Ein unkonfiguriertes Relay, fälschlicherweise beanspruchte Bildpaste, nicht funktional erstelltes shell, künstlich bestandene Tests, fehlender JS-Import, erfundene Release/URL oder Repository-Secrets blockieren die Veröffentlichung. Die Sicherheit des Protokolls wurde nicht überprüft: diese Offenlegung beibehalten, selbst wenn alle Tests bestanden haben.

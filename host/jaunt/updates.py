@@ -24,21 +24,7 @@ def version(tag: str) -> tuple:
     major, minor, patch, stage, number = match.groups()
     return int(major), int(minor), int(patch), {"alpha": 0, "beta": 1, "rc": 2, None: 3}[stage], int(number or 0)
 
-class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlsplit(newurl).scheme != "https":
-            raise ValueError("Update redirect must use HTTPS")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-def fetch(url: str, maximum: int) -> bytes:
-    if urllib.parse.urlsplit(url).scheme != "https":
-        raise ValueError("Updates require HTTPS")
-    request = urllib.request.Request(url, headers={"User-Agent": "jaunt updater", "Cache-Control": "no-cache"})
-    with urllib.request.build_opener(HTTPSRedirect()).open(request, timeout=30) as response:
-        data = response.read(maximum + 1)
-    if len(data) > maximum:
-        raise ValueError("Update artifact exceeds its size limit")
-    return data
+from .downloads import fetch
 
 def installation(root: Path | None = None) -> dict:
     path = (root or state_dir()) / "installation.json"
@@ -115,7 +101,7 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
             live = control("status")
             active = sum(bool(s["alive"] and not s.get("tmux")) for s in live["sessions"])
             authorized = allow_restart is True and not automatic
-            if (active or live.get("activeTransfers", 0)) and not authorized:
+            if ((active and not live.get("machine", {}).get("seamlessUpdates")) or live.get("activeTransfers", 0)) and not authorized:
                 return record("deferred", version=tag, activeShells=active,
                               message="Update downloaded. It will install after ordinary shells and file transfers finish.")
             with zipfile.ZipFile(wheel) as archive:

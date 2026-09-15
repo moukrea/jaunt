@@ -46,28 +46,28 @@ final class UpdateManager {
         if(downloadBusy.get()||!checkingBusy.compareAndSet(false,true))return;
         preferences().edit().putLong("checked",now).apply();
         final ProgressDialog checking=explicit&&activity!=null?new ProgressDialog(activity):null;
-        if(checking!=null){checking.setMessage("Checking published Android version…");checking.setCancelable(false);checking.show();}
+        if(checking!=null){checking.setMessage(Lang.t("Checking published Android version…"));checking.setCancelable(false);checking.show();}
         IO.execute(()->{try{
             String current=context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionName;
             // The owner publishes this channel only after checking the public APK assets.
             // No per-user GitHub API account or shared-IP API quota is required.
             JSONObject channel=new JSONObject(new String(fetch(CHANNEL,16384),java.nio.charset.StandardCharsets.UTF_8));
             String tag=channel.optString("androidRelease");
-            if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("jaunt is up to date","You already have the latest published Android release.");return;}
+            if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("jaunt is up to date",Lang.t("You already have the latest published Android release."));return;}
             String name="jaunt-"+tag+".apk";
             if(activity==null){notifyAvailable(tag);return;}
-            activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle("jaunt update available").setMessage("Version "+tag.substring(9)+" is available. Your paired machines will be kept. Android will ask you to confirm installation.").setNegativeButton("Later",null).setPositiveButton("Download and install",(d,w)->download(tag,name)).show();}});
-        }catch(Exception e){if(explicit)message("Update check unavailable","Could not verify the latest release. Check your connection and try again.");}finally{checkingBusy.set(false);if(checking!=null)activity.runOnUiThread(checking::dismiss);}});
+            activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(Lang.t("jaunt update available")).setMessage(Lang.format("Version {0} is available. Your paired machines will be kept. Android will ask you to confirm installation.",tag.substring(9))).setNegativeButton(Lang.t("Later"),null).setPositiveButton(Lang.t("Download and install"),(d,w)->download(tag,name)).show();}});
+        }catch(Exception e){if(explicit)message(Lang.t("Update check unavailable"),Lang.t("Could not verify the latest release. Check your connection and try again."));}finally{checkingBusy.set(false);if(checking!=null)activity.runOnUiThread(checking::dismiss);}});
     }
     private void notifyAvailable(String tag){
-        NotificationManager manager=context.getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel("jaunt-updates","Application updates",NotificationManager.IMPORTANCE_DEFAULT));
+        NotificationManager manager=context.getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel("jaunt-updates",Lang.t("Application updates"),NotificationManager.IMPORTANCE_DEFAULT));
         Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("checkUpdate",true);
         PendingIntent open=PendingIntent.getActivity(context,77,intent,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("jaunt update available").setContentText("Tap to install "+tag.substring(9)+". Your pairings will be kept.").setContentIntent(open).setAutoCancel(true).build());
+        manager.notify(2,new Notification.Builder(context,"jaunt-updates").setSmallIcon(R.drawable.ic_jaunt).setContentTitle("jaunt update available").setContentText(Lang.format("Tap to install {0}. Your pairings will be kept.",tag.substring(9))).setContentIntent(open).setAutoCancel(true).build());
     }
     private void download(String tag,String name){
         if(!downloadBusy.compareAndSet(false,true))return;
-        ProgressDialog progress=new ProgressDialog(activity);progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);progress.setMax(100);progress.setIndeterminate(true);progress.setMessage("Downloading jaunt…");progress.setCancelable(false);progress.show();
+        ProgressDialog progress=new ProgressDialog(activity);progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);progress.setMax(100);progress.setIndeterminate(true);progress.setMessage(Lang.t("Downloading jaunt…"));progress.setCancelable(false);progress.show();
         IO.execute(()->{try{
             String base=RELEASES+tag+"/";String sums=new String(fetch(base+"SHA256SUMS",16384),java.nio.charset.StandardCharsets.UTF_8),expected=null;
             for(String row:sums.split("\\n")){String[] parts=row.trim().split("  ",2);if(parts.length==2&&parts[1].equals(name)&&parts[0].matches("[a-f0-9]{64}"))expected=parts[0];}
@@ -75,14 +75,14 @@ final class UpdateManager {
             java.util.concurrent.atomic.AtomicInteger shown=new java.util.concurrent.atomic.AtomicInteger(-1);
             byte[] apk=fetch(base+name,64*1024*1024,(bytes,total)->{
                 int percent=total>0?(int)(bytes*100L/total):-1;
-                if(shown.getAndSet(percent)!=percent)activity.runOnUiThread(()->{progress.setIndeterminate(total<=0);if(total>0)progress.setProgress(percent);progress.setMessage("Downloading jaunt · "+(bytes/1024)+" KiB");});
+                if(shown.getAndSet(percent)!=percent)activity.runOnUiThread(()->{progress.setIndeterminate(total<=0);if(total>0)progress.setProgress(percent);progress.setMessage(Lang.t("Downloading jaunt · ")+(bytes/1024)+" KiB");});
             });
-            activity.runOnUiThread(()->{progress.setIndeterminate(true);progress.setMessage("Verifying checksum and application signature…");});
+            activity.runOnUiThread(()->{progress.setIndeterminate(true);progress.setMessage(Lang.t("Verifying checksum and application signature…"));});
             if(!hex(MessageDigest.getInstance("SHA-256").digest(apk)).equals(expected))throw new IOException("APK checksum mismatch");
             File dir=new File(context.getCacheDir(),"updates");if(!dir.exists()&&!dir.mkdirs())throw new IOException("No update directory");File file=new File(dir,"jaunt-update.apk");
             try(FileOutputStream out=new FileOutputStream(file)){out.write(apk);out.getFD().sync();}
             verifyPackage(file);pending=file;activity.runOnUiThread(()->{progress.dismiss();installPending();});
-        }catch(Exception e){activity.runOnUiThread(progress::dismiss);message("Update was not installed","The download or its signature could not be verified. Your current app and pairings are unchanged. Try again later.");}finally{downloadBusy.set(false);}});
+        }catch(Exception e){activity.runOnUiThread(progress::dismiss);message(Lang.t("Update was not installed"),Lang.t("The download or its signature could not be verified. Your current app and pairings are unchanged. Try again later."));}finally{downloadBusy.set(false);}});
     }
     private static String hex(byte[] data){StringBuilder out=new StringBuilder();for(byte b:data)out.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return out.toString();}
     @SuppressWarnings("deprecation") private void verifyPackage(File apk)throws Exception{
@@ -96,9 +96,9 @@ final class UpdateManager {
     }
     void installPending(){if(pending==null||activity==null)return;
         if(!context.getPackageManager().canRequestPackageInstalls()){
-            new AlertDialog.Builder(activity).setTitle("Allow this update").setMessage("Android needs permission for jaunt to open its APK installer. Enable “Allow from this source”, then return here.").setNegativeButton("Later",null).setPositiveButton("Open Android settings",(d,w)->activity.startActivityForResult(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+context.getPackageName())),44)).show();return;
+            new AlertDialog.Builder(activity).setTitle(Lang.t("Allow this update")).setMessage(Lang.t("Android needs permission for jaunt to open its APK installer. Enable “Allow from this source”, then return here.")).setNegativeButton(Lang.t("Later"),null).setPositiveButton(Lang.t("Open Android settings"),(d,w)->activity.startActivityForResult(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+context.getPackageName())),44)).show();return;
         }
-        try{verifyPackage(pending);Uri uri=FileProvider.getUriForFile(context,context.getPackageName()+".updates",pending);activity.startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(Exception e){message("Could not open the update","Please check for updates again. Your current installation is unchanged.");}
+        try{verifyPackage(pending);Uri uri=FileProvider.getUriForFile(context,context.getPackageName()+".updates",pending);activity.startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));}catch(Exception e){message(Lang.t("Could not open the update"),Lang.t("Please check for updates again. Your current installation is unchanged."));}
     }
-    private void message(String title,String text){if(activity!=null)activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(title).setMessage(text).setPositiveButton("OK",null).show();}});}
+    private void message(String title,String text){if(activity!=null)activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(Lang.t(title)).setMessage(text).setPositiveButton("OK",null).show();}});}
 }

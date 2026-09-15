@@ -25,7 +25,7 @@ def port():
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
 class Harness:
-    def __init__(self, name="jaunt workstation"):
+    def __init__(self, name="jaunt workstation", relay_url=None):
         self.tmp=tempfile.TemporaryDirectory(prefix='jaunt-browser-');self.root=Path(self.tmp.name)
         self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir();(self.root/'home').mkdir()
         self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state),'HOME':str(self.root/'home'),'XDG_CONFIG_HOME':str(self.root/'home/.config'),'XDG_DATA_HOME':str(self.root/'home/.local/share'),'XDG_CACHE_HOME':str(self.root/'home/.cache')}
@@ -43,7 +43,7 @@ class Harness:
         self.http=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(site)))
         self.url=f'http://127.0.0.1:{self.http.server_port}/jaunt/';threading.Thread(target=self.http.serve_forever,daemon=True).start()
         self.log=open(self.root/'host.log','w');self.relay=None;self.host=None;self.restart_relay()
-        self.cli('init','--relay',f'ws://127.0.0.1:{self.rport}','--page',self.url,'--name',name)
+        self.cli('init','--relay',relay_url or f'ws://127.0.0.1:{self.rport}','--page',self.url,'--name',name)
         self.host=subprocess.Popen([sys.executable,'-m','jaunt.cli','daemon'],env=self.env,stdout=self.log,stderr=self.log)
         for _ in range(100):
             if (self.state/'control.sock').exists():break
@@ -102,7 +102,7 @@ async def main():
         browser=await pw.chromium.launch(**({'executable_path':executable} if executable else {}),args=['--no-sandbox'])
         ctx=await browser.new_context(viewport={'width':1440,'height':950},accept_downloads=True)
         page=await ctx.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
-        await page.goto(h.url);await expect(page.locator('#pair-submit')).to_be_visible()
+        await page.goto(h.url);await expect(page.locator('#site-home')).to_be_visible();await page.locator('#open-workspace').click();await expect(page.locator('#pair-submit')).to_be_visible()
         await page.screenshot(path=str(OUT/'desktop-welcome.png'))
         await page.locator('#pair-code').fill('invalid');await page.locator('#pair-submit').click()
         await expect(page.locator('#pair-error')).to_contain_text('not a valid');passed('invalid pairing rejected by UI')
@@ -153,6 +153,8 @@ async def main():
         # a browser offline indicator. Host stays alive and re-registers its room.
         h.kill_relay()
         await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
+        await expect(page.locator('#connection-banner')).to_have_attribute('aria-busy','true')
+        await expect(page.locator('#connection-banner button')).to_have_count(0)
         h.restart_relay();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
         assert json.loads(h.cli('status'))['pid']==original
         await page.wait_for_timeout(300)
@@ -280,7 +282,7 @@ async def main():
         mobile=await browser.new_context(viewport={'width':390,'height':844},device_scale_factor=1,is_mobile=True,has_touch=True,accept_downloads=True)
         await mobile.add_init_script('delete window.BarcodeDetector')
         mp=await mobile.new_page();mp.on('pageerror',lambda e:errors.append(str(e)))
-        await mp.goto(h.url);await expect(mp.locator('#pair-submit')).to_be_visible();await mp.screenshot(path=str(OUT/'mobile-welcome.png'),full_page=True)
+        await mp.goto(h.url);await expect(mp.locator('#site-home')).to_be_visible();await mp.locator('#open-workspace').click();await expect(mp.locator('#pair-submit')).to_be_visible();await mp.screenshot(path=str(OUT/'mobile-welcome.png'),full_page=True)
         await mp.locator('#scan-welcome').click()
         await mp.get_by_label('Scan QR from an image').set_input_files({'name':'pairing.png','mimeType':'image/png','buffer':qr_png(h.pair()['code'])})
         await expect(mp.locator('#connection span')).to_have_text('Encrypted',timeout=15000)

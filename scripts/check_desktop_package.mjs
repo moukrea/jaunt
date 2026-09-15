@@ -13,6 +13,9 @@ for(const entry of await fs.readdir(root,{withFileTypes:true})) {
     try {await fs.access(archive);}catch{continue;}
     const files=new Set(listPackage(archive).map(f=>f.replace(/^\//,'')));
     const read=file=>extractFile(archive,file).toString();
+    for(const file of files)assert(!/(^|\/)(?:host\.json|\.dev-state|\.env|installation\.json|update-status\.json)(?:\/|$)/.test(file),`Private runtime state in package: ${file}`);
+    for(const file of ['web/vendor/meteor.mjs','web/vendor/LICENSE-meteor.txt','web/vendor/jsqr.mjs','web/vendor/LICENSE-jsQR.txt',...['en','fr','es','it','pt','de'].map(lang=>`web/locales/${lang}.json`)])assert(files.has(file),`Missing bundled resource ${file}`);
+    assert.equal(JSON.parse(read('web/manifest.webmanifest')).name,'jaunt (PWA)');
     assert.deepEqual(extractFile(archive,'web/assets/jaunt.png'),await fs.readFile('web/assets/jaunt.png'),'Packaged web logo differs or is absent');
     assert.deepEqual(await fs.readFile(path.join(resources,'jaunt.png')),await fs.readFile('desktop/icons/512x512.png'),'Native logo differs or is absent');
     for(const match of read('web/index.html').matchAll(/(?:src|href)="(\.\/[^"#?]+)"/g)) {

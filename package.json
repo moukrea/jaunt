@@ -1,6 +1,6 @@
 {
   "name": "jaunt-desktop",
-  "version": "0.1.0-beta.9",
+  "version": "0.1.0-beta.10",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "prepare-web": "node scripts/prepare_web.mjs",
     "test:relay": "node --test tests/relay.miniflare.mjs",
-    "test": "node --test tests/relay.test.mjs tests/js.test.mjs tests/desktop_updates.test.cjs",
+    "test": "node --test tests/relay.test.mjs tests/js.test.mjs tests/desktop_updates.test.cjs tests/host_errors.test.cjs",
     "desktop": "electron .",
     "build:desktop": "electron-builder --linux tar.gz deb --publish never"
   },
@@ -20,9 +20,12 @@
     "lucide": "1.46.0"
   },
   "devDependencies": {
+    "acorn": "^8.18.0",
+    "acorn-walk": "^8.3.5",
     "electron": "44.3.0",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
+    "meteor-icons": "4.4.0",
     "miniflare": "4.20260730.0",
     "sharp": "0.35.4",
     "wrangler": "4.131.2"
