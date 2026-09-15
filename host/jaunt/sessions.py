@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Awaitable
 
+from .process_wait import exit_status
 from .crypto import b64, token
 
 Send = Callable[[str, dict], Awaitable[None]]
@@ -240,9 +241,9 @@ class Sessions:
             # Keep the leader waitable until this retained session is removed.
             # Its reserved PID prevents reuse while we still own background jobs,
             # including jobs which outlive the interactive shell.
-            result = os.waitid(os.P_PID, s.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) if s.process else None
+            result = exit_status(s.pid) if s.process else None
             if result is not None:
-                s.exit_code = result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+                s.exit_code = result
                 break
             await asyncio.sleep(0.1)
         s.alive = False
@@ -400,6 +401,8 @@ class Sessions:
             try:
                 for value in raw.split():
                     pid = int(value)
+                    if pid == s.pid and exit_status(s.pid) is not None:
+                        continue
                     try:
                         if os.getsid(pid) != s.pid:
                             continue
@@ -432,7 +435,7 @@ class Sessions:
 
         def running() -> bool:
             # The leader remains waitable, reserving its PID until final cleanup.
-            return s.alive and (s.process is None or s.process.returncode is None)
+            return s.alive and (s.process is None or (s.process.returncode is None and exit_status(s.pid) is None))
 
         def signal_group(sig: int) -> None:
             if not running():
