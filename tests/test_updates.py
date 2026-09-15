@@ -9,7 +9,7 @@ from jaunt.state import atomic_json
 
 @pytest.fixture
 def release(tmp_path, monkeypatch):
-    monkeypatch.setenv('JAUNT_STATE', str(tmp_path))
+    monkeypatch.setenv('jaunt_STATE', str(tmp_path))
     atomic_json(tmp_path / 'installation.json', {'page': 'https://example.test/jaunt', 'repository': 'moukrea/jaunt', 'tag': 'v0.1.0-beta.4', 'automatic': True, 'prefix': str(tmp_path/'runtime'), 'bin': str(tmp_path/'bin')})
     content=io.BytesIO()
     with zipfile.ZipFile(content,'w') as z:z.writestr('jaunt/installer.sh', '#!/bin/sh\nexit 0\n')
@@ -20,7 +20,7 @@ def release(tmp_path, monkeypatch):
 
 def test_automatic_update_stages_but_never_kills_active_shell(release,monkeypatch):
     root,_=release
-    monkeypatch.setenv('JAUNT_ALLOW_RESTART','1')
+    monkeypatch.setenv('jaunt_ALLOW_RESTART','1')
     monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[{'alive':True,'tmux':False}]})
     monkeypatch.setattr(updates.subprocess,'run',lambda *a,**k:pytest.fail('An active ordinary shell must prevent automatic installation'))
     result=updates.update(automatic=True,allow_restart=True)
@@ -35,8 +35,8 @@ def test_tampered_release_does_not_reach_shutdown_or_installer(release,monkeypat
     assert not list((root/'updates').glob('*.whl'))
 
 def test_idle_update_strips_inherited_restart_and_development_overrides(release,monkeypatch):
-    monkeypatch.setenv('JAUNT_ALLOW_RESTART','1');monkeypatch.setenv('JAUNT_DEV_INSTALL','1')
-    monkeypatch.setenv('JAUNT_RELEASE_BASE','https://attacker.invalid')
+    monkeypatch.setenv('jaunt_ALLOW_RESTART','1');monkeypatch.setenv('jaunt_DEV_INSTALL','1')
+    monkeypatch.setenv('jaunt_RELEASE_BASE','https://attacker.invalid')
     monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[]})
     observed=[]
     def run(args,**kwargs):
@@ -44,15 +44,15 @@ def test_idle_update_strips_inherited_restart_and_development_overrides(release,
     monkeypatch.setattr(updates.subprocess,'run',run)
     assert updates.update(automatic=True)['state']=='installed'
     assert len(observed)==1
-    assert not {'JAUNT_ALLOW_RESTART','JAUNT_DEV_INSTALL','JAUNT_RELEASE_BASE'} & observed[0].keys()
-    assert observed[0]['JAUNT_SKIP_PAIR']=='1'
+    assert not {'jaunt_ALLOW_RESTART','jaunt_DEV_INSTALL','jaunt_RELEASE_BASE'} & observed[0].keys()
+    assert observed[0]['jaunt_SKIP_PAIR']=='1'
 
 def test_explicit_restart_is_distinct_from_automatic_update(release,monkeypatch):
     monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[{'alive':True,'tmux':False}]})
     observed=[]
     monkeypatch.setattr(updates.subprocess,'run',lambda args,**k:(observed.append(k['env']) or type('Result',(),{'returncode':0})()))
     assert updates.update(allow_restart=True)['state']=='installed'
-    assert observed[0]['JAUNT_ALLOW_RESTART']=='1'
+    assert observed[0]['jaunt_ALLOW_RESTART']=='1'
 
 def test_updates_do_not_downgrade_or_jump_to_unvalidated_tag(release,monkeypatch):
     _,responses=release

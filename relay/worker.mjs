@@ -1,4 +1,4 @@
-/** Jaunt's blind WebSocket relay. No terminal/file/clipboard plaintext is stored.
+/** jaunt's blind WebSocket relay. No terminal/file/clipboard plaintext is stored.
  * One Durable Object per unguessable host room; Hibernation WebSocket API.
  * Relay capabilities authorize routing only. End-to-end authentication is on the host.
  */

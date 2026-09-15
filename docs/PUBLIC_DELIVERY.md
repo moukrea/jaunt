@@ -45,7 +45,7 @@ The final acceptance test used the public page and releases without module subst
 The automatic initial check ran by itself on both public beta.4 installations: the user's workstation and the VM. To avoid waiting through each fifteen-minute interval during testing, the exact installed `python -m jaunt.updates --automatic` process was subsequently triggered manually in the VM:
 
 1. Downloaded the public beta.5 wheel and compared it with the public manifest.
-2. With an ordinary shell active, deferred installation while retaining the host PID, shell PID, and keys. An inherited `JAUNT_ALLOW_RESTART=1` did not authorize automatic updates to kill the shell.
+2. With an ordinary shell active, deferred installation while retaining the host PID, shell PID, and keys. An inherited `jaunt_ALLOW_RESTART=1` did not authorize automatic updates to kill the shell.
 3. Closed the shell through the UI's explicit confirmation, then reran the automatic process: beta.5 installed, service active and enabled, import from `site-packages`, host/device identities unchanged.
 
 The public beta.1 APK discovered beta.2 through the public channel, downloaded the assets, verified the checksum and existing certificate, and opened Android's “Allow from this source” settings and real system installer. After confirmation and opening, `versionCode=2`, non-debuggable mode, pairing, and shell PID were verified; a command created the expected host file. No `adb install` substituted for this update flow. Discovery was requested through Settings; no actual six-hour wait is claimed. The APK also reconnected without a QR code after the automatic host upgrade.
@@ -60,7 +60,7 @@ The first signed public APK ran a verified shell command on the VM. A synthetic 
 
 Earlier Android tests covered the system Save dialog with binary comparison, rotation and network interruption/recovery with the same session, three cold starts of the signed build, pairing from a gallery QR image, camera permission, and scanner launch. Clipboard tests use separate instrumentation absent from the public APK. The user's clipboard and personal directories were not test fixtures.
 
-One initial test tap encountered Android's clipboard-preview overlay on top of the app; after it disappeared, the real Paste button was exercised and bytes verified. The post-open check waits for the Encrypted state rather than assuming instant startup. A urllib probe with its default User-Agent received 403; the same probe with a Jaunt User-Agent and curl received 200, and real WebSockets passed. The first network interruption in the final acceptance test blocked only IPv4 while the VM socket used IPv6, confirmed with `ss`. The test was corrected to interrupt both families and restore rules in a finally block. No functional check was removed to obtain a passing result.
+One initial test tap encountered Android's clipboard-preview overlay on top of the app; after it disappeared, the real Paste button was exercised and bytes verified. The post-open check waits for the Encrypted state rather than assuming instant startup. A urllib probe with its default User-Agent received 403; the same probe with a jaunt User-Agent and curl received 200, and real WebSockets passed. The first network interruption in the final acceptance test blocked only IPv4 while the VM socket used IPv6, confirmed with `ss`. The test was corrected to interrupt both families and restore rules in a finally block. No functional check was removed to obtain a passing result.
 
 ## Rapid input correction
 

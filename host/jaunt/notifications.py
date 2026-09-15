@@ -29,7 +29,7 @@ async def deliver(value: dict, payload: dict) -> str:
         try:
             from pywebpush import webpush, WebPushException
         except ImportError:
-            return "Push dependency missing: reinstall Jaunt with its dependencies"
+            return "Push dependency missing: reinstall jaunt with its dependencies"
         try:
             webpush(subscription_info=value["subscription"],
                     data=json.dumps(payload, separators=(",", ":")),

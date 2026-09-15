@@ -43,7 +43,7 @@ jobs:
           FEDORA_VERSION: ${{ matrix.fedora }}
         run: |
           docker run --rm -v "$PWD:/src:ro" \
-            -e JAUNT_NO_SERVICE=1 -e JAUNT_SKIP_PAIR=1 \
+            -e jaunt_NO_SERVICE=1 -e jaunt_SKIP_PAIR=1 \
             "fedora:$FEDORA_VERSION" bash -c '
               set -euo pipefail
               cat /etc/fedora-release
@@ -95,9 +95,11 @@ jobs:
       - run: npm run test:relay
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_e2e.py
+      - run: xvfb-run -a python tests/shared_workspace_e2e.py
+      - run: python tests/terminal_render_e2e.py
       - run: python tests/browser_e2e.py
         env:
-          JAUNT_E2E_RELAY: workerd
+          jaunt_E2E_RELAY: workerd
       - run: python scripts/build_release.py
       - run: python tests/installer_e2e.py
       - uses: actions/upload-artifact@v4

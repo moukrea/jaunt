@@ -12,7 +12,7 @@ import java.util.Base64;
 import javax.crypto.*;
 import javax.crypto.spec.*;
 
-/** Jaunt v1 P-256/HMAC/HKDF/AES-GCM, with strict per-direction replay counters. */
+/** jaunt v1 P-256/HMAC/HKDF/AES-GCM, with strict per-direction replay counters. */
 public final class CryptoChannel {
     private final byte[] sendKey, receiveKey, aad;
     private long sent, received;

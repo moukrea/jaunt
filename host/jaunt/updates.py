@@ -33,7 +33,7 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
 def fetch(url: str, maximum: int) -> bytes:
     if urllib.parse.urlsplit(url).scheme != "https":
         raise ValueError("Updates require HTTPS")
-    request = urllib.request.Request(url, headers={"User-Agent": "Jaunt updater", "Cache-Control": "no-cache"})
+    request = urllib.request.Request(url, headers={"User-Agent": "jaunt updater", "Cache-Control": "no-cache"})
     with urllib.request.build_opener(HTTPSRedirect()).open(request, timeout=30) as response:
         data = response.read(maximum + 1)
     if len(data) > maximum:
@@ -126,15 +126,15 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
                 env = os.environ.copy()
                 # Never inherit restart authorization or dev/source overrides into automatic work.
                 for key in list(env):
-                    if key.startswith("JAUNT_"):
+                    if key.startswith("jaunt_"):
                         del env[key]
-                env.update(JAUNT_STATE=str(root), JAUNT_PAGE_URL=page, JAUNT_REPO=repo,
-                           JAUNT_VERSION=tag, JAUNT_PREFIX=config["prefix"], JAUNT_BIN_DIR=config["bin"],
-                           JAUNT_SKIP_PAIR="1")
+                env.update(jaunt_STATE=str(root), jaunt_PAGE_URL=page, jaunt_REPO=repo,
+                           jaunt_VERSION=tag, jaunt_PREFIX=config["prefix"], jaunt_BIN_DIR=config["bin"],
+                           jaunt_SKIP_PAIR="1")
                 if config.get("noService"):
-                    env["JAUNT_NO_SERVICE"] = "1"
+                    env["jaunt_NO_SERVICE"] = "1"
                 if authorized:
-                    env["JAUNT_ALLOW_RESTART"] = "1"
+                    env["jaunt_ALLOW_RESTART"] = "1"
                 record("installing", version=tag)
                 fd = os.open(root / "update.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 with os.fdopen(fd, "wb") as log:

@@ -26,7 +26,7 @@ The curl documentation defines [exit 23 as a local write failure](https://curl.s
 - `python tests/installer_namespace_e2e.py`: real public wheel installation with curl in a Fedora 44 container and Bash/Python outside it. No host directories are mounted into curl's container. Before the output-redirection fix, config download failed with exit 23. After the fix, the wheel installed from the public release, imported from the private runtime, and started the daemon with automatic updates enabled.
 - Required CI includes real Fedora 43/44 installations. The Fedora 44 job additionally runs the separate-filesystem curl installation regression.
 
-Fedora tests use isolated containers without a user service manager (`JAUNT_NO_SERVICE=1`) and suppress QR output (`JAUNT_SKIP_PAIR=1`). They validate installation and background startup, not systemd/SELinux on a physical Fedora workstation. The user service was previously validated on Ubuntu; no new physical Fedora validation is claimed.
+Fedora tests use isolated containers without a user service manager (`jaunt_NO_SERVICE=1`) and suppress QR output (`jaunt_SKIP_PAIR=1`). They validate installation and background startup, not systemd/SELinux on a physical Fedora workstation. The user service was previously validated on Ubuntu; no new physical Fedora validation is claimed.
 
 These corrections apply to the Pages entry point and installer source. Published beta.5 assets and APK beta.3 remain immutable. The host does not need a new version number to use the updated Pages installer. The installer embedded in the beta.5 wheel retains its previous code until a future host release.
 

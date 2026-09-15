@@ -1,4 +1,4 @@
-# Jaunt contribution guidelines
+# jaunt contribution guidelines
 
 - Read SECURITY.md and docs/PROTOCOL.md before modifying the transport.
 - Arbitrary shells are the core feature. Do not restrict access to AI agents.

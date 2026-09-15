@@ -15,11 +15,11 @@ def run_installer(tmp_path, curl_body):
     curl = fake_bin / 'curl'
     curl.write_text('#!/bin/bash\n' + curl_body)
     curl.chmod(0o755)
-    env = {k: v for k, v in os.environ.items() if not k.startswith('JAUNT_')}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('jaunt_')}
     env.update(PATH=f'{fake_bin}:{os.environ["PATH"]}',
-               JAUNT_PREFIX=str(tmp_path / 'runtime'),
-               JAUNT_BIN_DIR=str(tmp_path / 'installed-bin'),
-               JAUNT_STATE=str(tmp_path / 'state'))
+               jaunt_PREFIX=str(tmp_path / 'runtime'),
+               jaunt_BIN_DIR=str(tmp_path / 'installed-bin'),
+               jaunt_STATE=str(tmp_path / 'state'))
     result = subprocess.run(['bash', str(ROOT / 'install.sh')], env=env,
                             capture_output=True, text=True, timeout=10)
     assert not (tmp_path / 'runtime').exists()
@@ -64,7 +64,7 @@ def test_official_command_ignores_curlrc_output_redirection(tmp_path):
     # Exercise real curl and bash against a loopback HTTP fixture, not the network.
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            body = b'echo JAUNT_BOOTSTRAP_EXECUTED\n'
+            body = b'echo jaunt_BOOTSTRAP_EXECUTED\n'
             self.send_response(200)
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
@@ -88,7 +88,7 @@ def test_official_command_ignores_curlrc_output_redirection(tmp_path):
                                      'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'},
                                 capture_output=True, text=True, timeout=10)
         assert result.returncode == 0
-        assert 'JAUNT_BOOTSTRAP_EXECUTED' in result.stdout
+        assert 'jaunt_BOOTSTRAP_EXECUTED' in result.stdout
         assert not redirected.exists()
     finally:
         server.shutdown()

@@ -1,4 +1,4 @@
-# Jaunt protocol v1
+# jaunt protocol v1
 
 This document describes the implementation, not a standard or security guarantee.
 
@@ -10,7 +10,7 @@ The relay stores routing hashes and attachment state needed for hibernation, nev
 
 ## Pairing
 
-`JAUNT1.` followed by base64url JSON containing `v` (version), `r` (relay), `h` (room), `t` (clientToken), `p` (pair ID), `s` (pair secret), and `n` (host name). The host stores and enforces the expiry; the browser does not treat its own expiry value as authoritative. A QR code points to the page with this code in the fragment. Lifetime: 600 seconds, single use.
+`jaunt1.` followed by base64url JSON containing `v` (version), `r` (relay), `h` (room), `t` (clientToken), `p` (pair ID), `s` (pair secret), and `n` (host name). The host stores and enforces the expiry; the browser does not treat its own expiry value as authoritative. A QR code points to the page with this code in the fragment. Lifetime: 600 seconds, single use.
 
 The browser creates its device ID and 32-byte secret and saves them BEFORE consuming the QR code, then transmits them only after authentication and encryption. If the final welcome message is lost, it first tries the persisted device identity, then pairing if still valid. Revocation removes host-side authorization and closes that device's channels.
 
@@ -39,3 +39,13 @@ Uploads use per-transfer IDs, device ownership, an expected offset, and an offse
 ## Evolution
 
 A native Android client must implement this protocol and the same identity storage semantics; it must not copy the browser's WebSocket session. Version every incompatible change. Python/Web Crypto interoperability and replay tests must remain required in CI.
+
+## Shared views and local desktop transport
+
+A welcome optionally includes `peer`, the current view identifier. Session information includes `viewers` and `activeView`. `terminal.geometry` carries the PTY's columns, rows, controlling view, and viewer list. An explicit active input or resize claims geometry; merely attaching does not. Retained output records its dimensions, and replay emits geometry changes in order. Clients serialize these with the terminal parser's asynchronous write queue.
+
+`session.detach` removes one view without closing the PTY. `session.terminate` explicitly terminates the underlying session, including a named tmux session when applicable. The legacy `session.close` behavior remains compatible with older clients.
+
+The desktop bridge sends the same RPC/stream messages through the 0600 Unix control socket after `ui.connect`. The socket's 0700 parent directory confines access to the host account. No pairing secret is generated for this same-account channel; remote connections retain the existing cryptographic handshake. Input is never replayed when either channel reconnects.
+
+New pairing text uses the lowercase `jaunt1.` prefix. Updated clients also accept the original uppercase prefix; pairing URL fragments and cryptographic transcript labels are unchanged. Existing environment variable overrides are accepted as compatibility aliases while new documentation uses lowercase product prefixes.

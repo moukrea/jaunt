@@ -48,7 +48,7 @@ echo "PASS: $1 public installation, live daemon, staging cleanup, no temporary e
         subprocess.run([
             'docker', 'run', '--rm', '--tmpfs', '/tmp:rw,size=4096',
             '-v', f'{args.installer.resolve()}:/installer.sh:ro',
-            '-e', 'JAUNT_NO_SERVICE=1', '-e', 'JAUNT_SKIP_PAIR=1',
+            '-e', 'jaunt_NO_SERVICE=1', '-e', 'jaunt_SKIP_PAIR=1',
             IMAGE, 'bash', '-c', command, 'test', scenario,
         ], check=True, timeout=600)
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright,expect
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'test-results';OUT.mkdir(exist_ok=True)
-PNG=(ROOT/'web/assets/favicon.png').read_bytes()
+PNG=(ROOT/'web/assets/jaunt.png').read_bytes()
 
 def qr_png(value):
     qr=qrcode.QRCode(border=4);qr.add_data(value);qr.make(fit=True)
@@ -28,7 +28,7 @@ class Harness:
     def __init__(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='jaunt-browser-');self.root=Path(self.tmp.name)
         self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir()
-        self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'JAUNT_STATE':str(self.state)}
+        self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state)}
         # Exercise the headless fallback without accessing the user's desktop clipboard
         # or sourcing personal login scripts in our real PTYs.
         for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'BASH_ENV', 'ENV'):
@@ -43,7 +43,7 @@ class Harness:
         self.http=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(site)))
         self.url=f'http://127.0.0.1:{self.http.server_port}/jaunt/';threading.Thread(target=self.http.serve_forever,daemon=True).start()
         self.log=open(self.root/'host.log','w');self.relay=None;self.host=None;self.restart_relay()
-        self.cli('init','--relay',f'ws://127.0.0.1:{self.rport}','--page',self.url,'--name','Jaunt workstation')
+        self.cli('init','--relay',f'ws://127.0.0.1:{self.rport}','--page',self.url,'--name','jaunt workstation')
         self.host=subprocess.Popen([sys.executable,'-m','jaunt.cli','daemon'],env=self.env,stdout=self.log,stderr=self.log)
         for _ in range(100):
             if (self.state/'control.sock').exists():break
@@ -60,7 +60,7 @@ class Harness:
             self.relay.wait(timeout=5)
     def restart_relay(self):
         self.kill_relay()
-        if os.environ.get('JAUNT_E2E_RELAY') == 'workerd':
+        if os.environ.get('jaunt_E2E_RELAY') == 'workerd':
             command=['node',str(ROOT/'scripts/test_worker.mjs'),str(self.rport),self.url.removesuffix('/jaunt/'),str(self.root/'worker-state')]
         else:
             command=[sys.executable,str(ROOT/'scripts/dev_relay.py'),'--port',str(self.rport)]
@@ -98,7 +98,7 @@ async def main():
     def passed(name):checks.append(name);print('PASS',name,flush=True)
     try:
       async with async_playwright() as pw:
-        executable=os.environ.get('JAUNT_BROWSER_EXECUTABLE')
+        executable=os.environ.get('jaunt_BROWSER_EXECUTABLE')
         browser=await pw.chromium.launch(**({'executable_path':executable} if executable else {}),args=['--no-sandbox'])
         ctx=await browser.new_context(viewport={'width':1440,'height':950},accept_downloads=True)
         page=await ctx.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
@@ -113,13 +113,13 @@ async def main():
         await page.get_by_label('Working directory').fill(str(h.work))
         await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
         await expect(page.locator('#tabs')).to_contain_text('Workspace');await page.wait_for_timeout(400)
-        await terminal_command(page,"printf 'JAUNT_%s\\n' 'EXECUTED' > proof.txt; cat proof.txt")
+        await terminal_command(page,"printf 'jaunt_%s\\n' 'EXECUTED' > proof.txt; cat proof.txt")
         await until(lambda:(h.work/'proof.txt').exists());await page.wait_for_timeout(300)
-        assert (h.work/'proof.txt').read_text()=='JAUNT_EXECUTED\n'
+        assert (h.work/'proof.txt').read_text()=='jaunt_EXECUTED\n'
         # File creation precedes network delivery and xterm's asynchronous rendering.
         # Poll the actual UI output, keeping the terminal assertion mandatory.
         for _ in range(50):
-            if 'JAUNT_EXECUTED' in await scrollback(page):break
+            if 'jaunt_EXECUTED' in await scrollback(page):break
             await asyncio.sleep(.1)
         else:raise AssertionError('Executed command result never reached terminal scrollback')
         passed('real PTY command executed; result proven from file and terminal')
@@ -273,7 +273,7 @@ async def main():
         await page.get_by_label('Passphrase or PIN',exact=True).fill('correct horse portable shell');await page.get_by_role('button',name='Unlock workspace').click()
         await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000);passed('encrypted local vault, lock, bad password rejected, unlock and reconnect')
         await page.locator('[data-view="terminal"]').first.click();await page.wait_for_timeout(500)
-        await terminal_command(page, "PS1='jaunt $ '; printf '\\033c'; printf 'Jaunt workstation\\n\\n'; uname -s; printf '\\n'; ls -1; printf '\\n'")
+        await terminal_command(page, "PS1='jaunt $ '; printf '\\033c'; printf 'jaunt workstation\\n\\n'; uname -s; printf '\\n'; ls -1; printf '\\n'")
         await page.wait_for_timeout(1000)
         await page.screenshot(path=str(OUT/'desktop-terminal.png'))
         # Pair another independent browser/device to the same real host.
@@ -291,7 +291,7 @@ async def main():
             assert await mp.evaluate('document.documentElement.scrollWidth <= innerWidth'),f'Overflow at {width}x{height}'
         passed('independent mobile pairing, shared sessions, 360px/390px/landscape/keyboard-height layout')
         await mp.set_viewport_size({'width':390,'height':844});await mp.wait_for_timeout(300)
-        await terminal_command(mp, "PS1='jaunt $ '; printf '\\033c'; printf 'Jaunt workstation\\n\\n'; uname -s; printf '\\n'; ls -1; printf '\\n'")
+        await terminal_command(mp, "PS1='jaunt $ '; printf '\\033c'; printf 'jaunt workstation\\n\\n'; uname -s; printf '\\n'; ls -1; printf '\\n'")
         await mp.wait_for_timeout(7000)
         await mp.screenshot(path=str(OUT/'mobile-terminal.png'))
         devices=json.loads(h.cli('devices'));mobile_id=next(d['id'] for d in devices if d['id']!=devices[0]['id'])
@@ -307,7 +307,7 @@ async def main():
         assert not errors,errors;passed('no uncaught browser exceptions')
         await mobile.close();await ctx.close();await browser.close()
     finally:
-        (OUT/'browser-report.json').write_text(json.dumps({'passed':checks,'uncaughtErrors':errors,'tested':'Chromium desktop and emulated mobile; not a physical handset','relay':os.environ.get('JAUNT_E2E_RELAY','python-reference')},indent=2)+'\n')
+        (OUT/'browser-report.json').write_text(json.dumps({'passed':checks,'uncaughtErrors':errors,'tested':'Chromium desktop and emulated mobile; not a physical handset','relay':os.environ.get('jaunt_E2E_RELAY','python-reference')},indent=2)+'\n')
         h.close()
     print(f'{len(checks)} browser scenarios passed.',flush=True)
 if __name__=='__main__':asyncio.run(main())

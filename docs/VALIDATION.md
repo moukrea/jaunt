@@ -1,4 +1,4 @@
-# Jaunt — delivery validated on September 14, 2026
+# jaunt — delivery validated on September 14, 2026
 
 Latest public host beta.5 / Android beta.3 delivery: [consolidated report and limitations](PUBLIC_DELIVERY.md). The sections below retain historical observations; later reports supersede their test counts and version-specific status.
 
@@ -18,9 +18,9 @@ The previous form of this command (`curl -fsSL … | bash`) was executed in a cl
 
 The archive was integrated without reading the old implementation for inspiration. Original commit `eb71cfe9b80749d3c53f11e428f027b0d64fb372` is preserved on `backup/pre-rewrite-20260914`. PRs [8](https://github.com/moukrea/jaunt/pull/8) and [9](https://github.com/moukrea/jaunt/pull/9) were merged after required checks, without bypassing protections, force-pushing, or deleting history. Beta.1 remains immutable; host corrections were published in beta.2.
 
-The owner granted Wrangler OAuth through the browser. Jaunt Worker version `00dd364c-c69c-4e89-8878-00ebd38ca414` uses `ROOMS` / `Room`, SQLite migration `v1`, and APP_ORIGIN `https://moukrea.github.io`. No other project's relay was used. HTTP health, WebSocket authentication, bidirectional routing, ping/pong, and rejection of an unauthorized origin were verified. Real encrypted pairing and shell operation were then tested publicly.
+The owner granted Wrangler OAuth through the browser. jaunt Worker version `00dd364c-c69c-4e89-8878-00ebd38ca414` uses `ROOMS` / `Room`, SQLite migration `v1`, and APP_ORIGIN `https://moukrea.github.io`. No other project's relay was used. HTTP health, WebSocket authentication, bidirectional routing, ping/pong, and rejection of an unauthorized origin were verified. Real encrypted pairing and shell operation were then tested publicly.
 
-[Beta.2 release](https://github.com/moukrea/jaunt/actions/runs/34855623613): three public assets (wheel, host-manifest.json, SHA256SUMS) downloaded and verified before [Pages](https://github.com/moukrea/jaunt/actions/runs/34855764137). GitHub variables JAUNT_RELAY_URL, JAUNT_RELEASE_TAG, and JAUNT_PAGE_URL were set. The page's 25 resource requests, including JS modules, images, jsQR/xterm licenses, installer, and service worker, were compared with delivered bytes under `/jaunt/`. No runtime JS came from a CDN.
+[Beta.2 release](https://github.com/moukrea/jaunt/actions/runs/34855623613): three public assets (wheel, host-manifest.json, SHA256SUMS) downloaded and verified before [Pages](https://github.com/moukrea/jaunt/actions/runs/34855764137). GitHub variables jaunt_RELAY_URL, jaunt_RELEASE_TAG, and jaunt_PAGE_URL were set. The page's 25 resource requests, including JS modules, images, jsQR/xterm licenses, installer, and service worker, were compared with delivered bytes under `/jaunt/`. No runtime JS came from a CDN.
 
 OAuth credentials are stored encrypted with a key in the local system keyring. CLOUDFLARE_ACCOUNT_ID is set in GitHub; a future Actions relay deployment still requires its own CLOUDFLARE_API_TOKEN. The observed deployment used local OAuth, not a GitHub token or an OAuth token copied as a permanent API secret. This does not involve end users.
 
@@ -39,11 +39,11 @@ Development setup: `python3 -m venv .venv`, then `pip install -e . -r requiremen
 | `python scripts/build_release.py` | Beta.2 wheel, manifest, and checksums built |
 | `python -m playwright install chromium` | Chromium actually installed |
 | `python tests/browser_e2e.py` | **20 scenarios passed** in CI with the Python relay |
-| `JAUNT_E2E_RELAY=workerd python tests/browser_e2e.py` | **20 scenarios passed**, locally and in CI |
+| `jaunt_E2E_RELAY=workerd python tests/browser_e2e.py` | **20 scenarios passed**, locally and in CI |
 | `python tests/installer_e2e.py` | **8 checks passed** on beta.2, locally and in CI |
-| `JAUNT_INSTALLER_ONLINE=1 python tests/installer_e2e.py` | **8 checks passed** on beta.1, using a loopback mirror and PyPI dependencies in fresh environments |
+| `jaunt_INSTALLER_ONLINE=1 python tests/installer_e2e.py` | **8 checks passed** on beta.1, using a loopback mirror and PyPI dependencies in fresh environments |
 | `npm audit` | **0 known vulnerabilities** in the resolved graph |
-| `pip-audit` | **0 known vulnerabilities**; the local Jaunt package is absent from PyPI and therefore not covered |
+| `pip-audit` | **0 known vulnerabilities**; the local jaunt package is absent from PyPI and therefore not covered |
 
 [Beta.2 CI](https://github.com/moukrea/jaunt/actions/runs/34855112550): seven successful jobs, including 36 host tests across Linux/macOS × Python 3.11/3.13 and both sets of 20 browser scenarios. Branch-protection requirements `lint` and `test` execute real checks; the latter depends on all full suites succeeding.
 
@@ -58,13 +58,13 @@ QEMU/KVM Ubuntu 24.04 VM, Python 3.12.3, official image verified against SHA-256
 A private acceptance script drove SSH and Chromium against the public page. It ran the then-current installation command, `jaunt status`, `jaunt pair --json`, `systemctl --user` commands, and UI interactions. QR codes and private output remain outside the repository. Results:
 
 - Public pairing and an authenticated encrypted channel through Cloudflare.
-- Arbitrary shell, `printf`/`cat`, and `PUBLIC_JAUNT_PROVED` verified in both the terminal and a file; second tab and return to the first.
+- Arbitrary shell, `printf`/`cat`, and `PUBLIC_jaunt_PROVED` verified in both the terminal and a file; second tab and return to the first.
 - Multi-chunk Unicode/binary uploads and downloads compared byte for byte.
 - Image transferred and quoted path inserted without Enter; a sentinel file verified that nothing executed automatically. Native paste was disabled on this headless VM.
 - Page reload with remembered identity and no new QR code.
 - Real outbound VM network interruption through a temporary rule limited to that VM and removed in a `finally` block: same shell PID and session, with a proven `RESUMED` command after reconnecting without pairing.
 - Public upgrade refused with two ordinary shells active; daemon retained.
-- Upgrade with `JAUNT_ALLOW_RESTART=1`: explicit restart, shells terminated, service active, host/device identities preserved, browser reconnected.
+- Upgrade with `jaunt_ALLOW_RESTART=1`: explicit restart, shells terminated, service active, host/device identities preserved, browser reconnected.
 - Revocation disconnected the browser and disabled shell creation.
 - No uncaught browser exception.
 
@@ -131,3 +131,7 @@ The requested host updater adds six failure/safety tests: a downloaded update de
 The signed (non-debuggable) APK paired successfully through Android's Documents/gallery picker using a QR image, against the public beta.3 host and Cloudflare relay. Android's real camera permission dialog and the native ZXing scanner launch were also exercised; an actual physical camera decoding a QR is still not claimed. The APK deliberately bypasses the old WebView's BarcodeDetector for gallery QR decoding: that API crashed in the emulator when Google Play Services was absent; bundled jsQR decoded the same pairing successfully.
 
 The automatic-update shutdown guard now also defers during file transfers. An actual temporary upload remains writable after a refused restart and completes with identical bytes before shutdown is allowed. The full Python suite now reports **45 passed**. Android release discovery uses the verified public Page channel instead of requiring each device to consume GitHub API quota. Native JVM tests: **3 passed**. The signed APK also executed a command through its Android Compose/keyboard input; the resulting host file contained the exact expected bytes.
+
+## Shared workspace release
+
+See [workspace validation](WORKSPACE_VALIDATION.md) for the current desktop/shared-session, terminal geometry, Android insets and notification changes. Earlier beta observations above remain historical and do not imply that every new platform combination was tested.

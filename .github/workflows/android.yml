@@ -29,8 +29,8 @@ jobs:
       - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - run: npm ci && npm run prepare-web
         env:
-          JAUNT_RELEASE_TAG: ${{ vars.JAUNT_RELEASE_TAG }}
-          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
+          jaunt_RELEASE_TAG: ${{ vars.jaunt_RELEASE_TAG }}
+          jaunt_RELAY_URL: ${{ vars.jaunt_RELAY_URL }}
       - name: Test native protocol, lint and build APK
         run: android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
       - uses: actions/upload-artifact@v4
@@ -44,15 +44,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          JAUNT_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          JAUNT_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          jaunt_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          jaunt_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          export JAUNT_ANDROID_KEYSTORE="$RUNNER_TEMP/jaunt-release.jks"
-          trap 'rm -f "$JAUNT_ANDROID_KEYSTORE"' EXIT
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$JAUNT_ANDROID_KEYSTORE"
-          chmod 600 "$JAUNT_ANDROID_KEYSTORE"
+          export jaunt_ANDROID_KEYSTORE="$RUNNER_TEMP/jaunt-release.jks"
+          trap 'rm -f "$jaunt_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$jaunt_ANDROID_KEYSTORE"
+          chmod 600 "$jaunt_ANDROID_KEYSTORE"
           python3 - <<'PY'
           import os,re
           version=re.search(r"versionName '([^']+)'",open('android/app/build.gradle').read())[1]
@@ -67,4 +67,4 @@ jobs:
             echo 'Refusing to replace an existing Android release.' >&2
             exit 1
           fi
-          gh release create "$TAG" android-release/* --verify-tag --prerelease --title "Jaunt Android ${TAG#android-v}" --notes-file docs/ANDROID_RELEASE_NOTES.md
+          gh release create "$TAG" android-release/* --verify-tag --prerelease --title "jaunt Android ${TAG#android-v}" --notes-file docs/ANDROID_RELEASE_NOTES.md

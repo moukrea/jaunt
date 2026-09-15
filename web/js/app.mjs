@@ -1,3 +1,5 @@
+import {desktop, LocalLink} from './desktop.mjs';
+import {leaves, prune, split, themeMode} from './workspace.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
 import terminalBundle from '../vendor/xterm.mjs';
 import {Link, parsePairing} from './link.mjs';
@@ -11,7 +13,7 @@ import * as push from './push.mjs';
 
 const {Terminal, FitAddon} = terminalBundle;
 const vault = new Vault(), machines = new Map(), transfers = [];
-let androidAPK = "";
+let androidAPK = "", desktopRelease = "";
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
@@ -34,12 +36,13 @@ fillIcons();
 
 function drawer(open = false) { $('sidebar').classList.toggle('open', open); $('drawer-backdrop').hidden = !open; }
 function setView(value) {
+  document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
   view = value; drawer(); render();
   if (view === 'files' && current()?.link.state === 'online') listFiles(current()).catch(report);
   if (view === 'settings') { renderSettings(); const a = current(); if (a?.link.state === 'online' && a.info?.updates?.supported) a.link.request('updates.status').then(value => { a.info.updates = value; if (view === 'settings') renderSettings(); }).catch(report); }
 }
 function showPair() {
-  const input = el('textarea', {class: 'pair-code', rows: 4, placeholder: 'JAUNT1.… or the complete pairing link', spellcheck: false, autocapitalize: 'off', 'aria-label': 'Pairing code'});
+  const input = el('textarea', {class: 'pair-code', rows: 4, placeholder: 'jaunt1.… or the complete pairing link', spellcheck: false, autocapitalize: 'off', 'aria-label': 'Pairing code'});
   const body = el('div', {}, el('p', {class: 'modal-copy', text: 'Run jaunt pair on the host. The QR and pairing string expire after ten minutes and can be used once.'}),
     button('Scan QR code', () => scan(pairMachine), 'button wide', 'qr'), el('div', {class: 'divider'}, el('span', {text: 'or paste the complete string'})), input,
     el('div', {class: 'modal-actions'}, button('Pair machine', async () => { await pairMachine(input.value); closeModal(); }, 'button primary')));
@@ -59,7 +62,7 @@ async function pairMachine(value) {
 function makeMachine(machine) {
   const a = {machine, link: null, info: null, sessions: [], terms: new Map(), active: machine.lastSession || '',
     path: machine.lastPath || '~', pathDraft: null, listing: null, listingVersion: 0, remoteClipboard: '', fileError: ''};
-  a.link = new Link(machine, persist); machines.set(machine.room, a);
+  a.link = machine.local && desktop ? new LocalLink(machine) : new Link(machine, persist); machines.set(machine.room, a);
   a.link.addEventListener('status', () => {
     for (const t of a.terms.values()) {
       if (a.link.state !== 'online') t.attached = false;
@@ -71,10 +74,11 @@ function makeMachine(machine) {
   a.link.addEventListener('revoked', () => toast(`${machine.name}: access revoked. Forget this machine or pair it again.`, true));
   a.link.addEventListener('latency', () => { if (selected === machine.room) renderConnection(); });
   a.link.addEventListener('welcome', e => {
-    a.info = e.detail.machine; a.sessions = e.detail.sessions; syncSessions(a);
+    a.peer = e.detail.peer; a.info = e.detail.machine; a.sessions = e.detail.sessions; syncSessions(a);
     // Only attach terminal views this browser actually opened; sessions need no viewer to run.
     for (const t of a.terms.values()) attachTerm(a, t).catch(report);
-    if (!a.active || !a.sessions.some(s => s.id === a.active)) a.active = a.sessions[0]?.id || '';
+    if (!a.machine.openSessions) a.machine.openSessions = a.sessions.map(s=>s.id);
+    if (!a.active || !a.sessions.some(s => s.id === a.active)) a.active = a.machine.openSessions[0] || '';
     if (selected === machine.room) {
       render(); if (a.active) selectSession(a, a.active).catch(report);
       if (view === 'files') listFiles(a).catch(report);
@@ -92,16 +96,26 @@ function makeMachine(machine) {
   return a;
 }
 function syncSessions(a) {
+  if(a.machine.layouts) a.machine.layouts = a.machine.layouts.map(tree=>prune(tree,new Set(a.sessions.map(s=>s.id)))).filter(Boolean);
+  a.machine.layout = a.machine.layouts?.find(tree=>leaves(tree).includes(a.active)) || prune(a.machine.layout, new Set(a.sessions.map(s => s.id)));
   for (const [id, t] of a.terms) {
     const s = a.sessions.find(s => s.id === id);
     if (!s) { t.term.dispose(); t.node.remove(); a.terms.delete(id); }
     else { t.session = s; updateTermInput(a, t); }
   }
-  if (!a.sessions.some(s => s.id === a.active)) a.active = a.sessions[0]?.id || '';
+  if(a.machine.openSessions) a.machine.openSessions = a.machine.openSessions.filter(id=>a.sessions.some(s=>s.id===id));
+  if (!a.sessions.some(s => s.id === a.active)) a.active = a.machine.openSessions?.[0] || '';
 }
 function handleMessage(a, message) {
   if (message.type === 'sessions') { a.sessions = message.sessions; syncSessions(a); render(); }
-  else if (message.type === 'terminal.reset') {
+  else if (message.type === 'terminal.geometry') {
+    const t = a.terms.get(message.id); if (!t) return;
+    Object.assign(t.session, message); t.ownsSize = message.activeView === a.peer;
+    // Serialize geometry with xterm's asynchronous output parser, including replay.
+    t.term.write('', () => {t.term.resize(message.cols, message.rows);
+      if(t.term.element)t.term.element.style.height=t.ownsSize?'100%':t.node.querySelector('.xterm-screen').getBoundingClientRect().height+'px';
+      updateGeometryLabel(a, t);});
+  } else if (message.type === 'terminal.reset') {
     const t = a.terms.get(message.id); if (!t) return;
     t.term.reset(); t.offset = message.offset; t.trimmed = message.trimmed;
     if (message.cols && message.rows) t.term.resize(message.cols, message.rows);
@@ -120,6 +134,7 @@ function handleMessage(a, message) {
     const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
     render();
   } else if (message.type === 'notification') {
+    if(desktop && prefs().desktopNotifications) desktop.notify({session:message.session,host:a.machine.room}).catch(report);
     toast(`${message.title}${message.body ? ' — ' + message.body : ''}`, false,
       message.session ? {label: 'Open', run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(report); }} : null);
   } else if (message.type === 'clipboard.available') {
@@ -129,7 +144,7 @@ function handleMessage(a, message) {
 
 function renderConnection() {
   const a = current(), state = a?.link.state || 'offline';
-  const labels = {online: 'Encrypted', offline: 'Not connected', connecting: 'Connecting', authenticating: 'Verifying host', waiting: 'Host offline', reconnecting: 'Reconnecting'};
+  const labels = {online: a?.machine.local ? 'Local connection' : 'Encrypted', offline: 'Not connected', connecting: 'Connecting', authenticating: 'Verifying host', waiting: 'Host offline', reconnecting: 'Reconnecting'};
   $('connection').className = 'connection ' + state;
   $('connection').lastElementChild.textContent = labels[state] || state;
   $('latency').hidden = !(state === 'online' && a.link.latency != null);
@@ -141,9 +156,9 @@ function renderConnection() {
 }
 function renderMachines() {
   $('machine-count').textContent = machines.size;
-  const nodes = [...machines.values()].map(a => {
+  const nodes = [...machines.values()].sort((a,b) => vault.data.machines.indexOf(a.machine) - vault.data.machines.indexOf(b.machine)).map(a => {
     const b = button('', () => { selected = a.machine.room; drawer(); render(); if (a.active) selectSession(a, a.active); if (view === 'files') return listFiles(a); }, 'machine-item' + (selected === a.machine.room ? ' selected' : ''));
-    b.append(el('span', {class: 'machine-symbol'}, icon('monitor')), el('span', {class: 'machine-text'}, el('strong', {text: a.machine.name}), el('small', {text: a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state})),
+    b.append(el('span', {class: 'machine-symbol'}, icon('monitor')), el('span', {class: 'machine-text'}, el('strong', {text: a.machine.friendlyName || a.machine.name}), el('small', {text: a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state})),
       el('span', {class: `status-dot ${a.link.state === 'online' ? 'online' : a.link.enabled ? 'working' : ''}`}));
     return b;
   });
@@ -152,18 +167,19 @@ function renderMachines() {
 function render() {
   if (!vault.data) return;
   const a = current(); renderMachines(); renderConnection();
-  $('machine-title').textContent = a?.machine.name || 'Overview';
+  $('machine-title').textContent = a?.machine.friendlyName || a?.machine.name || 'Overview';
   $('breadcrumb-prefix').textContent = 'Workspace';
-  $('welcome').hidden = !!a; $('workspace').hidden = !a;
+  $('welcome').hidden = !!a || view === 'settings'; $('workspace').hidden = !a && view !== 'settings';
   $('new-session-top').hidden = !a; $('new-session-top').disabled = a?.link.state !== 'online';
   $('lock-button').hidden = !vault.protected;
   for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('selected', b.dataset.view === view);
   $('terminal-view').hidden = !a || (view !== 'terminal' && !(view === 'files' && !isMobile()));
-  for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = !a || view !== v;
+  for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || view !== v;
   for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
   $('terminal-empty').hidden = !!a?.active;
-  for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || id !== a.active;
+  for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || !visibleSessions(a).includes(id);
+  if (a) layoutPanes(a);
   if (a) {
     renderTabs(a);
     const s = a.sessions.find(s => s.id === a.active), t = activeTerm(a);
@@ -173,42 +189,55 @@ function render() {
   }
   requestAnimationFrame(fitActive);
 }
+function rememberLayout(a, tree) {
+  if(!tree)return;
+  const keep=new Set((a.machine.openSessions||a.sessions.map(s=>s.id)).filter(id=>!leaves(tree).includes(id)));
+  a.machine.layouts=(a.machine.layouts||[]).map(t=>prune(t,keep)).filter(Boolean);
+  a.machine.layouts.push(tree);
+  for(const id of keep)if(!a.machine.layouts.some(t=>leaves(t).includes(id)))a.machine.layouts.push({id});
+  a.machine.layout=tree;
+}
 function renderTabs(a) {
-  $('tabs').replaceChildren(...a.sessions.map(s => {
-    const label = button(s.name, () => selectSession(a, s.id), 'tab-label');
-    label.setAttribute('role', 'tab'); label.setAttribute('aria-selected', String(s.id === a.active));
-    const close = button('', () => closeSession(a, s), 'icon-button tab-close', 'close'); close.setAttribute('aria-label', `Close ${s.name}`);
-    return el('div', {class: 'session-tab' + (s.id === a.active ? ' active' : '')},
-      el('span', {class: 'tab-symbol'}, icon('terminal', 15)), label,
-      el('span', {class: `status-dot${s.alive ? ' online' : ''}`}), close);
+  const sessions=a.sessions.filter(s=>!a.machine.openSessions||a.machine.openSessions.includes(s.id));
+  const groups=isMobile()?sessions.map(s=>({id:s.id})):(a.machine.layouts||sessions.map(s=>({id:s.id})));
+  $('tabs').replaceChildren(...groups.map(tree => {
+    const ids=leaves(tree), group=sessions.filter(s=>ids.includes(s.id));if(!group.length)return el('span');
+    const active=ids.includes(a.active), target=active?a.active:group[0].id, name=group.map(s=>s.name).join(' + ');
+    const label=button(name,()=>selectSession(a,target),'tab-label');
+    label.setAttribute('role','tab');label.setAttribute('aria-selected',String(active));
+    const close=button('',async()=>{for(const s of group)await closeView(a,s.id);},'icon-button tab-close','close');close.setAttribute('aria-label',`Close view of ${name}`);
+    return el('div',{class:'session-tab'+(active?' active':'')},el('span',{class:'tab-symbol'},icon('terminal',15)),label,el('span',{class:`status-dot${group.some(s=>s.alive)?' online':''}`}),close);
   }));
 }
 function createTerm(a, session) {
   const node = el('div', {class: 'terminal-container', hidden: a !== current() || session.id !== a.active, 'data-session': session.id});
   $('terminal-containers').append(node);
+  node.append(el('div',{class:'pane-caption',text:session.name}));
   const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
     cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, convertEol: false,
-    screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true,
+    screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: 100, rescaleOverlappingGlyphs: true,
     linkHandler: {activate: (_event, uri) => { try { const u = new URL(uri); if (['https:', 'http:'].includes(u.protocol)) window.open(u.href, '_blank', 'noopener,noreferrer'); } catch {} }},
     theme: {background: '#111314', foreground: '#d9dfd3', cursor: '#e7a246', selectionBackground: '#455342', black: '#151918', brightBlack: '#70786f', red: '#d8897c', green: '#a3c391', yellow: '#e7bc73', blue: '#88adcb', magenta: '#c59bc7', cyan: '#8fc5bf', white: '#dbe0d3', brightWhite: '#f1f3eb'}});
-  const fit = new FitAddon(); term.loadAddon(fit); term.open(node);
-  const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1};
+  const mount = el('div',{class:'terminal-mount'});node.append(mount);
+  const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
+  const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false};
   a.terms.set(session.id, t);
   const area = node.querySelector('textarea');
   if (area) { area.setAttribute('autocorrect', 'off'); area.setAttribute('autocapitalize', 'off'); area.spellcheck = false; area.setAttribute('aria-label', `Terminal ${session.name}`); }
-  updateTermInput(a, t);
+  updateTermInput(a, t); applyTheme();
   let initialFit = false;
   term.onRender(() => { if (!initialFit && !node.hidden) { initialFit = true; requestAnimationFrame(fitActive); } });
   term.onData(data => {
-    if (!t.attached || a.link.state !== 'online') return;
+    if (!t.attached || a.link.state !== 'online' || (a.info?.sharedViews && !t.ownsSize)) return;
     if (ctrl && data.length === 1) { data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 31); ctrl = false; }
     if (alt) { data = '\x1b' + data; alt = false; }
     updateModifiers(); sendInput(a, t, data).catch(report);
   });
-  term.onBinary(data => { if (t.attached) a.link.send({type: 'terminal.input', id: session.id, data: b64(Uint8Array.from(data, c => c.charCodeAt(0) & 255))}).catch(report); });
-  term.onResize(({cols, rows}) => {
-    if (a === current() && a.active === session.id && t.attached && a.link.state === 'online') a.link.send({type: 'terminal.resize', id: session.id, cols, rows}).catch(() => {});
-  });
+  term.onBinary(data => { if (t.attached && (!a.info?.sharedViews || t.ownsSize)) a.link.send({type: 'terminal.input', id: session.id, data: b64(Uint8Array.from(data, c => c.charCodeAt(0) & 255))}).catch(report); });
+  node.addEventListener('pointerdown', () => { a.active = session.id; claimSize(a, t); renderTabs(a); }, {capture: true});
+  node.addEventListener('keydown', () => claimSize(a, t), {capture: true});
+  // ResizeObserver only resizes the controlling view. Passive views retain shared geometry.
+  new ResizeObserver(() => { if (t.ownsSize) fitActive(); }).observe(node);
   // OSC 52 can provide copy data, but cannot read or overwrite the phone clipboard silently.
   term.parser.registerOscHandler(52, data => {
     const payload = data.slice(data.indexOf(';') + 1);
@@ -256,33 +285,114 @@ async function attachTerm(a, t) {
     await new Promise(resolve => t.term.write('', resolve));
     if (generation !== a.link.generation || a.link.state !== 'online') return;
     t.generation = generation; t.attached = true; updateTermInput(a, t);
-    if (a === current() && a.active === t.session.id) {
-      fitActive();
-      await a.link.send({type: 'terminal.resize', id: t.session.id, cols: t.term.cols, rows: t.term.rows});
-    }
+    t.ownsSize = !a.info?.sharedViews || t.session.activeView === a.peer;
+    if (!t.session.activeView && a === current() && visibleSessions(a).includes(t.session.id)) claimSize(a, t);
+
   })();
   t.attaching = {generation, promise};
   try { await promise; } finally { if (t.attaching?.promise === promise) t.attaching = null; }
 }
 async function selectSession(a, id) {
+  document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
   const session = a.sessions.find(s => s.id === id);
   if (!session) throw new Error('This terminal no longer exists.');
   selected = a.machine.room; a.active = id; a.machine.lastSession = id;
+  a.machine.openSessions ||= []; if(!a.machine.openSessions.includes(id))a.machine.openSessions.push(id);
   const t = a.terms.get(id) || createTerm(a, session);
+  if (!leaves(a.machine.layout).includes(id)) a.machine.layout = a.machine.layouts?.find(tree=>leaves(tree).includes(id)) || {id};
+  rememberLayout(a, a.machine.layout);
   render();
   if ((!t.attached || t.generation !== a.link.generation) && a.link.state === 'online') await attachTerm(a, t);
   await persist();
   requestAnimationFrame(fitActive);
 }
+function visibleSessions(a) {
+  if (!a) return [];
+  return isMobile() ? [a.active] : leaves(a.machine.layout).length ? leaves(a.machine.layout) : [a.active];
+}
+function updateGeometryLabel(a, t) {
+  if (a !== current() || a.active !== t.session.id) return;
+  const viewers = (t.session.viewers || []).map(v => v.name + (v.active ? ' • active' : '')).join(', ');
+  $('terminal-meta').textContent = `${t.session.cwd} · ${t.term.cols} × ${t.term.rows}${viewers ? ' · ' + viewers : ''}${t.trimmed ? ' · older output trimmed' : ''}`;
+}
+function claimSize(a, t) {
+  if (!t.attached || a.link.state !== 'online' || t.node.hidden) return;
+  const owned=t.ownsSize; t.ownsSize = true;
+  if(t.term.element)t.term.element.style.height='100%';
+  try {
+    const d = t.fit.proposeDimensions(); if (!d) return;
+    if(owned && d.cols===t.term.cols && d.rows===t.term.rows)return;
+    t.term.resize(d.cols, d.rows);
+    a.link.send({type: 'terminal.resize', id: t.session.id, ...d}).catch(report);
+  } catch { /* Retry after layout. */ }
+}
 function fitActive() {
-  const a = current(), t = activeTerm(a);
-  if (!t || $('terminal-view').hidden || t.node.hidden || vault.locked) return;
-  try { t.fit.fit(); $('terminal-meta').textContent = `${t.session.cwd}  ·  ${t.term.cols} × ${t.term.rows}${t.session.alive ? '' : ' · exited'}${t.trimmed ? ' · older output trimmed' : ''}`; } catch { /* Hidden/zero-size layout; ResizeObserver retries. */ }
+  const a = current();
+  if (!a || $('terminal-view').hidden || vault.locked) return;
+  for (const id of visibleSessions(a)) {
+    const t = a.terms.get(id); if (!t || t.node.hidden) continue;
+    if (t.ownsSize) {
+      const d = t.fit.proposeDimensions();
+      if (d && (t.term.cols !== d.cols || t.term.rows !== d.rows)) claimSize(a, t);
+    }
+    updateGeometryLabel(a, t);
+  }
+}
+function layoutPanes(a) {
+  const container = $('terminal-containers');
+  container.querySelectorAll('.pane-divider').forEach(n => n.remove());
+  function place(tree, x, y, w, h) {
+    if (!tree) return;
+    if (tree.id) {
+      const session = a.sessions.find(s => s.id === tree.id); if (!session) return;
+      const t = a.terms.get(tree.id) || createTerm(a, session);
+      Object.assign(t.node.style, {left: x+'%', top: y+'%', width: w+'%', height: h+'%', right: 'auto', bottom: 'auto'});
+      t.node.hidden = false; t.node.classList.toggle('pane-active', tree.id === a.active);t.node.classList.toggle('pane-tiled',visibleSessions(a).length>1);
+      t.node.querySelector('.pane-caption').textContent=session.name;
+      if (!t.attached && !t.attaching && a.link.state === 'online') attachTerm(a, t).catch(report);
+      return;
+    }
+    const horizontal = tree.axis === 'x', r = tree.ratio;
+    place(tree.first,x,y,horizontal?w*r:w,horizontal?h:h*r);
+    place(tree.second,horizontal?x+w*r:x,horizontal?y:y+h*r,horizontal?w*(1-r):w,horizontal?h:h*(1-r));
+    const gutter = el('div', {class: 'pane-divider '+tree.axis, role: 'separator', tabindex: 0, 'aria-label': 'Resize terminal panes', 'aria-orientation': horizontal?'vertical':'horizontal', 'aria-valuenow': Math.round(r*100)});
+    Object.assign(gutter.style, horizontal ? {left:(x+w*r)+'%',top:y+'%',height:h+'%'} : {top:(y+h*r)+'%',left:x+'%',width:w+'%'});
+    gutter.onpointerdown = e => {
+      e.preventDefault(); const rect = container.getBoundingClientRect();
+      const move = e => {
+        tree.ratio = Math.max(.15, Math.min(.85, horizontal ? ((e.clientX-rect.left)/rect.width*100-x)/w : ((e.clientY-rect.top)/rect.height*100-y)/h));
+        layoutPanes(a); fitActive();
+      };
+      const up = () => { window.removeEventListener('pointermove',move); window.removeEventListener('pointerup',up); persist().catch(report); };
+      window.addEventListener('pointermove',move); window.addEventListener('pointerup',up,{once:true});
+    };
+    gutter.onkeydown = e => { if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return; e.preventDefault(); tree.ratio=Math.max(.15,Math.min(.85,r+(['ArrowRight','ArrowDown'].includes(e.key)?.05:-.05))); layoutPanes(a); fitActive(); persist().catch(report); };
+    container.append(gutter);
+  }
+  place(isMobile() ? {id:a.active} : a.machine.layout || {id:a.active},0,0,100,100);
+}
+function selectTerminalText() {
+  const a=checked(current()),t=activeTerm(a);if(!t)return;
+  const text=el('textarea',{class:'terminal-selection',readOnly:true,value:terminalText(t),'aria-label':'Select terminal text',spellcheck:false});
+  const overlay=el('div',{class:'terminal-selection-overlay'},button('Back to terminal',()=>overlay.remove(),'button'),text);
+  $('terminal-stage').append(overlay);text.scrollTop=text.scrollHeight;
+  // A native text control gives Android/iOS their own selection handles and copy menu.
+}
+function arrangePanes() {
+  const a = checked(current());
+  const other = a.sessions.filter(s => !visibleSessions(a).includes(s.id));
+  const body = el('div', {class:'file-menu'}, el('p',{text:'Split the current pane with another session. On mobile, each pane becomes a normal session tab.'}));
+  for (const s of other) body.append(el('div',{class:'settings-row'},el('span',{text:s.name}),
+    ...[['x','Side by side'],['y','Above / below']].map(([axis,label]) => button(label,async()=>{a.machine.layout=split(a.machine.layout||{id:a.active},a.active,s.id,axis);a.machine.openSessions||=[];if(!a.machine.openSessions.includes(s.id))a.machine.openSessions.push(s.id);rememberLayout(a,a.machine.layout);await persist();closeModal();render();}))));
+  body.append(button('Single pane',async()=>{rememberLayout(a,{id:a.active});await persist();closeModal();render();}));
+  if (!other.length) body.append(button('Create another shell',newSession));
+  modal('Arrange panes',body);
 }
 async function sendInput(a, t, text) {
   if (a.link.state !== 'online' || !t.session.alive || !t.attached) throw new Error('This terminal is not ready for input.');
+  claimSize(a, t);
   const bytes = utf8(text);
-  for (let i = 0; i < bytes.length; i += 8192) await a.link.send({type: 'terminal.input', id: t.session.id, data: b64(bytes.subarray(i, i + 8192))});
+  for (let i = 0; i < bytes.length; i += 8192) await a.link.send({type: 'terminal.input', id: t.session.id, active: true, cols: t.term.cols, rows: t.term.rows, data: b64(bytes.subarray(i, i + 8192))});
 }
 async function insertText(a, t, text) {
   if (!t) throw new Error('Open a shell before pasting.');
@@ -327,13 +437,34 @@ async function newSession() {
     }, 'button primary')));
   modal('New terminal', body); name.focus(); name.select();
 }
-function closeSession(a, session) {
-  confirmAction(`Close ${session.name}?`, session.tmux
-    ? `This detaches the Jaunt view. The tmux session “${session.tmux}” will keep running.`
-    : 'This terminates the shell and its foreground job. Simply closing the browser leaves it running.',
-    session.tmux ? 'Detach view' : 'Close shell', async () => {
-      await a.link.request('session.close', {id: session.id});
-      a.sessions = a.sessions.filter(s => s.id !== session.id); syncSessions(a); render();
+async function closeView(a, id) {
+  a.machine.openSessions = (a.machine.openSessions || a.sessions.map(s=>s.id)).filter(s=>s!==id);
+  a.machine.layout = prune(a.machine.layout,new Set(a.machine.openSessions));
+  a.machine.layouts = (a.machine.layouts||[]).map(tree=>prune(tree,new Set(a.machine.openSessions))).filter(Boolean);
+  const t=a.terms.get(id);
+  if(t){if(t.attached)await a.link.request('session.detach',{id});t.term.dispose();t.node.remove();a.terms.delete(id);}
+  if(a.active===id)a.active=a.machine.openSessions[0]||'';
+  a.machine.layout=a.machine.layouts.find(tree=>leaves(tree).includes(a.active))||null;
+  a.machine.lastSession=a.active;await persist();render();
+}
+function sessionList() {
+  const a=checked(current()), body=el('div',{class:'file-menu'});
+  for(const s of a.sessions) body.append(el('div',{class:'settings-row'},
+    el('div',{class:'settings-label'},el('strong',{text:s.name}),el('p',{text:`${s.alive?'Running':'Exited'} · ${s.cwd}`}),el('p',{text:(s.viewers||[]).map(v=>v.name).join(', ')||'No open views'})),
+    button('Open',async()=>{closeModal();await selectSession(a,s.id);}),
+    ...(a.machine.openSessions?.includes(s.id)?[button('Close view',async()=>{await closeView(a,s.id);sessionList();})]:[]),
+    button('Terminate',()=>terminateSession(a,s),'button danger')));
+  if(!a.sessions.length)body.append(el('p',{text:'No sessions are running on this host.'}));
+  body.append(button('New shell',newSession,'button primary'));
+  modal('Sessions on this host',body);
+}
+function terminateSession(a, session) {
+  confirmAction(`Terminate ${session.name}?`, session.tmux
+    ? `This kills the underlying tmux session “${session.tmux}” and its shells, including views outside jaunt.`
+    : 'This ends the shell and its jobs for everyone. All connected views will close. This cannot be undone.',
+    'Terminate session', async () => {
+      await a.link.request('session.terminate', {id: session.id});
+      a.sessions = a.sessions.filter(s => s.id !== session.id); syncSessions(a); await persist(); render();
     }, true);
 }
 function renameSession() {
@@ -494,7 +625,7 @@ async function attachFiles(a, t, files) {
     const native = button('Native image paste', () => doUpload(true), 'button', 'paste');
     native.disabled = !a.info?.clipboard?.image; actions.append(native);
     body.append(el('p', {class: 'modal-copy', text: a.info?.clipboard?.image
-      ? `Desktop clipboard: ${a.info.clipboard.backend}. The CLI must support image pasting; Jaunt cannot force an arbitrary terminal program to interpret an image.`
+      ? `Desktop clipboard: ${a.info.clipboard.backend}. The CLI must support image pasting; jaunt cannot force an arbitrary terminal program to interpret an image.`
       : 'This host is headless or has no supported image clipboard. Use Upload & insert path. No image will be silently converted into terminal text.'}));
   }
   body.append(actions); modal(image ? 'Send image to terminal' : 'Attach to terminal', body, () => { if (previewURL) URL.revokeObjectURL(previewURL); });
@@ -518,7 +649,7 @@ async function setRemoteClipboard(a, text) {
 async function showClipboard(a = online()) {
   const text = await remoteClipboard(a); a.remoteClipboard = text;
   const area = el('textarea', {class: 'copy-text', value: text, readOnly: true, 'aria-label': 'Remote clipboard'});
-  modal('Remote clipboard', el('div', {}, el('p', {class: 'modal-copy', text: `Text from ${a.machine.name}. A headless machine uses Jaunt’s private text buffer (printf … | jaunt clip).`}), area,
+  modal('Remote clipboard', el('div', {}, el('p', {class: 'modal-copy', text: `Text from ${a.machine.name}. A headless machine uses jaunt’s private text buffer (printf … | jaunt clip).`}), area,
     el('div', {class: 'modal-actions'}, button('Copy to this device', () => copyText(text), 'button primary', 'copy'),
       activeTerm(a) ? button('Insert in shell', async () => { closeModal(); await insertText(a, activeTerm(a), text); }, 'button', 'terminal') : null)));
 }
@@ -654,6 +785,35 @@ function settingsRow(title, description, control) {
   return el('div', {class: 'settings-row'}, el('div', {class: 'settings-label'}, el('strong', {text: title}), el('p', {text: description})), control);
 }
 function settingsGroup(title, ...rows) { return el('section', {class: 'settings-group'}, el('h3', {text: title}), ...rows); }
+function applyTheme() {
+  const mode = themeMode(prefs().theme);
+  document.documentElement.dataset.theme = mode;
+  const light = mode === 'light';
+  for (const a of machines.values()) for (const t of a.terms.values()) t.term.options.theme = {
+    ...t.term.options.theme, background: light ? '#f7f8f5' : '#111314', foreground: light ? '#252b24' : '#d9dfd3',
+    cursor: light ? '#875512' : '#e7a246', selectionBackground: light ? '#cbdac5' : '#455342'};
+}
+setInterval(() => { if (vault.data) applyTheme(); }, 60000);
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (vault.data) applyTheme(); });
+function hostPreferences(a) {
+  const name = el('input', {value:a.machine.friendlyName || a.machine.name, maxlength:80, 'aria-label':'Friendly host name'});
+  name.onchange = async () => { a.machine.friendlyName = name.value.trim().slice(0,80) || a.machine.name; await persist(); renderMachines(); };
+  const order = el('div',{class:'modal-actions'});
+  for (const [delta,label] of [[-1,'Move up'],[1,'Move down']]) order.append(button(label,async()=>{
+    const list=vault.data.machines, from=list.indexOf(a.machine), to=from+delta;
+    if(to<0||to>=list.length)return;
+    [list[from],list[to]]=[list[to],list[from]];await persist();renderMachines();
+  }));
+  return [settingsRow('Friendly name','Only changes the name on this device.',name),settingsRow('Host order','Choose the order in the sidebar.',order),
+    settingsRow('Open by default',prefs().defaultHost === a.machine.room ? 'This host opens when the app starts.' : 'Choose the first host shown when the app starts.',button('Use this host',async()=>{vault.data.preferences.defaultHost=a.machine.room;await persist();renderSettings();}))];
+}
+function attentionSettings(a) {
+  return ['bell','program','exit'].map(key => {
+    const input=el('input',{type:'checkbox',checked:a.info?.notifications?.[key] !== false,'aria-label':key+' notifications'});
+    input.onchange=async()=>{try {a.info.notifications=await a.link.request('notifications.configure',{...a.info.notifications,[key]:input.checked});}catch(e){input.checked=!input.checked;report(e);}};
+    return settingsRow({bell:'Terminal bell',program:'Program notifications',exit:'Session finished'}[key],{bell:'When a terminal rings its attention bell.',program:'OSC 9 and OSC 777 notifications from terminal programs.',exit:'When the shell exits. For individual command completion, use jaunt run -- command.'}[key],input);
+  });
+}
 function renderSettings() {
   if (!vault.data) return;
   const a = current(), content = $('settings-content');
@@ -673,8 +833,11 @@ function renderSettings() {
     for (const host of machines.values()) for (const t of host.terms.values()) t.term.options.screenReaderMode = reader.checked;
     await persist();
   };
+  const theme = el('select', {'aria-label':'Color theme'}, ...[['dark','Dark'],['light','Light'],['system','System'],['circadian','Circadian']].map(([value,text])=>el('option',{value,text,selected:(prefs().theme||'dark')===value})));
+  theme.onchange=async()=>{vault.data.preferences.theme=theme.value;applyTheme();await persist();};
   const groups = [
     settingsGroup('THIS DEVICE',
+      settingsRow('Appearance','Circadian uses light from 07:00 to 19:00 in your local time zone.',theme),
       settingsRow('Local vault', vault.protected ? 'Remembered machine keys are encrypted at rest with your passphrase or PIN.' : 'Machine keys are stored in this browser profile. Protect them on a shared or unlocked device.',
         button(vault.protected ? 'Change protection' : 'Set passphrase / PIN', protectVault)),
       settingsRow('Automatic lock', 'Locks this browser after inactivity. Shells remain alive on the host. Requires vault protection.', lockTime),
@@ -682,36 +845,51 @@ function renderSettings() {
       el('p', {class: 'settings-notice', text: 'A six-digit PIN is less resistant to offline guessing than a long passphrase. Clearing browser data loses pairings. No account recovery or secret escrow.'})),
     settingsGroup('TERMINAL', settingsRow('Text size', 'Applies to all terminal tabs on this device.', font),
       settingsRow('Screen reader support', 'Enables xterm’s accessible text layer.', reader),
-      el('p', {class: 'settings-notice', text: 'Plain PTYs survive network loss, not host daemon restarts or reboots. Use tmux for independent sessions. A running terminal outside Jaunt can only be attached when it is already in tmux (or screen from a shell).'}))
+      el('p', {class: 'settings-notice', text: 'Plain PTYs survive network loss, not host daemon restarts or reboots. Use tmux for independent sessions. Open the desktop app to use the same jaunt shells locally and remotely, without tmux. Existing terminals created outside jaunt require tmux attachment.'}))
   ];
   if (a) {
     groups.push(settingsGroup('SELECTED MACHINE',
+      ...hostPreferences(a),
       settingsRow(a.machine.name, `${a.info?.platform || 'Remote host'} · ${a.info?.version || 'Connecting'} · ${a.link.state}`, button('Reconnect', () => { a.link.start(); })),
       ...(a.info?.updates?.supported ? [settingsRow('Automatic host updates', a.info.updates.message || 'Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.', button(a.info.updates.automatic ? 'Disable auto-update' : 'Enable auto-update', async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
         settingsRow('Host version', a.info.version, button('Check for updates', async () => { await a.link.request('updates.install'); toast('Checking for a verified update. Active ordinary shells will be preserved.'); })),
         settingsRow('Update and restart now', 'This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.', button('Update and restart', () => confirmAction('Close active shells and update?', 'This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.', 'Close shells and update', async () => { await a.link.request('updates.install', {allowRestart: true}); toast('Checking the release before restarting the host.'); }, true), 'button danger'))] : []),
       settingsRow('Host clipboard', a.info?.clipboard?.backend || 'Unknown until connected', button('Open', () => showClipboard(a))),
       settingsRow('Authorized devices', 'Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.', button('Manage', () => manageDevices(a))),
-      settingsRow('Forget this machine', 'Removes its saved key from this browser. Revoke it on the host first when possible.', button('Forget', () => forgetMachine(a), 'button danger'))));
+      ...(!a.machine.local ? [settingsRow('Forget this machine', 'Removes its saved key from this browser. Revoke it on the host first when possible.', button('Forget', () => forgetMachine(a), 'button danger'))] : [])));
     groups.push(settingsGroup('NOTIFICATIONS',
-      settingsRow(isAndroid ? 'Android background notifications' : 'Background push', isAndroid ? 'Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.' : a.machine.push ? 'Registered for this machine. Delivery depends on browser/OS permissions and the host being online.' : 'Standard Web Push sent by your host. No ntfy, bot or third-party notification account.',
+      ...(a.info?.sharedViews ? attentionSettings(a) : []),
+      ...(!desktop ? [settingsRow(isAndroid ? 'Android background notifications' : 'Background push', isAndroid ? 'Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.' : a.machine.push ? 'Registered for this machine. Delivery depends on browser/OS permissions and the host being online.' : 'Standard Web Push sent by your host. No ntfy, bot or third-party notification account.',
         button(a.machine.push ? 'Disable' : 'Enable', async () => {
           if (a.machine.push) await push.unsubscribe(vault, a.link); else await push.subscribe(vault, a.link);
           renderSettings(); toast('Notification preference saved.');
-        })),
+        }))] : []),
       settingsRow('Test delivery', 'Background notifications omit command output by default.', button('Send test', async () => {
         const result = await a.link.request('notifications.test');
-        toast(isAndroid ? 'Test sent. Check Android notifications after enabling the background connection.' : result.delivered ? 'Push sent to the notification provider.' : result.results?.join('; ') || 'No push subscription delivered; a live in-app notification may still appear.', !isAndroid && !result.delivered);
+        toast(desktop ? 'Test sent. Background the desktop app to see its OS notification.' : isAndroid ? 'Test sent. Check Android notifications after enabling the background connection.' : result.delivered ? 'Push sent to the notification provider.' : result.results?.join('; ') || 'No push subscription delivered; a live in-app notification may still appear.', !desktop && !isAndroid && !result.delivered);
       })),
-      el('p', {class: 'settings-notice', text: (isAndroid ? 'The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. No terminal output is shown on the lock screen. ' : '') + 'From any Jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.'})));
+      el('p', {class: 'settings-notice', text: (isAndroid ? 'The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. No terminal output is shown on the lock screen. ' : '') + 'From any jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.'})));
   }
+  if (desktop) {
+    const notifications=el('input',{type:'checkbox',checked:!!prefs().desktopNotifications,'aria-label':'Desktop notifications'});
+    notifications.onchange=async()=>{vault.data.preferences.desktopNotifications=notifications.checked;await persist();};
+    groups.push(settingsGroup('THIS COMPUTER',
+      settingsRow('Install or update the host','Installs the official host and its background user service on this computer. Skip this if you only connect to other hosts.',button('Install / update host',async()=>{toast('Installing the host. This can take a few minutes.');const result=await desktop.action('install');toast(result.message);machines.get('local-host')?.link.start();})),
+      settingsRow('Update safely','Checks the published host version. Active ordinary shells prevent a restart.',button('Check host update',async()=>{await desktop.action('update');toast('Host update check started. Active shells are preserved.');})),
+      settingsRow('Restart for update','Explicitly closes ordinary shells on this computer. Use only when your jobs are finished.',button('Update and restart',()=>confirmAction('Close local shells and update?','This terminates ordinary shells and their foreground work on this computer.','Close shells and update',async()=>{await desktop.action('restart');toast('Host update started.');},true),'button danger')),
+      settingsRow('Local host','Local and remote views share the same shells. Closing this window leaves them running.',button('Start host',async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
+      settingsRow('Start automatically','Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.',button('Install service',async()=>{const result=await desktop.action('service');toast(result.message);machines.get('local-host')?.link.start();})),
+      settingsRow('Connect another device','Create a private one-use pairing link for this host.',button('Pair device',async()=>{const result=await desktop.action('pair');modal('Pair this computer',el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:'One-use pairing QR code'})]:[]),el('p',{text:'Open this one-use link on your other device. It expires after ten minutes. Keep it private.'}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button('Copy pairing link',()=>copyText(result.url))));})),
+      settingsRow('Desktop notifications','Show a private OS notification when this window is in the background.',notifications)));
+  }
+  if(desktopRelease && !desktop && !isAndroid) groups.push(settingsGroup('DESKTOP APP',settingsRow('Install jaunt on this computer','Shared local and remote shells, persistent tiled tabs, host controls and native notifications.',el('a',{class:'button primary',text:'Download desktop app',href:desktopRelease,target:'_blank',rel:'noopener noreferrer'}))));
   if (androidAPK && !isAndroid) groups.push(settingsGroup('ANDROID APP', settingsRow('Install the APK', 'Native Android clipboard, camera and background notifications. Your browser pairing stays separate.', el('a', {class: 'button primary', text: 'Download Android APK', href: androidAPK}))));
   const install = button(installedPrompt ? 'Install app' : 'Installation help', async () => {
     if (installedPrompt) { await installedPrompt.prompt(); await installedPrompt.userChoice; installedPrompt = null; renderSettings(); }
-    else modal('Install Jaunt on your phone', el('div', {}, el('p', {class: 'modal-copy', text: 'Open the browser menu and choose “Install app” or “Add to Home screen”. On iPhone/iPad, use Safari → Share → Add to Home Screen. This installs the web app. For Android camera, clipboard and notification integration, use Download Android APK in Settings.'})));
+    else modal('Install jaunt on your phone', el('div', {}, el('p', {class: 'modal-copy', text: 'Open the browser menu and choose “Install app” or “Add to Home screen”. On iPhone/iPad, use Safari → Share → Add to Home Screen. This installs the web app. For Android camera, clipboard and notification integration, use Download Android APK in Settings.'})));
   });
-  groups.push(settingsGroup('JAUNT', settingsRow(isAndroid ? 'Jaunt for Android' : 'Installable web app', isAndroid ? 'Installed APK · bundled interface and native Android integrations.' : 'A focused window on your home screen, with the same remembered machines.', isAndroid ? button('Check for updates', () => nativeCall('app.updates')) : install),
-    el('p', {class: 'settings-notice', text: 'Jaunt 0.1.0 beta · Host-authenticated encrypted channels · Open source. The custom protocol has automated tests, not an independent security audit. The relay transports ciphertext but can see routing metadata and interrupt availability. Never pair an untrusted device.'})));
+  groups.push(settingsGroup('jaunt', settingsRow(isAndroid ? 'jaunt for Android' : 'Installable web app', isAndroid ? 'Installed APK · bundled interface and native Android integrations.' : 'A focused window on your home screen, with the same remembered machines.', isAndroid ? button('Check for updates', () => nativeCall('app.updates')) : install),
+    el('p', {class: 'settings-notice', text: 'jaunt 0.1.0 beta · Host-authenticated encrypted channels · Open source. The custom protocol has automated tests, not an independent security audit. The relay transports ciphertext but can see routing metadata and interrupt availability. Never pair an untrusted device.'})));
   content.replaceChildren(...groups);
 }
 function protectVault() {
@@ -761,17 +939,19 @@ async function lockWorkspace() {
 }
 async function resumeWorkspace() {
   selected = null;
+  if(desktop && !vault.data.machines.some(m=>m.local)){vault.data.machines.unshift({room:'local-host',name:'This computer',local:true});await persist();}
   for (const m of vault.data.machines) makeMachine(m);
-  selected = machines.has(deepLink.get('host')) ? deepLink.get('host') : vault.data.machines[0]?.room || null;
+  selected = machines.has(deepLink.get('host')) ? deepLink.get('host') : (machines.has(prefs().defaultHost) ? prefs().defaultHost : vault.data.machines[0]?.room) || null;
+  applyTheme();
   for (const a of machines.values()) a.link.start();
   $('lock-screen').hidden = true; activeAt = Date.now(); render(); renderTransfers();
-  if (pairedFromURL) { const code = pairedFromURL; pairedFromURL = ''; await pairMachine('JAUNT1.' + code); }
+  if (pairedFromURL) { const code = pairedFromURL; pairedFromURL = ''; await pairMachine('jaunt1.' + code); }
 }
 function updateModifiers() { $('ctrl-key').setAttribute('aria-pressed', String(ctrl)); $('alt-key').setAttribute('aria-pressed', String(alt)); }
 function viewport() {
   const v = window.visualViewport;
   document.documentElement.style.setProperty('--app-height', `${Math.round(v?.height || innerHeight)}px`);
-  document.body.classList.toggle('keyboard-open', !!v && innerHeight - v.height > 130);
+  document.body.classList.toggle('keyboard-open', !!window.jauntKeyboardVisible || (!!v && innerHeight - v.height > 130));
   fitActive();
 }
 function bindEvents() {
@@ -781,6 +961,10 @@ function bindEvents() {
   $('scan-welcome').onclick = () => scan(pairMachine).catch(report);
   $('copy-install').onclick = () => copyText($('install-command').textContent).catch(report);
   for (const b of document.querySelectorAll('[data-view]')) b.onclick = () => setView(b.dataset.view);
+  $('select-terminal-text').onclick = () => {try{selectTerminalText();}catch(e){report(e);}};
+  $('list-sessions').onclick = () => {try{sessionList();}catch(e){report(e);}};
+  $('arrange-panes').onclick = () => { try { arrangePanes(); } catch(e) { report(e); } };
+  $('scroll-bottom').onclick = () => activeTerm(current())?.term.scrollToBottom();
   $('settings-button').onclick = () => setView('settings'); $('lock-button').onclick = () => lockWorkspace().catch(report);
   for (const id of ['new-session-top', 'new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
   $('rename-session').onclick = () => { try { renameSession(); } catch(e) { report(e); } };
@@ -850,7 +1034,7 @@ function bindEvents() {
     const code = parameters.get('pair');
     history.replaceState(null, '', location.pathname + location.search);
     if (!vault.data) { pairedFromURL = code; return; }
-    pairMachine('JAUNT1.' + code).catch(report);
+    pairMachine('jaunt1.' + code).catch(report);
   });
   window.addEventListener('online', () => { for (const a of machines.values()) if (a.link.state !== 'online') a.link.reconnect(); });
   document.addEventListener('visibilitychange', () => {
@@ -864,6 +1048,7 @@ function bindEvents() {
   setInterval(() => { const minutes = prefs().autoLock; if (minutes && vault.protected && Date.now() - activeAt > minutes * 60000) lockWorkspace().catch(report); }, 10000);
   window.addEventListener('resize', () => { viewport(); render(); });
   window.visualViewport?.addEventListener('resize', viewport);
+  window.addEventListener('jaunt-insets',viewport);
   new ResizeObserver(fitActive).observe($('terminal-stage'));
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installedPrompt = e; if (view === 'settings') renderSettings(); });
   document.addEventListener('keydown', e => {
@@ -879,7 +1064,7 @@ function bindEvents() {
     if (a) { selected = a.machine.room; setView('terminal'); if (a.sessions.some(s => s.id === target.session)) await selectSession(a, target.session); }
     const shared = await nativeClipboard('shared.read');
     if (shared.files.length) { const selectedMachine = current(), term = activeTerm(selectedMachine);
-      if (!selectedMachine || !term) { toast('Open a shell, then share the image to Jaunt again.', true); return; }
+      if (!selectedMachine || !term) { toast('Open a shell, then share the image to jaunt again.', true); return; }
       confirmAction('Send this shared image?', `Send the image to ${term.session.name} on ${selectedMachine.machine.name}.`, 'Send image', () => pasteFiles(selectedMachine, term, shared.files));
     }
   }
@@ -892,14 +1077,15 @@ function bindEvents() {
   });
 }
 async function bootstrap() {
-  if (!window.isSecureContext || !crypto.subtle) throw new Error('Jaunt requires HTTPS, or localhost for development. Do not open index.html directly.');
+  if (!window.isSecureContext || !crypto.subtle) throw new Error('jaunt requires HTTPS, or localhost for development. Do not open index.html directly.');
   bindEvents(); viewport();
+  if(desktop)desktop.onFrame(message=>{if(message.type!=='desktop.open'||!vault.data)return;const a=machines.get(message.host);if(a){selected=a.machine.room;setView('terminal');if(a.sessions.some(s=>s.id===message.session))selectSession(a,message.session).catch(report);}});
   await vault.load();
   if (vault.locked) { $('lock-screen').hidden = false; }
   else await resumeWorkspace();
   applicationStarted = true;
   if (isAndroid) await nativeCall('app.ready');
-  push.serviceWorker().catch(() => { /* Terminal still works when PWA/push are unavailable. */ });
+  if(!desktop) push.serviceWorker().catch(() => { /* Terminal still works when PWA/push are unavailable. */ });
   try {
     const response = await fetch('./config.json', {cache: 'no-store'});
     const config = await response.json();
@@ -909,20 +1095,25 @@ async function bootstrap() {
       if (view === 'settings') renderSettings();
       $('welcome').append(el('div', {class: 'android-download'}, apk, el('p', {class: 'modal-copy', text: 'Installable Android app with native clipboard, camera and background notifications.'})));
     }
+    if(!desktop && !isAndroid && /^desktop-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(config.desktopRelease||'')){
+      desktopRelease=`https://github.com/moukrea/jaunt/releases/tag/${config.desktopRelease}`;
+      $('welcome').append(el('div',{class:'android-download'},el('a',{class:'button',text:'Download desktop app',href:desktopRelease,target:'_blank',rel:'noopener noreferrer'}),el('p',{class:'modal-copy',text:'Linux and macOS. The host installer also adds the desktop app on graphical machines.'})));
+      if(view==='settings')renderSettings();
+    }
     if (!config.relay) {
       $('deployment-note').hidden = false;
-      $('deployment-note').textContent = 'Project deployment pending: configure and deploy the relay before using the public installer. Local development and pairing to an existing Jaunt host are available.';
+      $('deployment-note').textContent = 'Project deployment pending: configure and deploy the relay before using the public installer. Local development and pairing to an existing jaunt host are available.';
     }
   } catch { $('deployment-note').hidden = false; $('deployment-note').textContent = 'Deployment configuration is unavailable. This does not affect existing paired machines.'; }
 }
 function fatal(error) {
-  document.body.append(el('div', {class: 'fatal-note'}, el('div', {}, el('h2', {text: 'Jaunt could not start'}), el('p', {class: 'modal-copy', text: error.message || String(error)}), button('Reload', () => location.reload(), 'button primary'))));
+  document.body.append(el('div', {class: 'fatal-note'}, el('div', {}, el('h2', {text: 'jaunt could not start'}), el('p', {class: 'modal-copy', text: error.message || String(error)}), button('Reload', () => location.reload(), 'button primary'))));
 }
 // One tab owns this browser's IndexedDB vault at a time; avoids last-writer-wins
 // credential loss. Multiple devices and multiple terminal tabs remain supported.
 if (navigator.locks) {
   navigator.locks.request('jaunt-workspace-owner', {ifAvailable: true}, async lock => {
-    if (!lock) { fatal(new Error('Jaunt is already open in another tab of this browser. Use that tab, or close it and reload here.')); return; }
+    if (!lock) { fatal(new Error('jaunt is already open in another tab of this browser. Use that tab, or close it and reload here.')); return; }
     try { await bootstrap(); await new Promise(() => {}); } catch (e) { fatal(e); }
   }).catch(fatal);
 } else bootstrap().catch(fatal);

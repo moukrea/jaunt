@@ -1,6 +1,6 @@
 // precache:begin
-const CACHE = 'jaunt-static-fafebb6a21083d7b';
-const STATIC = ["./","./assets/favicon.png","./assets/icon-192.png","./assets/icon-512.png","./assets/jaunt.png","./index.html","./js/app.mjs","./js/crypto.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
+const CACHE = 'jaunt-static-330aadfcbd939905';
+const STATIC = ["./","./assets/jaunt.png","./index.html","./js/app.mjs","./js/crypto.mjs","./js/desktop.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./js/workspace.mjs","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
 // precache:end
 const base = new URL('./', self.location.href);
 const resources = new Set(STATIC.map(path => new URL(path, base).href));
@@ -22,9 +22,9 @@ self.addEventListener('fetch', event => {
 self.addEventListener('message', event => { if (event.data?.type === 'activate-update') self.skipWaiting(); });
 self.addEventListener('push', event => {
   let p = {}; try { p = event.data?.json() || {}; } catch {}
-  event.waitUntil(self.registration.showNotification(String(p.title || 'Jaunt').slice(0, 100), {
+  event.waitUntil(self.registration.showNotification(String(p.title || 'jaunt').slice(0, 100), {
     body: String(p.body || 'Your machine needs your attention.').slice(0, 400),
-    icon: new URL('./assets/icon-192.png', base).href, badge: new URL('./assets/favicon.png', base).href,
+    icon: new URL('./assets/jaunt.png', base).href, badge: new URL('./assets/jaunt.png', base).href,
     tag: String(p.tag || 'jaunt'), data: {host: String(p.host || ''), session: String(p.session || '')}
   }));
 });

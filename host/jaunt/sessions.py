@@ -25,6 +25,40 @@ Send = Callable[[str, dict], Awaitable[None]]
 MAX_REPLAY = 2 * 1024 * 1024
 
 
+class AttentionParser:
+    """Recognize BEL and terminal notification OSCs across arbitrary read chunks.
+
+    OSC title/clipboard payloads are never treated as notifications or exposed.
+    """
+    def __init__(self):
+        self.state, self.payload = 'text', bytearray()
+
+    def feed(self, data: bytes) -> set[str]:
+        events = set()
+        for byte in data:
+            if self.state == 'text':
+                if byte == 7:
+                    events.add('bell')
+                elif byte == 27:
+                    self.state = 'escape'
+            elif self.state == 'escape':
+                self.state = 'osc' if byte == 93 else 'text'
+                self.payload.clear()
+            elif self.state in ('osc', 'osc-escape'):
+                if byte == 7 or (self.state == 'osc-escape' and byte == 92):
+                    if self.payload.startswith((b'9;', b'777;notify;')):
+                        events.add('program')
+                    self.state = 'text'
+                    self.payload.clear()
+                elif byte == 27:
+                    self.state = 'osc-escape'
+                else:
+                    self.state = 'osc'
+                    if len(self.payload) < 64:
+                        self.payload.append(byte)
+        return events
+
+
 @dataclass
 class Session:
     id: str
@@ -43,23 +77,30 @@ class Session:
     ring: deque = field(default_factory=deque)
     ring_bytes: int = 0
     subscribers: set = field(default_factory=set)
+    viewers: dict = field(default_factory=dict)
+    active_view: str = ""
+    attention: AttentionParser = field(default_factory=AttentionParser)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(128))
     reading: bool = False
+    resizing: bool = False
+    resize_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pump: asyncio.Task | None = None
     reaper: asyncio.Task | None = None
 
     def info(self) -> dict:
         return {"id": self.id, "name": self.name, "cwd": self.cwd, "pid": self.pid,
                 "cols": self.cols, "rows": self.rows, "alive": self.alive,
-                "exitCode": self.exit_code, "created": self.created, "tmux": self.tmux}
+                "exitCode": self.exit_code, "created": self.created, "tmux": self.tmux,
+                "viewers": list(self.viewers.values()), "activeView": self.active_view}
 
 
 class Sessions:
-    def __init__(self, send: Send, changed: Callable[[], Awaitable[None]], root: Path):
+    def __init__(self, send: Send, changed: Callable[[], Awaitable[None]], root: Path, attention=None):
         self.send, self.changed, self.root = send, changed, root
         self.items: dict[str, Session] = {}
         self.accepting = True
+        self.attention = attention or (lambda *_: None)
         self.loop = asyncio.get_running_loop()
 
     def list(self) -> list[dict]:
@@ -105,7 +146,7 @@ class Sessions:
                 raise ValueError("Invalid tmux session")
             if not shutil.which("tmux"):
                 raise ValueError("tmux is not installed on this machine")
-            # An existing tmux is never killed by closing its Jaunt view.
+            # An existing tmux is never killed by closing its jaunt view.
             if data.get("tmuxCreate"):
                 if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", tmux):
                     raise ValueError("New tmux names must contain letters, digits, underscores or hyphens")
@@ -114,7 +155,10 @@ class Sessions:
                 command = ["tmux", "attach-session", "-t", "=" + tmux]
         fd, slave = pty.openpty()
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
-               "JAUNT_SESSION_ID": sid, "JAUNT_STATE": str(self.root)}
+               "jaunt_SESSION_ID": sid, "jaunt_STATE": str(self.root)}
+        # Old installed CLIs inside the shell keep working during a rolling upgrade.
+        for key in ("jaunt_SESSION_ID", "jaunt_STATE"):
+            env[key.upper()] = env[key]
         try:
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             process = subprocess.Popen(
@@ -138,7 +182,7 @@ class Sessions:
         return s.info()
 
     def _resume_reader(self, s: Session) -> None:
-        if s.fd >= 0 and not s.reading:
+        if s.fd >= 0 and not s.reading and not s.resizing:
             self.loop.add_reader(s.fd, self._read, s)
             s.reading = True
 
@@ -174,15 +218,17 @@ class Sessions:
     async def _pump(self, s: Session) -> None:
         while True:
             chunk = await s.queue.get()
+            for event in s.attention.feed(chunk):
+                self.attention(s, event)
             if s.alive:
                 self._resume_reader(s)
             async with s.lock:
                 start = s.offset
                 s.offset += len(chunk)
-                s.ring.append((start, chunk))
+                s.ring.append((start, chunk, s.cols, s.rows))
                 s.ring_bytes += len(chunk)
                 while s.ring_bytes > MAX_REPLAY and len(s.ring) > 1:
-                    _, old = s.ring.popleft()
+                    _, old, _, _ = s.ring.popleft()
                     s.ring_bytes -= len(old)
                 event = {"type": "terminal.output", "id": s.id, "offset": start, "data": b64(chunk)}
                 for peer in tuple(s.subscribers):
@@ -197,6 +243,7 @@ class Sessions:
                 break
             await asyncio.sleep(0.1)
         s.alive = False
+        self.attention(s, 'exit')
         # Drain all buffered trailing bytes before reporting exit. Reader callbacks
         # may still have bytes queued while the shell has already exited.
         self._pause_reader(s)
@@ -231,13 +278,22 @@ class Sessions:
                 after = start
                 await self._safe_send(peer, {"type": "terminal.reset", "id": s.id,
                                             "offset": start, "trimmed": start > 0,
-                                            "cols": s.cols, "rows": s.rows})
-            for offset, chunk in s.ring:
+                                            "cols": s.ring[0][2] if s.ring else s.cols, "rows": s.ring[0][3] if s.ring else s.rows})
+            replay_size = None
+            for offset, chunk, cols, rows in s.ring:
                 end = offset + len(chunk)
                 if end > after:
+                    if replay_size != (cols, rows):
+                        await self._safe_send(peer, {"type": "terminal.geometry", "id": s.id,
+                                                    "cols": cols, "rows": rows, "activeView": s.active_view,
+                                                    "viewers": list(s.viewers.values())})
+                        replay_size = (cols, rows)
                     begin = max(after, offset)
                     await self._safe_send(peer, {"type": "terminal.output", "id": s.id,
                                                 "offset": begin, "data": b64(chunk[begin - offset:])})
+            await self._safe_send(peer, {"type": "terminal.geometry", "id": s.id,
+                                        "cols": s.cols, "rows": s.rows, "activeView": s.active_view,
+                                        "viewers": list(s.viewers.values())})
             s.subscribers.add(peer)
         return s.info()
 
@@ -258,6 +314,47 @@ class Sessions:
             except BlockingIOError:
                 await asyncio.sleep(0.01)
 
+    async def activity(self, peer: str, sid: str, data: dict, name: str = "Device") -> None:
+        """Only an explicitly active view may change the shared PTY geometry."""
+        s = self.get(sid)
+        if peer not in s.subscribers:
+            raise ValueError("Attach to this terminal before interacting with it")
+        if s.active_view == peer and dimensions(data) == (s.cols, s.rows):
+            return
+        async with s.resize_lock:
+            s.resizing = True
+            self._pause_reader(s)
+            try:
+                # Drain bytes captured at the previous size before broadcasting a resize.
+                # Pausing the reader prevents continuous output from starving this barrier.
+                await asyncio.wait_for(s.queue.join(), 10)
+                self.get(sid)
+                async with s.lock:
+                    s.viewers[peer] = {"id": peer, "name": name[:80], "active": True}
+                    changed = s.active_view != peer
+                    s.active_view = peer
+                    for key, viewer in s.viewers.items():
+                        viewer["active"] = key == peer
+                    if "cols" in data and "rows" in data:
+                        cols, rows = dimensions(data)
+                        if (cols, rows) != (s.cols, s.rows):
+                            self.resize(sid, data)
+                            changed = True
+                    if changed:
+                        event = {"type": "terminal.geometry", "id": sid, "cols": s.cols,
+                                 "rows": s.rows, "activeView": peer, "viewers": list(s.viewers.values())}
+                        for recipient in tuple(s.subscribers):
+                            await self._safe_send(recipient, event)
+            finally:
+                s.resizing = False
+                if s.alive:
+                    self._resume_reader(s)
+
+    async def add_view(self, peer: str, sid: str, name: str) -> None:
+        s = self.get(sid)
+        s.viewers[peer] = {"id": peer, "name": name[:80], "active": s.active_view == peer}
+        await self.changed()
+
     def resize(self, sid: str, data: dict) -> None:
         s = self.get(sid)
         cols, rows = dimensions(data)
@@ -274,6 +371,58 @@ class Sessions:
     def detach(self, peer: str) -> None:
         for s in self.items.values():
             s.subscribers.discard(peer)
+            s.viewers.pop(peer, None)
+            if s.active_view == peer:
+                s.active_view = ""
+
+    async def terminate(self, sid: str) -> None:
+        s = self.get(sid)
+        if s.tmux:
+            proc = await asyncio.create_subprocess_exec("tmux", "kill-session", "-t", "=" + s.tmux,
+                                                        stdout=asyncio.subprocess.DEVNULL,
+                                                        stderr=asyncio.subprocess.PIPE)
+            _, error = await proc.communicate()
+            if proc.returncode and b"can't find" not in error and b"no server" not in error:
+                raise ValueError("Could not terminate the tmux session")
+        elif s.alive and (s.process is None or s.process.poll() is None):
+            # Job control creates several process groups inside this PTY's session.
+            # Signal all of those jobs, not only the interactive shell's group.
+            proc = await asyncio.create_subprocess_exec("ps", "-e", "-o", "pid=",
+                                                        stdout=asyncio.subprocess.PIPE,
+                                                        stderr=asyncio.subprocess.DEVNULL)
+            raw, _ = await asyncio.wait_for(proc.communicate(), 5)
+            if proc.returncode:
+                raise ValueError("Could not enumerate this shell's jobs; session was not terminated")
+            jobs = []
+            try:
+                for value in raw.split():
+                    pid = int(value)
+                    try:
+                        if os.getsid(pid) != s.pid:
+                            continue
+                    except (ProcessLookupError, PermissionError):
+                        continue
+                    try:
+                        fd = os.pidfd_open(pid) if hasattr(os, "pidfd_open") else None
+                        jobs.append((pid, fd))
+                    except ProcessLookupError:
+                        continue
+                for sig, delay in ((signal.SIGHUP, .15), (signal.SIGTERM, .25), (signal.SIGKILL, 0)):
+                    for pid, fd in jobs:
+                        try:
+                            if fd is not None:
+                                signal.pidfd_send_signal(fd, sig)
+                            elif os.getsid(pid) == s.pid:
+                                os.kill(pid, sig)
+                        except ProcessLookupError:
+                            pass
+                    if delay:
+                        await asyncio.sleep(delay)
+            finally:
+                for _, fd in jobs:
+                    if fd is not None:
+                        os.close(fd)
+        await self.close(sid)
 
     async def close(self, sid: str) -> None:
         s = self.get(sid)
@@ -326,7 +475,10 @@ class Sessions:
 
     async def shutdown(self) -> None:
         for sid in tuple(self.items):
-            await self.close(sid)
+            if self.items[sid].tmux:
+                await self.close(sid)
+            else:
+                await self.terminate(sid)
 
 
 def dimensions(data: dict) -> tuple[int, int]:

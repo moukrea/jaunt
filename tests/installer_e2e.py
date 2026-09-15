@@ -26,9 +26,9 @@ def main():
         threading.Thread(target=server.serve_forever,daemon=True).start();url=f'http://127.0.0.1:{server.server_port}'
         config={'version':1,'relay':f'ws://127.0.0.1:{relayport}','release':'v0.1.0-beta.5','page':url+'/'}
         (mirror/'config.json').write_text(json.dumps(config))
-        env={**os.environ,'JAUNT_DEV_INSTALL':'1','JAUNT_TEST_SYSTEM_SITE':'1','JAUNT_PIP_NO_DEPS':'1',
-             'JAUNT_PREFIX':str(t/'runtime'),'JAUNT_BIN_DIR':str(t/'bin'),'JAUNT_STATE':str(t/'state'),
-             'JAUNT_PAGE_URL':url,'JAUNT_RELEASE_BASE':url,'JAUNT_NO_SERVICE':'1','JAUNT_SKIP_PAIR':'1',
+        env={**os.environ,'jaunt_DEV_INSTALL':'1','jaunt_TEST_SYSTEM_SITE':'1','jaunt_PIP_NO_DEPS':'1',
+             'jaunt_PREFIX':str(t/'runtime'),'jaunt_BIN_DIR':str(t/'bin'),'jaunt_STATE':str(t/'state'),
+             'jaunt_PAGE_URL':url,'jaunt_RELEASE_BASE':url,'jaunt_NO_SERVICE':'1','jaunt_SKIP_PAIR':'1',
              'PIP_NO_INDEX':'1','PIP_DISABLE_PIP_VERSION_CHECK':'1'}
         env.pop('PYTHONPATH',None) # The wheel, not the source tree, must be imported.
         # This tool environment itself is a venv; nested --system-site-packages
@@ -36,9 +36,9 @@ def main():
         # Share dependency directories only, never ROOT/host; verify wheel origin below.
         import websockets, cryptography, qrcode
         env['PYTHONPATH']=os.pathsep.join(sorted({str(Path(m.__file__).resolve().parents[1]) for m in (websockets,cryptography,qrcode)}))
-        online=os.environ.get('JAUNT_INSTALLER_ONLINE')=='1'
+        online=os.environ.get('jaunt_INSTALLER_ONLINE')=='1'
         if online:
-            for key in ('JAUNT_TEST_SYSTEM_SITE','JAUNT_PIP_NO_DEPS','PIP_NO_INDEX','PYTHONPATH'):
+            for key in ('jaunt_TEST_SYSTEM_SITE','jaunt_PIP_NO_DEPS','PIP_NO_INDEX','PYTHONPATH'):
                 env.pop(key,None)
         log=(t/'relay.log').open('w')
         relay=subprocess.Popen([sys.executable,str(ROOT/'scripts/dev_relay.py'),'--port',str(relayport)],stdout=log,stderr=log)
@@ -64,7 +64,7 @@ def main():
             origin=subprocess.check_output([str(py),'-c','import jaunt;print(jaunt.__file__)'],env=env,text=True).strip()
             assert Path(origin).resolve().is_relative_to(t/'runtime/versions') and '/site-packages/' in origin
             passed('installed wheel imported, not editable project source')
-            pairing=json.loads(cli('pair','--json'));assert pairing['code'].startswith('JAUNT1.')
+            pairing=json.loads(cli('pair','--json'));assert pairing['code'].startswith('jaunt1.')
             passed('installer host produces usable pairing capability')
             # Populate a remembered device; no shell is running, so upgrade is safe.
             cli('stop');time.sleep(.7)
@@ -93,7 +93,7 @@ def main():
                 assert after['sessions'][0]['alive'] and (t/'runtime/current').resolve()==pointer
                 passed('installer refuses upgrade with active real shell, preserving daemon and runtime')
                 devices=set(json.loads((t/'state/host.json').read_text())['devices'])
-                approved=install({'JAUNT_ALLOW_RESTART':'1'})
+                approved=install({'jaunt_ALLOW_RESTART':'1'})
                 assert approved.returncode==0,approved.stdout+approved.stderr
                 after=json.loads(cli('status'))
                 assert after['pid']!=before['pid'] and after['sessions']==[]

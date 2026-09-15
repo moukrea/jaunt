@@ -1,10 +1,10 @@
-# Jaunt Android
+# jaunt Android
 
 The Android client packages the existing functional interface into an APK. Native Java code implements clipboard access, camera QR scanning, file selection/save and an opt-in foreground notification connection. The UI remains HTML/JS in Android System WebView. No runtime JavaScript comes from a CDN or the public Page: the assets are bundled in the APK.
 
 ## Use
 
-Install the signed APK from the Android release, then open Jaunt and scan the host's `jaunt pair` QR. Android may ask you to allow installation from the browser used to download it. This permission is only for installation; no new cloud account is needed.
+Install the signed APK from the Android release, then open jaunt and scan the host's `jaunt pair` QR. Android may ask you to allow installation from the browser used to download it. This permission is only for installation; no new cloud account is needed.
 
 Open a shell and use Paste after copying a screenshot. With a supported host clipboard the image is uploaded, copied into that clipboard and Ctrl+V is sent to the selected PTY without Enter. Otherwise the existing explicit path/attachment choices remain. Attach opens Android's file/gallery picker. Shared images from another app require a confirmation naming the destination shell. Downloads open Android's Save dialog.
 
@@ -16,7 +16,7 @@ Android may restrict network access in deep idle or under vendor battery policie
 
 - `WebViewAssetLoader` serves only bundled assets at `https://moukrea.github.io/jaunt/`. Missing assets fail closed. External links open outside the privileged WebView.
 - The native message bridge accepts only the exact HTTPS origin and the main frame. No file/content URL loading, cleartext traffic, release WebView debugging or backup is enabled.
-- Android notification identities use the already paired device key and Jaunt v1 PSK-authenticated ephemeral P-256/HKDF/AES-GCM channel. Strict authenticated counters reject replay. Native protocol interoperability is tested against the release-installed Python host.
+- Android notification identities use the already paired device key and jaunt v1 PSK-authenticated ephemeral P-256/HKDF/AES-GCM channel. Strict authenticated counters reject replay. Native protocol interoperability is tested against the release-installed Python host.
 - Only the explicit background-notification option copies the required identity fields into Android Keystore-encrypted storage. Forget/revocation removes them. Vault locking hides terminal data but does not disable a separately enabled background connection.
 - Pairing codes, clipboard contents, signing keys, terminal logs and local identities are not release assets.
 - The protocol and this new native implementation have **not had an independent security audit**.
@@ -41,6 +41,6 @@ See `docs/evidence/android-report.json` for observed results. Physical Android c
 
 ## Application updates
 
-The release APK checks the published release channel automatically when opened (at most once per six hours); an enabled background connection also checks and can notify you about an update. Settings → Check for updates forces a check. Jaunt downloads the APK only after you choose Download and install, verifies SHA-256 against the release checksum file, verifies the application ID and signing certificate against the installed app, and refuses version downgrades. Android's own installer then asks for confirmation. On the first update, Android may require “Allow from this source” for Jaunt. A normal sideloaded app cannot silently bypass this OS confirmation.
+The release APK checks the published release channel automatically when opened (at most once per six hours); an enabled background connection also checks and can notify you about an update. Settings → Check for updates forces a check. jaunt downloads the APK only after you choose Download and install, verifies SHA-256 against the release checksum file, verifies the application ID and signing certificate against the installed app, and refuses version downgrades. Android's own installer then asks for confirmation. On the first update, Android may require “Allow from this source” for jaunt. A normal sideloaded app cannot silently bypass this OS confirmation.
 
 Updates retain app data and pairing keys. Uninstalling the app removes them. The update APK is shared with Android's installer through a private FileProvider grant, not a publicly readable directory. Debug builds do not automatically install release updates.

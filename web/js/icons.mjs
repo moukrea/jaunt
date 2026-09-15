@@ -9,7 +9,7 @@ const paths = {
  attach:'m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9', lock:'M5 10h14v11H5z M8 10V6a4 4 0 0 1 8 0v4 M12 14v3',
  shield:'m12 3 9 4v6c0 5-9 9-9 9s-9-4-9-9V7z m-4 9 3 3 5-5',
  qr:'M3 3h6v6H3z M15 3h6v6h-6z M3 15h6v6H3z M15 15h3v3h3v3h-6z',
- settings:'M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M12 2v3 M12 19v3 M2 12h3 M19 12h3 m-17-7 2 2 m10 10 2 2 M5 19l2-2 M17 7l2-2',
+ settings:'M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z',
  bell:'M6 8a6 6 0 0 1 12 0v7l2 3H4l2-3z M9 21h6', check:'m5 12 4 4L19 6',
  refresh:'M20 7V2m0 5h-5 M4 17v5m0-5h5 M19 6A8 8 0 0 0 5 5 M5 18a8 8 0 0 0 14 1',
  arrowUp:'M12 20V4 m-7 7 7-7 7 7', arrowDown:'M12 4v16 m-7-7 7 7 7-7',

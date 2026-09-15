@@ -1,6 +1,6 @@
 {
-  "name": "jaunt-build",
-  "version": "0.1.0-beta.5",
+  "name": "jaunt-desktop",
+  "version": "0.1.0-beta.6",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,19 +9,78 @@
   "scripts": {
     "prepare-web": "node scripts/prepare_web.mjs",
     "test:relay": "node --test tests/relay.miniflare.mjs",
-    "test": "node --test tests/relay.test.mjs tests/js.test.mjs"
+    "test": "node --test tests/relay.test.mjs tests/js.test.mjs",
+    "desktop": "electron .",
+    "build:desktop": "electron-builder --linux tar.gz deb --publish never"
   },
   "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "jsqr": "1.4.0"
   },
   "devDependencies": {
-    "wrangler": "4.131.2",
-    "miniflare": "4.20260730.0"
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "wrangler": "4.131.2"
   },
   "overrides": {
     "miniflare": {
       "sharp": "0.35.4",
       "undici": "7.29.0"
     }
-  }
+  },
+  "main": "desktop/main.cjs",
+  "description": "Shared local and remote terminal workspace",
+  "author": "jaunt contributors",
+  "license": "MIT",
+  "build": {
+    "appId": "dev.jaunt.desktop",
+    "productName": "jaunt",
+    "directories": {
+      "output": "dist/desktop"
+    },
+    "files": [
+      "desktop/**",
+      "web/**",
+      "package.json"
+    ],
+    "linux": {
+      "executableName": "jaunt-desktop",
+      "icon": "web/assets/jaunt.png",
+      "category": "TerminalEmulator",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "dev.jaunt.desktop",
+          "Comment": "Shared local and remote terminal workspace"
+        }
+      },
+      "maintainer": "moukrea <moukrea@users.noreply.github.com>",
+      "syncDesktopName": true,
+      "target": [
+        "tar.gz",
+        "deb",
+        "rpm"
+      ]
+    },
+    "artifactName": "jaunt-desktop-${version}-${arch}.${ext}",
+    "extraResources": [
+      {
+        "from": "web/assets/jaunt.png",
+        "to": "jaunt.png"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "zip",
+        "dmg"
+      ],
+      "identity": null,
+      "icon": "web/assets/jaunt.png"
+    },
+    "afterPack": "desktop/after-pack.cjs"
+  },
+  "desktopName": "dev.jaunt.desktop.desktop"
 }

@@ -8,7 +8,7 @@
 | Consumed or expired QR code | On a remembered device, open the host card instead of reusing the old QR code. For a new device, run `jaunt pair`. |
 | Host offline | Check `jaunt status`, outbound WSS/443 connectivity, sleep/hibernation, and `jaunt doctor`. No new QR code is needed. |
 | User service unavailable | `jaunt start` runs in the background. Configure a real user service for startup after reboot. On Linux, running while logged out also depends on systemd linger, which may require an administrator. |
-| Update refused | Ordinary PTYs are active. Finish them, or explicitly use `JAUNT_ALLOW_RESTART=1` and accept their termination. tmux is recommended for long-running tasks. |
+| Update refused | Ordinary PTYs are active. Finish them, or explicitly use `jaunt_ALLOW_RESTART=1` and accept their termination. tmux is recommended for long-running tasks. |
 | Camera denied or missing | Allow camera access on HTTPS, select a QR image file, or paste the complete code. Manual entry does not depend on the camera. |
 | Image not recognized as an agent attachment | Upload-plus-path works without a graphical desktop. Native paste requires a host clipboard and a CLI tool that reads it. See README; there is no universal headless attachment driver. |
 | No push notification | Check registration in Settings, browser permission, an installed PWA if required, outbound connectivity to the push service, and `jaunt notify`. Notifications are not automatically generated for every shell application. |
