@@ -4,8 +4,11 @@ Every shell belongs to the host daemon, not to the window that created it. The d
 
 ## Sessions and views
 
+**New shell** immediately creates a terminal with an automatic name, such as `bash 1`. Its directory follows the previously active shell, including `cd` changes on supported hosts. The folder icon opens **New shell in folder**, with directory browsing and an optional name. If the OS cannot read a shell’s current directory, the host uses that shell’s initial directory.
+
 Use **Sessions** beside the tabs to see every retained session on the selected host, including sessions with no open view. The list shows whether each shell is running and which devices have it open.
 
+- **Rename** changes the shared session name. Double-click a tab name or click a pane title to rename it too.
 - **Open** attaches this device to the existing shell and its retained history.
 - The tab's **×** or **Close view** detaches only this view. The shell and other clients remain connected.
 - **Terminate** asks for confirmation, then ends the shell and its jobs for all viewers. For tmux it explicitly kills that tmux session, including attachments outside jaunt.
@@ -26,7 +29,7 @@ xterm 6 supports synchronized output (DEC mode 2026). Application-specific alter
 
 ## Tiled tabs
 
-On desktop, use **Split view** to split the active pane side by side or above/below with another session. Drag the divider, or focus it and use arrow keys. Each tab can contain a split tree; selecting another tab preserves previous groups. **Single pane** removes the active session from its group without terminating other sessions.
+On desktop, the two split icons choose side-by-side or above/below placement. Their inline chooser offers a new shell or any session outside the current split group. Drag the divider, or focus it and use arrow keys. Each tab can contain a split tree; selecting another tab preserves previous groups. The **Move pane to its own tab** icon in each pane header separates it without terminating any session.
 
 Layouts, ratios, open views, host order, friendly names, and the default host are stored in this device's vault. They survive reconnection and app reopening. On mobile, each session in a split group appears as an ordinary tab; returning to desktop width restores the split arrangement. Layout preferences are per client, so one device does not rearrange another device's workspace.
 

@@ -54,7 +54,7 @@ Pairing grants access as the **system account running the host**, with all of th
 
 Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and remote clients share the same ordinary shells without tmux. **Sessions** lists every session: open it, close only your view, or explicitly terminate it for everyone. The device you interact with controls the shared terminal size.
 
-**Split view** creates resizable split tabs on desktop. Layouts survive reopening; mobile displays their sessions as normal tabs. Settings includes host names/order/defaults, dark/light/system/circadian themes, and notification controls. The native desktop app also manages the local host service and pairs to other hosts. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
+The two **split icons** arrange panes side by side or above/below on desktop, using a new or existing session. Each pane can move into its own tab. Layouts survive reopening; mobile displays their sessions as normal tabs. Settings includes host names/order/defaults, dark/light/system/circadian themes, and notification controls. The native desktop app also manages the local host service and pairs to other hosts. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
 
 ## Image handling
 
