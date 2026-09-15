@@ -4,7 +4,7 @@ import asyncio,json,signal
 from playwright.async_api import async_playwright,expect
 from browser_e2e import Harness,terminal_command,until,ROOT
 async def main():
- h=Harness();stopped=False
+ h=Harness();other=Harness(name='machine X');stopped=False
  try:
   async with async_playwright() as pw:
    browser=await pw.chromium.launch();page=await browser.new_page(viewport={'width':1100,'height':800})
@@ -50,9 +50,32 @@ async def main():
    await page.set_viewport_size({'width':390,'height':460});await asyncio.sleep(.4)
    assert await page.evaluate("document.querySelector('#terminal-stage').getBoundingClientRect().bottom<=document.querySelector('.terminal-footer').getBoundingClientRect().top+1")
    await page.screenshot(path=str(ROOT/'test-results/feedback-mobile.png'))
+   # Two real hosts in one vault: switching while Settings stays open must
+   # replace both the displayed identity and every host-bound action.
+   await page.set_viewport_size({'width':1100,'height':800})
+   await page.locator('#add-machine').click()
+   await page.get_by_label('Pairing code',exact=True).fill(other.pair()['url'])
+   await page.locator('#modal').get_by_role('button',name='Pair machine',exact=True).click()
+   await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
+   await page.locator('#settings-button').click()
+   await expect(page.get_by_label('Friendly host name')).to_have_value('machine X')
+   await page.locator('#machine-list').get_by_role('button',name='jaunt workstation').click()
+   await expect(page.get_by_label('Friendly host name')).to_have_value('jaunt workstation')
+   await page.get_by_label('Friendly host name').fill('machine Y')
+   await page.get_by_label('Friendly host name').press('Tab')
+   await expect(page.locator('#machine-title')).to_have_text('machine Y')
+   await page.locator('#machine-list').get_by_role('button',name='machine X').click()
+   await expect(page.get_by_label('Friendly host name')).to_have_value('machine X')
+   # Forget must target X, not the previously rendered Y. Y's live shell remains.
+   await page.locator('#settings-content').get_by_role('button',name='Forget',exact=True).click()
+   await page.locator('#modal').get_by_role('button',name='Forget',exact=True).click()
+   await expect(page.locator('#machine-list .machine-item')).to_have_count(1)
+   await expect(page.get_by_label('Friendly host name')).to_have_value('machine Y')
+   assert json.loads(h.cli('status'))['sessions'][0]['pid']==before['pid']
+   print('PASS Settings switches between two real paired hosts; rename and forget target the selected host; other host PTY preserved',flush=True)
    await browser.close()
    print('PASS three interrupted real handshakes; five interrupted RPCs share one connection state with no error toasts; same PTY resumes; contextual errors; clickable progress controls; compact retained results; mobile terminal bounds')
  finally:
   if stopped:h.host.send_signal(signal.SIGCONT)
-  h.close()
+  h.close();other.close()
 if __name__=='__main__':asyncio.run(main())

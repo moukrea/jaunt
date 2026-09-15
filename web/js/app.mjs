@@ -16,6 +16,7 @@ import * as push from './push.mjs';
 const {Terminal, FitAddon} = terminalBundle;
 const vault = new Vault(), machines = new Map(), transfers = [];
 let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null;
+let settingsMachine, settingsRequest = 0;
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
@@ -47,10 +48,22 @@ fillIcons();
 function drawer(open = false) { $('sidebar').classList.toggle('open', open); $('drawer-backdrop').hidden = !open; }
 function setView(value) {
   document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
-  view = value; drawer(); render();
+  view = value; drawer(); if (view === 'settings') refreshSettings(); render();
   if(view==='transfers')renderTransfers();
   if (view === 'files' && current()?.link.state === 'online') listFiles(current()).catch(report);
-  if (view === 'settings') { renderSettings(); const a = current(); if (a?.link.state === 'online' && a.info?.updates?.supported) a.link.request('updates.status').then(value => { a.info.updates = value; if (view === 'settings') renderSettings(); }).catch(report); }
+}
+
+function refreshSettings() {
+  const a = current(), request = ++settingsRequest;
+  renderSettings();
+  if (a?.link.state === 'online' && a.info?.updates?.supported) {
+    a.link.request('updates.status').then(value => {
+      if (request !== settingsRequest || a !== current() || view !== 'settings') return;
+      a.info.updates = value; renderSettings();
+    }).catch(error => {
+      if (request === settingsRequest && a === current() && view === 'settings') reportHost(a, error);
+    });
+  }
 }
 function showPair() {
   const input = el('textarea', {class: 'pair-code', rows: 4, placeholder: 'jaunt1.… or the complete pairing link', spellcheck: false, autocapitalize: 'off', 'aria-label': 'Pairing code'});
@@ -184,6 +197,7 @@ function renderMachines() {
 function render() {
   if (!vault.data) return;
   const a = current(); renderMachines(); renderConnection();
+  if (view === 'settings' && settingsMachine !== a) refreshSettings();
   $('machine-title').textContent = a?.machine.friendlyName || a?.machine.name || 'Overview';
   $('breadcrumb-prefix').textContent = 'Workspace';
   $('welcome').hidden = !!a || view === 'settings'; $('workspace').hidden = !a && view !== 'settings';
@@ -983,6 +997,7 @@ async function installLocalHost() {
 function renderSettings() {
   if (!vault.data) return;
   const a = current(), content = $('settings-content');
+  settingsMachine = a;
   const font = el('select', {'aria-label': 'Terminal font size'});
   for (const n of [11, 12, 13, 14, 15, 16, 18, 20]) font.append(el('option', {value: n, text: `${n} px`, selected: n === (prefs().fontSize || 14)}));
   font.onchange = async () => {
@@ -1043,15 +1058,13 @@ function renderSettings() {
     autoDesktop.onchange=()=>desktop.updates('configure',autoDesktop.checked).then(desktopUpdateStatus).catch(report);
     groups.push(settingsGroup('DESKTOP APP',
       settingsRow('Desktop version',desktopUpdateState?.message || 'Loading update status…',button('Check desktop update',checkDesktopUpdate)),
-      settingsRow('Automatic desktop updates','Downloads and verifies updates automatically. Installs when the app closes; host shells keep running. System packages may require OS authorization.',autoDesktop)));
-    groups.push(settingsGroup('THIS COMPUTER',
+      settingsRow('Automatic desktop updates','Downloads and verifies updates automatically. Installs when the app closes; host shells keep running. System packages may require OS authorization.',autoDesktop),
+      settingsRow('Desktop notifications','Show the program’s notification when this window is in the background.',notifications)));
+    if (!a || a.machine.local) groups.push(settingsGroup('LOCAL HOST ON THIS COMPUTER',
       settingsRow('Install or update the host','Installs the official host and its background user service on this computer. Skip this if you only connect to other hosts.',button('Install / update host',installLocalHost)),
-      settingsRow('Update safely','Checks the published host version. Active ordinary shells prevent a restart.',button('Check host update',()=>checkHostUpdate(checked(machines.get('local-host'))))),
-      settingsRow('Restart for update','Explicitly closes ordinary shells on this computer. Use only when your jobs are finished.',button('Update and restart',()=>confirmAction('Close local shells and update?','This terminates ordinary shells and their foreground work on this computer.','Close shells and update',()=>checkHostUpdate(checked(machines.get('local-host')),true),true),'button danger')),
       settingsRow('Local host','Local and remote views share the same shells. Closing this window leaves them running.',button('Start host',async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
       settingsRow('Start automatically','Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.',button('Install service',async()=>{const job=activity('host-service','Automatic host startup');try{job.update({status:'Installing and enabling the user service…'});const result=await desktop.action('service');job.finish(result.message);machines.get('local-host')?.link.start();}catch(error){job.fail(error);}})),
-      settingsRow('Connect another device','Create a private one-use pairing link for this host.',button('Pair device',async()=>{const result=await desktop.action('pair');modal('Pair this computer',el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:'One-use pairing QR code'})]:[]),el('p',{text:'Open this one-use link on your other device. It expires after ten minutes. Keep it private.'}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button('Copy pairing link',()=>copyText(result.url))));})),
-      settingsRow('Desktop notifications','Show the program’s notification when this window is in the background.',notifications)));
+      settingsRow('Connect another device','Create a private one-use pairing link for this host.',button('Pair device',async()=>{const result=await desktop.action('pair');modal('Pair this computer',el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:'One-use pairing QR code'})]:[]),el('p',{text:'Open this one-use link on your other device. It expires after ten minutes. Keep it private.'}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button('Copy pairing link',()=>copyText(result.url))));}))));
   }
   if(desktopRelease && !desktop && !isAndroid) groups.push(settingsGroup('DESKTOP APP',settingsRow('Install jaunt on this computer','Shared local and remote shells, persistent tiled tabs, host controls and native notifications.',el('a',{class:'button primary',text:'Download desktop app',href:desktopRelease,target:'_blank',rel:'noopener noreferrer'}))));
   if (androidAPK && !isAndroid) groups.push(settingsGroup('ANDROID APP', settingsRow('Install the APK', 'Native Android clipboard, camera and background notifications. Your browser pairing stays separate.', el('a', {class: 'button primary', text: 'Download Android APK', href: androidAPK}))));
