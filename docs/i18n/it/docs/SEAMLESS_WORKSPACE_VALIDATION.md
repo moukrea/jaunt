@@ -2,7 +2,7 @@
 
 # Validazione dello spazio di lavoro e dell'aggiornamento di runtime — 2026-09-15
 
-Versioni del candidato: host `0.1.0b11`, desktop `0.1.0-beta.10`, Android `0.1.0-beta.8` / codice versione 8. La verifica della pubblicazione è in attesa mentre questo ramo è in prova. Nessun host di produzione o utente ordinario shell è stato fermato per questi test.
+Sono state verificate le versioni pubbliche: host `0.1.0b11`, desktop `0.1.0-beta.10` e Android `0.1.0-beta.8`. In una VM Ubuntu isolata sono stati controllati pagina pubblica, checksum, installer ufficiale e servizio utente. Sono riusciti connessione WebSocket reale, comandi shell, trasferimenti confrontati byte per byte, riconnessione e revoca. L’installazione solo client in un account nuovo non ha aggiunto CLI o servizio host. L’aggiornamento nativo del desktop da 9 a 10 ha mantenuto i PID dell’host e delle shell; un comando è stato eseguito prima e dopo. Android 7 è stato aggiornato a 8 in un emulatore, mantenendo l’abbinamento. I controlli ripetuti terminano con un solo dialogo che conferma la versione aggiornata.
 
 ## Risultati osservati
 
@@ -29,10 +29,10 @@ Versioni del candidato: host `0.1.0b11`, desktop `0.1.0-beta.10`, Android `0.1.0
 
 Lo scenario nativo client-solo utilizza il relè WSS effettivo del proprietario perché un relè loopback insicuro non deve essere accettato da un'origine di applicazione confezionata. Il suo stato ospite e shell sono dispositivi di prova temporanei.
 
-## Rimangono i confini di validazione
+## Verifica delle versioni pubblicate
 
-Installazione pubblica di rilascio, aggiornamenti delle applicazioni installate, la pagina pubblicata e la firma finale APK sono controllati dopo la pubblicazione; le loro osservazioni saranno allegate qui. Fisico Android telecamera, galleria, blocco-screen push e Wi-Fi/mobile handover non sono stati testati su un telefono fisico autorizzato. Le osservazioni dell'emulatore sono segnalate separatamente. Un launcher o browser può controllare la mascheratura dell'icona e l'approvazione del installato PWA cambia nome/icona.
+Sono state verificate le versioni pubbliche: host `0.1.0b11`, desktop `0.1.0-beta.10` e Android `0.1.0-beta.8`. In una VM Ubuntu isolata sono stati controllati pagina pubblica, checksum, installer ufficiale e servizio utente. Sono riusciti connessione WebSocket reale, comandi shell, trasferimenti confrontati byte per byte, riconnessione e revoca. L’installazione solo client in un account nuovo non ha aggiunto CLI o servizio host. L’aggiornamento nativo del desktop da 9 a 10 ha mantenuto i PID dell’host e delle shell; un comando è stato eseguito prima e dopo. Android 7 è stato aggiornato a 8 in un emulatore, mantenendo l’abbinamento. I controlli ripetuti terminano con un solo dialogo che conferma la versione aggiornata.
 
-Gli host senza erogazione di runtime necessitano di una migrazione protetta. L'esistente shells ordinario su quelle versioni non può essere retroattivamente conservato dal nuovo codice. Aggiornamenti compatibili mantengono i processi; un esplicito arresto daemon, crash o riavvio della macchina non è reso sopravvivivente da questo meccanismo.
+La sostituzione compatibile del runtime dell’host 11 ha mantenuto processi e identità. Si trattava di una reinstallazione della stessa versione. Il vecchio host 10 richiede ancora una prima migrazione protetta: le sue shell attive non possono essere preservate retroattivamente. Nessuna shell personale è stata arrestata. Non è stato usato un telefono fisico: fotocamera, galleria, notifiche a schermo bloccato e passaggio Wi-Fi/rete mobile restano da verificare. Il protocollo non ha ricevuto un audit di sicurezza indipendente.
 
-Il protocollo di crittografia non ha ricevuto un controllo di sicurezza indipendente**. I test funzionali non cambiano lo stato.
+[https://moukrea.github.io/jaunt/](https://moukrea.github.io/jaunt/) · [English — public release verification](../../../SEAMLESS_WORKSPACE_VALIDATION.md#public-release-verification)
