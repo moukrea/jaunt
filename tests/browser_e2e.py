@@ -25,10 +25,10 @@ def port():
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
 class Harness:
-    def __init__(self):
+    def __init__(self, name="jaunt workstation"):
         self.tmp=tempfile.TemporaryDirectory(prefix='jaunt-browser-');self.root=Path(self.tmp.name)
-        self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir()
-        self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state)}
+        self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir();(self.root/'home').mkdir()
+        self.rport=port();self.env={**os.environ,'PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state),'HOME':str(self.root/'home'),'XDG_CONFIG_HOME':str(self.root/'home/.config'),'XDG_DATA_HOME':str(self.root/'home/.local/share'),'XDG_CACHE_HOME':str(self.root/'home/.cache')}
         # Exercise the headless fallback without accessing the user's desktop clipboard
         # or sourcing personal login scripts in our real PTYs.
         for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'BASH_ENV', 'ENV'):
@@ -43,7 +43,7 @@ class Harness:
         self.http=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler,directory=str(site)))
         self.url=f'http://127.0.0.1:{self.http.server_port}/jaunt/';threading.Thread(target=self.http.serve_forever,daemon=True).start()
         self.log=open(self.root/'host.log','w');self.relay=None;self.host=None;self.restart_relay()
-        self.cli('init','--relay',f'ws://127.0.0.1:{self.rport}','--page',self.url,'--name','jaunt workstation')
+        self.cli('init','--relay',f'ws://127.0.0.1:{self.rport}','--page',self.url,'--name',name)
         self.host=subprocess.Popen([sys.executable,'-m','jaunt.cli','daemon'],env=self.env,stdout=self.log,stderr=self.log)
         for _ in range(100):
             if (self.state/'control.sock').exists():break
@@ -105,7 +105,7 @@ async def main():
         await page.goto(h.url);await expect(page.locator('#pair-submit')).to_be_visible()
         await page.screenshot(path=str(OUT/'desktop-welcome.png'))
         await page.locator('#pair-code').fill('invalid');await page.locator('#pair-submit').click()
-        await expect(page.locator('#toasts')).to_contain_text('not a valid');passed('invalid pairing rejected by UI')
+        await expect(page.locator('#pair-error')).to_contain_text('not a valid');passed('invalid pairing rejected by UI')
         pair=h.pair();await page.goto(pair['url']);await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
         assert '#pair' not in page.url;passed('URL pairing, encrypted authentication, secret removed from URL')
         original=json.loads(h.cli('status'))['pid']

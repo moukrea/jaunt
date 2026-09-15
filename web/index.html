@@ -42,6 +42,7 @@
       <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection"><i></i><span>Not connected</span></span><button id="new-session-top" class="button primary small" hidden><span data-icon="plus" data-size="16"></span><span>New shell</span></button></div>
     </header>
     <div id="connection-banner" class="connection-banner" role="status" hidden></div>
+    <section id="feedback" class="feedback" aria-label="Action errors" hidden></section>
     <section id="welcome" class="welcome">
       <div class="welcome-content">
         <div class="intro">
@@ -63,6 +64,7 @@
           <div class="divider"><span>or use a pairing string</span></div>
           <label class="sr-only" for="pair-code">Pairing string or link</label>
           <textarea id="pair-code" class="pair-code" rows="3" placeholder="jaunt1.eyJ2Ijox…" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+          <p id="pair-error" class="inline-error" role="alert" hidden></p>
           <button id="pair-submit" class="button primary wide">Pair machine<span data-icon="arrowRight" data-size="18"></span></button>
           <div class="pair-footnote"><span data-icon="lock" data-size="14"></span>One pairing. Remembered on this device.</div>
         </div>
@@ -103,7 +105,7 @@
   </main>
 </div>
 <div id="lock-screen" class="lock-screen" hidden><div class="lock-card"><img src="./assets/jaunt.png" width="65" height="65" alt="jaunt"><div class="eyebrow">YOUR WORKSPACE IS LOCKED</div><h1>Welcome back.</h1><p>Unlock this device to reconnect.<br>Your remote shells keep running.</p><form id="unlock-form"><label class="sr-only" for="unlock-password">Passphrase or PIN</label><input id="unlock-password" type="password" autocomplete="current-password" placeholder="Passphrase or PIN" required><button class="button primary wide" type="submit">Unlock workspace<span data-icon="arrowRight" data-size="17"></span></button><div id="unlock-error" class="form-error" role="alert"></div></form><button id="forget-vault" class="text-button muted">Forgot it? Reset this device</button></div></div>
-<dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="modal-close" class="icon-button" aria-label="Close dialog"><span data-icon="close"></span></button></div><div id="modal-content"></div></dialog>
+<dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="modal-close" class="icon-button" aria-label="Close dialog"><span data-icon="close"></span></button></div><div id="modal-error" class="inline-error" role="alert" hidden></div><div id="modal-content"></div></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <input id="attachment-input" type="file" multiple hidden>
 <input id="upload-input" type="file" multiple hidden>

@@ -18,22 +18,49 @@ export function button(label, action, cls = 'button', symbol) {
   return el('button', {class: cls, type: 'button', onclick: async event => {
     const b = event.currentTarget;
     if (b.disabled) return;
-    b.disabled = true;
-    try { await action(event); } catch (error) { toast(error.message || String(error), true); }
-    finally { b.disabled = false; }
+    b.disabled = true; b.setAttribute('aria-busy','true');
+    const scope=b.closest('#modal')?'modal':'action'; if(scope==='modal')clearError(scope);
+    try { await action(event); } catch (error) { reportError(error,b.closest('#modal')&&$('modal').open?'modal':'action'); }
+    finally { b.disabled = false; b.removeAttribute('aria-busy'); }
   }}, symbol ? icon(symbol, 17) : null, label);
 }
-export function toast(message, error = false, action) {
-  const node = el('div', {class: `toast${error ? ' error' : ''}`}, el('span', {}, icon(error ? 'alert' : 'check', 17)), el('p', {text: message}));
-  if (action) node.append(button(action.label, action.run, 'text-button'));
-  node.append(button('', () => node.remove(), 'icon-button', 'close'));
-  $('toasts').append(node);
-  setTimeout(() => node.remove(), error ? 12000 : 6500);
+const reported=new WeakSet(), notices=new Map(), errors=new Map();
+export function markReported(error){if(error && typeof error==='object')reported.add(error);}
+export function clearError(scope){if(errors.delete(scope))renderErrors();}
+export function clearFeedback(){errors.clear();renderErrors();for(const notice of notices.values()){clearTimeout(notice.timer);notice.node.remove();}notices.clear();}
+export function reportError(error,scope='action',context='') {
+  if(error && typeof error==='object' && reported.has(error))return;
+  markReported(error);
+  if(scope==='modal'&&!$('modal')?.open)scope='action';
+  const message=(context?context+': ':'')+(error?.message || String(error));
+  if(scope==='action' && /Connection (?:interrupted|changed|is offline)|Wait for the encrypted connection|Local host is offline/.test(message))scope='connection';
+  if(scope==='connection' && $('connection-banner') && !$('connection-banner').hidden)return;
+  if(errors.get(scope)===message)return;
+  errors.set(scope,message);renderErrors();
 }
+function renderErrors(){
+  const root=$('feedback');if(!root)return;
+  root.hidden=!errors.size;
+  root.replaceChildren(...[...errors].filter(([scope])=>scope!=='modal'&&scope!=='pair').map(([scope,message])=>el('div',{class:'feedback-error',role:'alert'},
+    el('div',{},el('strong',{text:scope==='connection'?'Connection interrupted':'Action could not complete'}),el('p',{text:message})),button('Dismiss',()=>clearError(scope),'text-button'))));
+  root.hidden=!root.childElementCount;
+  const pair=$('pair-error');if(pair){pair.hidden=!errors.has('pair');pair.textContent=errors.get('pair')||'';}
+  const inline=$('modal-error');if(inline){inline.hidden=!errors.has('modal');inline.textContent=errors.get('modal')||'';}
+}
+export function toast(message, error = false, action) {
+  if(error){reportError(new Error(message));return;}
+  const previous=notices.get(message);if(previous){clearTimeout(previous.timer);previous.timer=setTimeout(()=>removeNotice(message),5000);return;}
+  const node = el('div', {class:'toast',role:'status'}, el('span', {}, icon('check', 17)), el('p', {text: message}));
+  if (action) node.append(button(action.label, action.run, 'text-button'));
+  node.append(button('', () => removeNotice(message), 'icon-button', 'close'));
+  $('toasts').append(node);notices.set(message,{node,timer:setTimeout(()=>removeNotice(message),5000)});
+  while(notices.size>2)removeNotice(notices.keys().next().value);
+}
+function removeNotice(message){const item=notices.get(message);if(item){clearTimeout(item.timer);item.node.remove();notices.delete(message);}}
 let cleanup = null;
 export function closeModal() { $('modal').close(); cleanup?.(); cleanup = null; }
 export function modal(title, body, onClose) {
-  closeModal(); $('modal-title').textContent = title; $('modal-content').replaceChildren(body);
+  closeModal(); clearError('modal'); $('modal-title').textContent = title; $('modal-content').replaceChildren(body);
   cleanup = onClose || null; $('modal').showModal();
 }
 $('modal-close').onclick = closeModal;

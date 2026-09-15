@@ -1,28 +1,42 @@
-import {$,el,button} from './ui.mjs';
-const items=new Map();
+import {$,el,button,markReported} from './ui.mjs';
+const items=new Map();let expanded=false,layout=null;
 export function activity(id,title) {
   const item={id,title,status:'Starting…',done:false,error:false,percent:null};
   items.set(id,item);
-  const update=patch=>{Object.assign(item,patch);render();};
-  const finish=status=>update({status,done:true,waiting:false,percent:100});
-  const fail=error=>update({status:error.message || String(error),done:true,error:true,percent:null});
-  render();
-  return {update,finish,fail,item};
+  const update=patch=>{if(item.done && patch.done!==false && !('done' in patch)){patch={...patch};delete patch.status;delete patch.percent;}Object.assign(item,patch);render();};
+  const finish=status=>update({status,done:true,waiting:false,percent:100,action:null});
+  const fail=error=>{markReported(error);if(error.name==='AbortError'||error.message==='Transfer cancelled'){finish('Cancelled');return;}update({status:error.message || String(error),done:true,error:true,percent:null,action:null});};
+  render();return {update,finish,fail,item};
 }
-export function clearActivity(){items.clear();render();}
+export function clearActivity(){items.clear();expanded=false;layout=null;const root=$('activity');if(root){root.replaceChildren();root.hidden=true;}}
 function render(){
   const root=$('activity');if(!root)return;
+  while(items.size>30){const old=[...items].find(([,item])=>item.done&&!item.waiting&&!item.error);if(!old)break;items.delete(old[0]);}
   root.hidden=items.size===0;
-  root.replaceChildren(...[...items.values()].reverse().map(item=>{
-    const progress=el('progress',{'aria-label':item.title+' progress',max:100});
-    if(item.percent!==null)progress.value=item.percent;
-    const status=el('div',{class:'activity-description'},el('strong',{text:item.title}),el('span',{role:'status',text:item.status}));
-    const row=el('div',{class:'activity-row'+(item.error?' error':''),'data-state':item.error?'error':item.waiting?'waiting':item.done?'done':'running'},status);
-    if(!item.done)row.append(progress);
-    if(item.action)row.append(button(item.action.label,item.action.run,'text-button'));
-    if(item.done)row.append(button('Dismiss',()=>{item.dismissed=true;items.delete(item.id);render();},'text-button'));
-    return row;
-  }));
-  // Keep bounded metadata only, never copies of uploads or terminal contents.
-  if(items.size>30)for(const [id,item] of items){if(item.done){items.delete(id);break;}}
+  if(!layout){
+    const summary=el('span',{class:'activity-summary'}),toggle=button('Show history',()=>{expanded=!expanded;render();},'text-button');
+    const list=el('div',{class:'activity-items'});root.replaceChildren(el('div',{class:'activity-heading'},summary,toggle),list);layout={summary,toggle,list};
+  }
+  const all=[...items.values()].reverse(),ongoing=all.filter(i=>!i.done),attention=all.filter(i=>i.error||i.waiting);
+  layout.summary.textContent=ongoing.length?`${ongoing.length} operation${ongoing.length===1?'':'s'} in progress`:attention.length?`${attention.length} operation${attention.length===1?'':'s'} need attention`:'Activity';
+  layout.toggle.textContent=expanded?'Hide history':`Show history (${all.length})`;layout.toggle.hidden=all.length<2;
+  layout.toggle.setAttribute('aria-expanded',String(expanded));
+  const visible=new Set(expanded?all:ongoing.length||attention.length?[...ongoing,...attention]:all.slice(0,1));
+  const keep=new Set();
+  for(const [index,item] of all.entries()){
+    if(!item.row){
+      const status=el('span',{role:'status'}),progress=el('progress',{'aria-label':item.title+' progress',max:100});
+      const action=button('',()=>item.action?.run(),'text-button'),dismiss=button('Dismiss',()=>{item.dismissed=true;items.delete(item.id);render();},'text-button');
+      item.row=el('div',{class:'activity-row'},el('div',{class:'activity-description'},el('strong',{text:item.title}),status),progress,action,dismiss);
+      item.elements={status,progress,action,dismiss};
+    }
+    const {status,progress,action,dismiss}=item.elements,row=item.row;
+    if(status.textContent!==item.status)status.textContent=item.status;
+    row.dataset.state=item.error?'error':item.waiting?'waiting':item.done?'done':'running';row.classList.toggle('error',!!item.error);row.hidden=!visible.has(item);
+    progress.hidden=!!item.done;if(item.percent===null)progress.removeAttribute('value');else progress.value=item.percent;
+    action.hidden=!item.action;if(item.action && action.textContent!==item.action.label)action.textContent=item.action.label;
+    dismiss.hidden=!item.done;
+    keep.add(row);if(layout.list.children[index]!==row)layout.list.insertBefore(row,layout.list.children[index]||null);
+  }
+  for(const node of [...layout.list.children])if(!keep.has(node))node.remove();
 }

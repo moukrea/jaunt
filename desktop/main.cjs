@@ -11,12 +11,12 @@ app.setName('jaunt');
 if(process.platform==='linux')app.commandLine.appendSwitch('class','jaunt');
 protocol.registerSchemesAsPrivileged([{scheme:'jaunt',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 if(!app.requestSingleInstanceLock())app.quit();
-let win,bridge,updates,installingDesktop=false;
+let win,bridge,updates,installingDesktop=false,bridgeGeneration=0;
 const {DesktopUpdates}=require('./updates.cjs');
 const sendFrame=(channel,value)=>{if(win&&!win.isDestroyed()&&!win.webContents.isDestroyed())win.webContents.send(channel,value);};
 const executable=()=>process.env.jaunt_host_executable || (existsSync(join(homedir(),'.local/bin/jaunt'))?join(homedir(),'.local/bin/jaunt'):'jaunt');
 const allowed=e=>{if(e.sender!==win?.webContents||e.senderFrame!==win.webContents.mainFrame||!e.senderFrame.url.startsWith('jaunt://app/'))throw new Error('Untrusted frame');};
-function disconnect(){bridge?.kill();bridge=null;}
+function disconnect(){bridgeGeneration++;bridge?.kill();bridge=null;}
 function connect(){
   disconnect();
   const child=spawn(executable(),['desktop-bridge'],{stdio:['pipe','pipe','pipe']});bridge=child;
@@ -37,7 +37,7 @@ app.whenReady().then(async()=>{
   win.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return {action:'deny'};});
   win.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('jaunt://app/')){event.preventDefault();if(/^https?:\/\//.test(url))shell.openExternal(url);}});
   win.webContents.session.setPermissionRequestHandler((_wc,permission,callback)=>callback(['clipboard-sanitized-write','notifications'].includes(permission)||(permission==='clipboard-read'&&win.isFocused())));
-  ipcMain.handle('host.connect',async e=>{allowed(e);try{await execute(executable(),['start'],{timeout:15000,maxBuffer:65536});}catch{}connect();});
+  ipcMain.handle('host.connect',async e=>{allowed(e);const generation=++bridgeGeneration;try{await execute(executable(),['start'],{timeout:15000,maxBuffer:65536});}catch{}if(generation===bridgeGeneration)connect();});
   ipcMain.handle('host.disconnect',e=>{allowed(e);disconnect();});
   ipcMain.handle('host.send',async(e,frame)=>{allowed(e);const data=JSON.stringify(frame);if(data.length>200000||!bridge)throw new Error('Host connection unavailable');await new Promise((resolve,reject)=>bridge.stdin.write(data+'\n',err=>err?reject(err):resolve()));});
   ipcMain.handle('host.action',async(e,name)=>{

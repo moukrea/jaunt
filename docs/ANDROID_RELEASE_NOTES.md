@@ -1,4 +1,4 @@
-# jaunt Android 0.1.0-beta.6
+# jaunt Android 0.1.0-beta.7
 
 This update adds touch scrolling with momentum, preserves the reading position across keyboard resizing, uses bundled Lucide interface icons, and wraps the original logo in an adaptive launcher icon. It uses the original jaunt icon, provides the shared session manager and themes, and receives automatic terminal bell/program/session-exit notifications when enabled. Desktop split layouts remain ordinary session tabs at mobile widths.
 
@@ -21,3 +21,5 @@ The validation report distinguishes emulator testing from physical-phone testing
 The APK checks for updates automatically. Settings also offers an immediate check. Downloads are verified against release checksums and the installed signing identity before Android asks for installation confirmation. Updates preserve app data and pairings; uninstalling removes them.
 
 Session controls now keep Open, Rename, Close view and Terminate inside each responsive session card. New shell creates an automatically named terminal immediately. New shell in folder offers directory browsing and an optional name. The host can inherit the active shell’s current directory. Desktop has separate side-by-side and above/below split controls, an inline choice of new or existing sessions, and a button to move each pane into its own tab. Mobile retains ordinary session tabs. Closing a view keeps its shell alive; termination still requires explicit confirmation.
+
+Connection interruptions now share one persistent status banner. Late asynchronous handshake results cannot overwrite a replacement connection. Dialog errors stay inline; action errors persist without toast cascades. Transfers expose waiting/cancellation/completion, completed activity collapses into accessible history, and update availability keeps its action visible.
