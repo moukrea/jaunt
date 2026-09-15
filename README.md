@@ -134,6 +134,7 @@ python tests/browser_e2e.py       # Real browser and host in temporary isolation
 python tests/shared_workspace_e2e.py # Electron + browser sharing real PTYs; needs a display
 python tests/terminal_render_e2e.py  # Scroll, selection and terminal geometry
 python tests/installer_e2e.py        # Real wheel install and protected upgrade
+python tests/client_update_e2e.py    # Browser-driven host self-update, pushed progress, refusal of a broken release
 ```
 
 Set `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.

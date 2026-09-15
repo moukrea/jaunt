@@ -107,6 +107,7 @@ jobs:
           jaunt_E2E_RELAY: workerd
       - run: python scripts/build_release.py
       - run: python tests/installer_e2e.py
+      - run: python tests/client_update_e2e.py
       - name: Download the public legacy host fixture
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

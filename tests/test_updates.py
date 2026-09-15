@@ -15,7 +15,7 @@ def release(tmp_path, monkeypatch):
     with zipfile.ZipFile(content,'w') as z:z.writestr('jaunt/installer.sh', '#!/bin/sh\nexit 0\n')
     wheel=content.getvalue();name='jaunt_host-0.1.0b5-py3-none-any.whl'
     responses={'config.json':json.dumps({'release':'v0.1.0-beta.5'}).encode(), 'host-manifest.json':json.dumps({'schema':1,'wheel':name,'sha256':hashlib.sha256(wheel).hexdigest()}).encode(),name:wheel}
-    monkeypatch.setattr(updates,'fetch',lambda url,maximum: responses[url.rsplit('/',1)[1]])
+    monkeypatch.setattr(updates,'fetch',lambda url,maximum,**_: responses[url.rsplit('/',1)[1]])
     return tmp_path,responses
 
 def test_automatic_update_stages_but_never_kills_active_shell(release,monkeypatch):
@@ -110,3 +110,88 @@ def test_update_progress_preserves_the_requested_operation(release,monkeypatch):
     assert updates.update()['state']=='installed'
     assert [r['state'] for r in observed]==['checking','downloading','verifying','installing','installed']
     assert all(r['operation']=='fixture-operation' for r in observed)
+
+def test_running_daemon_version_wins_over_a_stale_installation_pointer(release,monkeypatch):
+    # An interrupted handoff can leave installation.json ahead of the daemon. The
+    # published release must then still install instead of reporting "current".
+    root,_=release
+    atomic_json(root/'installation.json',{**updates.installation(root),'tag':'v0.1.0-beta.5'})
+    import os
+    atomic_json(root/'runtime.json',{'version':'0.1.0b4','pid':os.getpid()})
+    monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[]})
+    monkeypatch.setattr(updates.subprocess,'run',lambda *a,**k:type('Result',(),{'returncode':0})())
+    assert updates.update()['state']=='installed'
+    # A record from a daemon that no longer exists is ignored.
+    atomic_json(root/'runtime.json',{'version':'0.1.0b3','pid':2**22-1})
+    assert updates.running_tag(root)==''
+    assert updates.tag_from_version('0.1.0b11')=='v0.1.0-beta.11' and updates.tag_from_version('1.2.3')=='v1.2.3'
+
+def test_installer_failure_surfaces_its_own_reason(release,monkeypatch):
+    root,_=release
+    monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[]})
+    def run(args,**kwargs):
+        (root/'update.log').write_text('pip output line\njaunt: Dependency installation failed (network or package problem). The previous version was retained.\n')
+        return type('Result',(),{'returncode':1})()
+    monkeypatch.setattr(updates.subprocess,'run',run)
+    result=updates.update()
+    assert result['state']=='error' and result['retryable'] and 'Dependency installation failed' in result['message'] and 'pip output' not in result['message']
+
+def test_network_failures_are_reported_as_retryable_not_generic(release,monkeypatch):
+    import urllib.error
+    def fetch(url,maximum,**_):raise urllib.error.URLError('unreachable')
+    monkeypatch.setattr(updates,'fetch',fetch)
+    result=updates.update()
+    assert result['state']=='error' and result['retryable'] and 'internet connection' in result['message']
+
+def test_deferred_state_names_its_reason(release,monkeypatch):
+    monkeypatch.setattr('jaunt.cli.control',lambda method:{'sessions':[],'activeTransfers':2,'machine':{'seamlessUpdates':True}})
+    monkeypatch.setattr(updates.subprocess,'run',lambda *a,**k:pytest.fail('must defer'))
+    result=updates.update()
+    assert result['state']=='deferred' and result['reason']=='transfers' and result['manual'] is True
+
+@pytest.mark.asyncio
+async def test_exec_for_upgrade_waits_for_inflight_actions_and_announces(tmp_path):
+    import asyncio,sys
+    from pathlib import Path
+    from jaunt.daemon import Host
+    from jaunt.state import State
+    host=Host(State(tmp_path))
+    sent=[]
+    async def broadcast(value):sent.append(value)
+    host.broadcast=broadcast
+    host.active_actions=1
+    async def release_later():
+        await asyncio.sleep(0.3);host.active_actions=0
+    asyncio.create_task(release_later())
+    result=await host.exec_for_upgrade(Path(sys.executable))
+    assert result=={'replacing':True,'preservesShells':True} and host.reexec==sys.executable and not host.sessions.accepting
+    assert sent and sent[-1]['type']=='host.restarting' and sent[-1]['preservesShells']
+    await asyncio.sleep(0.4);assert host.stopping.is_set()
+
+@pytest.mark.asyncio
+async def test_exec_for_upgrade_refuses_a_stuck_action_and_reopens_admission(tmp_path,monkeypatch):
+    import asyncio,sys
+    from pathlib import Path
+    from jaunt.daemon import Host
+    from jaunt.state import State
+    host=Host(State(tmp_path));host.active_actions=1
+    real=asyncio.sleep
+    monkeypatch.setattr('jaunt.daemon.time.monotonic',(lambda base=[0]:(lambda:(base.__setitem__(0,base[0]+11) or base[0])))())
+    with pytest.raises(ValueError,match='still finishing'):
+        await host.exec_for_upgrade(Path(sys.executable))
+    assert host.sessions.accepting and host.reexec is None
+
+@pytest.mark.asyncio
+async def test_update_status_changes_are_pushed_once_per_change(tmp_path):
+    from jaunt.daemon import Host
+    from jaunt.state import State
+    host=Host(State(tmp_path));sent=[]
+    async def broadcast(value):sent.append(value)
+    host.broadcast=broadcast;host.peers={'p':object()}
+    atomic_json(tmp_path/'installation.json',{'page':'https://example.test','repository':'moukrea/jaunt','tag':'v0.1.0-beta.4','prefix':'','bin':''})
+    atomic_json(tmp_path/'update-status.json',{'state':'downloading','version':'v0.1.0-beta.5'})
+    await host.push_update_status();await host.push_update_status()
+    assert len(sent)==1 and sent[0]['type']=='update.progress' and sent[0]['state']=='downloading' and sent[0]['supported']
+    atomic_json(tmp_path/'update-status.json',{'state':'installed','version':'v0.1.0-beta.5'})
+    await host.push_update_status()
+    assert len(sent)==2 and sent[1]['state']=='installed'

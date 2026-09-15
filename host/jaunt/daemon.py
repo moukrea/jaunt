@@ -240,6 +240,8 @@ class Host:
         self.lockfile = None
         self.update_process = None
         self.last_update_check = -float("inf")
+        self.update_status_stamp = None
+        self.update_watch_until = -float("inf")
 
     def info(self) -> dict:
         from .updates import status as update_status
@@ -484,6 +486,38 @@ class Host:
         return {"delivered": results.count("sent"), "results": results,
                 "liveClients": sum(p.ready for p in self.peers.values())}
 
+    async def exec_for_upgrade(self, target: Path) -> dict:
+        """Replace the runtime in place once in-flight client actions have drained.
+
+        The installer used to give up after a few seconds when a client action was
+        still running; the daemon now owns that wait, refuses new shells meanwhile
+        and tells every client that the coming disconnection is an expected update.
+        """
+        if not target.is_file() or not os.access(target, os.X_OK):
+            raise ValueError("New host runtime is not executable")
+        if self.reexec or self.stopping.is_set():
+            raise ValueError("Host is already restarting")
+        if self.files.uploads or self.files.downloads:
+            raise ValueError("File transfers are active; the update will wait until they finish")
+        self.sessions.accepting = False
+        try:
+            deadline = time.monotonic() + 20
+            while self.active_actions and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            if self.active_actions:
+                raise ValueError("Host actions are still finishing; retry the update shortly")
+            if self.files.uploads or self.files.downloads:
+                raise ValueError("File transfers are active; the update will wait until they finish")
+        except BaseException:
+            self.sessions.accepting = True
+            raise
+        self.reexec = str(target)
+        await self.broadcast({"type": "host.restarting", "reason": "update", "preservesShells": True,
+                              "runtimeId": self.runtime_id})
+        # Give the notice a moment to leave the relay before the socket closes.
+        asyncio.get_running_loop().call_later(.25, self.stopping.set)
+        return {"replacing": True, "preservesShells": True}
+
     def stop_for_upgrade(self, allow_restart: bool = False) -> dict:
         # Check and close admission in one event-loop turn: no new PTY can appear
         # between the installer's status check and the actual shutdown.
@@ -542,17 +576,7 @@ class Host:
             elif method == "updates.install":
                 result = self.launch_update(allow_restart=p.get("allowRestart") is True)
             elif method == "upgrade.exec":
-                if self.active_actions:
-                    raise ValueError("Host actions are still finishing; retry the update shortly")
-                target = Path(p["python"]).absolute()
-                if not target.is_file() or not os.access(target,os.X_OK):
-                    raise ValueError("New host runtime is not executable")
-                if self.files.uploads or self.files.downloads:
-                    raise ValueError("File transfers are active; the update will wait until they finish")
-                self.reexec = str(target)
-                self.sessions.accepting = False
-                result = {"replacing": True, "preservesShells": True}
-                asyncio.get_running_loop().call_later(.1,self.stopping.set)
+                result = await self.exec_for_upgrade(Path(p["python"]).absolute())
             elif method == "upgrade.stop":
                 result = self.stop_for_upgrade(p.get("allowRestart", False))
             elif method == "stop":
@@ -577,15 +601,58 @@ class Host:
             await asyncio.sleep(1)
 
     async def maintenance(self) -> None:
+        tick = 0
         while True:
-            await asyncio.sleep(60)
-            self.files.cleanup()
+            await asyncio.sleep(5)
+            tick += 5
+            if tick % 60 == 0:
+                self.files.cleanup()
             if self.update_process is not None:
                 self.update_process.poll()
-            from .updates import installation
+            from .updates import installation, status
             config = installation(self.state.root)
+            if not config:
+                continue
+            await self.push_update_status()
+            current = status(self.state.root)
+            running = self.update_process is not None and self.update_process.poll() is None
+            if current.get("state") == "deferred" and not running and not self.reexec and not self.stopping.is_set():
+                # A deferred update resumes by itself once the reason has gone away,
+                # instead of waiting for the next quarter-hour or for a person.
+                transfers = len(self.files.uploads) + len(self.files.downloads)
+                shells = sum(bool(s.alive and not s.tmux) for s in self.sessions.items.values())
+                blocked = transfers or (shells and current.get("reason") == "shells")
+                if not blocked and time.time() - current.get("checkedAt", 0) >= 5:
+                    manual = current.get("manual", False)
+                    if manual or config.get("automatic", False):
+                        with contextlib.suppress(ValueError):
+                            self.launch_update(automatic=not manual)
+                        continue
             if config.get("automatic", False) and time.monotonic() - self.last_update_check >= 900:
-                self.launch_update(automatic=True)
+                with contextlib.suppress(ValueError):
+                    self.launch_update(automatic=True)
+
+    async def push_update_status(self) -> None:
+        """Broadcast update-status.json whenever the detached updater changes it."""
+        path = self.state.root / "update-status.json"
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            return
+        if stamp == self.update_status_stamp:
+            return
+        self.update_status_stamp = stamp
+        from .updates import status
+        if self.peers:
+            await self.broadcast({"type": "update.progress", **status(self.state.root)})
+
+    async def watch_update(self) -> None:
+        """Follow an active update closely so clients see progress as it happens."""
+        while True:
+            await asyncio.sleep(0.5)
+            active = self.update_process is not None and self.update_process.poll() is None
+            if active or time.monotonic() - self.update_watch_until < 0:
+                await self.push_update_status()
 
     def launch_update(self, *, automatic: bool = False, allow_restart: bool = False) -> dict:
         from .updates import installation
@@ -603,11 +670,13 @@ class Host:
         from .state import atomic_json
         operation = token(12)
         env["jaunt_UPDATE_ID"] = operation
-        atomic_json(self.state.root / "update-status.json", {"state": "checking", "checkedAt": time.time(), "operation": operation})
+        atomic_json(self.state.root / "update-status.json", {"state": "checking", "checkedAt": time.time(), "operation": operation, "manual": not automatic})
         self.update_process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         self.last_update_check = time.monotonic()
-        return {"state": "checking", "operation": operation}
+        # Keep watching a little after exit so the final state is pushed too.
+        self.update_watch_until = time.monotonic() + 3600
+        return {"state": "checking", "operation": operation, "manual": not automatic}
 
     async def run(self) -> None:
         relay_url(self.state.data["relay"], self.state.data["room"])
@@ -620,6 +689,7 @@ class Host:
             if updater:
                 from .handoff import InheritedChild
                 self.update_process=InheritedChild(int(updater))
+                self.update_watch_until = time.monotonic() + 3600
         else:
             self.lockfile = open(self.state.root / "daemon.lock", "a+")
         os.chmod(self.state.root / "daemon.lock", 0o600)
@@ -629,6 +699,10 @@ class Host:
             raise RuntimeError("jaunt is already running") from None
         control_path = self.state.root / "control.sock"
         control_path.unlink(missing_ok=True)
+        # Let the detached updater compare against the version really running,
+        # not against whatever an interrupted installation last recorded.
+        from .state import atomic_json
+        atomic_json(self.state.root / "runtime.json", {"version": __version__, "pid": os.getpid(), "runtime": sys.executable})
         server = await asyncio.start_unix_server(self.control, path=control_path, limit=7_000_001)
         os.chmod(control_path, 0o600)
         loop = asyncio.get_running_loop()
@@ -636,6 +710,7 @@ class Host:
             loop.add_signal_handler(sig, self.stopping.set)
         transport_task = asyncio.create_task(self.transport.run())
         maintenance = asyncio.create_task(self.maintenance())
+        update_watch = asyncio.create_task(self.watch_update())
         programs = asyncio.create_task(self.watch_programs())
         state = None
         try:
@@ -662,6 +737,8 @@ class Host:
             programs.cancel()
             await asyncio.gather(programs, return_exceptions=True)
             maintenance.cancel()
+            update_watch.cancel()
+            await asyncio.gather(maintenance, update_watch, return_exceptions=True)
             server.close()
             # Local clients must observe EOF immediately, not an online socket
             # that only rejects requests while the old runtime is draining.
