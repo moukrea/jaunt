@@ -141,6 +141,19 @@ class Bridge:
         self.host.state.save()
 
     # ---- runtime detection ------------------------------------------------
+    async def refresh_integrations(self) -> None:
+        """Re-apply the integrations after a host update so hook/MCP commands stay current."""
+        if not self.enabled:
+            return
+        detected = await self.detect()
+        if not detected.get("available"):
+            return
+        from . import bridge_setup
+        with contextlib.suppress(Exception):
+            results = await asyncio.to_thread(bridge_setup.install, detected["runtimes"])
+            self.integrations = results
+            self._store(integrations=results)
+
     async def detect(self, force: bool = False) -> dict:
         """Resolve both runtimes in the user's login shell, not the service's minimal PATH."""
         if self.detected is not None and not force and time.monotonic() - self.detected_at < 30:
@@ -269,13 +282,17 @@ class Bridge:
         await self.host.broadcast({"type": "bridge.changed", **self.status()})
 
     # ---- registration (from hooks inside jaunt PTYs) ---------------------------
-    def verify_session(self, session_id: str, runtime: str, pid: int) -> "Session":
+    def verify_session(self, session_id: str, runtime: str, pid: int, hook_pid: int = 0) -> "Session":
+        if not session_id:
+            # Environment stripped by the runtime: recognise the hook by where it runs.
+            session_id = self.session_for_pid(hook_pid) or self.session_for_pid(pid)
         session = self.host.sessions.items.get(session_id)
         if session is None or not session.alive:
             raise ValueError("This terminal is not a running jaunt shell")
-        # The claimed runtime process must belong to the process group tree of this PTY:
-        # the hook inherits jaunt_SESSION_ID only when started from that shell.
-        if pid and not self._descends(pid, session.pid):
+        # The claim must come from inside this PTY: the runtime process or the hook
+        # itself descends from the shell, or sits on the terminal the host owns.
+        candidates = [x for x in (pid, hook_pid) if x]
+        if candidates and not any(self.session_for_pid(x) == session.id for x in candidates):
             raise ValueError("Runtime process does not belong to this jaunt shell")
         return session
 
@@ -304,14 +321,65 @@ class Bridge:
     def _descends(cls, pid: int, ancestor: int) -> bool:
         return ancestor in cls._ancestors(pid)
 
+    @staticmethod
+    def pts_path(fd: int) -> str:
+        """Slave path of a PTY master owned by the host."""
+        try:
+            return os.ptsname(fd)  # Python 3.13+
+        except (AttributeError, OSError):
+            pass
+        try:
+            import fcntl, struct
+            number = struct.unpack("I", fcntl.ioctl(fd, 0x80045430, b"\0" * 4))[0]  # TIOCGPTN (Linux)
+            return f"/dev/pts/{number}"
+        except (OSError, ImportError, struct.error):
+            return ""
+
+    @staticmethod
+    def tty_of_pid(pid: int) -> str:
+        """Controlling terminal of a process, as a device number string or a name."""
+        try:
+            with open(f"/proc/{pid}/stat") as stream:
+                tty_nr = int(stream.read().rsplit(")", 1)[1].split()[4])
+            return f"dev:{tty_nr}" if tty_nr else ""
+        except (OSError, IndexError, ValueError):
+            pass
+        try:
+            out = subprocess.run(["ps", "-o", "tty=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+            name = out.stdout.strip()
+            return "" if name in ("", "?", "??") else name
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def session_tty(self, s) -> str:
+        path = self.pts_path(s.fd) if s.fd >= 0 else ""
+        if not path:
+            return ""
+        try:
+            return f"dev:{os.stat(path).st_rdev}"
+        except OSError:
+            return ""
+
     def session_for_pid(self, pid: int) -> str:
-        """The jaunt terminal whose shell is an ancestor of this process, or ''."""
+        """The jaunt terminal this process belongs to, or ''.
+
+        First by process ancestry (the shell is an ancestor), then by controlling
+        terminal (the process still sits on the PTY the host owns even when it was
+        reparented). Neither depends on environment variables surviving.
+        """
         if not pid:
             return ""
         chain = set(self._ancestors(pid))
-        for s in self.host.sessions.items.values():
-            if s.alive and s.pid in chain:
+        live = [s for s in self.host.sessions.items.values() if s.alive]
+        for s in live:
+            if s.pid in chain:
                 return s.id
+        tty = self.tty_of_pid(pid)
+        if tty:
+            for s in live:
+                mine = self.session_tty(s)
+                if mine and (mine == tty or (not tty.startswith("dev:") and self.pts_path(s.fd).endswith(tty.lstrip("/")))):
+                    return s.id
         return ""
 
     async def register(self, p: dict) -> dict:
@@ -326,7 +394,13 @@ class Bridge:
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{6,128}", conversation):
             raise ValueError("Invalid conversation identifier")
         pid = int(p.get("pid") or 0)
-        session = self.verify_session(session_id, runtime, pid)
+        hook_pid = int(p.get("hookPid") or 0)
+        try:
+            session = self.verify_session(session_id, runtime, pid, hook_pid)
+        except ValueError as exc:
+            log.info("bridge: %s registration refused (%s) session=%r pid=%s hookPid=%s", runtime, exc, session_id, pid, hook_pid)
+            raise
+        session_id = session.id
         event = str(p.get("event", ""))
         cwd = str(p.get("cwd") or session.cwd)
         project = p.get("project") if isinstance(p.get("project"), dict) else {}
@@ -447,7 +521,8 @@ class Bridge:
         me = self.participants.get(f"{runtime}:{conversation}")
         if me is None or me.state == "ended":
             if not p.get("session"):
-                raise ValueError("This session was not started from a jaunt shell; the jaunt bridge is not available here")
+                log.info("bridge: %s tool call from pid %s could not be matched to a jaunt shell", runtime, p.get("pid"))
+                raise ValueError("This session was not started from a jaunt shell, or jaunt could not match it to one of its terminals; the jaunt bridge is not available here")
             raise ValueError("This session is not registered with the bridge yet (it registers on its next prompt)")
         return me
 

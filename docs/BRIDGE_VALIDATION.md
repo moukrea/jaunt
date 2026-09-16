@@ -51,3 +51,7 @@ Cost per run: about five Claude turns and three Codex turns on the user's accoun
 ## Follow-up (beta.14)
 
 After publishing beta.13 and updating the real local host (running as a systemd user service), the Settings switch did not appear: the service's PATH does not contain `~/.local/bin`, and a plain login shell on this workstation does not add it either (the interactive shell does). Detection now runs a login + interactive shell like jaunt's own PTYs and falls back to well-known per-user locations; covered by a unit test with a minimal PATH.
+
+## Follow-up (beta.15)
+
+Reported on a fresh installation on another machine (bridge on, both runtimes detected): the Claude Code session's `jaunt_peers` answered *not started from a jaunt shell* while the Codex session registered normally. Not reproduced here: on this workstation Claude Code 2.1.273 passes `jaunt_SESSION_ID`/`jaunt_STATE` to hooks and MCP servers and the process chain leads to the shell. The fix therefore removes every dependency on those two facts: hooks always register (sending their own pid), the host matches a hook or tool call to a terminal by process ancestry **or by the controlling PTY it owns** (`/proc/<pid>/stat` tty, `ps -o tty=` elsewhere), the state directory is passed with `--state`, integrations are re-applied at host start, and every refused registration is logged in `host.log` with its reason. Unit tests cover the stripped-environment and reparented-process cases; the real-runtime e2e still passes.

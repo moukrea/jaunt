@@ -202,6 +202,7 @@ def main() -> None:
     for hidden in ("bridge-hook", "bridge-mcp"):
         hidden_parser = sub.add_parser(hidden, help=argparse.SUPPRESS)
         hidden_parser.add_argument("runtime", choices=("claude", "codex"))
+        hidden_parser.add_argument("--state", default="")
     gui = sub.add_parser("gui", help=tr('Install or open the desktop workspace'))
     gui.add_argument("--install-only", action="store_true", help=tr('Install the desktop app and application icon without opening it'))
     sub.add_parser("start", help=tr('Start the host in the background'))
@@ -235,12 +236,11 @@ def main() -> None:
         elif args.command == "desktop-bridge":
             from .desktop import bridge
             asyncio.run(bridge())
-        elif args.command == "bridge-hook":
-            from .bridge_client import hook_main
-            sys.exit(hook_main(args.runtime))
-        elif args.command == "bridge-mcp":
-            from .bridge_client import mcp_main
-            sys.exit(mcp_main(args.runtime))
+        elif args.command in ("bridge-hook", "bridge-mcp"):
+            if args.state:
+                os.environ["jaunt_STATE"] = args.state
+            from .bridge_client import hook_main, mcp_main
+            sys.exit((hook_main if args.command == "bridge-hook" else mcp_main)(args.runtime))
         elif args.command == "gui":
             from .desktop import install_gui
             desktop = Path.home() / ".local/share/jaunt-desktop/current" / ("jaunt.app/Contents/MacOS/jaunt" if platform.system() == "Darwin" else "jaunt-desktop")

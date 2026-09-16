@@ -21,10 +21,10 @@ Deployment tools are pinned and the resolved lockfile is committed. The sharp/un
 
 ## Host, desktop and Android releases, then Pages
 
-1. Pass CI. Create the host tag, currently `v0.1.0-beta.14` (Python version `0.1.0b14`). The release workflow builds the wheel and publishes it with `host-manifest.json` and `SHA256SUMS`. Beta releases are explicitly marked as prereleases. Never overwrite an existing release's assets.
+1. Pass CI. Create the host tag, currently `v0.1.0-beta.15` (Python version `0.1.0b15`). The release workflow builds the wheel and publishes it with `host-manifest.json` and `SHA256SUMS`. Beta releases are explicitly marked as prereleases. Never overwrite an existing release's assets.
 2. For Android, publish the tag, currently `android-v0.1.0-beta.7`, with its signed APK, `SIGNING-CERTIFICATE.txt`, and `SHA256SUMS`; verify the public assets. Keep the same signing key for updates.
 3. Publish `desktop-v0.1.0-beta.9`: Linux x64/ARM64 archives, deb/rpm packages, macOS x64/ARM64 zip/dmg packages, and `SHA256SUMS`. Verify the public archives before advertising them. The Linux package must retain Chromium sandbox support; macOS builds are unsigned.
-4. Set repository variables `jaunt_RELAY_URL` (actual WSS URL), `jaunt_RELEASE_TAG` (`v0.1.0-beta.14`), `jaunt_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.10`), `jaunt_DESKTOP_RELEASE_TAG` (`desktop-v0.1.0-beta.12`), and optionally `jaunt_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
+4. Set repository variables `jaunt_RELAY_URL` (actual WSS URL), `jaunt_RELEASE_TAG` (`v0.1.0-beta.15`), `jaunt_ANDROID_RELEASE_TAG` (`android-v0.1.0-beta.10`), `jaunt_DESKTOP_RELEASE_TAG` (`desktop-v0.1.0-beta.12`), and optionally `jaunt_PAGE_URL` (defaults to the repository's page URL). Never put host tokens or pairing secrets in public variables.
 5. Enable Pages in GitHub Actions mode. `pages.yml` builds the web app, validates configuration, copies the installer, and publishes it.
 6. Do not run Pages with a nonexistent release. The deployment prompt requires this order.
 
