@@ -1,3 +1,10 @@
+# jaunt 0.1.0-beta.24
+
+- The split picker (new shell or existing session for the second pane) opens right under the split button that was clicked, left edges aligned, instead of at the far side of the terminal. It closes on Escape or a click elsewhere.
+- Rename terminal dialog: Enter saves, Escape cancels; a Cancel button sits next to Save. The New terminal dialog also submits on Enter from its name or directory field.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.23
 
 - Fix: the top bar could turn the accent colour at normal latency (86 ms) without the warning text. The high-latency class was toggled with a non-boolean value on machines that had never been slow, and `classList.toggle` flips the class on every render in that case. Strict booleans now; the latency e2e checks that repeated normal renders never show the warning.

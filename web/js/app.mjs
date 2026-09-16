@@ -659,7 +659,7 @@ function selectTerminalText() {
   $('terminal-stage').append(overlay);text.scrollTop=text.scrollHeight;
   // A native text control gives Android/iOS their own selection handles and copy menu.
 }
-function arrangePanes(axis) {
+function arrangePanes(axis, anchor = $(axis === 'y' ? 'split-below' : 'arrange-panes')) {
   const a = online(), target = a.active;
   const old = document.querySelector('.split-picker');
   if (old) old.remove();
@@ -676,9 +676,14 @@ function arrangePanes(axis) {
   for (const session of a.sessions.filter(s=>!leaves(a.machine.layout || {id:target}).includes(s.id)))
     picker.append(button(session.name,()=>add(session.id),'button','terminal'));
   picker.append(button(tr('Cancel'),()=>picker.remove(),'button','close'));
-  $('terminal-stage').append(picker);
+  document.body.append(picker);
+  // Anchored right under the split button that opened it, left edges aligned, kept on screen.
+  const r = anchor.getBoundingClientRect(), width = picker.offsetWidth, height = picker.offsetHeight;
+  picker.style.left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) + 'px';
+  picker.style.top = (r.bottom + height + 8 < window.innerHeight ? r.bottom + 6 : Math.max(8, r.top - height - 6)) + 'px';
+  const dismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && (picker.contains(e.target) || anchor.contains(e.target))) return; picker.remove(); document.removeEventListener('pointerdown', dismiss, true); document.removeEventListener('keydown', dismiss, true); };
+  setTimeout(() => { document.addEventListener('pointerdown', dismiss, true); document.addEventListener('keydown', dismiss, true); }, 0);
   picker.querySelector('button').focus();
-  picker.onkeydown=e=>{if(e.key==='Escape')picker.remove();};
 }
 async function undockPane(a,id) {
   rememberLayout(a,{id});
@@ -761,6 +766,7 @@ async function browseNewSession() {
       ...(result.next!==null?[button(tr('Load more'),()=>navigate(result.path,true))]:[]));
   };
   cwd.oninput=()=>{request++;};
+  for(const box of [name,cwd])box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();newSession(null,{name:name.value,cwd:cwd.value}).catch(error=>reportError(error,'modal'));}});
   cwd.onchange=()=>navigate(cwd.value).catch(error=>reportError(error,cwd.isConnected?'modal':'action'));
   await navigate(cwd.value);
   modal(tr('New terminal'),el('div',{},field(tr('Session name'),name,tr('Optional — leave blank for an automatic name.')),
@@ -829,9 +835,10 @@ function terminateSession(a, session) {
 function renameSession(a = online(), s = a.sessions.find(s => s.id === a.active)) {
   if (!s) return;
   const input = el('input', {value: s.name, maxLength: 80});
-  modal(tr('Rename terminal'), el('div', {}, field(tr('Name'), input), el('div', {class: 'modal-actions'}, button(tr('Save'), async () => {
-    await a.link.request('session.rename', {id: s.id, name: input.value}); s.name=input.value.trim() || s.name; closeModal(); render();
-  }, 'button primary')))); input.focus(); input.select();
+  const save = async () => { await a.link.request('session.rename', {id: s.id, name: input.value}); s.name=input.value.trim() || s.name; closeModal(); render(); };
+  // Enter saves, Escape closes (the dialog's native cancel).
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save().catch(error => reportError(error, 'modal')); } };
+  modal(tr('Rename terminal'), el('div', {}, field(tr('Name'), input), el('div', {class: 'modal-actions'}, button(tr('Cancel'), closeModal), button(tr('Save'), save, 'button primary')))); input.focus(); input.select();
 }
 
 async function listFiles(a, path = a.path, append = false) {

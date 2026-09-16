@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.18
+
+- Bundles the beta.24 interface (split picker under its button, Enter/Escape in rename).
+
 # jaunt desktop 0.1.0-beta.17
 
 - Bundles the beta.23 interface (top bar no longer turns orange at normal latency).

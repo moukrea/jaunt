@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.16 (versionCode 16)
+
+- Bundles the beta.24 interface (split picker under its button, Enter/Escape in rename).
+
 # jaunt Android 0.1.0-beta.15 (versionCode 15)
 
 - Bundles the beta.23 interface (top bar no longer turns orange at normal latency).
