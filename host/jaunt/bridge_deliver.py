@@ -81,7 +81,13 @@ def envelope(bridge, sender, recipient, message: dict) -> str:
 
 async def deliver_claude(bridge, sender, recipient, message: dict) -> None:
     socket_path, token = await asyncio.to_thread(find_claude_inbox, recipient.conversation, recipient.pid, recipient.inbox.get("socket", ""))
-    body = ("<cross-session-message from=\"jaunt-bridge\" from-name=\"jaunt · " + sender.id + "\">\n"
+    # Claude Code's inbound gate holds a peer message for the user's review when the
+    # receiving session bypasses permission prompts and the sender did not attest its
+    # own permission class, or attested a different one. Assert the sender's real
+    # class (from its hook payload); an unknown class is left unasserted, so the
+    # user keeps the review prompt instead of jaunt guessing.
+    mode = f' from-mode="{sender.mode_class}"' if sender.mode_class in ("bypass", "prompting") else ""
+    body = ("<cross-session-message from=\"jaunt-bridge\" from-name=\"jaunt · " + sender.id + "\"" + mode + ">\n"
             + envelope(bridge, sender, recipient, message) + "\n</cross-session-message>")
     frames = []
     if token:

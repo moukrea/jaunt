@@ -118,6 +118,7 @@ class Participant:
     last_seen: float = field(default_factory=time.time)
     roster_seen: int = -1
     bridged: bool = True
+    mode_class: str = ""   # "bypass" | "prompting" | "" (unknown) — asserted to Claude Code's inbound gate
 
     def public(self, terminal_name: str = "") -> dict:
         return {"id": self.id, "session": self.session, "runtime": self.runtime, "conversation": self.conversation[:12],
@@ -466,6 +467,8 @@ class Bridge:
             if changed:
                 self.version += 1
         existing.inbox = {k: str(v) for k, v in (p.get("inbox") or {}).items() if k in ("socket", "key", "sessionPid")}
+        if p.get("modeClass") in ("bypass", "prompting"):
+            existing.mode_class = p["modeClass"]
         existing.last_seen = now
         existing.state = {"prompt": "busy", "tool": "busy", "stop": "idle", "start": "idle", "compact": "busy"}.get(event, existing.state)
         context = self.context_for(existing, event, str(p.get("source", "")))
@@ -535,10 +538,18 @@ class Bridge:
         for s in self.host.sessions.items.values():
             if not s.alive or s.program not in RUNTIMES or s.program == me.runtime or s.id in registered or s.id == me.session:
                 continue
-            here = {"root": os.path.realpath(s.cwd), "common": "", "kind": "dir"}
+            here = {"root": os.path.realpath(self.live_cwd(s)), "common": "", "kind": "dir"}
             if self.same_project(me.project, here):
-                rows.append({"session": s.id, "terminal": s.name, "runtime": s.program, "cwd": s.cwd})
+                rows.append({"session": s.id, "terminal": s.name, "runtime": s.program, "cwd": self.live_cwd(s)})
         return rows
+
+    @staticmethod
+    def live_cwd(s) -> str:
+        """Where the shell is now, not where it started (Linux /proc; else the initial cwd)."""
+        try:
+            return os.readlink(f"/proc/{s.pid}/cwd")
+        except OSError:
+            return s.cwd
 
     def presence_signature(self) -> tuple:
         return tuple(sorted((s.id, s.program) for s in self.host.sessions.items.values() if s.alive and s.program in RUNTIMES))
@@ -620,6 +631,16 @@ class Bridge:
             for old in sorted(self.messages.values(), key=lambda m: m["at"])[:100]:
                 self.messages.pop(old["id"], None)
         await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
+        waiter = self.waiters.get(reply_to) if reply_to else None
+        if waiter is not None and not waiter.done():
+            # The asker is blocked in jaunt_send/jaunt_wait_reply: hand the reply to that
+            # call only. Pushing it into the conversation as well would make the same
+            # answer arrive twice.
+            message["state"] = "delivered"
+            message["detail"] = "handed to the waiting call"
+            waiter.set_result({"state": "replied", "reply": self.message_public(message)})
+            await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
+            return self.message_public(message)
         message["state"] = "delivering"
         try:
             from . import bridge_deliver
@@ -631,8 +652,6 @@ class Bridge:
             await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
             raise ValueError(f"Could not deliver to {recipient.id}: {message['detail']}") from None
         await self.host.broadcast({"type": "bridge.message", **self.message_public(message)})
-        if reply_to and reply_to in self.waiters and not self.waiters[reply_to].done():
-            self.waiters[reply_to].set_result({"state": "replied", "reply": self.message_public(message)})
         return self.message_public(message)
 
     def message_public(self, m: dict) -> dict:
