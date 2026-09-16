@@ -52,15 +52,67 @@ def state_argument() -> str:
     return str(state_dir())
 
 
+def wrapper_dir() -> Path:
+    from .state import state_dir
+    return state_dir() / "bridge"
+
+
+def write_wrapper(kind: str, runtime: str) -> Path:
+    """A plain executable per runtime: a single path works whether the runtime hands the
+    command to a shell or executes it directly, and it survives host updates through the
+    `current` pointer. The state directory travels as an argument (no reliance on env)."""
+    import shlex
+    directory = wrapper_dir()
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / f"{kind}-{runtime}"
+    log = shlex.quote(str(directory / "hook.log"))
+    python = shlex.quote(runtime_python())
+    state = shlex.quote(state_argument())
+    if kind == "hook":
+        # Never fail the runtime's own hook pipeline: a broken interpreter or a
+        # stopped host is recorded in hook.log for diagnosis and exits 0.
+        script = ("#!/bin/sh\n# Installed by jaunt (" + MARKER + "). Removed when the bridge is turned off.\n"
+                  f"PY={python}\nLOG={log}\n"
+                  "if [ ! -x \"$PY\" ]; then printf '%s hook-" + runtime + ": interpreter not executable: %s\\n' \"$(date '+%F %T')\" \"$PY\" >> \"$LOG\" 2>/dev/null; exit 0; fi\n"
+                  f"\"$PY\" -m jaunt.cli bridge-hook {runtime} --state {state} \"$@\" 2>>\"$LOG\"\n"
+                  "rc=$?\n"
+                  "if [ \"$rc\" -ne 0 ]; then printf '%s hook-" + runtime + ": exit %s\\n' \"$(date '+%F %T')\" \"$rc\" >> \"$LOG\" 2>/dev/null; fi\n"
+                  "exit 0\n")
+    else:
+        script = ("#!/bin/sh\n# Installed by jaunt (" + MARKER + "). Removed when the bridge is turned off.\n"
+                  f"exec {python} -m jaunt.cli bridge-mcp {runtime} --state {state} \"$@\"\n")
+    temp = path.with_suffix(".tmp")
+    temp.write_text(script)
+    temp.chmod(0o755)
+    os.replace(temp, path)
+    return path
+
+
 def hook_command(runtime: str) -> str:
     import shlex
-    # The host state directory travels as an argument: hooks must reach the host even
-    # when the runtime hands them a scrubbed environment.
-    return f'"{runtime_python()}" -m {MARKER} {runtime} --state {shlex.quote(state_argument())}'
+    return shlex.quote(str(write_wrapper("hook", runtime)))
 
 
 def mcp_command(runtime: str) -> list[str]:
-    return [runtime_python(), "-m", "jaunt.cli", "bridge-mcp", runtime, "--state", state_argument()]
+    return [str(write_wrapper("mcp", runtime))]
+
+
+def remove_wrappers() -> None:
+    directory = wrapper_dir()
+    if directory.is_dir():
+        for child in directory.iterdir():
+            child.unlink(missing_ok=True)
+        with contextlib_suppress(OSError):
+            directory.rmdir()
+
+
+class contextlib_suppress:
+    def __init__(self, *exceptions):
+        self.exceptions = exceptions
+    def __enter__(self):
+        return self
+    def __exit__(self, kind, *_):
+        return kind is not None and issubclass(kind, self.exceptions)
 
 
 def mcp_env() -> str:
@@ -80,7 +132,8 @@ def _write_json(path: Path, value: dict) -> None:
 
 
 def _is_ours(hook: dict) -> bool:
-    return isinstance(hook, dict) and MARKER in str(hook.get("command", ""))
+    command = str(hook.get("command", "")) if isinstance(hook, dict) else ""
+    return MARKER in command or "/bridge/hook-" in command
 
 
 def add_hooks(settings: dict, runtime: str) -> dict:
@@ -93,7 +146,9 @@ def add_hooks(settings: dict, runtime: str) -> dict:
             raise ValueError(f"Unexpected {event} hooks shape; left untouched")
         # Replace only our own entries; keep every user-defined group as it is.
         groups[:] = [g for g in groups if not (isinstance(g, dict) and all(_is_ours(h) for h in g.get("hooks", [])) and g.get("hooks"))]
-        groups.append({"hooks": [{"type": "command", "command": hook_command(runtime), "timeout": 10}]})
+        # Codex clamps SessionEnd hooks to 3 s and warns about longer timeouts.
+        timeout = 3 if event == "SessionEnd" else 10
+        groups.append({"hooks": [{"type": "command", "command": hook_command(runtime), "timeout": timeout}]})
     return settings
 
 
@@ -232,6 +287,7 @@ def uninstall(runtimes: dict) -> dict:
             results[name] = remover(runtimes.get(name, {}).get("path") or shutil.which(name) or "")
         except Exception as exc:
             results[name] = {"ok": False, "error": str(exc)[:160]}
+    remove_wrappers()
     return results
 
 

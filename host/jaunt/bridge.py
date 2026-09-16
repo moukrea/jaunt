@@ -450,8 +450,13 @@ class Bridge:
                 future.set_result({"state": "failed", "detail": f"recipient {reason}"})
 
     def sweep(self) -> bool:
-        """Drop participants whose terminal or runtime process is gone."""
+        """Drop participants whose terminal or runtime process is gone; notice runtimes appearing in shells."""
         changed = False
+        signature = self.presence_signature()
+        if signature != getattr(self, "_presence", None):
+            self._presence = signature
+            self.version += 1
+            changed = True
         for key, p in list(self.participants.items()):
             session = self.host.sessions.items.get(p.session)
             gone = session is None or not session.alive or (p.pid and not self._alive(p.pid))
@@ -486,6 +491,22 @@ class Bridge:
             return "nested"
         return ""
 
+    def present(self, me: Participant) -> list[dict]:
+        """Sessions of the other runtime open in jaunt shells on this project that have
+        not registered yet (no prompt so far, hooks not trusted, or still loading)."""
+        registered = {q.session for q in self.participants.values() if q.state != "ended"}
+        rows = []
+        for s in self.host.sessions.items.values():
+            if not s.alive or s.program not in RUNTIMES or s.program == me.runtime or s.id in registered or s.id == me.session:
+                continue
+            here = {"root": os.path.realpath(s.cwd), "common": "", "kind": "dir"}
+            if self.same_project(me.project, here):
+                rows.append({"session": s.id, "terminal": s.name, "runtime": s.program, "cwd": s.cwd})
+        return rows
+
+    def presence_signature(self) -> tuple:
+        return tuple(sorted((s.id, s.program) for s in self.host.sessions.items.values() if s.alive and s.program in RUNTIMES))
+
     def relevant(self, me: Participant) -> list[Participant]:
         return [q for q in self.participants.values()
                 if q is not me and q.state != "ended" and q.runtime != me.runtime and self.same_project(me.project, q.project)]
@@ -497,11 +518,16 @@ class Bridge:
             return ""
         me.roster_seen = self.version
         peers = self.relevant(me)
+        present = self.present(me)
         root = me.project.get("root", me.cwd)
         lines = ["[jaunt bridge] Cross-runtime awareness for this project (" + root + ")."]
+        for row in present:
+            lines.append(f"- A {runtime_name(row['runtime'])} session is open in jaunt terminal \"{row['terminal']}\" (cwd {row['cwd']}) "
+                         "but has not started its conversation on the bridge yet; it becomes reachable after its first prompt.")
         if not peers:
-            lines.append("No other AI session of the other runtime is currently working on this project through jaunt. "
-                         "If one arrives you will be told; you can also call jaunt_peers to check.")
+            if not present:
+                lines.append("No other AI session of the other runtime is currently working on this project through jaunt. "
+                             "If one arrives you will be told; you can also call jaunt_peers to check.")
             return "\n".join(lines)
         for q in peers:
             relation = self.same_project(me.project, q.project)
@@ -619,7 +645,7 @@ class Bridge:
         if not self.enabled:
             return {"enabled": False, "peers": [], "note": "The jaunt bridge is turned off on this host"}
         me = self.sender_of(p)
-        return {"enabled": True, "me": self.public(me), "peers": [self.public(q) for q in self.relevant(me)]}
+        return {"enabled": True, "me": self.public(me), "peers": [self.public(q) for q in self.relevant(me)], "present": self.present(me)}
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ Turning it **off** removes the integration entries from both runtimes, refuses a
 
 ## What "aware" means
 
-Each session receives, as ordinary hook context, the list of relevant sessions of the *other* runtime: terminal name, id, whether it is idle or working, how its workspace relates to yours (same project, another worktree of the same repository, a nested directory). "Relevant" is computed from real paths and git metadata, never from folder names. Sessions on unrelated projects are not listed. The roster is injected at session start, after a resume/compaction, and on your next prompt only when something changed. An idle session costs nothing; it is brought up to date when it resumes work.
+Each session receives, as ordinary hook context, the list of relevant sessions of the *other* runtime (a session that is open in a jaunt shell on the project but has not registered yet, because it has not received a prompt or its hooks are not trusted yet, is announced as present and not yet reachable): terminal name, id, whether it is idle or working, how its workspace relates to yours (same project, another worktree of the same repository, a nested directory). "Relevant" is computed from real paths and git metadata, never from folder names. Sessions on unrelated projects are not listed. The roster is injected at session start, after a resume/compaction, and on your next prompt only when something changed. An idle session costs nothing; it is brought up to date when it resumes work.
 
 Deciding to talk stays with the models: the context says who is there and how to reach them, and asks them to contact a peer only when their work benefits from it.
 
@@ -34,6 +34,7 @@ States are what the host can verify: *delivered* means the runtime accepted the 
 
 - **Claude Code**: hook entries (`SessionStart`, `UserPromptSubmit`, `PostCompact`, `Stop`, `SessionEnd`) in `~/.claude/settings.json`, all running `… -m jaunt.cli bridge-hook claude`; one user-scope MCP server named `jaunt-bridge` registered with `claude mcp add`; and three `permissions.allow` rules naming only the bridge's own tools (`mcp__jaunt-bridge__jaunt_peers`, `…jaunt_send`, `…jaunt_wait_reply`), so a session running in *don't ask* or auto mode can still use the bridge. No other permission is granted.
 - **Codex**: the same hook events in `~/.codex/hooks.json`, and one MCP server named `jaunt-bridge` registered with `codex mcp add`.
+- Both point at small executables jaunt writes under its own state directory (`~/.local/share/jaunt/bridge/hook-<runtime>` and `mcp-<runtime>`), which call the jaunt runtime with the host state directory as an argument.
 
 Entries are attributable (the jaunt command in them), added next to your existing hooks and servers without rewriting anything else, and removed one by one when you turn the bridge off. The commands point at the jaunt runtime that survives host updates, so nothing needs redoing after an update. Outside a jaunt shell, or while the bridge is off, the hook and MCP server exit silently: your other Claude Code and Codex sessions never talk to the host.
 
