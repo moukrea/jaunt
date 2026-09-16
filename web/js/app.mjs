@@ -27,7 +27,31 @@ const activeTerm = a => a?.terms.get(a.active);
 const prefs = () => vault.data?.preferences || {};
 const checked = p => { if (!p) throw new Error('Choose a connected machine first.'); return p; };
 const online = () => { const a = checked(current()); if (a.link.state !== 'online') throw new Error('Wait for the encrypted connection.'); return a; };
-const persist = () => vault.save();
+const persist = async () => { await vault.save(); for (const a of machines.values()) pushWorkspace(a).catch(() => {}); };
+// ---- shared workspace (open sessions and layouts follow the host) ----------
+function wsConfig(a) { return a.info?.workspace || {}; }
+function workspaceSignature(a) { return JSON.stringify({o: a.machine.openSessions || [], l: a.machine.layouts || [], t: a.machine.tabOrder || [], a: a.active || ''}); }
+function workspacePayload(a) { return {openSessions: a.machine.openSessions || [], layouts: a.machine.layouts || [], tabOrder: a.machine.tabOrder || [], active: a.active || ''}; }
+async function pushWorkspace(a) {
+  if (!wsConfig(a).sync || a.link.state !== 'online') return;
+  const signature = workspaceSignature(a);
+  if (signature === a.wsSent) return;
+  a.wsSent = signature;
+  try { a.info.workspace = await a.link.request('workspace.update', workspacePayload(a)); }
+  catch (error) { a.wsSent = ''; if (!/synchronization is off/.test(error.message)) throw error; }
+}
+async function applyHostWorkspace(a, w) {
+  a.machine.openSessions = [...w.openSessions];
+  a.machine.layouts = JSON.parse(JSON.stringify(w.layouts || []));
+  a.machine.tabOrder = [...(w.tabOrder || [])];
+  if (w.active && a.sessions.some(s => s.id === w.active)) a.active = w.active;
+  if (!a.machine.openSessions.includes(a.active)) a.active = a.machine.openSessions[0] || '';
+  a.machine.layout = a.machine.layouts.find(tree => leaves(tree).includes(a.active)) || (a.active ? {id: a.active} : null);
+  for (const [id, t] of a.terms) if (!a.machine.openSessions.includes(id)) { if (t.attached && a.link.state === 'online') await a.link.request('session.detach', {id}).catch(() => {}); t.term.dispose(); t.node.remove(); a.terms.delete(id); }
+  a.machine.lastSession = a.active; a.wsSent = workspaceSignature(a);
+  await vault.save();
+}
+function displayedOnly(a) { return !!(wsConfig(a).sync && wsConfig(a).displayedOnly); }
 const report = error => {
   if(/Connection (?:interrupted|changed|is offline)|Wait for the encrypted connection|Local host is offline/.test(error?.message||'') && current()?.link.state!=='online'){renderConnection();return;}
   reportError(error);
@@ -146,6 +170,7 @@ function makeMachine(machine) {
     for (const t of a.terms.values()) attachTerm(a, t).catch(error=>reportHost(a,error));
     if (!a.machine.openSessions) a.machine.openSessions = a.sessions.map(s=>s.id);
     if (!a.active || !a.sessions.some(s => s.id === a.active)) a.active = a.machine.openSessions[0] || '';
+    if (a.info?.workspace?.sync) applyHostWorkspace(a, a.info.workspace).then(() => { if (selected === machine.room) { render(); if (a.active) selectSession(a, a.active).catch(error=>reportHost(a,error)); } }).catch(error=>reportHost(a,error));
     if (selected === machine.room) {
       render(); if (a.active) selectSession(a, a.active).catch(error=>reportHost(a,error));
       if (view === 'files') listFiles(a).catch(error=>reportHost(a,error));
@@ -208,6 +233,13 @@ function handleMessage(a, message) {
       message.session ? {label: tr('Open'), run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null);
   } else if (message.type === 'clipboard.available') {
     toast(`${a.machine.name} shared clipboard text.`, false, {label: tr('Open'), run: () => showClipboard(a)});
+  } else if (message.type === 'workspace.changed') {
+    const w = message.workspace; if (a.info) a.info.workspace = w;
+    if (message.from === a.peer) { a.wsSent = workspaceSignature(a); if (view === 'settings' && a === current()) renderSettings(); return; }
+    if (w.sync) {
+      applyHostWorkspace(a, w).then(() => { render(); if (a === current() && a.active && view === 'terminal') selectSession(a, a.active).catch(error=>reportHost(a,error)); }).catch(error=>reportHost(a,error));
+    }
+    if (view === 'settings' && a === current()) renderSettings();
   } else if (message.type === 'bridge.changed') {
     const {type, ...status} = message; if (a.info) a.info.bridge = status;
     if (view === 'settings' && a === current()) renderSettings();
@@ -268,6 +300,7 @@ function render() {
   for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = !!a?.creating || a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
   for(const id of ['arrange-panes','split-below']) $(id).disabled = !a?.active || a?.link.state !== 'online';
+  $('list-sessions').hidden = !!a && displayedOnly(a);
   $('terminal-empty').hidden = !!a?.active;
   for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || !visibleSessions(a).includes(id);
   if (a) layoutPanes(a);
@@ -301,18 +334,28 @@ async function reorderTab(a,from,to) {
 }
 function tabDrag(node,a,index) {
   let drag;
-  node.addEventListener('pointerdown',e=>{if(e.button!==0)return;drag={x:e.clientX,y:e.clientY,id:e.pointerId,index,moving:false};});
+  const scrollable=()=>$('tabs').scrollWidth>$('tabs').clientWidth+2;
+  node.addEventListener('pointerdown',e=>{
+    if(e.button!==0)return;
+    drag={x:e.clientX,y:e.clientY,id:e.pointerId,index,moving:false,armed:true};
+    // On a touch screen whose tab strip scrolls, a horizontal swipe must scroll: the
+    // drag is only armed after a still press, so the swipe keeps its natural meaning.
+    if(e.pointerType==='touch'&&scrollable()){drag.armed=false;drag.timer=setTimeout(()=>{if(drag&&!drag.moving){drag.armed=true;node.closest('.session-tab').classList.add('tab-armed');if(navigator.vibrate)navigator.vibrate(10);}},350);}
+  });
+  node.addEventListener('touchmove',e=>{if(drag?.armed&&drag.moving)e.preventDefault();},{passive:false});
   node.addEventListener('pointermove',e=>{
     if(!drag)return;
-    if(!drag.moving&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<10)return;
+    const distance=Math.hypot(e.clientX-drag.x,e.clientY-drag.y);
+    if(!drag.armed){if(distance>=10){clearTimeout(drag.timer);drag=null;}return;}
+    if(!drag.moving&&distance<10)return;
     drag.moving=true;node.setPointerCapture(e.pointerId);node.closest('.session-tab').classList.add('tab-dragging');
     const rows=[...$('tabs').querySelectorAll('.session-tab')];
     drag.to=rows.findIndex(row=>{const r=row.getBoundingClientRect();return e.clientX>=r.left&&e.clientX<=r.right;});
     rows.forEach((row,i)=>row.classList.toggle('tab-drop-target',i===drag.to));
     const r=$('tabs').getBoundingClientRect();if(e.clientX>r.right-30)$('tabs').scrollLeft+=15;if(e.clientX<r.left+30)$('tabs').scrollLeft-=15;
   });
-  node.addEventListener('pointerup',e=>{const d=drag;drag=null;if(!d?.moving)return;e.preventDefault();node.dataset.dragged='1';setTimeout(()=>delete node.dataset.dragged,0);document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));if(d.to>=0)reorderTab(a,d.index,d.to).catch(report);});
-  node.addEventListener('pointercancel',()=>{drag=null;document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));});
+  node.addEventListener('pointerup',e=>{const d=drag;drag=null;clearTimeout(d?.timer);document.querySelectorAll('.tab-armed').forEach(n=>n.classList.remove('tab-armed'));if(!d?.moving)return;e.preventDefault();node.dataset.dragged='1';setTimeout(()=>delete node.dataset.dragged,0);document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));if(d.to>=0)reorderTab(a,d.index,d.to).catch(report);});
+  node.addEventListener('pointercancel',()=>{clearTimeout(drag?.timer);drag=null;document.querySelectorAll('.tab-drop-target,.tab-dragging,.tab-armed').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging','tab-armed'));});
   node.addEventListener('keydown',e=>{if(e.altKey&&e.shiftKey&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const to=index+(e.key==='ArrowLeft'?-1:1);if(to>=0&&to<$('tabs').children.length)reorderTab(a,index,to).catch(report);}});
 }
 function renderTabs(a) {
@@ -331,7 +374,7 @@ function renderTabs(a) {
     const label=el('button',{type:'button',class:'tab-label',text:name,onclick:()=>{if(label.dataset.dragged)return;selectSession(a,target()).catch(report);}});
     renameGesture(label,()=>renameSession(a,a.sessions.find(s=>s.id===target())));tabDrag(label,a,index);
     label.setAttribute('role','tab');label.setAttribute('aria-selected',String(ids.includes(a.active)));
-    const close=button('',async()=>{for(const s of group)await closeView(a,s.id);},'icon-button tab-close','close');close.setAttribute('aria-label',tr("Close view of {0}",name));
+    const close=button('',()=>closeChoice(close,a,group.map(s=>s.id)),'icon-button tab-close','close');close.setAttribute('aria-label',displayedOnly(a)?tr("Terminate {0}",name):tr("Close {0}",name));
     return el('div',{class:'session-tab'+(ids.includes(a.active)?' active':''),'data-ids':JSON.stringify(ids)},el('span',{class:'tab-symbol'},icon(sessionIcon(group.find(s=>s.id===target())),15)),label,el('span',{class:`status-dot${group.some(s=>s.alive)?' online':''}`}),close);
   }));
 }
@@ -342,7 +385,9 @@ function createTerm(a, session) {
   renameGesture(title,()=>renameSession(a,session));
   const undock=button('',()=>undockPane(a,session.id),'icon-button','external');
   undock.setAttribute('aria-label',tr('Move pane to its own tab'));
-  node.append(el('div',{class:'pane-caption'},el('span',{class:'pane-symbol'},icon(sessionIcon(session),15)),title,undock));
+  const closePane=button('',()=>closeChoice(closePane,a,[session.id]),'icon-button','close');
+  closePane.setAttribute('aria-label',tr('Close {0}',session.name));
+  node.append(el('div',{class:'pane-caption'},el('span',{class:'pane-symbol'},icon(sessionIcon(session),15)),title,undock,closePane));
   const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
     cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, convertEol: false,
     screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
@@ -447,6 +492,7 @@ async function selectSession(a, id) {
   const t = a.terms.get(id) || createTerm(a, session);
   render();
   await persist();
+  pushWorkspace(a).catch(() => {});
   if ((!t.attached || t.generation !== a.link.generation) && a.link.state === 'online') await attachTerm(a, t);
   if(!document.hidden && view==='terminal')claimSize(a,t);
   requestAnimationFrame(fitActive);
@@ -655,6 +701,34 @@ async function browseNewSession() {
   modal(tr('New terminal'),el('div',{},field(tr('Session name'),name,tr('Optional — leave blank for an automatic name.')),
     field(tr('Working directory'),cwd),folders,
     el('div',{class:'modal-actions'},button(tr('Cancel'),closeModal),button(tr('Create shell'),()=>newSession(null,{name:name.value,cwd:cwd.value}),'button primary'))));
+}
+async function killSessions(a, ids) {
+  for (const id of ids) {
+    await a.link.request('session.terminate', {id});
+    a.sessions = a.sessions.filter(s => s.id !== id);
+  }
+  syncSessions(a); await persist(); render();
+}
+// The × on a tab or pane: closing a view and terminating the shell are different
+// actions, so the choice is made explicit right there. When the host only keeps the
+// sessions that are displayed, closing is terminating and no menu is shown.
+function closeChoice(anchor, a, ids) {
+  document.querySelectorAll('.close-menu').forEach(n => n.remove());
+  if (displayedOnly(a)) { killSessions(a, ids).catch(report); return; }
+  const names = ids.map(id => a.sessions.find(s => s.id === id)?.name || id).join(' + ');
+  const menu = el('div', {class: 'close-menu', role: 'menu', 'aria-label': tr('Close {0}', names)});
+  const closeAll = async () => { menu.remove(); for (const id of ids) await closeView(a, id); };
+  menu.append(button(tr('Close view'), closeAll, 'button', 'close'),
+    el('small', {class: 'close-menu-hint', text: tr('Keeps the shell running on the host.')}),
+    button(tr('Terminate session'), () => { menu.remove(); killSessions(a, ids).catch(report); }, 'button danger', 'trash'),
+    el('small', {class: 'close-menu-hint', text: tr('Ends the shell and its jobs for everyone.')}));
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(r.left + r.width / 2 - width / 2, window.innerWidth - width - 8)) + 'px';
+  menu.style.top = (r.bottom + height + 8 < window.innerHeight ? r.bottom + 6 : Math.max(8, r.top - height - 6)) + 'px';
+  const dismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && menu.contains(e.target)) return; menu.remove(); document.removeEventListener('pointerdown', dismiss, true); document.removeEventListener('keydown', dismiss, true); };
+  setTimeout(() => { document.addEventListener('pointerdown', dismiss, true); document.addEventListener('keydown', dismiss, true); }, 0);
+  menu.querySelector('button').focus();
 }
 async function closeView(a, id) {
   a.machine.openSessions = (a.machine.openSessions || a.sessions.map(s=>s.id)).filter(s=>s!==id);
@@ -1004,6 +1078,16 @@ function copyMenu() {
   modal(tr('Copy & clipboard'), body);
 }
 
+function workspaceSettings(a) {
+  if (!a.info?.workspace) return [];
+  const w = a.info.workspace;
+  const sync = el('input', {type: 'checkbox', checked: !!w.sync, 'aria-label': tr('Share open sessions with this host')});
+  sync.onchange = async () => { sync.disabled = true; try { a.info.workspace = await a.link.request('workspace.configure', {sync: sync.checked, ...(sync.checked ? workspacePayload(a) : {})}); if (sync.checked) a.wsSent = workspaceSignature(a); } catch (e) { sync.checked = !sync.checked; report(e); } finally { sync.disabled = false; renderSettings(); } };
+  const only = el('input', {type: 'checkbox', checked: !!w.displayedOnly, disabled: !w.sync, 'aria-label': tr('Only displayed sessions exist')});
+  only.onchange = async () => { only.disabled = true; try { a.info.workspace = await a.link.request('workspace.configure', {displayedOnly: only.checked}); } catch (e) { only.checked = !only.checked; report(e); } finally { only.disabled = false; renderSettings(); render(); } };
+  return [settingsRow(tr('Share open sessions'), tr('Every client and the host itself show the same tabs, panes and active session for this host. Changes made anywhere follow everywhere.'), sync),
+    settingsRow(tr('Only displayed sessions exist'), w.sync ? tr('Closing a tab or pane terminates its shell; the Sessions list and the close-or-terminate choice disappear for this host.') : tr('Requires shared open sessions.'), only)];
+}
 function hostVersionText(a) {
   const status = a.info?.updates || {}, active = hostUpdateJobs.has(a.machine.room);
   if (active) return `${a.info.version} · ${describeUpdate(status)}`;
@@ -1222,6 +1306,7 @@ function renderSettings() {
       ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
         settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
         ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
+      ...workspaceSettings(a),
       settingsRow(tr('Host clipboard'), a.info?.clipboard?.backend || tr('Unknown until connected'), button(tr('Open'), () => showClipboard(a))),
       settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
       ...(!a.machine.local ? [settingsRow(tr('Forget this machine'), tr('Removes its saved key from this browser. Revoke it on the host first when possible.'), button(tr('Forget'), () => forgetMachine(a), 'button danger'))] : [])));
