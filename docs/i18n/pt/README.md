@@ -74,7 +74,7 @@ Abra o **jaunt** a partir do menu de aplicações do host ou execute `jaunt gui`
 
 Os dois **ícones de divisão** dispõem os painéis lado a lado ou um sobre o outro na versão de secretária, com uma sessão nova ou existente. Cada painel pode passar para o seu próprio separador. As disposições sobrevivem à reabertura; em mobile, as sessões aparecem como separadores normais. A barra lateral da versão de secretária pode ser recolhida, e a preferência é conservada. As Definições incluem os nomes amigáveis dos hosts, a ordenação e o host predefinido, os temas escuro/claro/do sistema/circadiano e os controlos de notificações. As definições do host acompanham de imediato a máquina selecionada, incluindo a sua identidade e os controlos de atualização. A aplicação de secretária nativa também gere o serviço do host local e emparelha com outros hosts; os controlos do serviço local só aparecem para o host local, e as atualizações da própria aplicação de secretária permanecem separadas. Consulte o [guia do espaço de trabalho](docs/WORKSPACE.md) e o [relatório de validação](docs/WORKSPACE_VALIDATION.md).
 
-**Ponte Claude Code ↔ Codex.** Quando `claude` e `codex` estão ambos instalados num host, as Definições mostram um interruptor. Uma vez ligado, as sessões reais de Claude Code e Codex abertas em shells do jaunt no mesmo projeto passam a conhecer-se automaticamente (como contexto normal de hooks) e podem enviar mensagens para a conversa aberta uma da outra, a seu pedido ou por iniciativa própria. Está desligado por omissão; desligá-lo remove tudo o que o jaunt adicionou aos dois runtimes. Consulte o [guia da ponte](docs/BRIDGE.md).
+**Ponte Claude Code ↔ Codex.** Quando `claude` e `codex` estão ambos instalados num host, as Definições mostram um interruptor. Uma vez ligado, as sessões reais de Claude Code e Codex abertas em shells do jaunt no mesmo projeto passam a conhecer-se automaticamente (como contexto normal de hooks) e podem enviar mensagens para a conversa aberta uma da outra, a seu pedido ou por iniciativa própria. Está desligado por omissão; desligá-lo remove tudo o que o jaunt adicionou aos dois runtimes. Consulte o [guia da ponte](../../../docs/BRIDGE.md).
 
 ## Tratamento de imagens
 
@@ -163,7 +163,7 @@ O inglês é a língua canónica da documentação. Traduções: [Français](../
 
 A web, o Android e a versão de secretária selecionam automaticamente o idioma do sistema. Pode alterá-lo em **Definições → Idioma**. A CLI usa a localização do sistema; `jaunt --language fr --help` altera uma única invocação e `jaunt language fr` guarda a preferência. Use `system` para repor a seleção automática. Os nomes dos comandos, os argumentos, a saída do terminal e o conteúdo do utilizador nunca são traduzidos.
 
-O endereço web público apresenta o projeto; **Abrir espaço de trabalho** entra no cliente. As aplicações nativas abrem o espaço de trabalho diretamente.
+O endereço web público apresenta o projeto; **Abrir área de trabalho** entra no cliente. As aplicações nativas abrem o espaço de trabalho diretamente.
 
 ## Aplicação Android
 
