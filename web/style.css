@@ -137,3 +137,19 @@
 .site-stage .site-demo pre{font-size:9px;line-height:1.55;padding:10px 12px}
 .site-stage .preview-phone pre{font-size:6.5px;line-height:1.6;padding:8px}
 .preview-file-list .file-name{flex:0 1 auto;min-width:0}.preview-file-list .file-text{width:100%}
+
+/* Latency tiers */
+.topbar.high-latency{background:var(--accent);border-bottom-color:var(--accent);color:#251d11}
+.topbar.high-latency .breadcrumb,.topbar.high-latency .breadcrumb strong,.topbar.high-latency .connection,.topbar.high-latency .connection.online,.topbar.high-latency .latency,.topbar.high-latency .icon-button{color:#251d11}
+.topbar.high-latency .connection i{background:#251d11}
+.topbar.high-latency .latency{display:inline-flex!important;align-items:center;gap:6px;font-size:11px;white-space:nowrap}
+.topbar.high-latency .latency strong{font-weight:700}
+.topbar.high-latency .topbar-actions>.button.primary{background:#251d11;border-color:#251d11;color:var(--accent)}
+.latency-overlay{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(3px)}
+.terminal-view{position:relative}
+.latency-card{max-width:420px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;padding:28px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.latency-card h2{font-size:20px;font-weight:600}
+.latency-card p{font-size:12px;line-height:1.7;color:var(--muted)}
+.latency-card .text-button{font-size:11px;color:var(--accent)}
+.latency-spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:busy-spin .9s linear infinite}
+@media(max-width:760px){.topbar.high-latency .latency{font-size:9px}.topbar.high-latency .latency strong{display:block}.latency-card{padding:22px}}

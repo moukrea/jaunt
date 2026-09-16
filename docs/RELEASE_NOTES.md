@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.22
+
+- Latency tiers. The client measures round trips continuously (more often while the link is degraded; an outstanding probe already counts). From 2 s the top bar turns the accent colour with **High latency, expect slowness** in bold next to the figure and the New shell button, on desktop and mobile, so slowness is not taken for a bug. From 15 s a waiting overlay with a spinner covers the tabs and terminals until the link settles (under 10 s); **Use anyway (expect lag and a rough experience)** lifts it for the current spike. Hysteresis on both tiers. Covered by `tests/latency_e2e.py` in CI.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.21
 
 - Public page and README rewritten around what jaunt actually does: several hosts in one workspace, shells and files on each, sessions that follow you across screens, the Claude Code ↔ Codex bridge, browser/Android/desktop clients. No new capability is claimed; the wording is stated plainly.

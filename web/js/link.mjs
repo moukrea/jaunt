@@ -43,7 +43,7 @@ export class Link extends EventTarget {
   status(state, message = '') { this.state = state; this.message = message; this.emit('status', {state, message}); }
   start() { this.enabled = true; this.connect(); }
   stop(message = '') {
-    this.enabled = false; clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);
+    this.enabled = false; clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer); this.stopProbes();
     this.generation++; this.channel = null; this.ws?.close(); this.ws = null;
     this.rejectPending(); this.status('offline', message);
   }
@@ -57,7 +57,7 @@ export class Link extends EventTarget {
   }
   connect() {
     if (!this.enabled) return;
-    clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);
+    clearTimeout(this.timer); clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer); this.stopProbes();
     this.ws?.close();
     const generation = ++this.generation;
     this.channel = null; this.stage = ''; this.rejectPending();
@@ -75,8 +75,13 @@ export class Link extends EventTarget {
           this.reconnect(); return;
         }
         ws.send('ping');
-        if (this.state === 'online') this.send({type: 'ping', at: Date.now()}).catch(() => {});
+        if (this.state === 'online') this.probe();
       }, 20000);
+      // A probe that has not come back yet is already a latency measurement: report it
+      // while it is outstanding so the UI can react to a stall before the pong arrives.
+      this.stallTimer = setInterval(() => {
+        if (this.state === 'online' && this.probeAt && Date.now() - this.probeAt > 2000) { this.latency = Date.now() - this.probeAt; this.emit('latency', this.latency); }
+      }, 1000);
     };
     ws.onmessage = event => {
       this.receiveQueue = this.receiveQueue.then(async () => {
@@ -104,7 +109,7 @@ export class Link extends EventTarget {
     };
     ws.onclose = () => {
       if (generation !== this.generation) return;
-      clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer);
+      clearInterval(this.heartbeat); clearTimeout(this.handshakeTimer); this.stopProbes();
       this.channel = null; this.rejectPending();
       if (this.enabled) {
         this.status('reconnecting', tr('Reconnecting automatically'));
@@ -176,7 +181,7 @@ export class Link extends EventTarget {
       await this.persist();
       if(generation!==this.generation || secure!==this.channel || !this.enabled)return;
       this.status('online'); this.emit('welcome', value);
-      this.send({type: 'ping', at: Date.now()}).catch(() => {});
+      this.probe();
     } else if (value.type === 'reply') {
       const pending = this.pending.get(value.id);
       if (pending) {
@@ -184,13 +189,24 @@ export class Link extends EventTarget {
         if (value.ok) pending.resolve(value.result); else pending.reject(new Error(value.error));
       }
     } else if (value.type === 'pong') {
+      if (value.at === this.probeAt) this.probeAt = 0;
       this.latency = Math.max(0, Date.now() - value.at); this.emit('latency', this.latency);
+      // Degraded link: probe more often so recovery is noticed within seconds, not at the next heartbeat.
+      if (this.latency >= 1500) this.probeSoon(3000);
     } else if (value.type === 'revoked') {
       this.stop(tr('Access revoked on the host')); this.emit('revoked', null);
     } else if (value.type === 'error') {
       this.emit('error', value.message);
     } else this.emit('message', value);
   }
+  probe() {
+    if (this.state !== 'online' || this.ws?.readyState !== WebSocket.OPEN) return;
+    if (this.probeAt && Date.now() - this.probeAt < 60000) return; // one outstanding probe at a time
+    this.probeAt = Date.now(); const at = this.probeAt;
+    this.send({type: 'ping', at}).catch(() => { if (this.probeAt === at) this.probeAt = 0; });
+  }
+  probeSoon(delay) { clearTimeout(this.probeTimer); this.probeTimer = setTimeout(() => this.probe(), delay); }
+  stopProbes() { clearTimeout(this.probeTimer); clearInterval(this.stallTimer); this.probeAt = 0; }
   send(value) {
     const generation = this.generation;
     const current = this.channel;
