@@ -4,21 +4,21 @@
 
 <img src="web/assets/jaunt.png" width="96" alt="jaunt logo">
 
-**Ihr shells, Ihre Dateien, Ihre Maschine.
+**Ihre Rechner, Ihre Shells, Ihre Dateien. Auf jedem Bildschirm.**
 
-jaunt bietet native Desktop- und Android-Anwendungen, einen mobilen / Desktop-Webclient und einen POSIX-Host. Es verbindet Sie mit echten Terminals, einschließlich willkürlicher shells, Claude Code und Codex. Die statische Web-App verwendet ein gemeinsames Relais, um verschlüsselte ausgehende Verbindungen vom Host und Client zu übertragen.
+jaunt verbindet die Geräte, die Sie bei sich tragen, mit den Rechnern, auf denen Sie arbeiten. Installieren Sie einen kleinen Host auf jedem Linux- oder macOS-Rechner, koppeln Sie Ihr Smartphone, Ihren Laptop oder Ihren Desktop einmalig, und alle zeigen denselben Arbeitsbereich: echte Shells in echten PTYs, die Dateien daneben und die Sitzungen, die Sie laufen gelassen haben. Öffnen, umbenennen, teilen, umsortieren, schließen oder beenden Sie Shells auf jedem Host von jedem Gerät aus; bei aktivierten *gemeinsam geöffneten Sitzungen* folgen Ihnen dieselben Tabs, Bereiche und die aktive Shell von Bildschirm zu Bildschirm. Claude Code und Codex laufen dort wie jedes andere Programm, und wenn beide auf einem Host installiert sind, sorgt ein einziger Schalter dafür, dass ihre Sitzungen im selben Projekt voneinander wissen und Nachrichten austauschen können. Clients: ein Browser (auch als PWA installierbar), eine native Android-App und eine native Desktop-App; alle drei liefern dieselbe Oberfläche. Verbindungen gehen vom Host nach außen über ein Relay, Ende-zu-Ende-verschlüsselt, ohne offenen Port, ohne VPN und ohne Konto.
 
-**Host: 0.1.0-beta.11 · Desktop: 0.1.0-beta.10 · Android: 0.1.0-beta.8.** [Open jaunt](https://moukrea.github.io/jaunt/). Veröffentlichung und Validierung des Releases werden im Validierungsbericht nachverfolgt. Das Protokoll hat **kein unabhängiges Sicherheitsaudit erhalten**. Siehe den [letzten Validierungsbericht](docs/SEAMLESS_WORKSPACE_VALIDATION.md) für beobachtete Testergebnisse und unvalidierte Einschränkungen].
+**Host: 0.1.0-beta.21 · Desktop: 0.1.0-beta.15 · Android: 0.1.0-beta.13.** [jaunt öffnen](https://moukrea.github.io/jaunt/). Veröffentlichung und Validierung der Releases werden im Validierungsbericht nachverfolgt. Das Protokoll hat **kein unabhängiges Sicherheitsaudit erhalten**. Beobachtete Testergebnisse und nicht validierte Einschränkungen finden Sie im [aktuellen Validierungsbericht](docs/SEAMLESS_WORKSPACE_VALIDATION.md).
 
-## Installieren Sie den Host
+## Host installieren
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Unterstützt Linux, macOS und WSL. Erfordert `curl`. Der Installer verwendet eine kompatible Python 3.11-3.14 Laufzeit oder installiert eine private Python Laufzeit über uv. Der Host installiert ohne Administratorprivilegien. Auf Ubuntu mit eingeschränkten Benutzernamensräumen verwendet die optionale Desktop-App das Systempaket-Installationsprogramm und fordert möglicherweise ein Administrator-Passwort zur Konfiguration seiner Sandbox an. Es überprüft die Veröffentlichung SHA-256, erstellt eine private Umgebung und startet einen Benutzerdienst, wenn verfügbar. Automatische Updates sind aktiviert. Kompatible Hosts behalten ihre shell-Prozesse während des Laufzeitwechsels bei und warten, bis die Übertragungen abgeschlossen sind.
+Unterstützt Linux, macOS und WSL. Erfordert `curl`. Der Installer verwendet eine kompatible Python-Laufzeit 3.11–3.14 oder installiert über uv eine private Python-Laufzeit. Der Host wird ohne Administratorrechte installiert. Unter Ubuntu mit eingeschränkten User Namespaces verwendet die optionale Desktop-App den Paketinstaller des Systems und fragt unter Umständen nach einem Administratorpasswort, um ihre Sandbox einzurichten. Der Installer prüft die SHA-256-Summe des Releases, legt eine private Umgebung an und startet, sofern verfügbar, einen Benutzerdienst. Automatische Updates sind aktiviert. Kompatible Hosts behalten ihre Shell-Prozesse beim Austausch der Laufzeit bei und warten, bis laufende Übertragungen abgeschlossen sind.
 
-Auf Android [installieren Sie den signierten APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.8/jaunt-android-v0.1.0-beta.8.apk), scannen Sie dann den vom Host angezeigten QR-Code. Auf einem Desktop oder in einem Browser öffnen Sie **https://moukrea.github.io/jaunt/**. Sie können auch den `jaunt1.…`-Paarungsstring einfügen. Der QR-Code läuft nach zehn Minuten ab und kann nur einmal verwendet werden. Jedes erinnerte Gerät verwendet dann seinen eigenen Schlüssel, so dass der Wechsel von Wi-Fi oder Mobilfunknetzen keine erneute Paarung erfordert. Halten Sie die Registerkarte für die automatische Wiederverbindung offen; öffnen Sie die App, wenn das mobile Betriebssystem es aussetzt oder tötet.
+Unter Android [installieren Sie die signierte APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.13/jaunt-android-v0.1.0-beta.13.apk) und scannen anschließend den vom Host angezeigten QR-Code. Auf einem Desktop oder im Browser öffnen Sie **https://moukrea.github.io/jaunt/**. Sie können auch die Kopplungszeichenfolge `jaunt1.…` einfügen. Der QR-Code läuft nach zehn Minuten ab und kann nur einmal verwendet werden. Jedes gemerkte Gerät verwendet danach seinen eigenen Schlüssel, sodass ein Wechsel zwischen WLAN und Mobilfunk keine erneute Kopplung erfordert. Lassen Sie den Tab für die automatische Wiederverbindung geöffnet; öffnen Sie die App erneut, wenn das mobile Betriebssystem sie anhält oder beendet.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -35,83 +35,89 @@ jaunt clipboard < notes.txt      # Make text available to the client
 jaunt stop                       # Stop the host AND its non-tmux shells
 ```
 
-Pairing gewährt Zugriff als **Systemkonto mit dem Host**, mit allen Berechtigungen dieses Kontos. Laufen Sie nicht als root für den gewöhnlichen Gebrauch. Ein QR-Code gewährt shell-Zugriff: Veröffentlichen Sie ihn niemals.
+Die Kopplung gewährt Zugriff als das **Systemkonto, unter dem der Host läuft**, mit allen Berechtigungen dieses Kontos. Führen Sie den Host im Normalbetrieb nicht als root aus. Ein QR-Code gewährt Shell-Zugriff: Veröffentlichen Sie ihn niemals.
 
-## Merkmale
+## Funktionen
 
-| Benehmen | Benehmen |
+| Bereich | Verhalten |
 |---|---|
-| Terminals | Echtes PTYs, interaktive Tastatur, mehrere Registerkarten, Create/rename/open/detach/terminate, Shared Sizing, mobiles Ctrl/Alt/Esc/Tab/Pfeiltasten |
-| Reconnection | Gebundener Verlauf, automatische Reconnection, erinnerter Zustand; eine Browsertrennung schließt den shell nicht |
-| Bestehende tmux-Sitzungen | Legacy tmux-Sitzungen bleiben unterstützt; neue Sitzungen in der Benutzeroberfläche sind gewöhnliche gemeinsame shells |
-| Dateien | Durchsuchen, versteckte Dateien, Paginierung, Erstellen von Verzeichnissen, Umbenennen, nicht-rekursives Löschen, Upload/Download, Text/Bildvorschau |
-| Transfers | Sichtbarer Fortschritt und beibehaltene Erfolgs- / Fehlerergebnisse; detailliertes Tracking in Dateien → Transferaktivität; 48 KiB-Brocken, Netzwerk-Wiederaufnahme-Offsets, Hochladen von SHA-256, atomare Finalisierung, Löschung |
-| Bilder | Galerie, File Picker, Paste und Drag-and-Drop; PNG-Konvertierung für Browser-dekodierbare Formate; Pfadeinfügen oder bedingte native Paste |
-| Zwischenablage | Auswahl, beibehaltenes Scrollback-Kopier, Host-Zwischenablage lesen / schreiben, wenn verfügbar, Headless-Textpuffer, Copy-only OSC 52 |
-| Schutz | Einweg-QR-Codes, per-Geräte-Schlüssel, Widerruf, optionaler PIN/passwortgeschützter Browser-Tresor und automatische Sperrung |
-| Benachrichtigungen | Optional nativer Android Service oder Browser Web Push; terminal Glocken, Programmereignisse, Sitzungsausgang, Einstellungen Test und CLI `notify`/`run` |
-| Interface | Native Desktop- und Android-Apps mit gemeinsamer gebündelter Schnittstelle; Browser-Client; lokales JavaScript |
+| Hosts | Koppeln Sie beliebig viele Linux-/macOS-Rechner; jeder behält seine eigenen Sitzungen, Dateien, Einstellungen und seinen Anzeigenamen; Wechsel über eine gemeinsame Seitenleiste; Standard-Host und Reihenfolge |
+| Terminals | Echte PTYs mit Ihrer eigenen Shell, interaktive Tastatur, Tabs, Erstellen/Umbenennen/Öffnen/Abtrennen/Beenden, Umsortieren per Drag-and-drop, geteilte Bereiche (nebeneinander oder übereinander), gemeinsame Größe, mobile Tasten Strg/Alt/Esc/Tab/Pfeile, Eingabefeld für lange Eingaben |
+| Gemeinsam geöffnete Sitzungen | Pro Host: alle Clients und der Host selbst zeigen dieselben Tabs, Bereiche, Reihenfolge und aktive Shell; optionaler Modus „nur angezeigte Sitzungen existieren“ |
+| Wiederverbindung | Begrenzter Verlauf, automatische Wiederverbindung, gemerkter Zustand; ein Verbindungsabbruch im Browser schließt die Shell nicht; Shells überleben In-Place-Updates des Hosts |
+| Bestehende tmux-Sitzungen | Bestehende tmux-Sitzungen werden weiterhin unterstützt; neue Sitzungen in der Oberfläche sind gewöhnliche gemeinsame Shells |
+| Dateien | Durchsuchen, versteckte Dateien, Seitenweise Anzeige, Verzeichnisse anlegen, Umbenennen, nicht rekursives Löschen, Upload/Download, Text-/Bildvorschau |
+| Übertragungen | Sichtbarer Fortschritt und aufbewahrte Erfolgs-/Fehlerergebnisse; detaillierte Nachverfolgung unter Dateien → Übertragungsaktivität; 48-KiB-Blöcke, Wiederaufnahme-Offsets nach Netzwerkunterbrechung, SHA-256 beim Upload, atomarer Abschluss, Abbruch |
+| Bilder | Galerie, Dateiauswahl, Einfügen und Drag-and-drop; PNG-Konvertierung für vom Browser dekodierbare Formate; Einfügen des Pfads oder bedingtes natives Einfügen |
+| Zwischenablage | Auswahl, Kopieren aus dem aufbewahrten Scrollback, Lesen/Schreiben der Host-Zwischenablage, wenn verfügbar, Textpuffer für Headless-Hosts, OSC 52 nur zum Kopieren |
+| Claude Code ↔ Codex | Ein Schalter pro Host: Sitzungen im selben Projekt erfahren über ihre Hooks voneinander und können der offenen Unterhaltung der jeweils anderen Seite Nachrichten senden; ausgeschaltet wird alles entfernt, was jaunt hinzugefügt hat |
+| Schutz | Einmal-QR-Codes, Schlüssel pro Gerät, Widerruf, optional per PIN/Passwort geschützter Browser-Tresor und automatische Sperre |
+| Benachrichtigungen | Optionaler nativer Android-Dienst oder Web Push im Browser; Terminal-Glocken, Programmereignisse, Sitzungsende, Test in den Einstellungen und CLI `notify`/`run` |
+| Oberfläche | Native Desktop- und Android-Apps mit gemeinsamer gebündelter Oberfläche; Browser-Client und PWA; sechs Sprachen; dunkles, helles, System- und zirkadianes Design |
+| Updates | Der Host ersetzt sich selbst an Ort und Stelle, ohne Shells zu beenden; Desktop-App und APK prüfen, verifizieren und installieren ihre eigenen Updates |
 
-## Desktop-Client nur
+## Nur Desktop-Client
 
-So verbinden Sie sich mit anderen Hosts, ohne einen lokalen Hostdienst oder jaunt CLI zu installieren:
+Um sich mit anderen Hosts zu verbinden, ohne einen lokalen Host-Dienst oder die jaunt-CLI zu installieren:
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash -s -- --client-only'
 ```
 
-Es installiert dieselbe Desktop-Anwendung und denselben Launcher mit Fernkopplung, Sitzungen, Dateien, Benachrichtigungen und automatischen App-Updates. Es startet keinen Daemon oder zeigt lokale Host-Steuerelemente an. Es deinstalliert keinen zuvor installierten Host. Führen Sie den normalen Host-Installationsbefehl aus, um später die Integration lokaler Hosts zu aktivieren.
+Dies installiert dieselbe Desktop-Anwendung samt Launcher, mit Kopplung entfernter Hosts, Sitzungen, Dateien, Benachrichtigungen und automatischen App-Updates. Es wird kein Daemon gestartet und es werden keine Steuerelemente für einen lokalen Host angezeigt. Ein zuvor installierter Host wird nicht deinstalliert. Führen Sie später den normalen Host-Installationsbefehl aus, um die lokale Host-Integration zu aktivieren.
 
-Die installierte Browseranwendung trägt den Namen **jaunt (PWA)**, so dass sie von der nativen **jaunt**-App unterschieden werden kann. Beide verwenden das original transparente Logo. Native Android verwendet das gleiche Artwork ohne gebündelten dunklen Hintergrund; einzelne Launcher können ihre eigene Icon-Behandlung anwenden.
+Die installierte Browser-Anwendung heißt **jaunt (PWA)**, damit sie sich von der nativen **jaunt**-App unterscheiden lässt. Beide verwenden das ursprüngliche transparente Logo. Die native Android-App verwendet dieselbe Grafik ohne gebündelten dunklen Hintergrund; einzelne Launcher können ihre eigene Icon-Darstellung anwenden.
 
-## Freigegebener Desktop-Arbeitsbereich
+## Gemeinsamer Desktop-Arbeitsbereich
 
-Öffnen Sie **jaunt** aus dem Anwendungsmenü des Hosts oder führen Sie `jaunt gui` aus. Host- und Remote-Clients teilen sich das gleiche gewöhnliche shells ohne tmux. **Neues shell** öffnet sofort einen automatisch benannten shell und erbt das aktuelle Verzeichnis des vorherigen aktiven shell. Die Ordnerschaltfläche ermöglicht es Ihnen, die Verzeichnisse des Hosts zu durchsuchen und optional die neuen shell zu benennen. **Sessions** listet laufende und beendete Sitzungen auf: Öffnen, umbenennen, schließen Sie nur Ihre Ansicht oder beenden Sie explizit ein shell für alle. Sie können auch einen Tab umbenennen, indem Sie auf seinen Titel doppelklicken, oder doppelklicken Sie auf den Titel eines Bereichs. Ziehen Sie Registerkarten, um sie neu zu ordnen; Auswählen eines Tabs ändert nie seine Position. Das Gerät, mit dem Sie interagieren, steuert die gemeinsame Größe von terminal.
+Öffnen Sie **jaunt** über das Anwendungsmenü des Hosts oder führen Sie `jaunt gui` aus. Host und entfernte Clients teilen sich dieselben gewöhnlichen Shells ohne tmux. **Neue Shell** öffnet sofort eine automatisch benannte Shell, die das aktuelle Verzeichnis der zuvor aktiven Shell übernimmt. Über die Ordner-Schaltfläche durchsuchen Sie die Verzeichnisse des Hosts und geben der neuen Shell optional einen Namen. **Sitzungen** listet laufende und beendete Sitzungen auf: öffnen, umbenennen, nur die eigene Ansicht schließen oder eine Shell ausdrücklich für alle beenden. Sie können einen Tab auch per Doppelklick auf seinen Titel umbenennen, ebenso einen Bereich per Doppelklick auf dessen Titel. Ziehen Sie Tabs, um sie umzusortieren; das Auswählen eines Tabs ändert nie seine Position. Das Gerät, mit dem Sie gerade arbeiten, bestimmt die gemeinsame Terminalgröße.
 
-Die beiden **Split-Symbole ** ordnen Fenster nebeneinander oder oben/unten auf dem Desktop an, indem sie eine neue oder bestehende Sitzung verwenden. Jedes Fenster kann in eine eigene Registerkarte verschoben werden. Layouts überleben das Wiedereröffnen; Mobilgeräte zeigen ihre Sitzungen als normale Registerkarten an. Die Desktop-Seitenleiste kann zusammenbrechen, wobei die Präferenz beibehalten wird. Einstellungen enthalten freundliche Hostnamen, Bestellung und den Standard-Host, Dark/Light/System/Zirkadian-Themen und Benachrichtigungssteuerungen. Hosteinstellungen folgen sofort dem ausgewählten Computer, einschließlich der Identitäts- und Aktualisierungssteuerungen. Die native Desktop-App verwaltet auch den lokalen Hostdienst und paart sich mit anderen Hosts; lokale Servicesteuerungen erscheinen nur für den lokalen Host, während Desktop-Anwendungsupdates getrennt bleiben. Siehe die [Arbeitsplatzführung](docs/WORKSPACE.md) und [Validierungsbericht](docs/WORKSPACE_VALIDATION.md)].
+Die beiden **Teilen-Symbole** ordnen Bereiche auf dem Desktop nebeneinander oder übereinander an, mit einer neuen oder einer bestehenden Sitzung. Jeder Bereich lässt sich in einen eigenen Tab verschieben. Layouts bleiben beim erneuten Öffnen erhalten; auf Mobilgeräten erscheinen die Sitzungen als normale Tabs. Die Desktop-Seitenleiste lässt sich einklappen, die Einstellung wird gemerkt. Die Einstellungen umfassen Anzeigenamen für Hosts, Reihenfolge und Standard-Host, das dunkle, helle, System- und zirkadiane Design sowie die Benachrichtigungsoptionen. Host-Einstellungen folgen sofort dem ausgewählten Rechner, einschließlich seiner Identität und Update-Steuerung. Die native Desktop-App verwaltet außerdem den lokalen Host-Dienst und koppelt sich mit anderen Hosts; die Steuerung des lokalen Dienstes erscheint nur für den lokalen Host, während Updates der Desktop-Anwendung davon getrennt bleiben. Siehe den [Arbeitsbereich-Leitfaden](docs/WORKSPACE.md) und den [Validierungsbericht](docs/WORKSPACE_VALIDATION.md).
+
+**Brücke Claude Code ↔ Codex.** Wenn sowohl `claude` als auch `codex` auf einem Host installiert sind, zeigen die Einstellungen einen Schalter an. Ist er eingeschaltet, wissen echte Claude-Code- und Codex-Sitzungen, die in jaunt-Shells im selben Projekt geöffnet werden, automatisch voneinander (als gewöhnlicher Hook-Kontext) und können der offenen Unterhaltung der jeweils anderen Seite Nachrichten senden, auf Ihre Anweisung oder aus eigener Initiative. Standardmäßig ausgeschaltet; beim Ausschalten wird alles entfernt, was jaunt zu beiden Laufzeiten hinzugefügt hat. Siehe den [Brücken-Leitfaden](docs/BRIDGE.md).
 
 ## Bildverarbeitung
 
-Der Fortschritt bleibt während des Uploads und der Zwischenablage/Pfadzustellung sichtbar. Abgeschlossene Vorgänge fallen in ein kompaktes Ergebnis zusammen; **Die Historie behält die Details bei. Das Abbrechen einer Übertragung wird als Stornierung angezeigt und Fehler bleiben bei ihrer Operation. Das Endergebnis gibt genau an, was passiert ist; Fehler bleiben bei einer Wiederholungsaktion sichtbar. Eine erfolgreiche Pfadeinfügung oder Ctrl+V-Zustellung beweist nicht, dass Claude Code oder Codex einen Anhang erkannt haben.
+Der Fortschritt bleibt während des Uploads und der Zustellung per Zwischenablage oder Pfad sichtbar. Abgeschlossene Vorgänge werden zu einem kompakten Ergebnis zusammengefasst; **Verlauf anzeigen** bewahrt die Details. Der Abbruch einer Übertragung wird als Abbruch angezeigt, und Fehler bleiben ihrem Vorgang zugeordnet. Das Endergebnis gibt genau an, was passiert ist; Fehler bleiben mit einer Wiederholen-Aktion sichtbar. Ein erfolgreich eingefügter Pfad oder eine erfolgreiche Zustellung per Strg+V beweist nicht, dass Claude Code oder Codex einen Anhang erkannt haben.
 
-**Einfügen:** Wenn ein natives Backend verfügbar ist, wird ein Bild in die Host-Zwischenablage hochgeladen und in die ausgewählte Sitzung mit Ctrl+V eingefügt. Wenn der Browser eine leere Zwischenablage zurückgibt, bietet die Benutzeroberfläche einen reichhaltigen Einfügenbereich und eine Bildauswahl. Attach behält beide expliziten Modi bei. Es wird kein Enter-Schlüssel gesendet.
+**Einfügen:** Ist ein natives Backend verfügbar, wird ein Bild in die Zwischenablage des Hosts hochgeladen und mit Strg+V in die ausgewählte Sitzung eingefügt. Liefert der Browser eine leere Zwischenablage, bietet die Oberfläche einen Einfügebereich und eine Bildauswahl an. „Anhängen“ behält beide expliziten Modi bei. Es wird keine Eingabetaste gesendet.
 
-**Rückfall mit aktiver Verbindung: ** Wählen oder Einfügen eines Bildes, laden Sie es auf den Host hoch und fügen Sie den ordnungsgemäß entwichenen Pfad in den terminal ein. Nichts sendet den Befehl automatisch. Claude, Codex oder ein anderes Tool können die Datei lesen, wenn der eigene Modus sie unterstützt.
+**Fallback bei aktiver Verbindung:** Wählen Sie ein Bild aus oder fügen Sie es ein, laden Sie es auf den Host hoch und fügen Sie seinen korrekt maskierten Pfad in das Terminal ein. Nichts sendet den Befehl automatisch ab. Claude, Codex oder ein anderes Werkzeug kann die Datei lesen, sofern der eigene Modus dies unterstützt.
 
-**Bedingte native Paste:** Wenn der Host eine zugängliche grafische Zwischenablage hat (macOS, Wayland mit `wl-clipboard` oder X11 mit `xclip`), legt jaunt den PNG dorthin und sendet Ctrl+V an den terminal. Dies hängt auch von der Verknüpfung und dem Verhalten des CLI-Tools ab. ** Auf einem Headless-Host kann jaunt keinen nativen Claude/Codex-Anhang herstellen: Es fällt auf eine Datei und ihren Pfad zurück.** HEIC und andere Formate, die der Browser nicht dekodieren kann, können immer noch als Dateien übertragen werden, werden aber nicht in PNG konvertiert.
+**Bedingtes natives Einfügen:** Verfügt der Host über eine zugängliche grafische Zwischenablage (macOS, Wayland mit `wl-clipboard` oder X11 mit `xclip`), legt jaunt das PNG dort ab und sendet Strg+V an das Terminal. Dies hängt zusätzlich vom Tastenkürzel und Verhalten des CLI-Werkzeugs ab. **Auf einem Headless-Host kann jaunt keinen nativen Claude-/Codex-Anhang erzeugen: Es weicht auf eine Datei und deren Pfad aus.** HEIC und andere Formate, die der Browser nicht dekodieren kann, lassen sich weiterhin als Dateien übertragen, werden aber nicht in PNG konvertiert.
 
 ## Automatische Updates
 
-| Komponente | Aktualisieren des Verhaltens |
+| Komponente | Update-Verhalten |
 |---|---|
-| Host / CLI | Gleiche Installation. Prüft den veröffentlichten Kanal alle 15 Minuten, überprüft Downloads und ersetzt kompatible Laufzeiten, ohne shell-Prozesse zu beenden. Übertragungen werden zuerst beendet. Einstellungen oder `jaunt update` prüft sofort. Ältere Hosts ohne Laufzeit-Handoff-Verzögerung, während normale shells aktiv sind; die Beendigung dieser shells erfordert immer noch eine explizite Bestätigung. |
-| Desktop-App | Separate Version vom Host. Automatisch überprüft, lädt und überprüft ein Update; installiert, wenn Sie die App schließen. Einstellungen bietet eine manuelle Überprüfung, ein automatisches Update umschalten und **Installieren und erneut öffnen **. Die Aktualisierung der GUI stoppt den Host oder seine shells. Systempakete können die OS-Autorisierung anfordern. |
-| Android APK | Prüft automatisch nach einem neuen APK. Ein sichtbarer Check/Download-Dialog führt zur Installationsbestätigung von Android. Prüfsumme und Signaturzertifikat des APK werden überprüft; Android erlaubt keine stille Selbstinstallation. |
-| Webclient | Verwendet die auf Pages veröffentlichte Version. Wieder öffnen/neu laden, um ein heruntergeladenes Service-Worker-Update zu aktivieren. |
+| Host / CLI | Gleiche Installation. Prüft alle 15 Minuten den veröffentlichten Kanal, verifiziert Downloads und ersetzt kompatible Laufzeiten, ohne Shell-Prozesse zu beenden. Übertragungen werden zuerst abgeschlossen. Über die Einstellungen oder `jaunt update` wird sofort geprüft. Ältere Hosts ohne Laufzeitübergabe warten, solange gewöhnliche Shells aktiv sind; das Beenden dieser Shells erfordert weiterhin eine ausdrückliche Bestätigung. |
+| Desktop-App | Eigene Version, unabhängig vom Host. Prüft, lädt und verifiziert ein Update automatisch; installiert es beim Schließen der App. Die Einstellungen bieten eine manuelle Prüfung, einen Schalter für automatische Updates und **Installieren und neu öffnen**. Ein Update der GUI stoppt weder den Host noch seine Shells. Systempakete können eine Autorisierung durch das Betriebssystem verlangen. |
+| Android-APK | Prüft automatisch auf eine neue APK. Ein sichtbarer Prüf-/Download-Dialog führt zur Installationsbestätigung von Android. Prüfsumme und Signaturzertifikat der APK werden verifiziert; Android erlaubt keine stille Selbstinstallation. |
+| Web-Client | Verwendet die auf Pages veröffentlichte Version. Erneut öffnen oder neu laden, um ein heruntergeladenes Service-Worker-Update zu aktivieren. |
 
-Bestehende Installationen benötigen die Version, die ihren Updater enthält, bevor dieser Updater ausgeführt werden kann. shells. Pairing-Tasten bleiben erhalten.](docs/UPDATES.md).
+Bestehende Installationen benötigen erst das Release, das ihren Updater enthält, bevor dieser Updater laufen kann. Ein erneuter Aufruf des offiziellen Host-Befehls aktualisiert den Host und installiert die angebotene Desktop-App; er weigert sich, aktive gewöhnliche Shells stillschweigend zu schließen. Kopplungsschlüssel bleiben erhalten. Siehe [Updates und Neustartschutz](docs/UPDATES.md).
 
-## Anschluss- und Betriebsrückmeldung
+## Rückmeldung zu Verbindung und Vorgängen
 
-Eine Netzwerkunterbrechung hat ein persistentes Verbindungsbanner mit einer Wiederholungsaktion. jaunt verbindet sich wieder mit dem gespeicherten Geräteschlüssel; es wiederholt nicht gesendete terminal-Eingaben. Widerruf und fehlgeschlagene Host-Verifizierung stoppen die Verbindung und erklären den nächsten Schritt. Fehler in einem Dialog bleiben in diesem Dialog; andere Aktionsfehler bleiben sichtbar, bis sie abgewiesen werden. Kurze Bestätigungstoasts werden dedupliziert und auf zwei beschränkt.
+Bei einer Netzwerkunterbrechung erscheint ein einzelnes, dauerhaftes Verbindungsbanner mit einer Wiederholen-Aktion. jaunt verbindet sich mit dem gespeicherten Geräteschlüssel neu; nicht gesendete Terminaleingaben werden nicht nachgeholt. Ein Widerruf oder eine fehlgeschlagene Host-Verifizierung beenden die Verbindung und erklären den nächsten Schritt. Fehler in einem Dialog bleiben in diesem Dialog; andere Aktionsfehler bleiben sichtbar, bis sie geschlossen werden. Kurze Bestätigungs-Toasts werden dedupliziert und auf zwei begrenzt.
 
-Uploads, Downloads, Service-Installation und Update-Checks zeigen den Fortschritt und ein Endergebnis in Aktivität. Netzwerkpausen sind explizit, Transfer-Stornierung ist verfügbar und abgeschlossene Historie kann erweitert werden. Verfügbare Updates bieten eine direkte Aktion anstelle eines auslaufenden Toasts.
+Uploads, Downloads, Dienstinstallation und Update-Prüfungen zeigen unter Aktivität den Fortschritt und ein Endergebnis. Netzwerkpausen werden ausdrücklich angezeigt, Übertragungen lassen sich abbrechen, und der abgeschlossene Verlauf kann aufgeklappt werden. Verfügbare Updates bieten eine direkte Aktion statt eines ablaufenden Toasts.
 
-## Meldungen
+## Benachrichtigungen
 
-Aktivieren Sie Benachrichtigungen in **Einstellungen ** und verwenden Sie die Testaktion. Programmbenachrichtigungstitel und -text bleiben erhalten, wenn sie geliefert werden; eine einfache terminal-Glocke hat keinen Nachrichtenkörper zum Wiederherstellen. Durch Klicken auf eine Benachrichtigung wird der entsprechende Host und die entsprechende Sitzung ausgewählt. Desktopbenachrichtigungen erfordern, dass die App ausgeführt wird; Android verwendet seinen optionalen Vordergrundverbindungsdienst; der Webclient verwendet den Browser Web Push. Benachrichtigungsinhalte können gemäß den Betriebssystemeinstellungen auf dem Sperrbildschirm erscheinen.
+Aktivieren Sie Benachrichtigungen in den **Einstellungen** und nutzen Sie die dortige Testaktion. Titel und Text von Programmbenachrichtigungen bleiben erhalten, wenn sie mitgeliefert werden; eine einfache Terminal-Glocke hat keinen Nachrichtentext, der wiederhergestellt werden könnte. Ein Klick auf eine Benachrichtigung wählt den zugehörigen Host und die zugehörige Sitzung aus. Desktop-Benachrichtigungen setzen voraus, dass die App läuft; Android verwendet seinen optionalen Vordergrund-Verbindungsdienst; der Web-Client verwendet Web Push des Browsers. Benachrichtigungsinhalte können je nach Betriebssystemeinstellungen auf dem Sperrbildschirm erscheinen.
 
 ## Bekannte Einschränkungen
 
-- Bis zu 16 aktive shells, 32 beibehaltene Ansichten, 2 MiB von Rohwiedergabe pro PTY und 10.000 xterm-Scrollback-Zeilen. Copy-all deckt die gespeicherte Historie ab, nicht ein unbegrenztes Protokoll.
-- Host-Dateilimit: 512 MiB. In-Memory-Downloads sind auf 128 MiB in Browsern ohne direktes Dateischreiben beschränkt; Previews sind auf 16 MiB begrenzt. Bis zu acht gleichzeitige Uploads und 1 GiB von deklarierter Gesamtgröße.
-- Uploads werden nach Netzwerkunterbrechungen fortgesetzt, während der Host und die Seite die Übertragung beibehalten. Starten Sie den Upload nach einem Neustart des Hosts oder einem Neuladen der gesamten Seite neu; jaunt erhält keinen unbefugten dauerhaften Zugriff auf die lokalen Dateien des Telefons.
-- Gewöhnliche shells überleben die Trennung und kompatible Laufzeit-Updates, **nicht ein expliziter Daemon-Stopp / Neustart oder Maschinen-Neustart **. tmux kann einen Daemon-Neustart überleben, aber keinen OS-Neustart.
-- Es kann sein, dass nur eine jaunt-Anwendungsregisterkarte pro Browserprofil gleichzeitig den Tresor besitzt. Mehrere terminal-Registerkarten innerhalb von jaunt und mehrere Geräte werden unterstützt.
-- Browser-Benachrichtigungen erfordern Erlaubnis und Web-Push-Unterstützung. In der APK aktivieren Sie Android Hintergrundbenachrichtigungen in den Einstellungen; Android Batteriebeschränkungen können die Lieferung verzögern. Auf iOS verwenden Sie die installierte PWA. Die Lieferung hängt vom Netzwerk und Push-Provider ab; es ist nicht in Echtzeit garantiert.
-- Ein schlafender oder ausgeschalteter Host ist nicht erreichbar. Es gibt keine Fernaufweckung, keinen beliebigen TCP-Tunnel, keinen grafischen Desktop oder keine native Windows shell-Unterstützung.
-- Linux-Desktoppakete sind für x64 und ARM64 verfügbar; macOS-Archive sind unsigniert und unnotarisiert. Es wird kein natives Windows-Desktoppaket bereitgestellt. Physisches Android-Telefonverhalten und geschützte macOS-Updater-Autorisierung wurden nicht validiert; Emulatorergebnisse werden separat dokumentiert.
-- Produktionsrelaiskosten, -kontingente und -verfügbarkeit hängen vom Cloudflare-Konto ab. Grundlegende Relaissicherungen sind kein garantierter kommerzieller Missbrauchsschutz.
+- Bis zu 16 aktive Shells, 32 aufbewahrte Ansichten, 2 MiB Roh-Replay pro PTY und 10.000 xterm-Scrollback-Zeilen. „Alles kopieren“ umfasst den aufbewahrten Verlauf, kein unbegrenztes Protokoll.
+- Dateilimit des Hosts: 512 MiB. Downloads im Arbeitsspeicher sind in Browsern ohne direktes Schreiben von Dateien auf 128 MiB begrenzt; Vorschauen auf 16 MiB. Bis zu acht gleichzeitige Uploads und 1 GiB deklarierte Gesamtgröße.
+- Uploads werden nach Netzwerkunterbrechungen fortgesetzt, solange Host und Seite die Übertragung behalten. Nach einem Neustart des Hosts oder einem vollständigen Neuladen der Seite müssen Sie den Upload neu starten; jaunt verschafft sich keinen unautorisierten dauerhaften Zugriff auf die lokalen Dateien des Smartphones.
+- Gewöhnliche Shells überleben Verbindungsabbrüche und kompatible Laufzeit-Updates, **nicht aber ein ausdrückliches Stoppen/Neustarten des Daemons oder einen Neustart des Rechners**. tmux kann einen Daemon-Neustart überleben, aber keinen Neustart des Betriebssystems.
+- Nur ein jaunt-Anwendungstab pro Browserprofil kann den Tresor gleichzeitig besitzen. Mehrere Terminal-Tabs innerhalb von jaunt und mehrere Geräte werden unterstützt.
+- Browser-Benachrichtigungen erfordern eine Berechtigung und Web-Push-Unterstützung. In der APK aktivieren Sie Android-Hintergrundbenachrichtigungen in den Einstellungen; Akku-Einschränkungen von Android können die Zustellung verzögern. Unter iOS verwenden Sie die installierte PWA. Die Zustellung hängt vom Netzwerk und vom Push-Anbieter ab; sie ist nicht in Echtzeit garantiert.
+- Ein schlafender oder ausgeschalteter Host ist nicht erreichbar. Es gibt kein Fernwecken, keinen beliebigen TCP-Tunnel, keinen grafischen Desktop und keine Unterstützung für native Windows-Shells.
+- Linux-Desktop-Pakete sind für x64 und ARM64 verfügbar; macOS-Archive sind weder signiert noch notarisiert. Ein natives Windows-Desktop-Paket wird nicht bereitgestellt. Das Verhalten auf physischen Android-Smartphones und die geschützte Autorisierung des macOS-Updaters wurden nicht validiert; Emulator-Ergebnisse sind separat dokumentiert.
+- Kosten, Kontingente und Verfügbarkeit des Produktions-Relays hängen vom Cloudflare-Konto ab. Die grundlegenden Schutzmaßnahmen des Relays sind kein garantierter kommerzieller Missbrauchsschutz.
 
 ## Lokale Entwicklung
 
@@ -124,7 +130,7 @@ npm run prepare-web
 python scripts/dev.py
 ```
 
-Der Läufer hört nur auf `127.0.0.1`, startet einen Host und ein lokales Relais und zeigt einen Test-QR-Code an. ** Dadurch wird der Host nicht dem Internet ausgesetzt. ** Verwenden Sie die HTTPS-Bereitstellung auf einem physischen Telefon: `localhost` bezieht sich auf das Telefon, nicht auf den PC.
+Der Runner lauscht nur auf `127.0.0.1`, startet einen Host und ein lokales Relay und zeigt einen Test-QR-Code an. **Der Host wird dadurch nicht im Internet erreichbar.** Verwenden Sie auf einem physischen Smartphone die HTTPS-Bereitstellung: `localhost` bezeichnet dort das Smartphone, nicht den PC.
 
 ```sh
 pytest -q                        # Python tests and Node interoperability tests
@@ -136,28 +142,31 @@ python tests/browser_e2e.py       # Real browser and host in temporary isolation
 python tests/shared_workspace_e2e.py # Electron + browser sharing real PTYs; needs a display
 python tests/terminal_render_e2e.py  # Scroll, selection and terminal geometry
 python tests/installer_e2e.py        # Real wheel install and protected upgrade
+python tests/client_update_e2e.py    # Browser-driven host self-update, pushed progress, refusal of a broken release
+python tests/bridge_e2e.py           # Real Claude Code and Codex sessions discover and message each other through the bridge (uses your real accounts)
+python tests/workspace_sync_e2e.py   # Shared open sessions between two clients, close-or-terminate choice, displayed-only mode
 ```
 
-Stellen Sie `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` so ein, dass Sie einen Systembrowser verwenden. Andernfalls führen Sie `python -m playwright install chromium` aus. Tests ändern niemals die Sicherheitsrichtlinien Ihres Browsers.
+Setzen Sie `jaunt_BROWSER_EXECUTABLE=/path/to/chromium`, um einen Systembrowser zu verwenden. Andernfalls führen Sie `python -m playwright install chromium` aus. Die Tests ändern niemals die Sicherheitsrichtlinien Ihres Browsers.
 
 ## Erstbereitstellung — einmalig durch den Projekteigentümer
 
-Geben Sie [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md)] an einen Agenten mit GitHub-Zugriff. Er konfiguriert GitHub-Seiten, eine Host-Version und ein Cloudflare-Relay für das gesamte Projekt. Cloudflare-Autorisierung ist erforderlich; ein GitHub-Token stellt es nicht bereit. Endbenutzer erstellen keine Infrastruktur.
+Übergeben Sie [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) an einen Agenten mit GitHub-Zugriff. Er richtet GitHub Pages, ein Host-Release und **ein einziges Cloudflare-Relay für das gesamte Projekt** ein. Eine Cloudflare-Autorisierung ist erforderlich; ein GitHub-Token stellt sie nicht bereit. Endnutzer erstellen keine Infrastruktur.
 
-jaunt leiht keine Relais von sshx, Happy oder Zedra. Es hängt nicht von ihren Servern, Tailscale oder einem jaunt-Benutzerkonto ab. Das Cloudflare-Konto des Besitzers kann Quoten oder Kosten verursachen; es wird kein kostenloses oder unbegrenztes Relais versprochen.
+jaunt leiht sich keine Relays von sshx, Happy oder Zedra. Es hängt weder von deren Servern noch von Tailscale oder einem jaunt-Benutzerkonto ab. Für das Cloudflare-Konto des Eigentümers können Kontingente oder Kosten anfallen; ein kostenloses oder unbegrenztes Relay wird nicht versprochen.
 
 ## Dokumentation
 
-[Deployment](docs/DEPLOYMENT.md) · [Security](SECURITY.md) · [Protocol](docs/PROTOCOL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Mitteilungen Dritter](../../../THIRD_PARTY_NOTICES.md)]]
+[Bereitstellung](docs/DEPLOYMENT.md) · [Sicherheit](SECURITY.md) · [Protokoll](docs/PROTOCOL.md) · [Fehlerbehebung](docs/TROUBLESHOOTING.md) · [Validierung](docs/VALIDATION.md) · [Hinweise zu Drittanbietern](../../../THIRD_PARTY_NOTICES.md)
 
-Englisch ist die kanonische Dokumentationssprache.](../fr/README.md), [Español]](../es/README.md), [Italiano]](../it/README.md)[Português]](../pt/README.md), [Deutsch]](README.md)Jeder übersetzte Baum enthält die Sicherheits-, Bereitstellungs- und Validierungsleitfäden.
+Englisch ist die kanonische Dokumentationssprache. Übersetzungen: [Français](../fr/README.md), [Español](../es/README.md), [Italiano](../it/README.md), [Português](../pt/README.md), [Deutsch](README.md). Jeder übersetzte Dokumentationsbaum enthält die Leitfäden zu Sicherheit, Bereitstellung und Validierung.
 
-Web, Android und Desktop wählen die Systemsprache automatisch aus. Überschreiben Sie sie in **Settings → Language**. Das CLI verwendet das Systemlocal; `jaunt --language fr --help` überschreibt eine Invocation und `jaunt language fr` speichert die Präferenz. Verwenden Sie `system`, um die automatische Auswahl wiederherzustellen. Befehlsnamen, Argumente, terminal-Ausgabe und Benutzerinhalte werden nie übersetzt.
+Web, Android und Desktop wählen die Systemsprache automatisch. Überschreiben Sie sie unter **Einstellungen → Sprache**. Die CLI verwendet die Systemsprache; `jaunt --language fr --help` überschreibt sie für einen Aufruf und `jaunt language fr` speichert die Einstellung. Mit `system` stellen Sie die automatische Auswahl wieder her. Befehlsnamen, Argumente, Terminalausgaben und Nutzerinhalte werden nie übersetzt.
 
-Die öffentliche Webadresse stellt das Projekt vor; **Open Workspace** tritt in den Client ein. Native Apps öffnen den Workspace direkt.
+Die öffentliche Webadresse stellt das Projekt vor; **Arbeitsbereich öffnen** führt in den Client. Native Apps öffnen den Arbeitsbereich direkt.
 
-## Android App
+## Android-App
 
-Der Android-Client ist ein APK mit einer gebündelten WebView-Schnittstelle und nativen Clipboard-, Kamera-, Datei- und Hintergrundbenachrichtigungsintegrationen. siehe [Android Installation, Architektur und Validierung](docs/ANDROID.md). Die Seite wirbt für das APK, nachdem seine öffentlichen Assets verifiziert wurden].
+Der Android-Client ist eine APK mit gebündelter WebView-Oberfläche und nativer Integration von Zwischenablage, Kamera, Dateien und Hintergrundbenachrichtigungen. Siehe [Android: Installation, Architektur und Validierung](docs/ANDROID.md). Die Seite bietet die APK an, sobald ihre öffentlichen Assets verifiziert wurden.
 
-Das APK ist ein natives Android-Paket mit einem gebündelten WebView, keine PWA-Installation. Die Schnittstelle und Typografie werden mit den Web- und Desktop-Apps geteilt; die native Integration liefert Kamera, Zwischenablage, Dateiauswahl und Benachrichtigungen. Siehe die Aktualisierungstabelle oben für die Installationsbestätigungsanforderungen.
+Die APK ist ein natives Android-Paket mit gebündelter WebView, keine PWA-Installation. Oberfläche und Typografie sind mit den Web- und Desktop-Apps identisch; die native Integration liefert Kamera, Zwischenablage, Dateiauswahl und Benachrichtigungen. Die Anforderungen an die Installationsbestätigung entnehmen Sie der Update-Tabelle oben.

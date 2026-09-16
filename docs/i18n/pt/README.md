@@ -4,21 +4,21 @@
 
 <img src="web/assets/jaunt.png" width="96" alt="jaunt logo">
 
-** Seu shells, seus arquivos, sua máquina. Do seu telefone. **
+**As suas máquinas, as suas shells, os seus ficheiros. Em todos os ecrãs.**
 
-jaunt fornece desktop nativo e aplicativos Android, um cliente web móvel/desktop e um host POSIX. Ele conecta você a terminais reais, incluindo shells arbitrário, Claude Code e Codex. O aplicativo web estático usa um relé compartilhado para realizar conexões criptografadas do host e cliente.
+O jaunt liga os dispositivos que traz consigo às máquinas onde trabalha. Instale um pequeno host em cada máquina Linux ou macOS, emparelhe o telemóvel, o portátil ou o computador de secretária uma única vez, e todos passam a mostrar o mesmo espaço de trabalho: shells reais em PTYs reais, os ficheiros ao lado delas e as sessões que deixou a correr. Abra, renomeie, divida, reordene, feche ou termine shells em qualquer host a partir de qualquer dispositivo; com as *sessões abertas partilhadas* ativas, os mesmos separadores, painéis e shell ativa acompanham-no de ecrã para ecrã. O Claude Code e o Codex correm ali como qualquer outro programa e, quando ambos estão instalados num host, um único interruptor permite que as suas sessões no mesmo projeto se conheçam e troquem mensagens. Clientes: um navegador (também instalável como PWA), uma aplicação Android nativa e uma aplicação de secretária nativa; as três trazem a mesma interface. As ligações saem do host através de um relay, cifradas de ponta a ponta, sem porta aberta, sem VPN e sem conta.
 
-**Host: 0.1.0-beta.11 · Desktop: 0.1.0-beta.10 · Android: 0.1.0-beta.8.** [Open jaunt](https://moukrea.github.io/jaunt/). A publicação e validação da versão são rastreadas no relatório de validação. O protocolo não recebeu uma auditoria de segurança independente**. Veja o [último relatório de validação](docs/SEAMLESS_WORKSPACE_VALIDATION.md) para resultados de testes observados e limitações não validadas.
+**Host: 0.1.0-beta.21 · Desktop: 0.1.0-beta.15 · Android: 0.1.0-beta.13.** [Abrir o jaunt](https://moukrea.github.io/jaunt/). A publicação e a validação das versões são acompanhadas no relatório de validação. O protocolo **não foi submetido a uma auditoria de segurança independente**. Consulte o [relatório de validação mais recente](docs/SEAMLESS_WORKSPACE_VALIDATION.md) para os resultados de teste observados e as limitações ainda não validadas.
 
-## Instalar a máquina
+## Instalar o host
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash'
 ```
 
-Suporta Linux, macOS e WSL. Requer `curl`. O instalador usa um Python compatível 3.11–3.14 runtime ou instala um servidor privado Python runtime através do uv. O host instala sem privilégios de administrador. No Ubuntu com espaços de nomes de usuário restritos, o aplicativo de desktop opcional usa o instalador do pacote do sistema e pode solicitar uma senha de administrador para configurar sua caixa de areia. Ele verifica a liberação do SHA-256, cria um ambiente privado e inicia um serviço de usuário quando disponível. Atualizações automáticas estão habilitadas. Os hosts compatíveis mantêm seus processos shell durante a substituição de tempo de execução e aguardam transferências para terminar.
+Suporta Linux, macOS e WSL. Requer `curl`. O instalador utiliza um runtime Python 3.11–3.14 compatível ou instala um runtime Python privado através do uv. O host instala-se sem privilégios de administrador. No Ubuntu com namespaces de utilizador restritos, a aplicação de secretária opcional recorre ao instalador de pacotes do sistema e pode pedir a palavra-passe de administrador para configurar a sua sandbox. O instalador verifica o SHA-256 da versão, cria um ambiente privado e inicia um serviço de utilizador quando disponível. As atualizações automáticas ficam ativas. Os hosts compatíveis conservam os processos das shells durante a substituição do runtime e aguardam que as transferências terminem.
 
-Ligado Android, [instalar a assinatura APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.8/jaunt-android-v0.1.0-beta.8.apk), em seguida, digitalizar o QR código exibido pela máquina. Em um desktop ou em um navegador, abra **https://moukrea.github.io/jaunt/**. Você também pode colar o `jaunt1.…` emparelhamento string. QR O código expira ao fim de dez minutos e só pode ser usado uma vez. Cada dispositivo recordado usa então a sua própria chave, de modo a alternar Wi-Fi ou redes móveis não requer emparelhamento novamente. Mantenha a guia aberta para reconexão automática; reabra o aplicativo se o sistema operacional móvel suspender ou matá-lo.
+No Android, [instale o APK assinado](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.13/jaunt-android-v0.1.0-beta.13.apk) e depois leia o código QR apresentado pelo host. Num computador de secretária ou num navegador, abra **https://moukrea.github.io/jaunt/**. Também pode colar a cadeia de emparelhamento `jaunt1.…`. O código QR expira ao fim de dez minutos e só pode ser usado uma vez. Cada dispositivo memorizado passa depois a usar a sua própria chave, pelo que mudar de rede Wi-Fi ou móvel não obriga a emparelhar de novo. Mantenha o separador aberto para a religação automática; reabra a aplicação se o sistema operativo móvel a suspender ou terminar.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -35,83 +35,89 @@ jaunt clipboard < notes.txt      # Make text available to the client
 jaunt stop                       # Stop the host AND its non-tmux shells
 ```
 
-Emparelhamento concede acesso como a ** conta do sistema que executa o host**, com todas as permissões dessa conta. Não execute como root para uso comum. Um código QR concede acesso shell: nunca publique.
+O emparelhamento concede acesso como a **conta de sistema que executa o host**, com todas as permissões dessa conta. Não execute como root para uso corrente. Um código QR concede acesso a uma shell: nunca o publique.
 
-## Características
+## Funcionalidades
 
-Área □ Comportamento
+| Área | Comportamento |
 |---|---|
-□ Terminais □ Real PTYs, teclado interativo, múltiplas abas, criar/renomear/abrir/detacar/terminar, dimensionamento compartilhado, Ctrl/Alt/Esc/Tab/seta teclas
-□ Reconexão □ Histórico fechado, reconexão automática, estado lembrado; uma desconexão do navegador não fecha o shell
-Sessões existentes do tmux O Legacy tmux continua sendo suportado; novas sessões na UI são comuns compartilhadas do shells
-Arquivos □ Navegação, arquivos ocultos, paginação, criar diretórios, renomear, exclusão não-recursiva, upload/download, visualização de texto/imagem
-• Transferências • Progresso visível e resultados de sucesso/erro retidos; acompanhamento detalhado em Arquivos → atividade de transferência; 48 KiB blocos, offsets de currículo de rede, upload SHA-256, finalização atômica, cancelamento
-□ Imagens Galeria, coletor de arquivos, colar e arrastar e soltar; Conversão de PNG para formatos decodíveis por navegador; inserção de caminho ou pasta nativa condicional
-Área de transferência □ Selecção, cópia de rolagem retida, leitura/escrita da área de transferência da máquina quando disponível, buffer de texto sem cabeça, OSC 52 apenas para cópia
-Proteção , código QR de uso único, chaves por dispositivo, revogação, opcional PIN / senha-protegido cofre do navegador e travamento automático ,
-Notificações □ Nativo opcional Android serviço ou navegador Web Push; terminal sinos, eventos do programa, saída da sessão, teste de configurações e CLI `notify`/`run` |
-Interface □ Ambiente de trabalho nativo e aplicativos Android com uma interface compartilhada empacotada; cliente do navegador; JavaScript local
+| Hosts | Emparelhe tantas máquinas Linux/macOS quantas quiser; cada uma conserva as suas sessões, ficheiros, definições e nome amigável; mude de máquina a partir de uma única barra lateral; host predefinido e ordenação |
+| Terminais | PTYs reais com a sua própria shell, teclado interativo, separadores, criar/renomear/abrir/desligar/terminar, arrastar para reordenar, painéis divididos (lado a lado ou empilhados), dimensionamento partilhado, teclas Ctrl/Alt/Esc/Tab/setas em mobile, caixa de composição para entradas longas |
+| Sessões abertas partilhadas | Por host: todos os clientes e o próprio host mostram os mesmos separadores, painéis, ordem e shell ativa; modo opcional «só existem as sessões apresentadas» |
+| Religação | Histórico limitado, religação automática, estado memorizado; uma desconexão do navegador não fecha a shell; as shells sobrevivem às atualizações do host no local |
+| Sessões tmux existentes | As sessões tmux antigas continuam suportadas; as novas sessões na interface são shells partilhadas normais |
+| Ficheiros | Navegação, ficheiros ocultos, paginação, criação de diretórios, renomear, eliminação não recursiva, envio/transferência, pré-visualização de texto e imagens |
+| Transferências | Progresso visível e resultados de sucesso/erro conservados; acompanhamento detalhado em Ficheiros → Atividade de transferência; blocos de 48 KiB, retoma a partir do ponto de interrupção da rede, SHA-256 no envio, finalização atómica, cancelamento |
+| Imagens | Galeria, seletor de ficheiros, colar e arrastar e largar; conversão para PNG dos formatos que o navegador consegue descodificar; inserção do caminho ou colagem nativa condicional |
+| Área de transferência | Seleção, cópia do histórico conservado, leitura/escrita da área de transferência do host quando disponível, buffer de texto para hosts sem ambiente gráfico, OSC 52 apenas para cópia |
+| Claude Code ↔ Codex | Um interruptor por host: as sessões no mesmo projeto conhecem-se através dos respetivos hooks e podem enviar mensagens para a conversa aberta uma da outra; desligar remove tudo o que o jaunt adicionou |
+| Proteção | Códigos QR de utilização única, chaves por dispositivo, revogação, cofre do navegador opcionalmente protegido por PIN/palavra-passe e bloqueio automático |
+| Notificações | Serviço Android nativo opcional ou Web Push do navegador; sinos de terminal, eventos de programas, fim de sessão, teste nas Definições e `notify`/`run` na CLI |
+| Interface | Aplicações nativas de secretária e Android com uma interface empacotada comum; cliente de navegador e PWA; seis idiomas; temas escuro, claro, do sistema e circadiano |
+| Atualizações | O host substitui-se a si próprio no local sem terminar as shells; a aplicação de secretária e o APK verificam, validam e instalam as suas próprias atualizações |
 
-## Apenas cliente de área de trabalho
+## Apenas o cliente de secretária
 
-Para se conectar a outras máquinas sem instalar um serviço de host local ou jaunt CLI:
+Para se ligar a outros hosts sem instalar um serviço de host local nem a CLI do jaunt:
 
 ```sh
 bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukrea.github.io/jaunt/install.sh | bash -s -- --client-only'
 ```
 
-Isto instala o mesmo aplicativo de desktop e lançador, com emparelhamento remoto, sessões, arquivos, notificações e atualizações automáticas de aplicativos. Ele não inicia um servidor ou mostra os controles da máquina local. Ele não desinstala uma máquina instalada anteriormente. Execute o comando de instalação da máquina normal para habilitar a integração da máquina local mais tarde.
+Isto instala a mesma aplicação de secretária e o mesmo lançador, com emparelhamento remoto, sessões, ficheiros, notificações e atualizações automáticas da aplicação. Não inicia nenhum daemon nem mostra os controlos do host local. Não desinstala um host instalado anteriormente. Para ativar mais tarde a integração com o host local, execute o comando normal de instalação do host.
 
-O aplicativo de navegador instalado é nomeado **jaunt (PWA)** para que possa ser distinguido do aplicativo nativo **jaunt**. Ambos usam o logotipo transparente original. Android nativo usa a mesma arte sem um fundo escuro empacotado; lançadores individuais podem aplicar o seu próprio tratamento ícone.
+A aplicação de navegador instalada chama-se **jaunt (PWA)** para se distinguir da aplicação nativa **jaunt**. Ambas usam o logótipo transparente original. No Android nativo usa-se a mesma imagem sem fundo escuro incorporado; cada lançador pode aplicar o seu próprio tratamento ao ícone.
 
-## Espaço de trabalho compartilhado
+## Espaço de trabalho partilhado
 
-Abra **jaunt** do menu de aplicativos da máquina ou execute `jaunt gui`. Host e clientes remotos compartilham o mesmo shells normal sem tmux. **New shell** abre um shell automaticamente chamado imediatamente, herdando o diretório atual do shell ativo anterior. O botão de pasta permite que você navegue pelos diretórios da máquina e, opcionalmente, nomeie o novo shell. **Sessões** lista as sessões em execução e saída: abra, renomeie, feche apenas a sua visão ou exclua explicitamente um shell para todos. Você também pode renomear uma aba clicando duas vezes no seu título ou clique duas vezes no título de um painel. Arrasta para reordená- los; selecionar uma aba nunca muda sua posição. O dispositivo que você interage com o terminal compartilhado.
+Abra o **jaunt** a partir do menu de aplicações do host ou execute `jaunt gui`. O host e os clientes remotos partilham as mesmas shells normais, sem tmux. **Nova shell** abre de imediato uma shell com nome automático, herdando o diretório atual da shell ativa anterior. O botão de pasta permite percorrer os diretórios do host e, opcionalmente, dar um nome à nova shell. **Sessões** lista as sessões em execução e as terminadas: abrir, renomear, fechar apenas a sua vista ou terminar explicitamente uma shell para todos. Também pode renomear um separador com um duplo clique no título, ou fazer duplo clique no título de um painel. Arraste os separadores para os reordenar; selecionar um separador nunca lhe altera a posição. O dispositivo com que interage é o que controla o tamanho do terminal partilhado.
 
-Os dois ícones ** repartidos** organizam painéis lado a lado ou acima/ abaixo na área de trabalho, usando uma sessão nova ou existente. Cada painel pode mover- se para a sua própria página. As disposições sobrevivem à reabertura; os dispositivos móveis exibem as suas sessões como páginas normais. A barra lateral da área de trabalho pode entrar em colapso, com a preferência mantida. As opções incluem nomes de máquinas amigáveis, encomendas e a máquina por omissão, temas escuros/ claros/sistemas/circadianos e controlos de notificações. As opções da máquina seguem a máquina seleccionada imediatamente, incluindo os seus controlos de identidade e actualização. A aplicação de ecrã nativa também gere o serviço de máquina local e os pares para outras máquinas; os controlos de serviço locais aparecem apenas para a máquina local, enquanto as actualizações da aplicação de ecrã permanecem separadas. Veja o [workspace guide](docs/WORKSPACE.md)0XXQ e [validation report](docs/WORKSPACE_VALIDATION.md).
+Os dois **ícones de divisão** dispõem os painéis lado a lado ou um sobre o outro na versão de secretária, com uma sessão nova ou existente. Cada painel pode passar para o seu próprio separador. As disposições sobrevivem à reabertura; em mobile, as sessões aparecem como separadores normais. A barra lateral da versão de secretária pode ser recolhida, e a preferência é conservada. As Definições incluem os nomes amigáveis dos hosts, a ordenação e o host predefinido, os temas escuro/claro/do sistema/circadiano e os controlos de notificações. As definições do host acompanham de imediato a máquina selecionada, incluindo a sua identidade e os controlos de atualização. A aplicação de secretária nativa também gere o serviço do host local e emparelha com outros hosts; os controlos do serviço local só aparecem para o host local, e as atualizações da própria aplicação de secretária permanecem separadas. Consulte o [guia do espaço de trabalho](docs/WORKSPACE.md) e o [relatório de validação](docs/WORKSPACE_VALIDATION.md).
 
-## Manipulação de imagens
+**Ponte Claude Code ↔ Codex.** Quando `claude` e `codex` estão ambos instalados num host, as Definições mostram um interruptor. Uma vez ligado, as sessões reais de Claude Code e Codex abertas em shells do jaunt no mesmo projeto passam a conhecer-se automaticamente (como contexto normal de hooks) e podem enviar mensagens para a conversa aberta uma da outra, a seu pedido ou por iniciativa própria. Está desligado por omissão; desligá-lo remove tudo o que o jaunt adicionou aos dois runtimes. Consulte o [guia da ponte](docs/BRIDGE.md).
 
-O progresso permanece visível durante o envio e a entrega da área de transferência/caminho. As operações concluídas colapsam em um resultado compacto; **Mostrar o histórico** retém os detalhes. Cancelar uma transferência é mostrado como cancelamento, e os erros permanecem com a sua operação. O resultado final indica exatamente o que aconteceu; os erros permanecem visíveis com uma ação de repetição. Uma inserção de caminho bem sucedida ou entrega Ctrl+V não prova que Claude Code ou Codex reconheceram um anexo.
+## Tratamento de imagens
 
-**Paste:** quando uma infra- estrutura nativa está disponível, uma imagem é enviada para a área de transferência do host e colada na sessão selecionada com Ctrl+V. Se o navegador retornar uma área de transferência vazia, a UI oferece uma área de pasta rica e um seletor de imagens. Anexar retém ambos os modos explícitos. Nenhuma chave Enter é enviada.
+O progresso mantém-se visível durante o envio e a entrega pela área de transferência ou pelo caminho. As operações concluídas contraem-se num resultado compacto; **Mostrar histórico** conserva os detalhes. O cancelamento de uma transferência é apresentado como cancelamento, e os erros ficam associados à respetiva operação. O resultado final indica exatamente o que aconteceu; os erros permanecem visíveis, com uma ação para tentar de novo. Uma inserção de caminho ou uma entrega por Ctrl+V bem-sucedida não prova que o Claude Code ou o Codex tenham reconhecido um anexo.
 
-**Fallback com uma conexão ativa:** selecione ou cole uma imagem, carregue-a para o host, e insira seu caminho corretamente escapado no terminal. Nada envia o comando automaticamente. Claude, Codex, ou outra ferramenta pode ler o arquivo se seu próprio modo o suportar.
+**Colar:** quando existe um backend nativo disponível, a imagem é enviada para a área de transferência do host e colada na sessão selecionada com Ctrl+V. Se o navegador devolver uma área de transferência vazia, a interface oferece uma zona de colagem enriquecida e um seletor de imagens. Anexar conserva os dois modos explícitos. Nunca é enviada a tecla Enter.
 
-**Pasta nativa condicional:** quando o host tem uma área de transferência gráfica acessível (macOS, Wayland com `wl-clipboard`, ou X11 com `xclip`), jaunt coloca o PNG lá e envia Ctrl+V para a terminal. Isto também depende da CLI atalho e comportamento da ferramenta. ** Em uma máquina sem cabeça, jaunt não pode fabricar um Claude nativo /Codex anexo: ele cai de volta para um arquivo e seu caminho.** HEIC e outros formatos que o navegador não pode decodificar ainda pode ser transferido como arquivos, mas não são convertidos para PNG.
+**Alternativa com ligação ativa:** selecione ou cole uma imagem, envie-a para o host e insira no terminal o seu caminho devidamente escapado. Nada submete o comando automaticamente. O Claude, o Codex ou outra ferramenta podem ler o ficheiro se o seu próprio modo o permitir.
 
-## Actualizações automáticas
+**Colagem nativa condicional:** quando o host dispõe de uma área de transferência gráfica acessível (macOS, Wayland com `wl-clipboard` ou X11 com `xclip`), o jaunt coloca lá o PNG e envia Ctrl+V ao terminal. Isto depende igualmente do atalho e do comportamento da ferramenta de linha de comandos. **Num host sem ambiente gráfico, o jaunt não consegue fabricar um anexo nativo do Claude/Codex: recorre a um ficheiro e ao seu caminho.** O HEIC e outros formatos que o navegador não consegue descodificar podem, ainda assim, ser transferidos como ficheiros, mas não são convertidos para PNG.
 
-O comportamento da atualização do componente do componente
+## Atualizações automáticas
+
+| Componente | Comportamento de atualização |
 |---|---|
-□ Host / CLI □ Mesma instalação. Verifica o canal publicado a cada 15 minutos, verifica os downloads e substitui os tempos de execução compatíveis sem terminar os processos shell. As transferências terminam em primeiro lugar. As configurações ou as verificações `jaunt update` imediatamente. Hosts mais antigos sem diferimento de tempo de execução, enquanto o shells normal estão ativos; o fim desses shells ainda requer confirmação explícita.
-O aplicativo Desktop . Separar versão do host. Verifica, baixa e verifica automaticamente uma atualização; instala quando você fecha o aplicativo. As configurações fornecem uma verificação manual, uma atualização automática alterna e ** Instalar e reabrir**. Atualizar a interface gráfica não impede o host ou o seu shells. Os pacotes do sistema podem solicitar autorização do sistema.
-| Android APK □ Verifica automaticamente para um novo APK. Uma janela de verificação/download visível leva a AndroidConfirmação da instalação. APKSão verificados o somatório de verificação e o certificado de assinatura; Android não permite a auto-instalação silenciosa.
-□ Cliente Web □ Usa a versão publicada em Páginas. Reabre/recarregue para ativar uma atualização de serviço-trabalhador baixado.
+| Host / CLI | Mesma instalação. Verifica o canal publicado a cada 15 minutos, valida as transferências e substitui os runtimes compatíveis sem terminar os processos das shells. As transferências terminam primeiro. As Definições ou `jaunt update` fazem a verificação de imediato. Os hosts mais antigos, sem passagem de testemunho do runtime, adiam a atualização enquanto houver shells normais ativas; terminar essas shells continua a exigir confirmação explícita. |
+| Aplicação de secretária | Versão separada da do host. Verifica, transfere e valida automaticamente uma atualização; instala-a quando fecha a aplicação. As Definições oferecem uma verificação manual, um interruptor de atualização automática e **Instalar e reabrir**. Atualizar a interface gráfica não pára o host nem as suas shells. Os pacotes de sistema podem pedir autorização ao sistema operativo. |
+| APK Android | Verifica automaticamente se existe um novo APK. Um diálogo visível de verificação/transferência conduz à confirmação de instalação do Android. A soma de verificação e o certificado de assinatura do APK são validados; o Android não permite a autoinstalação silenciosa. |
+| Cliente web | Usa a versão publicada no Pages. Reabra ou recarregue para ativar uma atualização do service worker já transferida. |
 
-As instalações existentes precisam da versão que contém o seu updater antes que o updater possa ser executado. A repetição do comando host oficial actualiza a máquina e instala a aplicação de ecrã anunciada; recusa- se a fechar silenciosamente o shells normal activo. As teclas de emparelhamento são retidas. Veja [atualizações e reinicie a protecção](docs/UPDATES.md).
+As instalações existentes precisam da versão que contém o respetivo atualizador antes de este poder correr. Voltar a executar o comando oficial do host atualiza o host e instala a aplicação de secretária anunciada; recusa-se a fechar silenciosamente shells normais ativas. As chaves de emparelhamento são conservadas. Consulte [atualizações e proteção contra reinícios](docs/UPDATES.md).
 
-## Feedback de conexão e operação
+## Feedback de ligação e de operações
 
-Uma interrupção da rede tem um banner de conexão persistente com uma ação de repetição. O jaunt reconecta- se de novo com a chave do dispositivo gravada; não reproduz a entrada do terminal não enviada. A revogação e a verificação falhada da máquina interrompem a conexão e explicam o próximo passo. Erros numa janela permanecem nessa janela; outros erros de ação permanecem visíveis até serem descartados. Os brindes de confirmação curtos são desduplicados e limitados a dois.
+Uma interrupção da rede produz um único aviso de ligação persistente, com uma ação para tentar de novo. O jaunt religa-se com a chave de dispositivo guardada; não reenvia entradas de terminal que não tenham chegado a ser enviadas. A revogação e a falha de verificação do host interrompem a ligação e explicam o passo seguinte. Os erros num diálogo ficam nesse diálogo; os erros de outras ações permanecem visíveis até serem dispensados. As notificações curtas de confirmação são desduplicadas e limitadas a duas.
 
-Os envios, downloads, instalação de serviço e verificação de atualização mostram o progresso e um resultado final em Atividade. As pausas na rede são explícitas, o cancelamento de transferência está disponível e o histórico completo pode ser expandido. As atualizações disponíveis fornecem uma ação direta em vez de uma torrada expirante.
+Os envios, as transferências, a instalação do serviço e as verificações de atualização mostram o progresso e um resultado final em Atividade. As pausas da rede são explícitas, o cancelamento de transferências está disponível e o histórico concluído pode ser expandido. As atualizações disponíveis oferecem uma ação direta em vez de uma notificação que expira.
 
-## Notificação
+## Notificações
 
-Habilitar notificações em **Configurações** e usar sua ação de teste. Títulos de notificação de programa e texto são preservados quando fornecido; um sino terminal simples não tem corpo de mensagem para recuperar. Clicar em uma notificação seleciona o host e sessão correspondente. As notificações de desktop exigem que o aplicativo esteja em execução; Android usa seu serviço de conexão de primeiro plano opcional; o cliente web usa o navegador Web Push. Conteúdo de notificação pode aparecer na tela de bloqueio de acordo com as configurações do sistema operacional.
+Ative as notificações nas **Definições** e use a respetiva ação de teste. Os títulos e o texto das notificações de programas são preservados quando fornecidos; um simples sino de terminal não tem corpo de mensagem a recuperar. Clicar numa notificação seleciona o host e a sessão correspondentes. As notificações de secretária exigem que a aplicação esteja em execução; o Android usa o seu serviço de ligação em primeiro plano opcional; o cliente web usa o Web Push do navegador. O conteúdo das notificações pode aparecer no ecrã de bloqueio, consoante as definições do sistema operativo.
 
 ## Limitações conhecidas
 
-- Até 16 shells ativos, 32 visualizações retidas, 2 MiB de replay bruto por PTY, e 10.000 linhas de rolagem xterm. Copy-all cobre o histórico retido, não um log ilimitado.
-- Limite de arquivo host: 512 MiB. Os downloads em memória são limitados a 128 MiB em navegadores sem escrita direta de arquivo; pré-visualizações são limitadas a 16 MiB. Até oito uploads simultâneos e 1 GiB de tamanho total declarado.
-- Os envios retomam após interrupções da rede enquanto o host e a página retêm a transferência. Reinicie o upload após o reinício de uma máquina ou recarregue a página inteira; jaunt não obtém acesso persistente não autorizado aos arquivos locais do telefone.
-- shells comum sobreviver à desconexão e atualizações de tempo de execução compatíveis, ** não um daemon explícito parar / reiniciar ou reinicialização da máquina**. tmux pode sobreviver a um reinício do daemon, mas não a uma reinicialização do sistema operacional.
-- Apenas uma guia de aplicação jaunt por perfil do navegador pode possuir o cofre de cada vez. Várias abas terminal dentro do jaunt e vários dispositivos são suportados.
-- As notificações de navegador requerem permissão e suporte ao Web Push. No APK, habilite as notificações de fundo do Android em Configurações; as restrições de bateria do Android podem atrasar a entrega. No iOS, use o PWA instalado. A entrega depende da rede e do provedor de push; não é garantida em tempo real.
-- Uma máquina adormecida ou desligada não é acessível. Não existe qualquer despertar remoto, túnel TCP arbitrário, área de trabalho gráfica ou nativo Windows shell apoio.
-- Os pacotes de desktop Linux estão disponíveis para x64 e ARM64; os arquivos macOS não estão assinados e não estão anotados. Nenhum pacote de desktop Windows nativo é fornecido. O comportamento físico do telefone Android e a autorização protegida do updater macOS não foram validadas; os resultados do emulador são documentados separadamente.
-- Custos de relé de produção, quotas e disponibilidade dependem da conta Cloudflare. As salvaguardas básicas de relé não são um serviço de proteção contra abuso comercial garantido.
+- Até 16 shells ativas, 32 vistas conservadas, 2 MiB de replay em bruto por PTY e 10 000 linhas de histórico no xterm. A cópia integral abrange o histórico conservado, não um registo ilimitado.
+- Limite de ficheiro no host: 512 MiB. As transferências em memória estão limitadas a 128 MiB nos navegadores sem escrita direta em ficheiro; as pré-visualizações estão limitadas a 16 MiB. Até oito envios em simultâneo e 1 GiB de tamanho total declarado.
+- Os envios são retomados após interrupções da rede enquanto o host e a página conservarem a transferência. Reinicie o envio depois de um reinício do host ou de um recarregamento completo da página; o jaunt não obtém acesso persistente não autorizado aos ficheiros locais do telemóvel.
+- As shells normais sobrevivem a desconexões e a atualizações compatíveis do runtime, **mas não a uma paragem ou reinício explícito do daemon nem a um reinício da máquina**. O tmux pode sobreviver a um reinício do daemon, mas não a um reinício do sistema operativo.
+- Só um separador da aplicação jaunt por perfil de navegador pode deter o cofre de cada vez. Vários separadores de terminal dentro do jaunt e vários dispositivos são suportados.
+- As notificações no navegador exigem permissão e suporte de Web Push. No APK, ative as notificações em segundo plano do Android nas Definições; as restrições de bateria do Android podem atrasar a entrega. No iOS, use a PWA instalada. A entrega depende da rede e do fornecedor de push; não é garantida em tempo real.
+- Um host em suspensão ou desligado fica inacessível. Não existe despertar remoto, túnel TCP arbitrário, ambiente de trabalho gráfico nem suporte de shell nativa do Windows.
+- Os pacotes de secretária para Linux estão disponíveis para x64 e ARM64; os arquivos para macOS não são assinados nem notarizados. Não é fornecido nenhum pacote de secretária nativo para Windows. O comportamento em telemóveis Android físicos e a autorização protegida do atualizador no macOS não foram validados; os resultados em emulador estão documentados à parte.
+- Os custos, as quotas e a disponibilidade do relay de produção dependem da conta Cloudflare. As salvaguardas básicas do relay não constituem um serviço comercial garantido de proteção contra abusos.
 
 ## Desenvolvimento local
 
@@ -124,7 +130,7 @@ npm run prepare-web
 python scripts/dev.py
 ```
 
-O corredor escuta apenas no `127.0.0.1`, inicia um relé local e host, e exibe um código de teste QR. **Isso não expõe o host à Internet.** Use a implantação do HTTPS em um telefone físico: `localhost` refere-se ao telefone, não ao PC.
+O runner escuta apenas em `127.0.0.1`, inicia um host e um relay local e apresenta um código QR de teste. **Isto não expõe o host à Internet.** Num telemóvel físico, use a implantação HTTPS: `localhost` refere-se ao telemóvel, não ao PC.
 
 ```sh
 pytest -q                        # Python tests and Node interoperability tests
@@ -136,28 +142,31 @@ python tests/browser_e2e.py       # Real browser and host in temporary isolation
 python tests/shared_workspace_e2e.py # Electron + browser sharing real PTYs; needs a display
 python tests/terminal_render_e2e.py  # Scroll, selection and terminal geometry
 python tests/installer_e2e.py        # Real wheel install and protected upgrade
+python tests/client_update_e2e.py    # Browser-driven host self-update, pushed progress, refusal of a broken release
+python tests/bridge_e2e.py           # Real Claude Code and Codex sessions discover and message each other through the bridge (uses your real accounts)
+python tests/workspace_sync_e2e.py   # Shared open sessions between two clients, close-or-terminate choice, displayed-only mode
 ```
 
-Defina o `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` para usar um navegador de sistema. Caso contrário, execute o `python -m playwright install chromium`. Os testes nunca alteram as políticas de segurança do seu navegador.
+Defina `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` para usar um navegador do sistema. Caso contrário, execute `python -m playwright install chromium`. Os testes nunca alteram as políticas de segurança do seu navegador.
 
-## Implementação inicial — uma vez, pelo proprietário do projecto
+## Implantação inicial — uma única vez, pelo responsável do projeto
 
-Dê [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) a um agente com acesso GitHub. Ele configura Páginas GitHub, uma versão host, e ** um relé Cloudflare para todo o projeto**. É necessária autorização Cloudflare; um token GitHub não o fornece. Usuários finais não criam infraestrutura.
+Entregue o [DEPLOY_AGENT_PROMPT.md](DEPLOY_AGENT_PROMPT.md) a um agente com acesso ao GitHub. Ele configura o GitHub Pages, uma versão do host e **um único relay Cloudflare para todo o projeto**. É necessária autorização na Cloudflare; um token do GitHub não a fornece. Os utilizadores finais não criam infraestrutura.
 
-O jaunt não empresta relés do sshx, Happy ou Zedra. Ele não depende de seus servidores, Tailscale ou de uma conta de usuário do jaunt. A conta Cloudflare do proprietário pode incorrer em cotas ou custos; nenhum relé gratuito ou ilimitado é prometido.
+O jaunt não reutiliza os relays do sshx, do Happy nem do Zedra. Não depende dos servidores deles, do Tailscale nem de uma conta de utilizador jaunt. A conta Cloudflare do responsável pode estar sujeita a quotas ou custos; não é prometido nenhum relay gratuito nem ilimitado.
 
 ## Documentação
 
-[Deployment](docs/DEPLOYMENT.md) · [Security](SECURITY.md) · [Protocol](docs/PROTOCOL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Validation](docs/VALIDATION.md) · [Edifícios de terceiros](../../../THIRD_PARTY_NOTICES.md)
+[Implantação](docs/DEPLOYMENT.md) · [Segurança](SECURITY.md) · [Protocolo](docs/PROTOCOL.md) · [Resolução de problemas](docs/TROUBLESHOOTING.md) · [Validação](docs/VALIDATION.md) · [Avisos de terceiros](../../../THIRD_PARTY_NOTICES.md)
 
-Inglês é o idioma de documentação canônica. Traduções: [Français](../fr/README.md), [Español](../es/README.md), [Italiano](../it/README.md), [Português](README.md), [Deutsch](../de/README.md)Cada árvore traduzida inclui os guias de segurança, implantação e validação.
+O inglês é a língua canónica da documentação. Traduções: [Français](../fr/README.md), [Español](../es/README.md), [Italiano](../it/README.md), [Português](README.md), [Deutsch](../de/README.md). Cada árvore traduzida inclui os guias de segurança, implantação e validação.
 
-Web, Android e desktop selecione a linguagem do sistema automaticamente. Sobrescrever em **Configurações → Idioma**. O CLI usa o locale do sistema; `jaunt --language fr --help` substitui uma invocação e `jaunt language fr` salva a preferência. Use `system` para restaurar a seleção automática. Nomes de comando, argumentos, saída terminal e conteúdo do usuário nunca são traduzidos.
+A web, o Android e a versão de secretária selecionam automaticamente o idioma do sistema. Pode alterá-lo em **Definições → Idioma**. A CLI usa a localização do sistema; `jaunt --language fr --help` altera uma única invocação e `jaunt language fr` guarda a preferência. Use `system` para repor a seleção automática. Os nomes dos comandos, os argumentos, a saída do terminal e o conteúdo do utilizador nunca são traduzidos.
 
-O endereço web público introduz o projeto; **Open workspace** entra no cliente. Aplicativos nativos abrem o espaço de trabalho diretamente.
+O endereço web público apresenta o projeto; **Abrir espaço de trabalho** entra no cliente. As aplicações nativas abrem o espaço de trabalho diretamente.
 
-## Aplicativo Android
+## Aplicação Android
 
-O cliente Android é um APK com uma interface WebView empacotada e integrações de área de transferência nativa, câmera, arquivo e notificação de fundo. Veja [Android installation, architecture, and validation](docs/ANDROID.md). A página anuncia o APK depois que seus ativos públicos foram verificados.
+O cliente Android é um APK com uma interface WebView incorporada e integrações nativas de área de transferência, câmara, ficheiros e notificações em segundo plano. Consulte [instalação, arquitetura e validação no Android](docs/ANDROID.md). A página anuncia o APK depois de os seus recursos públicos terem sido verificados.
 
-O APK é um pacote Android nativo com um pacote WebView, não uma instalação PWA. A interface e tipografia são compartilhadas com os aplicativos web e desktop; a integração nativa fornece câmera, área de transferência, seleção de arquivos e notificações. Veja a tabela de atualização acima para os requisitos de confirmação de instalação.
+O APK é um pacote Android nativo com uma WebView incorporada, não uma instalação PWA. A interface e a tipografia são partilhadas com as aplicações web e de secretária; a integração nativa fornece a câmara, a área de transferência, a seleção de ficheiros e as notificações. Consulte a tabela de atualizações acima para os requisitos de confirmação da instalação.

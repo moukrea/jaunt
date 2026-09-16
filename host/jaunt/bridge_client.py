@@ -116,7 +116,7 @@ def hook_main(runtime: str) -> int:
 
 TOOLS = [
     {"name": "jaunt_peers",
-     "description": "List the other AI sessions (Claude Code or Codex) working on the same project through jaunt, with their ids and availability. Only sessions of the other runtime on this project are listed.",
+     "description": "List the sessions of the OTHER runtime (Codex for a Claude Code caller, Claude Code for a Codex caller) working on the same project through jaunt, with their ids and availability. Sessions of your own runtime are never listed here: on Claude Code use ListAgents / SendMessage for those.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "jaunt_send",
      "description": "Send a message to another AI session listed by jaunt_peers. It arrives in that session's own conversation, attributed to you through the jaunt bridge. Use in_reply_to when answering a bridge message. Replies always arrive later as bridge messages, so leave wait_seconds unset unless you cannot continue without the answer (then up to 600); never wait for a greeting or a notice that needs no reply.",
