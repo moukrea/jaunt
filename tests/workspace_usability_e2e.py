@@ -24,6 +24,12 @@ async def main():
    await p.get_by_role('tab',name='two',exact=True).hover();await p.mouse.down();await asyncio.sleep(2.1);await p.mouse.up();await expect(p.locator('#modal')).not_to_be_visible()
    await p.get_by_role('tab',name='two',exact=True).dblclick();await expect(p.locator('#modal')).to_be_visible();await p.get_by_label('Name',exact=True).fill('renamed');await p.locator('#modal').get_by_role('button',name='Save',exact=True).click()
    await expect(p.get_by_role('tab',name='renamed',exact=True)).to_be_visible()
+   # Enter saves the rename; Escape cancels it.
+   await p.get_by_role('tab',name='renamed',exact=True).dblclick();await p.get_by_label('Name',exact=True).fill('entered');await p.keyboard.press('Enter')
+   await expect(p.get_by_role('tab',name='entered',exact=True)).to_be_visible();await expect(p.locator('#modal')).to_be_hidden()
+   await p.get_by_role('tab',name='entered',exact=True).dblclick();await p.get_by_label('Name',exact=True).fill('discarded');await p.keyboard.press('Escape')
+   await expect(p.locator('#modal')).to_be_hidden();await expect(p.get_by_role('tab',name='entered',exact=True)).to_be_visible()
+   await p.get_by_role('tab',name='entered',exact=True).dblclick();await p.get_by_label('Name',exact=True).fill('renamed');await p.keyboard.press('Enter');await expect(p.get_by_role('tab',name='renamed',exact=True)).to_be_visible()
    await p.locator('#settings-button').click();await expect(p.get_by_label('Friendly host name')).to_be_visible()
    for width in [1280,1000,780,390]:
     await p.set_viewport_size({'width':width,'height':840});await asyncio.sleep(.2)

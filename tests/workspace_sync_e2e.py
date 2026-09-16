@@ -26,6 +26,14 @@ async def main():
    await until(lambda:len(json.loads(h.cli('status'))['sessions'])==2)
    await expect(A.locator('#tabs .session-tab')).to_have_count(2,timeout=15000)
    print('PASS a shell opened on one client appears on the other')
+   # The split picker opens right under the split button that was clicked, left edges aligned.
+   await A.locator('[data-view="terminal"]').first.click()
+   for bid in ('arrange-panes','split-below'):
+    await A.locator('#'+bid).click();await expect(A.locator('.split-picker')).to_be_visible()
+    br=await A.locator('#'+bid).bounding_box();pr=await A.locator('.split-picker').bounding_box()
+    assert abs(pr['x']-br['x'])<2 and 0<=pr['y']-(br['y']+br['height'])<12,(bid,br,pr)
+    await A.keyboard.press('Escape');await expect(A.locator('.split-picker')).to_have_count(0)
+   print('PASS the split picker opens under its button, not across the screen')
    # × on A offers the choice; closing the view keeps the shell alive and B follows.
    await A.locator('[data-view="terminal"]').first.click()
    await A.locator('.session-tab').filter(has_text='Shared one').locator('.tab-close').click()
@@ -58,6 +66,6 @@ async def main():
    await swipe(label['x']+label['width']/2,label['y']+label['height']/2,150,hold=0.6);await asyncio.sleep(0.4)
    assert await m.locator('#tabs .session-tab .tab-label').first.text_content()!=first
    print('PASS touch: a swipe over a tab scrolls the strip; a held press then a move reorders')
-   await b.close();print('5 workspace sync checks passed.')
+   await b.close();print('6 workspace sync checks passed.')
  finally:h.close()
 if __name__=='__main__':asyncio.run(main())
