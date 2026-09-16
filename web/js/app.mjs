@@ -318,10 +318,11 @@ function renderConnection() {
 // covers the terminals until the link settles, unless the user chooses to go on anyway.
 function renderLatency(a, state) {
   const lat = state === 'online' && a?.link.latency != null ? a.link.latency : null;
-  const high = lat != null && (lat >= 2000 || (a.highLatency && lat >= 1500));
-  const extreme = lat != null && (lat >= 15000 || (a?.extremeLatency && lat >= 10000));
+  // Strict booleans: classList.toggle(name, undefined) would flip the class on every render.
+  const high = lat != null && (lat >= 2000 || (a.highLatency === true && lat >= 1500));
+  const extreme = lat != null && (lat >= 15000 || (a.extremeLatency === true && lat >= 10000));
   if (a) { a.highLatency = high; if (!extreme) a.latencyOverride = false; a.extremeLatency = extreme; }
-  $('topbar').classList.toggle('high-latency', high);
+  $("topbar").classList.toggle("high-latency", high === true);
   $('latency').hidden = lat == null;
   $('latency').replaceChildren(...(high ? [el('strong', {text: tr('High latency, expect slowness')}), ' '] : []), lat == null ? '' : `${lat} ms`);
   const cover = extreme && !a.latencyOverride && view === 'terminal';

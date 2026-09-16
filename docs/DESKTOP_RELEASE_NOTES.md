@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.17
+
+- Bundles the beta.23 interface (top bar no longer turns orange at normal latency).
+
 # jaunt desktop 0.1.0-beta.16
 
 - Bundles the beta.22 interface (latency tiers). No desktop-specific change.

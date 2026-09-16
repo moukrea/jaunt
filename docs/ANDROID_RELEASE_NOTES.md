@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.15 (versionCode 15)
+
+- Bundles the beta.23 interface (top bar no longer turns orange at normal latency).
+
 # jaunt Android 0.1.0-beta.14 (versionCode 14)
 
 - Bundles the beta.22 interface (latency tiers). No Android-specific change.
