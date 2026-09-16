@@ -40,6 +40,24 @@ async def main():
    await expect(A.locator('.close-menu')).to_have_count(0)
    await until(lambda:len(json.loads(h.cli('status'))['sessions'])==1,timeout=20)
    print('PASS only displayed sessions exist: × terminates directly and the Sessions list is hidden')
-   await b.close();print('4 workspace sync checks passed.')
+   # Touch: a swipe over a tab scrolls the strip; a held press then a move reorders.
+   m=await (await b.new_context(viewport={'width':390,'height':844},device_scale_factor=1,is_mobile=True,has_touch=True)).new_page();await m.goto(h.pair()['url'])
+   await expect(m.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
+   for i in range(5):
+    await m.locator('#new-session-tab').click();await until(lambda:len(json.loads(h.cli('status'))['sessions'])==i+2)
+   await expect(m.locator('#tabs .session-tab').nth(4)).to_be_visible(timeout=10000)
+   cdp=await m.context.new_cdp_session(m)
+   async def swipe(x,y,dx,hold=0):
+    await cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]});await asyncio.sleep(hold)
+    for i in range(1,13):await cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x+dx*i/12,'y':y}]});await asyncio.sleep(0.016)
+    await cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+   label=await m.locator('#tabs .session-tab .tab-label').first.bounding_box();first=await m.locator('#tabs .session-tab .tab-label').first.text_content()
+   await swipe(label['x']+label['width']/2,label['y']+label['height']/2,-150);await asyncio.sleep(0.4)
+   assert await m.evaluate("document.getElementById('tabs').scrollLeft")>50 and await m.locator('#tabs .session-tab .tab-label').first.text_content()==first
+   await m.evaluate("document.getElementById('tabs').scrollLeft=0")
+   await swipe(label['x']+label['width']/2,label['y']+label['height']/2,150,hold=0.6);await asyncio.sleep(0.4)
+   assert await m.locator('#tabs .session-tab .tab-label').first.text_content()!=first
+   print('PASS touch: a swipe over a tab scrolls the strip; a held press then a move reorders')
+   await b.close();print('5 workspace sync checks passed.')
  finally:h.close()
 if __name__=='__main__':asyncio.run(main())

@@ -208,12 +208,14 @@ async def test_shared_workspace_follows_the_host_and_prunes_dead_sessions(tmp_pa
     host.sessions.items={'aaa':S('aaa'),'bbb':S('bbb')}
     class P:routing_id='peer-1'
     assert host.workspace()['sync'] is False
-    w=await host.workspace_configure(P(),{'sync':True,'openSessions':['aaa','bbb','zzz'],'layouts':[{'direction':'row','children':[{'id':'aaa'},{'id':'bbb'}],'sizes':[0.5,0.5]},{'id':'zzz'}],'tabOrder':['bbb','aaa'],'active':'bbb'})
-    assert w['sync'] and w['openSessions']==['aaa','bbb'] and w['layouts']==[{'direction':'row','children':[{'id':'aaa'},{'id':'bbb'}],'sizes':[0.5,0.5]}] and w['tabOrder']==['bbb','aaa'] and w['active']=='bbb' and w['revision']==1
+    w=await host.workspace_configure(P(),{'sync':True,'openSessions':['aaa','bbb','zzz'],'layouts':[{'axis':'y','ratio':0.3,'first':{'id':'aaa'},'second':{'id':'bbb'}},{'id':'zzz'}],'tabOrder':['bbb','aaa'],'active':'bbb'})
+    assert w['sync'] and w['openSessions']==['aaa','bbb'] and w['layouts']==[{'axis':'y','ratio':0.3,'first':{'id':'aaa'},'second':{'id':'bbb'}}] and w['tabOrder']==['bbb','aaa'] and w['active']=='bbb' and w['revision']==1
     assert sent[-1]['type']=='workspace.changed' and sent[-1]['from']=='peer-1'
     # An identical update is a no-op; a real one bumps the revision and is broadcast.
     assert (await host.workspace_update(P(),w))['revision']==1
     w2=await host.workspace_update(P(),{**w,'active':'aaa'});assert w2['revision']==2 and w2['active']=='aaa'
+    # A client working from an older revision gets the current state back instead of overwriting it.
+    stale=await host.workspace_update(P(),{**w,'openSessions':['aaa'],'revision':1});assert stale['stale'] and stale['openSessions']==['aaa','bbb'] and host.workspace()['revision']==2
     # displayedOnly needs sync; turning sync off drops it.
     assert (await host.workspace_configure(P(),{'displayedOnly':True}))['displayedOnly'] is True
     # A session that ended leaves the shared workspace and a split collapses to its survivor.

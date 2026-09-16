@@ -330,3 +330,21 @@ def test_mode_class_and_home_git_root(monkeypatch,tmp_path):
     import subprocess
     subprocess.run(['git','init','-q',str(tmp_path)],check=True);(tmp_path/'Code/test').mkdir(parents=True)
     assert bridge_client.project_of(str(tmp_path/'Code/test'))['root']==os.path.realpath(tmp_path/'Code/test')
+
+
+@pytest.mark.asyncio
+async def test_mcp_identity_follows_the_terminal_after_clear(host):
+    # The MCP server was started with the first conversation id; /clear registered a newer one in the same terminal.
+    h=host;h.sessions.items={'s1':FakeSession('s1','A',1,'/p','claude')}
+    await register(h,'s1','claude','claude-conv-000001','/p')
+    await register(h,'s1','claude','claude-conv-000002','/p',source='clear')
+    resolved=h.bridge.resolve({'runtime':'claude','session':'s1','conversation':'claude-conv-000001','pid':1})
+    assert resolved['conversation']=='claude-conv-000002' and h.bridge.sender_of(resolved).id=='claude:claude-c'
+
+def test_participants_survive_a_runtime_handoff(host):
+    h=host;h.sessions.items={'s1':FakeSession('s1','A',1,'/p','claude')}
+    h.bridge.participants['claude:c1']=Participant(id='claude:c1',session='s1',runtime='claude',conversation='c1',pid=1,cwd='/p',project={'root':'/p'},mode_class='bypass')
+    h.bridge.participants['codex:t1']=Participant(id='codex:t1',session='s2',runtime='codex',conversation='t1',pid=2,cwd='/p',project={'root':'/p'},state='ended')
+    rows=h.bridge.export();assert [r['id'] for r in rows]==['claude:c1']
+    fresh=Bridge(h);fresh.restore(rows)
+    p=fresh.participants['claude:c1'];assert p.mode_class=='bypass' and p.session=='s1' and p.roster_seen==-1 and fresh.version==1

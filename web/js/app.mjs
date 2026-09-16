@@ -37,7 +37,11 @@ async function pushWorkspace(a) {
   const signature = workspaceSignature(a);
   if (signature === a.wsSent) return;
   a.wsSent = signature;
-  try { a.info.workspace = await a.link.request('workspace.update', workspacePayload(a)); }
+  try {
+    const result = await a.link.request('workspace.update', {...workspacePayload(a), revision: a.info.workspace.revision});
+    if (result.stale) { await applyHostWorkspace(a, result); render(); if (a === current() && a.active && view === 'terminal') selectSession(a, a.active).catch(() => {}); }
+    a.info.workspace = result;
+  }
   catch (error) { a.wsSent = ''; if (!/synchronization is off/.test(error.message)) throw error; }
 }
 async function applyHostWorkspace(a, w) {
@@ -340,9 +344,12 @@ function tabDrag(node,a,index) {
     drag={x:e.clientX,y:e.clientY,id:e.pointerId,index,moving:false,armed:true};
     // On a touch screen whose tab strip scrolls, a horizontal swipe must scroll: the
     // drag is only armed after a still press, so the swipe keeps its natural meaning.
-    if(e.pointerType==='touch'&&scrollable()){drag.armed=false;drag.timer=setTimeout(()=>{if(drag&&!drag.moving){drag.armed=true;node.closest('.session-tab').classList.add('tab-armed');if(navigator.vibrate)navigator.vibrate(10);}},350);}
+    if(e.pointerType==='touch'&&scrollable()){drag.armed=false;drag.timer=setTimeout(()=>{if(drag&&!drag.moving){drag.armed=true;node.addEventListener('touchmove',block,{passive:false});node.closest('.session-tab').classList.add('tab-armed');if(navigator.vibrate)navigator.vibrate(10);}},350);}
   });
-  node.addEventListener('touchmove',e=>{if(drag?.armed&&drag.moving)e.preventDefault();},{passive:false});
+  // A non-passive touchmove listener that is always attached stops the strip from
+  // panning in Chromium even when it never prevents anything; attach it only while
+  // an armed drag is in progress.
+  const block=e=>{if(drag?.armed&&drag.moving)e.preventDefault();};
   node.addEventListener('pointermove',e=>{
     if(!drag)return;
     const distance=Math.hypot(e.clientX-drag.x,e.clientY-drag.y);
@@ -354,8 +361,8 @@ function tabDrag(node,a,index) {
     rows.forEach((row,i)=>row.classList.toggle('tab-drop-target',i===drag.to));
     const r=$('tabs').getBoundingClientRect();if(e.clientX>r.right-30)$('tabs').scrollLeft+=15;if(e.clientX<r.left+30)$('tabs').scrollLeft-=15;
   });
-  node.addEventListener('pointerup',e=>{const d=drag;drag=null;clearTimeout(d?.timer);document.querySelectorAll('.tab-armed').forEach(n=>n.classList.remove('tab-armed'));if(!d?.moving)return;e.preventDefault();node.dataset.dragged='1';setTimeout(()=>delete node.dataset.dragged,0);document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));if(d.to>=0)reorderTab(a,d.index,d.to).catch(report);});
-  node.addEventListener('pointercancel',()=>{clearTimeout(drag?.timer);drag=null;document.querySelectorAll('.tab-drop-target,.tab-dragging,.tab-armed').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging','tab-armed'));});
+  node.addEventListener('pointerup',e=>{const d=drag;drag=null;clearTimeout(d?.timer);node.removeEventListener('touchmove',block);document.querySelectorAll('.tab-armed').forEach(n=>n.classList.remove('tab-armed'));if(!d?.moving)return;e.preventDefault();node.dataset.dragged='1';setTimeout(()=>delete node.dataset.dragged,0);document.querySelectorAll('.tab-drop-target,.tab-dragging').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging'));if(d.to>=0)reorderTab(a,d.index,d.to).catch(report);});
+  node.addEventListener('pointercancel',()=>{clearTimeout(drag?.timer);drag=null;node.removeEventListener('touchmove',block);document.querySelectorAll('.tab-drop-target,.tab-dragging,.tab-armed').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging','tab-armed'));});
   node.addEventListener('keydown',e=>{if(e.altKey&&e.shiftKey&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const to=index+(e.key==='ArrowLeft'?-1:1);if(to>=0&&to<$('tabs').children.length)reorderTab(a,index,to).catch(report);}});
 }
 function renderTabs(a) {
@@ -946,14 +953,16 @@ async function showClipboard(a = online()) {
 function compose(initial = '', label = tr('Compose text')) {
   const a = online(), t = activeTerm(a); if (!t) throw new Error('Open a terminal first.');
   const area = el('textarea', {class: 'compose-text', value: initial, placeholder: tr('Write or paste an instruction…'), spellcheck: false, 'aria-label': tr('Text to insert')});
-  const execute = el('input', {type: 'checkbox'});
+  const execute = el('input', {type: 'checkbox', class: 'switch'});
   modal(label, el('div', {}, area, el('label', {class: 'checkbox-label compose-execute'}, execute, tr('Send Enter after inserting (may execute commands)')),
     el('div', {class: 'modal-actions'}, button(tr('Remote clipboard'), async () => { await setRemoteClipboard(a, area.value); toast(tr('Saved in the remote clipboard.')); }),
       button(tr('Insert in terminal'), async () => {
         const text = area.value; closeModal(); await insertText(a, t, text);
         // Multiline unbracketed input uses a confirmation modal. Do not send Enter before that decision.
         if (execute.checked && !( /[\r\n]/.test(text) && !t.term.modes.bracketedPasteMode)) {
-          // xterm paste emits onData synchronously and sendQueue preserves the order.
+          // An Enter that follows the pasted bytes too closely is read as part of the
+          // paste by TUI programs (a newline, not a submit). Let the program settle first.
+          await new Promise(resolve => setTimeout(resolve, 250));
           await sendInput(a, t, '\r');
         }
       }, 'button primary'))));

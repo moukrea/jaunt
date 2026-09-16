@@ -289,6 +289,22 @@ class Bridge:
     async def changed(self) -> None:
         await self.host.broadcast({"type": "bridge.changed", **self.status()})
 
+    def export(self) -> list[dict]:
+        """Participants survive the in-place runtime replacement (they did not restart)."""
+        from dataclasses import asdict
+        return [asdict(p) for p in self.participants.values() if p.state != "ended"]
+
+    def restore(self, rows: list) -> None:
+        for row in rows:
+            try:
+                p = Participant(**{k: v for k, v in row.items() if k in Participant.__dataclass_fields__})
+            except (TypeError, ValueError):
+                continue
+            p.roster_seen = -1
+            self.participants[f"{p.runtime}:{p.conversation}"] = p
+        if rows:
+            self.version += 1
+
     # ---- registration (from hooks inside jaunt PTYs) ---------------------------
     def verify_session(self, session_id: str, runtime: str, pid: int, hook_pid: int = 0) -> "Session":
         if not session_id:
@@ -689,11 +705,16 @@ class Bridge:
             found = self.session_for_pid(int(p.get("pid") or 0))
             if found:
                 p = {**p, "session": found}
-        if p.get("conversation") in ("", "current", None):
-            session_id = str(p.get("session", ""))
-            live = [q for q in self.participants.values() if q.session == session_id and q.runtime == p.get("runtime") and q.state != "ended"]
-            if live:
-                p = {**p, "conversation": max(live, key=lambda q: q.last_seen).conversation}
+        session_id = str(p.get("session", ""))
+        live = [q for q in self.participants.values() if q.session == session_id and q.runtime == p.get("runtime") and q.state != "ended"]
+        current = max(live, key=lambda q: q.last_seen).conversation if live else ""
+        given = p.get("conversation")
+        # The MCP server keeps the conversation id it was started with; after /clear the
+        # terminal runs a newer conversation. The live participant of the terminal wins.
+        known = self.participants.get(f"{p.get('runtime')}:{given}")
+        stale = known is None or known.state == "ended"
+        if current and (given in ("", "current", None) or (given != current and stale)):
+            p = {**p, "conversation": current}
         return p
 
     def peers_for(self, p: dict) -> dict:

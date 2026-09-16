@@ -6,7 +6,7 @@
 
 jaunt provides native desktop and Android applications, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
 
-**Host: 0.1.0-beta.19 · Desktop: 0.1.0-beta.13 · Android: 0.1.0-beta.11.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.20 · Desktop: 0.1.0-beta.14 · Android: 0.1.0-beta.12.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -16,7 +16,7 @@ bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukr
 
 Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled. Compatible hosts retain their shell processes during runtime replacement and wait for transfers to finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.11/jaunt-android-v0.1.0-beta.11.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.12/jaunt-android-v0.1.0-beta.12.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace

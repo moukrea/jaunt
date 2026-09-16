@@ -511,21 +511,18 @@ class Host:
         ids = {s.id for s in self.sessions.items.values()}
         def clean_ids(values):
             return [v for v in values if isinstance(v, str) and v in ids][:64] if isinstance(values, list) else []
-        def clean_tree(tree):
-            if not isinstance(tree, dict):
+        def clean_tree(tree, depth=0):
+            # Same shape as web/js/workspace.mjs: a leaf {id} or a split {axis, ratio, first, second}.
+            if not isinstance(tree, dict) or depth > 16:
                 return None
             if "id" in tree:
                 return {"id": tree["id"]} if tree["id"] in ids else None
-            children = [t for t in (clean_tree(c) for c in tree.get("children") or []) if t]
-            if not children:
-                return None
-            if len(children) == 1:
-                return children[0]
-            out = {"direction": tree.get("direction") if tree.get("direction") in ("row", "column") else "row", "children": children}
-            sizes = tree.get("sizes")
-            if isinstance(sizes, list) and len(sizes) == len(children) and all(isinstance(x, (int, float)) for x in sizes):
-                out["sizes"] = sizes
-            return out
+            first, second = clean_tree(tree.get("first"), depth + 1), clean_tree(tree.get("second"), depth + 1)
+            if first and second:
+                ratio = tree.get("ratio")
+                ratio = float(ratio) if isinstance(ratio, (int, float)) else 0.5
+                return {"axis": "y" if tree.get("axis") == "y" else "x", "ratio": max(0.15, min(0.85, ratio)), "first": first, "second": second}
+            return first or second
         layouts = [t for t in (clean_tree(t) for t in (p.get("layouts") if isinstance(p.get("layouts"), list) else [])) if t][:64]
         active = p.get("active") if isinstance(p.get("active"), str) and p.get("active") in ids else ""
         return {**base, "openSessions": clean_ids(p.get("openSessions")), "layouts": layouts,
@@ -549,6 +546,10 @@ class Host:
         current = self.workspace()
         if not current["sync"]:
             raise ValueError("Workspace synchronization is off on this host")
+        # Optimistic concurrency: a client that did not see the latest revision is
+        # handed the current state instead of overwriting newer changes with stale ones.
+        if isinstance(p.get("revision"), int) and p["revision"] != current["revision"]:
+            return {**current, "stale": True}
         data = self._workspace_state(p, current)
         if all(data[k] == current[k] for k in ("openSessions", "layouts", "tabOrder", "active")):
             return current
@@ -780,7 +781,8 @@ class Host:
         handoff = os.environ.pop("jaunt_HANDOFF_FD", "")
         if handoff:
             from .handoff import restore
-            self.lockfile = restore(self.sessions,int(handoff))
+            self.lockfile, inherited = restore(self.sessions,int(handoff))
+            self.bridge.restore(inherited.get('bridge') or [])
             self.last_update_check = time.monotonic()
             updater=os.environ.pop('jaunt_HANDOFF_UPDATER','')
             if updater:
@@ -818,7 +820,7 @@ class Host:
                 if self.reexec:
                     try:
                         from .handoff import snapshot
-                        state = await snapshot(self.sessions,self.lockfile.fileno())
+                        state = await snapshot(self.sessions,self.lockfile.fileno(),extra={'bridge':self.bridge.export()})
                     except Exception:
                         # A failed snapshot must leave the old host and PTYs usable.
                         from .state import atomic_json

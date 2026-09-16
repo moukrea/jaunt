@@ -26,7 +26,7 @@ class InheritedChild:
             time.sleep(.02)
         return self.returncode
 
-async def snapshot(sessions,lockfd):
+async def snapshot(sessions,lockfd,extra=None):
     rows=[];reapers=[]
     for s in sessions.items.values():
         sessions._pause_reader(s);s.resizing=True
@@ -44,7 +44,7 @@ async def snapshot(sessions,lockfd):
             parser={'state':s.attention.state,'payload':b64(s.attention.payload),'overflow':s.attention.overflow})
         rows.append(row)
     out=tempfile.TemporaryFile(mode='w+b',dir=sessions.root)
-    out.write(json.dumps({'schema':1,'pid':os.getpid(),'lockfd':lockfd,'sessions':rows}).encode());out.flush()
+    out.write(json.dumps({'schema':1,'pid':os.getpid(),'lockfd':lockfd,'sessions':rows,**(extra or {})}).encode());out.flush()
     if out.tell()>100*1024*1024:
         out.close();raise ValueError('Runtime snapshot exceeds its size limit')
     out.seek(0)
@@ -73,4 +73,4 @@ def restore(sessions,fd):
         sessions.items[s.id]=s;s.pump=asyncio.create_task(sessions._pump(s))
         if s.alive:sessions._resume_reader(s)
         s.reaper=asyncio.create_task(sessions._reap(s,announce=s.alive))
-    return os.fdopen(lockfd,'a+')
+    return os.fdopen(lockfd,'a+'),{k:v for k,v in data.items() if k not in ('schema','pid','lockfd','sessions')}

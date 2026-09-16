@@ -119,7 +119,7 @@ TOOLS = [
      "description": "List the other AI sessions (Claude Code or Codex) working on the same project through jaunt, with their ids and availability. Only sessions of the other runtime on this project are listed.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "jaunt_send",
-     "description": "Send a message to another AI session listed by jaunt_peers. It arrives in that session's own conversation, attributed to you through the jaunt bridge. Use in_reply_to when answering a bridge message. Set wait_seconds (up to 600) to wait for a reply in the same call; otherwise replies arrive later as bridge messages.",
+     "description": "Send a message to another AI session listed by jaunt_peers. It arrives in that session's own conversation, attributed to you through the jaunt bridge. Use in_reply_to when answering a bridge message. Replies always arrive later as bridge messages, so leave wait_seconds unset unless you cannot continue without the answer (then up to 600); never wait for a greeting or a notice that needs no reply.",
      "inputSchema": {"type": "object", "required": ["to", "text"], "additionalProperties": False,
                      "properties": {"to": {"type": "string", "description": "Peer id from jaunt_peers or from a bridge message"},
                                     "text": {"type": "string", "description": "The message"},
