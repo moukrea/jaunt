@@ -33,7 +33,10 @@ async def test_awareness_is_automatic_symmetric_and_project_scoped(host):
     h=host
     h.sessions.items={'s1':FakeSession('s1','Claude tab',100,'/work/x','claude'),'s2':FakeSession('s2','Codex tab',200,'/work/x/sub','codex'),'s3':FakeSession('s3','Other',300,'/work/y','codex')}
     first=await register(h,'s1','claude','claude-conv-000001','/work/x')
-    assert first['enabled'] and 'No other AI session' in first['context']
+    # The Codex program already runs in a jaunt shell on this project but has not registered:
+    # it is announced as present, not as reachable.
+    assert first['enabled'] and 'has not started its conversation on the bridge yet' in first['context'] and 'Codex tab' in first['context']
+    assert h.bridge.peers_for({'runtime':'claude','session':'s1','conversation':'claude-conv-000001'})['present'][0]['terminal']=='Codex tab'
     # Codex arrives later on a subdirectory of the same project: both sides learn about each other.
     second=await register(h,'s2','codex','codex-thread-00001','/work/x/sub','/work/x')
     assert 'Claude Code session in jaunt terminal "Claude tab"' in second['context'] and 'claude:claude-c' in second['context']
@@ -134,7 +137,7 @@ async def test_registration_requires_a_live_jaunt_shell_and_same_runtime_is_refu
 
 def test_setup_edits_are_targeted_and_reversible(tmp_path,monkeypatch):
     from jaunt import bridge_setup
-    monkeypatch.setenv('CLAUDE_CONFIG_DIR',str(tmp_path/'claude'));monkeypatch.setenv('CODEX_HOME',str(tmp_path/'codex'))
+    monkeypatch.setenv('CLAUDE_CONFIG_DIR',str(tmp_path/'claude'));monkeypatch.setenv('CODEX_HOME',str(tmp_path/'codex'));monkeypatch.setenv('jaunt_STATE',str(tmp_path/'state'))
     settings=tmp_path/'claude/settings.json';settings.parent.mkdir()
     original={'permissions':{'allow':['Bash(ls)']},'hooks':{'PreToolUse':[{'matcher':'Bash','hooks':[{'type':'command','command':'/me/check.sh'}]}],'SessionStart':[{'matcher':'startup','hooks':[{'type':'command','command':'/me/start.sh','timeout':15}]}]},'enabledPlugins':{'x@y':True}}
     settings.write_text(json.dumps(original))
@@ -144,17 +147,24 @@ def test_setup_edits_are_targeted_and_reversible(tmp_path,monkeypatch):
     after=json.loads(settings.read_text())
     assert after['permissions']['allow']==['Bash(ls)','mcp__jaunt-bridge__jaunt_peers','mcp__jaunt-bridge__jaunt_send','mcp__jaunt-bridge__jaunt_wait_reply'] and after['enabledPlugins']==original['enabledPlugins']
     assert after['hooks']['PreToolUse']==original['hooks']['PreToolUse']
-    assert after['hooks']['SessionStart'][0]==original['hooks']['SessionStart'][0] and 'bridge-hook claude' in after['hooks']['SessionStart'][1]['hooks'][0]['command']
-    assert all(any('bridge-hook' in h['command'] for g in after['hooks'][e] for h in g['hooks']) for e in ('UserPromptSubmit','Stop','SessionEnd','PostCompact'))
+    wrapper=tmp_path/'state/bridge/hook-claude'
+    assert after['hooks']['SessionStart'][0]==original['hooks']['SessionStart'][0] and after['hooks']['SessionStart'][1]['hooks'][0]['command']==str(wrapper)
+    assert wrapper.exists() and os.access(wrapper,os.X_OK) and 'bridge-hook claude --state' in wrapper.read_text() and 'hook.log' in wrapper.read_text() and (tmp_path/'state/bridge/mcp-codex').exists()
+    assert after['hooks']['SessionEnd'][0]['hooks'][0]['timeout']==3
+    # The wrapper never fails the runtime's hook pipeline: a missing interpreter is logged instead.
+    import subprocess
+    broken=tmp_path/'state/bridge/hook-codex';broken.write_text(broken.read_text().replace(sys.executable,'/nonexistent/python'))
+    r=subprocess.run([str(broken)],input=b'{}',capture_output=True);assert r.returncode==0 and 'interpreter not executable' in (tmp_path/'state/bridge/hook.log').read_text()
+    assert all(any('/bridge/hook-' in h['command'] for g in after['hooks'][e] for h in g['hooks']) for e in ('UserPromptSubmit','Stop','SessionEnd','PostCompact'))
     assert bridge_setup.installed({})=={'claude':{'hooks':True},'codex':{'hooks':True}}
     assert [c[:4] for c in calls if c[1]=='mcp' and c[2]=='add']==[['/bin/claude','mcp','add','--scope'],['/bin/codex','mcp','add','jaunt-bridge']]
-    assert all(any(a.startswith('jaunt_STATE=') for a in c) for c in calls if c[1]=='mcp' and c[2]=='add')
+    assert all(any(a.startswith('jaunt_STATE=') for a in c) and c[-1]==str(tmp_path/'state/bridge'/('mcp-claude' if c[0]=='/bin/claude' else 'mcp-codex')) for c in calls if c[1]=='mcp' and c[2]=='add')
     # Installing twice never duplicates entries.
     bridge_setup.install({'claude':{'path':'/bin/claude'},'codex':{'path':'/bin/codex'}})
     assert len(json.loads(settings.read_text())['hooks']['SessionStart'])==2
     bridge_setup.uninstall({'claude':{'path':'/bin/claude'},'codex':{'path':'/bin/codex'}})
     assert json.loads(settings.read_text())==original
-    assert not (tmp_path/'codex/hooks.json').exists()
+    assert not (tmp_path/'codex/hooks.json').exists() and not (tmp_path/'state/bridge').exists()
     assert bridge_setup.installed({})=={'claude':{'hooks':False},'codex':{'hooks':False}}
 
 def test_hook_client_is_silent_outside_jaunt_shells(monkeypatch,capsys):
@@ -276,3 +286,20 @@ async def test_startup_detection_runs_even_when_the_bridge_is_off(host,monkeypat
     monkeypatch.setattr(Bridge,'detect',fake_detect)
     await h.bridge.refresh_integrations()
     assert calls==[True] and h.bridge.status()['visible'] is True
+
+
+@pytest.mark.asyncio
+async def test_hook_under_a_wrapper_shell_registers_the_runtime_process_not_the_wrapper(host,monkeypatch):
+    # hook (pid 30) <- sh wrapper (pid 20, exits right after) <- codex (pid 10) <- jaunt shell (pid 2000)
+    h=host;h.sessions.items={'s2':FakeSession('s2','B',2000,'/p','codex')}
+    monkeypatch.setattr(Bridge,'session_for_pid',REAL_SESSION_FOR_PID)
+    monkeypatch.setattr(Bridge,'_ancestors',classmethod(lambda cls,pid:{30:[30,20,10,2000,1],20:[20,10,2000,1],10:[10,2000,1]}.get(pid,[pid])))
+    monkeypatch.setattr(Bridge,'tty_of_pid',staticmethod(lambda pid:''))
+    monkeypatch.setattr(Bridge,'command_of_pid',staticmethod(lambda pid:{20:'/bin/sh /state/bridge/hook-codex',10:'/home/u/.local/bin/codex'}.get(pid,'')))
+    monkeypatch.setattr(Bridge,'_alive',staticmethod(lambda pid:pid!=20))
+    r=await h.bridge.register({'runtime':'codex','session':'','conversation':'codex-thread-00009','pid':20,'hookPid':30,'cwd':'/p','event':'prompt','project':project('/p')})
+    participant=h.bridge.participants['codex:codex-thread-00009']
+    assert r['enabled'] and participant.session=='s2' and participant.pid==10
+    # The wrapper is gone but the runtime lives: the participant must survive the sweep.
+    assert not h.bridge.sweep() or participant.state!='ended'
+    assert participant.state!='ended'

@@ -133,9 +133,12 @@ def _tool(runtime: str, name: str, args: dict) -> str:
             if not result.get("enabled"):
                 return result.get("note", "The jaunt bridge is turned off on this host.")
             peers = result.get("peers", [])
-            if not peers:
+            lines = [f"- {p['runtime']} session in terminal \"{p['terminal']}\" (id {p['id']}), cwd {p['cwd']}, {p['state']}" for p in peers]
+            lines += [f"- {p['runtime']} session open in terminal \"{p['terminal']}\" (cwd {p['cwd']}) but not reachable yet: it joins the bridge after its first prompt"
+                      for p in result.get("present", [])]
+            if not lines:
                 return "No other AI session of the other runtime is working on this project through jaunt right now."
-            return "\n".join(f"- {p['runtime']} session in terminal \"{p['terminal']}\" (id {p['id']}), cwd {p['cwd']}, {p['state']}" for p in peers)
+            return "\n".join(lines)
         if name == "jaunt_send":
             result = control("bridge.send", {**identity, "to": args.get("to", ""), "text": args.get("text", ""),
                                              "inReplyTo": args.get("in_reply_to", "")})

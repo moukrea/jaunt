@@ -89,7 +89,7 @@ async def main():
         passed(f"host detects both runtimes in the login shell: Claude Code {status['runtimes']['claude']['version']}, Codex {status['runtimes']['codex']['version']}")
         status=await peer.rpc('bridge.configure',{'enabled':True});enabled=True
         assert status['enabled'] and all(r['ok'] for r in status['integrations'].values()),status
-        assert 'bridge-hook claude' in (Path.home()/'.claude/settings.json').read_text() and 'bridge-hook codex' in (Path.home()/'.codex/hooks.json').read_text()
+        assert '/bridge/hook-claude' in (Path.home()/'.claude/settings.json').read_text() and '/bridge/hook-codex' in (Path.home()/'.codex/hooks.json').read_text()
         passed('one switch installs attributable hooks + MCP entries in both runtimes')
         a=await peer.rpc('session.create',{'cwd':str(project),'name':'Claude tab','cols':140,'rows':40});claude_sid=a['id']
         await peer.rpc('session.attach',{'id':claude_sid,'cols':140,'rows':40})
@@ -172,8 +172,8 @@ async def main():
         # OFF: integrations removed, sends refused, sessions untouched.
         status=await peer.rpc('bridge.configure',{'enabled':False});enabled=False
         assert not status['enabled'] and status['participants']==[]
-        assert 'bridge-hook' not in (Path.home()/'.claude/settings.json').read_text()
-        assert not (Path.home()/'.codex/hooks.json').exists() or 'bridge-hook' not in (Path.home()/'.codex/hooks.json').read_text()
+        assert '/bridge/hook-' not in (Path.home()/'.claude/settings.json').read_text()
+        assert not (Path.home()/'.codex/hooks.json').exists() or '/bridge/hook-' not in (Path.home()/'.codex/hooks.json').read_text()
         st=await peer.rpc('session.list');assert all(s['alive'] for s in st if s['id'] in (claude_sid,codex_sid))
         await peer.until(lambda:'❯' in peer.screen(claude_sid)[-300:],120,'Claude idle')
         await peer.type(claude_sid,'Send the text "ping" to the other AI session on this project and print exactly BRIDGE=<what the tool answered>.');await asyncio.sleep(0.5);await peer.type(claude_sid,'\r')
