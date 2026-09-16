@@ -48,13 +48,17 @@ function renderErrors(){
   const pair=$('pair-error');if(pair){pair.hidden=!errors.has('pair');pair.textContent=errors.get('pair')||'';}
   const inline=$('modal-error');if(inline){inline.hidden=!errors.has('modal');inline.textContent=errors.get('modal')||'';}
 }
-export function toast(message, error = false, action) {
+// `host` = {name, local} names the machine a notice is about, so a toast is never ambiguous with several hosts paired.
+export function toast(message, error = false, action, host = null) {
   if(error){reportError(new Error(message));return;}
-  const previous=notices.get(message);if(previous){clearTimeout(previous.timer);previous.timer=setTimeout(()=>removeNotice(message),5000);return;}
-  const node = el('div', {class:'toast',role:'status'}, el('span', {}, icon('check', 17)), el('p', {text: message}));
+  const key=host?`${host.name}\u0000${message}`:message;
+  const previous=notices.get(key);if(previous){clearTimeout(previous.timer);previous.timer=setTimeout(()=>removeNotice(key),5000);return;}
+  const body = el('p', {text: message});
+  if (host) body.prepend(el('span', {class: 'toast-host'}, icon(host.local ? 'monitor' : 'globe', 12), el('span', {text: host.name})));
+  const node = el('div', {class:'toast',role:'status'}, el('span', {}, icon('check', 17)), body);
   if (action) node.append(button(action.label, action.run, 'text-button'));
-  const dismiss=button('',()=>removeNotice(message),'icon-button','close');dismiss.setAttribute('aria-label',tr('Dismiss notification'));node.append(dismiss);
-  $('toasts').append(node);notices.set(message,{node,timer:setTimeout(()=>removeNotice(message),5000)});
+  const dismiss=button('',()=>removeNotice(key),'icon-button','close');dismiss.setAttribute('aria-label',tr('Dismiss notification'));node.append(dismiss);
+  $('toasts').append(node);notices.set(key,{node,timer:setTimeout(()=>removeNotice(key),5000)});
   while(notices.size>2)removeNotice(notices.keys().next().value);
 }
 function removeNotice(message){const item=notices.get(message);if(item){clearTimeout(item.timer);item.node.remove();notices.delete(message);}}

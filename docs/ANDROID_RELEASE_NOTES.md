@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.17 (versionCode 17)
+
+- Bundles the beta.25 interface (host symbol and switcher in the top bar, tinted per-host activity strip).
+
 # jaunt Android 0.1.0-beta.16 (versionCode 16)
 
 - Bundles the beta.24 interface (split picker under its button, Enter/Escape in rename).

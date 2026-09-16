@@ -110,7 +110,7 @@ async def main():
             child=h.work/'browsed folder';child.mkdir()
             await terminal_command(local,"cd '"+str(child)+"'; printf ready > cwd-ready")
             await until(lambda:(child/'cwd-ready').exists())
-            await local.locator('#new-session-top').click()
+            await local.locator('#new-session-tab').click()
             await expect(local.locator('#modal')).not_to_be_visible()
             await terminal_command(local,"printf inherited > inherited.txt")
             await until(lambda:(child/'inherited.txt').exists())

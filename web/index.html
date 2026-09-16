@@ -84,8 +84,8 @@
   <main class="main">
     <header id="topbar" class="topbar">
       <button class="icon-button mobile-only" id="menu-button" aria-label="Open machines"><span data-icon="menu"></span></button>
-      <div class="breadcrumb"><span id="breadcrumb-prefix">Workspace</span><span class="breadcrumb-separator">/</span><strong id="machine-title">Overview</strong></div>
-      <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection"><i></i><span>Not connected</span></span><button id="new-session-top" class="button primary small" hidden><span data-icon="plus" data-size="16"></span><span>New shell</span></button></div>
+      <div class="breadcrumb"><span id="breadcrumb-prefix">Workspace</span><span class="breadcrumb-separator">/</span><button id="host-switch" class="host-switch" aria-haspopup="menu" aria-expanded="false"><span id="host-symbol" class="host-symbol" data-icon="monitor" data-size="16"></span><strong id="machine-title">Overview</strong><span id="host-chevron" data-icon="down" data-size="14" hidden></span></button></div>
+      <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection sr-only"><i></i><span>Not connected</span></span></div>
     </header>
     <div id="connection-banner" class="connection-banner" role="status" hidden></div>
     <section id="feedback" class="feedback" aria-label="Action errors" hidden></section>
