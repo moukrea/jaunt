@@ -43,6 +43,8 @@ Entries are attributable (the jaunt command in them), added next to your existin
 - A participant is a triple: jaunt terminal, runtime process, conversation id. Registration is accepted only from hooks whose process descends from a jaunt shell the host owns. A new conversation in the same terminal (`/clear`, a new session) supersedes the old one; messages addressed to the old id are refused, never redirected.
 - Only sessions started from jaunt shells take part. Enabling the bridge never exposes other conversations on the machine.
 - Permissions, approvals and sandboxes of each runtime apply unchanged. A bridge message is not an authorization; the recipient may need to approve the `jaunt_send` tool the first time, exactly like any MCP tool.
+- Claude Code reviews inbound peer messages itself: a Claude session that bypasses permission prompts (`--dangerously-skip-permissions`, auto mode) auto-accepts a message only from a sender that attests the same class; jaunt attests the sender's real class from its hook payload (Codex in full-access/YOLO mode counts as bypassing). Any other combination shows Claude's *Deliver / Deny* prompt, as with its own peers; setting `crossSessionInbound` to `accept` in your Claude settings is your decision, jaunt does not change it.
+- A reply that the asking session is waiting for (`wait_seconds` / `jaunt_wait_reply`) is returned by that call only; it is not pushed into the conversation a second time.
 - Scope is one host. Cross-machine sessions are not bridged.
 - The host stores no conversation content. Message previews shown in the activity strip stay in the client.
 

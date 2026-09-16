@@ -54,10 +54,24 @@ def project_of(cwd: str) -> dict:
     lines = out.stdout.splitlines()
     if len(lines) >= 2:
         top = os.path.realpath(lines[0].strip())
+        if top == os.path.realpath(os.path.expanduser("~")):
+            return project  # a home directory under version control is not a project boundary
         common = lines[1].strip()
         common = os.path.realpath(common if os.path.isabs(common) else os.path.join(top, common))
         project.update(root=top, common=common, kind="worktree" if common != os.path.join(top, ".git") else "git")
     return project
+
+
+def mode_class(runtime: str, permission_mode: str) -> str:
+    """Whether this session bypasses permission prompts, in the terms Claude Code's
+    inbound gate uses: a bypassing session only auto-accepts peers that bypass too."""
+    mode = str(permission_mode or "").lower()
+    if not mode:
+        return ""
+    if runtime == "claude":
+        return "bypass" if mode in ("bypasspermissions", "auto") else "prompting"
+    # Codex: full-access / never-ask style modes bypass prompts.
+    return "bypass" if any(word in mode for word in ("yolo", "bypass", "danger", "full", "never")) else "prompting"
 
 
 def claude_inbox() -> dict:
@@ -86,6 +100,7 @@ def hook_main(runtime: str) -> int:
     # host answers with a refusal and nothing is printed.
     request = {"runtime": runtime, "session": session, "conversation": conversation, "pid": pid, "hookPid": os.getpid(),
                "cwd": cwd, "event": event, "source": str(payload.get("source", "")), "project": project_of(cwd),
+               "modeClass": mode_class(runtime, str(payload.get("permission_mode", ""))),
                "inbox": claude_inbox() if runtime == "claude" else {}}
     try:
         result = control("bridge.register", request, timeout=15)

@@ -231,13 +231,13 @@ async def test_claude_delivery_frames_authenticate_then_inject(tmp_path,monkeypa
     (sessions/'7.k.key').write_text(json.dumps({'peerToken':'secret-token'}))
     class B:
         def public(self,p):return {'terminal':'Codex tab'}
-    sender=Participant(id='codex:abc',session='s2',runtime='codex',conversation='abc',pid=1,cwd='/p',project={'root':'/p'})
+    sender=Participant(id='codex:abc',session='s2',runtime='codex',conversation='abc',pid=1,cwd='/p',project={'root':'/p'},mode_class='bypass')
     recipient=Participant(id='claude:conv',session='s1',runtime='claude',conversation='conv-a',pid=7,cwd='/p',project={'root':'/p'})
     await bridge_deliver.deliver_claude(B(),sender,recipient,{'id':'m-1','text':'hello there','inReplyTo':None})
     server.close();await server.wait_closed()
     assert received[0]=={'type':'auth','token':'secret-token'} and received[1]['type']=='user' and received[1]['priority']=='next'
     body=received[1]['message']['content']
-    assert body.startswith('<cross-session-message from="jaunt-bridge"') and '[jaunt bridge] Message from the Codex session in jaunt terminal "Codex tab" (id codex:abc)' in body and 'hello there' in body and 'jaunt_send' in body
+    assert body.startswith('<cross-session-message from="jaunt-bridge" from-name="jaunt · codex:abc" from-mode="bypass">') and '[jaunt bridge] Message from the Codex session in jaunt terminal "Codex tab" (id codex:abc)' in body and 'hello there' in body and 'jaunt_send' in body
 
 
 @pytest.mark.asyncio
@@ -303,3 +303,30 @@ async def test_hook_under_a_wrapper_shell_registers_the_runtime_process_not_the_
     # The wrapper is gone but the runtime lives: the participant must survive the sweep.
     assert not h.bridge.sweep() or participant.state!='ended'
     assert participant.state!='ended'
+
+
+@pytest.mark.asyncio
+async def test_reply_consumed_by_a_waiting_call_is_not_delivered_twice(host,monkeypatch):
+    h=host;h.sessions.items={'s1':FakeSession('s1','A',1,'/p','claude'),'s2':FakeSession('s2','B',2,'/p','codex')}
+    await register(h,'s1','claude','claude-conv-000001','/p');await register(h,'s2','codex','codex-thread-00001','/p')
+    delivered=[]
+    async def fake_deliver(bridge,sender,recipient,message):delivered.append(message['text'])
+    monkeypatch.setattr('jaunt.bridge_deliver.deliver',fake_deliver)
+    me={'runtime':'claude','session':'s1','conversation':'claude-conv-000001'};them={'runtime':'codex','session':'s2','conversation':'codex-thread-00001'}
+    sent=await h.bridge.send({**me,'to':'codex:codex-th','text':'question?'})
+    waiter=asyncio.create_task(h.bridge.wait_reply({**me,'id':sent['id'],'seconds':5}));await asyncio.sleep(0.05)
+    reply=await h.bridge.send({**them,'to':'claude:claude-c','text':'answer!','inReplyTo':sent['id']})
+    assert (await waiter)['reply']['text']=='answer!' and reply['state']=='delivered' and reply['detail']=='handed to the waiting call'
+    assert delivered==['question?']  # the answer went to the waiting call only
+    # Nobody waiting: the reply is pushed into the conversation as usual.
+    late=await h.bridge.send({**them,'to':'claude:claude-c','text':'later','inReplyTo':sent['id']})
+    assert delivered==['question?','later'] and late['detail']==''
+
+def test_mode_class_and_home_git_root(monkeypatch,tmp_path):
+    from jaunt import bridge_client
+    assert bridge_client.mode_class('claude','bypassPermissions')=='bypass' and bridge_client.mode_class('claude','default')=='prompting' and bridge_client.mode_class('claude','')==''
+    assert bridge_client.mode_class('codex','danger-full-access')=='bypass' and bridge_client.mode_class('codex','default')=='prompting'
+    monkeypatch.setenv('HOME',str(tmp_path));monkeypatch.setattr(os.path,'expanduser',lambda p:str(tmp_path) if p=='~' else p)
+    import subprocess
+    subprocess.run(['git','init','-q',str(tmp_path)],check=True);(tmp_path/'Code/test').mkdir(parents=True)
+    assert bridge_client.project_of(str(tmp_path/'Code/test'))['root']==os.path.realpath(tmp_path/'Code/test')
