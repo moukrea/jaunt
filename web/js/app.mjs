@@ -1,5 +1,5 @@
 import {t as tr,languages,language,preference,setLanguage,translateStatic} from './i18n.mjs';
-import {activity,clearActivity} from './activity.mjs';
+import {activity,clearActivity,scopeActivity,activityBadges} from './activity.mjs';
 import {bindTouchScroll} from './touch-scroll.mjs';
 import {desktop, LocalLink} from './desktop.mjs';
 import {leaves, prune, split, themeMode} from './workspace.mjs';
@@ -270,9 +270,9 @@ function handleMessage(a, message) {
   } else if (message.type === 'notification') {
     if(desktop && prefs().desktopNotifications) desktop.notify({title:message.title,body:message.body,session:message.session,host:a.machine.room}).catch(error=>reportHost(a,error));
     toast(`${message.title}${message.body ? ' — ' + message.body : ''}`, false,
-      message.session ? {label: tr('Open'), run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null);
+      message.session ? {label: tr('Open'), run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null, hostOf(a));
   } else if (message.type === 'clipboard.available') {
-    toast(`${a.machine.name} shared clipboard text.`, false, {label: tr('Open'), run: () => showClipboard(a)});
+    toast(tr('Shared clipboard text.'), false, {label: tr('Open'), run: () => showClipboard(a)}, hostOf(a));
   } else if (message.type === 'workspace.changed') {
     const w = message.workspace; if (a.info) a.info.workspace = w;
     if (message.from === a.peer) { a.wsSent = workspaceSignature(a); if (view === 'settings' && a === current()) renderSettings(); return; }
@@ -296,11 +296,40 @@ function handleMessage(a, message) {
   }
 }
 
+// Host symbol in the top bar: a monitor for the local host, a globe for a remote one, coloured
+// by its link state (online, transitional, offline). Clicking the name lists the other hosts.
+function hostTone(a) { const s = a?.link.state; return s === 'online' ? 'online' : a?.link.enabled && s ? 'busy' : 'offline'; }
+function renderHostSymbol(a) {
+  const symbol = $('host-symbol'), switcher = $('host-switch');
+  symbol.hidden = !a; $('host-chevron').hidden = !a || machines.size < 2;
+  if (a) { symbol.replaceChildren(icon(a.machine.local ? 'monitor' : 'globe', 16)); symbol.className = 'host-symbol ' + hostTone(a); symbol.title = a.machine.local ? tr('Local host') : tr('Remote host'); }
+  switcher.disabled = !a || machines.size < 2;
+}
+function hostMenu() {
+  document.querySelectorAll('.host-menu').forEach(n => n.remove());
+  const anchor = $('host-switch'), menu = el('div', {class: 'host-menu', role: 'menu', 'aria-label': tr('Switch host')});
+  for (const m of [...machines.values()].sort((x, y) => vault.data.machines.indexOf(x.machine) - vault.data.machines.indexOf(y.machine))) {
+    const item = button('', () => { menu.remove(); anchor.setAttribute('aria-expanded', 'false'); selected = m.machine.room; render(); if (m.active) selectSession(m, m.active); if (view === 'files') listFiles(m).catch(report); }, 'host-menu-item' + (selected === m.machine.room ? ' selected' : ''));
+    item.setAttribute('role', 'menuitem');
+    item.append(el('span', {class: 'host-symbol ' + hostTone(m)}, icon(m.machine.local ? 'monitor' : 'globe', 15)), el('span', {class: 'host-menu-text'}, el('strong', {text: m.machine.friendlyName || m.machine.name}), el('small', {text: m.info ? `${m.info.user} · ${m.info.platform}` : m.machine.local ? tr('Local host') : tr('Remote host')})));
+    menu.append(item);
+  }
+  document.body.append(menu); anchor.setAttribute('aria-expanded', 'true');
+  const r = anchor.getBoundingClientRect(), width = menu.offsetWidth;
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) + 'px'; menu.style.top = (r.bottom + 6) + 'px';
+  const dismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && (menu.contains(e.target) || anchor.contains(e.target))) return; menu.remove(); anchor.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', dismiss, true); document.removeEventListener('keydown', dismiss, true); };
+  setTimeout(() => { document.addEventListener('pointerdown', dismiss, true); document.addEventListener('keydown', dismiss, true); }, 0);
+  (menu.querySelector('.selected') || menu.querySelector('button')).focus();
+}
+window.addEventListener('jaunt-activity', () => { if (vault.data) renderMachines(); });
+$('host-switch').onclick = () => { if (document.querySelector('.host-menu')) { document.querySelector('.host-menu').remove(); $('host-switch').setAttribute('aria-expanded', 'false'); } else hostMenu(); };
+const hostOf = a => a ? {name: a.machine.friendlyName || a.machine.name, local: !!a.machine.local} : null;
 function renderConnection() {
   const a = current(), state = a?.link.state || 'offline';
   const labels = {online: a?.machine.local ? tr('Local connection') : tr('Encrypted'), offline: tr('Not connected'), connecting: tr('Connecting'), authenticating: tr('Verifying host'), waiting: tr('Host offline'), reconnecting: tr('Reconnecting')};
   const restarting = a && state !== 'online' && a.link.enabled && a.restartExpected && Date.now() - a.restartExpected < 180000;
-  $('connection').className = 'connection ' + (restarting ? 'reconnecting' : state);
+  $('connection').className = 'connection sr-only ' + (restarting ? 'reconnecting' : state);
+  renderHostSymbol(a);
   $('connection').lastElementChild.textContent = restarting ? tr('Updating host') : labels[state] || state;
   renderLatency(a, state);
   $('connection-banner').hidden = !a || state === 'online';
@@ -322,7 +351,7 @@ function renderLatency(a, state) {
   const high = lat != null && (lat >= 2000 || (a.highLatency === true && lat >= 1500));
   const extreme = lat != null && (lat >= 15000 || (a.extremeLatency === true && lat >= 10000));
   if (a) { a.highLatency = high; if (!extreme) a.latencyOverride = false; a.extremeLatency = extreme; }
-  $("topbar").classList.toggle("high-latency", high === true);
+  $('latency').classList.toggle('high', high === true);
   $('latency').hidden = lat == null;
   $('latency').replaceChildren(...(high ? [el('strong', {text: tr('High latency, expect slowness')}), ' '] : []), lat == null ? '' : `${lat} ms`);
   const cover = extreme && !a.latencyOverride && view === 'terminal';
@@ -338,23 +367,26 @@ if (new URL(location.href).searchParams.has('debug')) window.jauntSimulateLatenc
 };
 function renderMachines() {
   $('machine-count').textContent = machines.size;
+  const badges = activityBadges();
   const nodes = [...machines.values()].sort((a,b) => vault.data.machines.indexOf(a.machine) - vault.data.machines.indexOf(b.machine)).map(a => {
     const b = button('', () => { selected = a.machine.room; drawer(); render(); if (a.active) selectSession(a, a.active); if (view === 'files') return listFiles(a); }, 'machine-item' + (selected === a.machine.room ? ' selected' : ''));
     b.title=a.machine.friendlyName||a.machine.name;b.setAttribute('aria-label',b.title);
-    b.append(el('span', {class: 'machine-symbol'}, icon('monitor')), el('span', {class: 'machine-text'}, el('strong', {text: a.machine.friendlyName || a.machine.name}), el('small', {text: a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state})),
+    b.append(el('span', {class: 'machine-symbol'}, icon(a.machine.local ? 'monitor' : 'globe')), el('span', {class: 'machine-text'}, el('strong', {text: a.machine.friendlyName || a.machine.name}), el('small', {text: a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state})),
       el('span', {class: `status-dot ${a.link.state === 'online' ? 'online' : a.link.enabled ? 'working' : ''}`}));
+    const badge = badges.get(a.machine.room);
+    if (badge) b.append(el('span', {class: 'notif-badge' + (badge.error ? ' error' : ''), text: String(badge.count), title: tr(badge.count === 1 ? '{0} operation needs attention' : '{0} operations need attention', badge.count)}));
     return b;
   });
   $('machine-list').replaceChildren(...(nodes.length ? nodes : [el('p', {class: 'machine-placeholder', text: tr('Your paired machines will appear here.')})]));
 }
 function render() {
   if (!vault.data) return;
-  const a = current(); renderMachines(); renderConnection();
+  const a = current(); scopeActivity(a?.machine.room || null); renderMachines(); renderConnection();
   if (view === 'settings' && settingsMachine !== a) refreshSettings();
   $('machine-title').textContent = a?.machine.friendlyName || a?.machine.name || tr('Overview');
   $('breadcrumb-prefix').textContent = tr('Workspace');
+  renderHostSymbol(a);
   $('welcome').hidden = !!a || view === 'settings'; $('workspace').hidden = !a && view !== 'settings';
-  $('new-session-top').hidden = !a; $('new-session-top').disabled = !!a?.creating || a?.link.state !== 'online';
   $('lock-button').hidden = !vault.protected;
   for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('selected', b.dataset.view === view);
   $('terminal-view').hidden = !a || (view !== 'terminal' && !(view === 'files' && !isMobile()));
@@ -492,7 +524,7 @@ function createTerm(a, session) {
     if (payload !== '?' && payload.length <= 1400000) {
       try {
         const binary = atob(payload); a.remoteClipboard = new TextDecoder().decode(Uint8Array.from(binary, c => c.charCodeAt(0)));
-        if (t.attached) toast(tr('The terminal has text ready to copy.'), false, {label: tr('Copy'), run: () => copyText(a.remoteClipboard)});
+        if (t.attached) toast(tr('The terminal has text ready to copy.'), false, {label: tr('Copy'), run: () => copyText(a.remoteClipboard)}, hostOf(a));
       } catch { /* Invalid OSC is ignored, never interpreted as HTML. */ }
     }
     return true;
@@ -941,7 +973,7 @@ function renderTransfers() {
 async function putFile(a, file, options = {}, operation = null) {
   if (file.size > (a.info?.maxFileBytes || 512 * 1024 * 1024)) throw new Error('This file exceeds the host’s transfer limit.');
   const item = transferItem(a, file.name, 'up', file.size);
-  const job=operation || activity(item.key,`${file.name} → ${a.machine.name}`);
+  const job=operation || activity(item.key,`${file.name} → ${a.machine.name}`,a.machine.room);
   job.update({action:{label:tr('Cancel transfer'),run:()=>item.controller.abort()}});
   try {
     const result = await upload(a.link, file, options, value=>{progressFor(item)(value);job.update({status:`${value.status} · ${size(value.offset)} / ${size(value.total)}`,percent:value.total?Math.round(value.offset/value.total*100):null});}, item.controller.signal);
@@ -952,7 +984,7 @@ async function putFile(a, file, options = {}, operation = null) {
   } catch (e) { job.fail(e);item.done = true; item.error = e.name!=='AbortError'&&e.message!=='Transfer cancelled'; item.status = item.error?e.message:tr('Cancelled'); renderTransfers(); throw e; }
 }
 async function getFile(a, path, name, writer) {
-  const item = transferItem(a, name, 'down', 0),job=activity(item.key,`${name} ← ${a.machine.name}`);
+  const item = transferItem(a, name, 'down', 0),job=activity(item.key,`${name} ← ${a.machine.name}`,a.machine.room);
   job.update({status:tr('Preparing download…'),action:{label:tr('Cancel transfer'),run:()=>item.controller.abort()}});
   try {
     const result = await download(a.link, path, value=>{progressFor(item)(value);job.update({status:value.status+' · '+size(value.offset)+(value.total?' / '+size(value.total):''),percent:value.total?Math.round(value.offset/value.total*100):null});}, {writer, signal: item.controller.signal});
@@ -1040,7 +1072,7 @@ function clipboardFiles(data) {
     .map(item => item.getAsFile()).filter(Boolean);
 }
 async function deliverAttachment(a,t,input,native,multiple=false,operationId=random(8)) {
-  const job=activity(operationId,`${input.name} → ${t.session.name}`);
+  const job=activity(operationId,`${input.name} → ${t.session.name}`,a.machine.room);
   job.update({status:tr('Preparing image or file…')});
   try {
     const file=input.type.startsWith('image/') ? await toPNG(input) : input;
@@ -1206,7 +1238,7 @@ const bridgeJobs=new Map();
 function bridgeMessageActivity(a,m){
   const key='bridge-'+a.machine.room+'-'+m.id;
   let job=bridgeJobs.get(key);
-  if(!job){job=activity(key,tr("AI sessions · {0}",a.machine.name));bridgeJobs.set(key,job);}
+  if(!job){job=activity(key,tr("AI sessions · {0}",a.machine.name),a.machine.room);bridgeJobs.set(key,job);}
   const who=`${m.from} → ${m.to}`;
   const labels={accepted:tr('Accepted'),delivering:tr('Delivering…'),delivered:tr('Delivered to the session'),failed:tr('Delivery failed'),cancelled:tr('Cancelled')};
   const text=`${who} · ${labels[m.state]||m.state}${m.detail?' · '+m.detail:''}${m.preview?' · '+m.preview:''}`;
@@ -1226,7 +1258,7 @@ function bridgeSettings(a){
   } else {
     const toggle=el('input',{type:'checkbox',checked:!!b.enabled,'aria-label':tr('Claude Code ↔ Codex bridge')});
     toggle.onchange=async()=>{
-      toggle.disabled=true;const job=activity('bridge-setup-'+a.machine.room,tr("AI sessions · {0}",a.machine.name));
+      toggle.disabled=true;const job=activity('bridge-setup-'+a.machine.room,tr("AI sessions · {0}",a.machine.name),a.machine.room);
       job.update({status:toggle.checked?tr('Preparing the integrations in Claude Code and Codex…'):tr('Turning the bridge off…')});
       try{a.info.bridge=await a.link.request('bridge.configure',{enabled:toggle.checked},120000);job.finish(toggle.checked?tr('Bridge on. Sessions opened from now on take part; sessions already open join after their next restart. Codex asks once in its terminal to trust the new hooks.'):tr('Bridge off. Existing sessions keep running; no further cross-runtime messages are delivered.'));}
       catch(error){toggle.checked=!toggle.checked;job.fail(error);}
@@ -1287,7 +1319,7 @@ function checkHostUpdate(a,allowRestart=false){return followHostUpdate(a,()=>a.l
 async function followHostUpdate(a,start,initial=null,allowRestart=false) {
   const existing=hostUpdateJobs.get(a.machine.room);
   if(existing){existing.job.update({});return;}
-  const job=activity('host-update-'+a.machine.room,tr("Host update · {0}",a.machine.name));
+  const job=activity('host-update-'+a.machine.room,tr("Host update · {0}",a.machine.name),a.machine.room);
   const tracker={job,operation:initial?.operation||null,requestedAt:Date.now()/1000,settled:false};
   hostUpdateJobs.set(a.machine.room,tracker);
   let settle;const settled=new Promise(resolve=>{settle=resolve;});
@@ -1392,11 +1424,11 @@ function renderSettings() {
       ...(!desktop ? [settingsRow(isAndroid ? tr('Android background notifications') : tr('Background push'), isAndroid ? tr('Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.') : a.machine.push ? tr('Registered for this machine. Delivery depends on browser/OS permissions and the host being online.') : tr('Standard Web Push sent by your host. No ntfy, bot or third-party notification account.'),
         button(a.machine.push ? tr('Disable') : tr('Enable'), async () => {
           if (a.machine.push) await push.unsubscribe(vault, a.link); else await push.subscribe(vault, a.link);
-          renderSettings(); toast(tr('Notification preference saved.'));
+          renderSettings(); toast(tr('Notification preference saved.'), false, null, hostOf(a));
         }))] : []),
       settingsRow(tr('Test delivery'), tr('Notifications show the title and message sent by the program.'), button(tr('Send test'), async () => {
         const result = await a.link.request('notifications.test');
-        toast(desktop ? tr('Test sent. Background the desktop app to see its OS notification.') : isAndroid ? tr('Test sent. Check Android notifications after enabling the background connection.') : result.delivered ? tr('Push sent to the notification provider.') : result.results?.join('; ') || tr('No push subscription delivered; a live in-app notification may still appear.'), !desktop && !isAndroid && !result.delivered);
+        toast(desktop ? tr('Test sent. Background the desktop app to see its OS notification.') : isAndroid ? tr('Test sent. Check Android notifications after enabling the background connection.') : result.delivered ? tr('Push sent to the notification provider.') : result.results?.join('; ') || tr('No push subscription delivered; a live in-app notification may still appear.'), !desktop && !isAndroid && !result.delivered, null, hostOf(a));
       })),
       el('p', {class: 'settings-notice', text: (isAndroid ? tr('The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. Notification content follows your Android lock-screen privacy settings. ') : '') + tr('From any jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.')})));
   }
@@ -1445,8 +1477,8 @@ async function manageDevices(a) {
       el('p', {text: tr("Last seen {0}",new Date(device.lastSeen * 1000).toLocaleString())})),
     button(tr('Revoke'), () => confirmAction(tr('Revoke this device?'), `${device.name} will lose access immediately. Its existing PTYs are not terminated.`, tr('Revoke'), async () => {
       await a.link.request('devices.revoke', {id: device.id});
-      if (device.id === a.machine.deviceId) { a.link.stop('Revoked'); toast(tr('This device was revoked on the host.')); }
-      else toast(tr('Device revoked.'));
+      if (device.id === a.machine.deviceId) { a.link.stop('Revoked'); toast(tr('This device was revoked on the host.'), false, null, hostOf(a)); }
+      else toast(tr('Device revoked.'), false, null, hostOf(a));
     }, true), 'button danger')));
   modal(tr('Authorized devices'), body);
 }
@@ -1509,7 +1541,7 @@ function bindEvents() {
   $('scroll-bottom').onclick = () => activeTerm(current())?.term.scrollToBottom();
   $('sidebar-toggle').onclick=async()=>{vault.data.preferences.sidebarCollapsed=!prefs().sidebarCollapsed;try{localStorage.setItem('jaunt-sidebar-collapsed',String(prefs().sidebarCollapsed));}catch{}document.body.classList.toggle('sidebar-collapsed',prefs().sidebarCollapsed);$('sidebar-toggle').setAttribute('aria-expanded',String(!prefs().sidebarCollapsed));$('sidebar-toggle').setAttribute('aria-label',prefs().sidebarCollapsed?tr('Expand sidebar'):tr('Collapse sidebar'));await persist();fitActive();};
   $('settings-button').onclick = () => setView('settings'); $('lock-button').onclick = () => lockWorkspace().catch(report);
-  for (const id of ['new-session-top', 'new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
+  for (const id of ['new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
   $('split-below').onclick = () => {try {arrangePanes('y');} catch(e) {report(e);}};
   $('new-session-folder').onclick = () => browseNewSession().catch(report);
   $('rename-session').onclick = () => { try { renameSession(); } catch(e) { report(e); } };

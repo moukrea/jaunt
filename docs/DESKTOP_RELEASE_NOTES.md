@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.19
+
+- Bundles the beta.25 interface (host symbol and switcher in the top bar, tinted per-host activity strip).
+
 # jaunt desktop 0.1.0-beta.18
 
 - Bundles the beta.24 interface (split picker under its button, Enter/Escape in rename).

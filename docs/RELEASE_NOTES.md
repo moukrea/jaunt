@@ -1,3 +1,12 @@
+# jaunt 0.1.0-beta.25
+
+- Top bar: the host is shown with a monitor icon (local host) or a globe (remote host) coloured by its connection state (green online, accent while connecting or reconnecting, red offline). The "Encrypted" label, its dot and the top New shell button are gone (the tab strip keeps New shell). Clicking the host name opens a menu to switch to another paired host. Latency stays on the right and is visible on mobile too.
+- High latency no longer recolours the whole bar: the latency text itself turns the accent colour with the bold warning.
+- Toasts about a host (program notifications, shared clipboard, revocation, test delivery) carry the host's name and icon, so a notice is never ambiguous with several hosts paired.
+- Activity strip: tinted by the state of its most important operation (blue running, accent needs attention, red failed, green done), one operation shown at a time unless the history is opened, and only the selected host's operations; other hosts show a badge on their sidebar entry when something of theirs is running or needs attention.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.24
 
 - The split picker (new shell or existing session for the second pane) opens right under the split button that was clicked, left edges aligned, instead of at the far side of the terminal. It closes on Escape or a click elsewhere.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real interrupted handshakes/RPCs, bounded feedback and stable operation controls."""
-import asyncio,json,signal
+import asyncio,re,json,signal
 from playwright.async_api import async_playwright,expect
 from browser_e2e import Harness,terminal_command,until,ROOT
 async def main():
@@ -45,7 +45,14 @@ async def main():
    await expect(page.locator('#activity')).to_contain_text('Cancelled by user')
    await page.evaluate("async()=>{const {activity}=await import('./js/activity.mjs');for(let i=0;i<8;i++)activity('completed-'+i,'Completed transfer '+i).finish('Uploaded and verified');}")
    await expect(page.locator('#activity .activity-row:visible')).to_have_count(1)
-   await page.get_by_role('button',name='Show history (9)',exact=True).click();await expect(page.locator('#activity .activity-row:visible')).to_have_count(9)
+   await expect(page.locator('#activity')).to_have_attribute('data-tone','done')
+   # A failed and a running operation: the strip shows only the most important one, tinted accordingly; never a stack.
+   await page.evaluate("async()=>{const {activity}=await import('./js/activity.mjs');activity('running-x','Running thing').update({status:'Uploading…',percent:40});activity('failed-x','Failed thing').fail(new Error('disk full'));}")
+   await expect(page.locator('#activity')).to_have_attribute('data-tone','error');await expect(page.locator('#activity .activity-row:visible')).to_have_count(1);await expect(page.locator('#activity .activity-row:visible')).to_contain_text('Failed thing')
+   await page.evaluate("async()=>{const {activity}=await import('./js/activity.mjs');activity('failed-x','Failed thing').finish('ok');}")
+   await expect(page.locator('#activity')).to_have_attribute('data-tone','running');await expect(page.locator('#activity .activity-row:visible')).to_contain_text('Running thing')
+   await page.evaluate("async()=>{const {activity}=await import('./js/activity.mjs');activity('running-x','Running thing').finish('ok');}")
+   await page.get_by_role('button',name='Show history (11)',exact=True).click();await expect(page.locator('#activity .activity-row:visible')).to_have_count(11)
    await page.get_by_role('button',name='Hide history',exact=True).click()
    await page.set_viewport_size({'width':390,'height':460});await asyncio.sleep(.4)
    assert await page.evaluate("document.querySelector('#terminal-stage').getBoundingClientRect().bottom<=document.querySelector('.terminal-footer').getBoundingClientRect().top+1")
@@ -64,7 +71,25 @@ async def main():
    await page.get_by_label('Friendly host name').fill('machine Y')
    await page.get_by_label('Friendly host name').press('Tab')
    await expect(page.locator('#machine-title')).to_have_text('machine Y')
-   await page.locator('#machine-list').get_by_role('button',name='machine X').click()
+   # The host name in the top bar opens a switcher listing the paired hosts; a remote online host shows a green globe.
+   await expect(page.locator('#host-symbol svg')).to_have_attribute('data-icon-name','globe');await expect(page.locator('#host-symbol')).to_have_class(re.compile('online'))
+   await page.locator('#host-switch').click();await expect(page.locator('.host-menu .host-menu-item')).to_have_count(2)
+   await page.locator('.host-menu').get_by_role('menuitem',name=re.compile('machine X')).click()
+   await expect(page.locator('#machine-title')).to_have_text('machine X');await expect(page.locator('.host-menu')).to_have_count(0)
+   print('PASS the top bar host name switches hosts from a menu; host symbol shows type and state',flush=True)
+   # Operations are scoped to their host: X's failed job is not shown while Y is selected, but Y's sidebar entry for X carries a badge.
+   room_x=json.loads(other.cli('status'))['machine']['room']
+   await page.evaluate("async r=>{const {activity}=await import('./js/activity.mjs');activity('x-job','X only job',r).fail(new Error('boom'));}",room_x)
+   await expect(page.locator('#activity')).to_contain_text('X only job')
+   await page.locator('#host-switch').click();await page.locator('.host-menu').get_by_role('menuitem',name=re.compile('machine Y')).click()
+   await expect(page.locator('#machine-title')).to_have_text('machine Y');await expect(page.locator('#activity')).not_to_contain_text('X only job')
+   await expect(page.locator('#machine-list').get_by_role('button',name='machine X').locator('.notif-badge')).to_have_text('1')
+   await page.locator('#machine-list').get_by_role('button',name='machine X').click();await expect(page.locator('#activity')).to_contain_text('X only job')
+   print('PASS activity is scoped to the selected host; other hosts show a badge',flush=True)
+   # A host notification toast names its host.
+   other.cli('notify','Hello from X')
+   await expect(page.locator('#toasts .toast').filter(has_text='Hello from X').locator('.toast-host')).to_contain_text('machine X',timeout=15000)
+   print('PASS toasts name the host they are about',flush=True)
    await expect(page.get_by_label('Friendly host name')).to_have_value('machine X')
    # Forget must target X, not the previously rendered Y. Y's live shell remains.
    await page.locator('#settings-content').get_by_role('button',name='Forget',exact=True).click()
