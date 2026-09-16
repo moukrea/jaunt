@@ -74,7 +74,7 @@ Apri **jaunt** dal menu delle applicazioni dell'host oppure esegui `jaunt gui`. 
 
 Le due **icone di divisione** dispongono i riquadri affiancati o uno sopra l'altro sul desktop, usando una sessione nuova o esistente. Ogni riquadro può essere spostato in una scheda propria. Le disposizioni sopravvivono alla riapertura; su mobile le loro sessioni compaiono come schede normali. La barra laterale del desktop può essere ridotta, e la preferenza viene mantenuta. Le Impostazioni comprendono i nomi descrittivi degli host, l'ordinamento e l'host predefinito, i temi scuro/chiaro/di sistema/circadiano e i controlli delle notifiche. Le impostazioni dell'host seguono immediatamente la macchina selezionata, compresi la sua identità e i controlli di aggiornamento. L'app desktop nativa gestisce anche il servizio host locale e si associa ad altri host; i controlli del servizio locale compaiono solo per l'host locale, mentre gli aggiornamenti dell'applicazione desktop restano separati. Consulta la [guida allo spazio di lavoro](docs/WORKSPACE.md) e il [rapporto di validazione](docs/WORKSPACE_VALIDATION.md).
 
-**Bridge Claude Code ↔ Codex.** Quando su un host sono installati sia `claude` che `codex`, le Impostazioni mostrano un interruttore. Se attivato, le sessioni reali di Claude Code e Codex aperte in shell jaunt sullo stesso progetto si conoscono automaticamente (come normale contesto degli hook) e possono inviare messaggi alla conversazione aperta dell'altra, su tua richiesta o di propria iniziativa. È disattivato per impostazione predefinita; disattivandolo si rimuove tutto ciò che jaunt ha aggiunto a entrambi i runtime. Consulta la [guida al bridge](docs/BRIDGE.md).
+**Bridge Claude Code ↔ Codex.** Quando su un host sono installati sia `claude` che `codex`, le Impostazioni mostrano un interruttore. Se attivato, le sessioni reali di Claude Code e Codex aperte in shell jaunt sullo stesso progetto si conoscono automaticamente (come normale contesto degli hook) e possono inviare messaggi alla conversazione aperta dell'altra, su tua richiesta o di propria iniziativa. È disattivato per impostazione predefinita; disattivandolo si rimuove tutto ciò che jaunt ha aggiunto a entrambi i runtime. Consulta la [guida al bridge](../../../docs/BRIDGE.md).
 
 ## Gestione delle immagini
 
@@ -163,7 +163,7 @@ L'inglese è la lingua canonica della documentazione. Traduzioni: [Français](..
 
 Web, Android e desktop selezionano automaticamente la lingua di sistema. Puoi cambiarla in **Impostazioni → Lingua**. La CLI usa la locale di sistema; `jaunt --language fr --help` la sovrascrive per una singola invocazione e `jaunt language fr` salva la preferenza. Usa `system` per ripristinare la selezione automatica. Nomi dei comandi, argomenti, output del terminale e contenuti dell'utente non vengono mai tradotti.
 
-L'indirizzo web pubblico presenta il progetto; **Apri lo spazio di lavoro** entra nel client. Le app native aprono direttamente lo spazio di lavoro.
+L'indirizzo web pubblico presenta il progetto; **Apri spazio di lavoro** entra nel client. Le app native aprono direttamente lo spazio di lavoro.
 
 ## App Android
 
