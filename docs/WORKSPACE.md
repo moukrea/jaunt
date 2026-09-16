@@ -64,3 +64,9 @@ The activity strip remains visible through image preparation, upload, verificati
 ### Foreground program icons
 
 Tabs and pane captions use the locally bundled Meteor Icons Claude and OpenAI marks while the owned PTY foreground program is `claude` or `codex`. Detection refreshes once per second and sends only the program category, never command arguments. Returning to the shell restores the terminal icon. Friendly session names do not affect detection. Existing tmux sessions and unrecognized wrappers retain the terminal icon. Meteor Icons 4.4.0 is MIT licensed; its license is included in the web bundle.
+
+## Closing, terminating and sharing sessions
+
+- The **×** on a tab or on a pane caption opens a small choice: **Close view** keeps the shell running on the host (it stays in the Sessions list), **Terminate session** ends the shell and its jobs for every viewer. Panes in a split view close directly from their caption; **Move pane to its own tab** stays next to it.
+- On a touch screen, when the tab strip is wider than the screen, hold a tab still for a moment before dragging it; a plain swipe scrolls the strip.
+- **Share open sessions** (Settings → selected machine) makes every client and the host itself show the same tabs, panes, order and active session for that host. The host stores that workspace; opening, closing, reordering or splitting anywhere is followed everywhere, and sessions that end are pruned. The sub-option **Only displayed sessions exist** turns the × into a termination (no choice shown) and hides the Sessions list for that host, because a session that is not displayed no longer exists.

@@ -195,3 +195,30 @@ async def test_update_status_changes_are_pushed_once_per_change(tmp_path):
     atomic_json(tmp_path/'update-status.json',{'state':'installed','version':'v0.1.0-beta.5'})
     await host.push_update_status()
     assert len(sent)==2 and sent[1]['state']=='installed'
+
+@pytest.mark.asyncio
+async def test_shared_workspace_follows_the_host_and_prunes_dead_sessions(tmp_path):
+    from jaunt.daemon import Host
+    from jaunt.state import State
+    host=Host(State(tmp_path));sent=[]
+    async def broadcast(v):sent.append(v)
+    host.broadcast=broadcast
+    class S:
+        def __init__(s,id):s.id=id
+    host.sessions.items={'aaa':S('aaa'),'bbb':S('bbb')}
+    class P:routing_id='peer-1'
+    assert host.workspace()['sync'] is False
+    w=await host.workspace_configure(P(),{'sync':True,'openSessions':['aaa','bbb','zzz'],'layouts':[{'direction':'row','children':[{'id':'aaa'},{'id':'bbb'}],'sizes':[0.5,0.5]},{'id':'zzz'}],'tabOrder':['bbb','aaa'],'active':'bbb'})
+    assert w['sync'] and w['openSessions']==['aaa','bbb'] and w['layouts']==[{'direction':'row','children':[{'id':'aaa'},{'id':'bbb'}],'sizes':[0.5,0.5]}] and w['tabOrder']==['bbb','aaa'] and w['active']=='bbb' and w['revision']==1
+    assert sent[-1]['type']=='workspace.changed' and sent[-1]['from']=='peer-1'
+    # An identical update is a no-op; a real one bumps the revision and is broadcast.
+    assert (await host.workspace_update(P(),w))['revision']==1
+    w2=await host.workspace_update(P(),{**w,'active':'aaa'});assert w2['revision']==2 and w2['active']=='aaa'
+    # displayedOnly needs sync; turning sync off drops it.
+    assert (await host.workspace_configure(P(),{'displayedOnly':True}))['displayedOnly'] is True
+    # A session that ended leaves the shared workspace and a split collapses to its survivor.
+    del host.sessions.items['bbb'];await host.workspace_prune()
+    w3=host.workspace();assert w3['openSessions']==['aaa'] and w3['layouts']==[{'id':'aaa'}] and w3['tabOrder']==['aaa'] and sent[-1]['from']==''
+    off=await host.workspace_configure(P(),{'sync':False});assert off['sync'] is False and off['displayedOnly'] is False
+    with pytest.raises(ValueError,match='synchronization is off'):
+        await host.workspace_update(P(),w)

@@ -252,7 +252,7 @@ class Host:
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
                 "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
-                "updates": update_status(self.state.root), "bridge": self.bridge.status(),
+                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
     def attention(self, session, event, title="", body=""):
@@ -276,6 +276,8 @@ class Host:
 
     async def sessions_changed(self) -> None:
         await self.broadcast({"type": "sessions", "sessions": self.sessions.list()})
+        with contextlib.suppress(Exception):
+            await self.workspace_prune()
 
     async def receive(self, message: dict) -> None:
         kind = message.get("type")
@@ -410,6 +412,10 @@ class Host:
             return configure(p.get("automatic"))
         if method == "updates.install":
             return self.launch_update(allow_restart=p.get("allowRestart") is True)
+        if method == "workspace.configure":
+            return await self.workspace_configure(peer, p)
+        if method == "workspace.update":
+            return await self.workspace_update(peer, p)
         if method == "bridge.status":
             await self.bridge.detect(force=p.get("refresh") is True)
             return self.bridge.status()
@@ -492,6 +498,77 @@ class Host:
                 self.state.save()
         return {"delivered": results.count("sent"), "results": results,
                 "liveClients": sum(p.ready for p in self.peers.values())}
+
+    # ---- shared workspace (open sessions, layouts) -------------------------------
+    def workspace(self) -> dict:
+        data = self.state.data.get("workspace") or {}
+        return {"sync": bool(data.get("sync")), "displayedOnly": bool(data.get("displayedOnly")),
+                "openSessions": list(data.get("openSessions") or []), "layouts": list(data.get("layouts") or []),
+                "tabOrder": list(data.get("tabOrder") or []), "active": str(data.get("active") or ""),
+                "revision": int(data.get("revision") or 0)}
+
+    def _workspace_state(self, p: dict, base: dict) -> dict:
+        ids = {s.id for s in self.sessions.items.values()}
+        def clean_ids(values):
+            return [v for v in values if isinstance(v, str) and v in ids][:64] if isinstance(values, list) else []
+        def clean_tree(tree):
+            if not isinstance(tree, dict):
+                return None
+            if "id" in tree:
+                return {"id": tree["id"]} if tree["id"] in ids else None
+            children = [t for t in (clean_tree(c) for c in tree.get("children") or []) if t]
+            if not children:
+                return None
+            if len(children) == 1:
+                return children[0]
+            out = {"direction": tree.get("direction") if tree.get("direction") in ("row", "column") else "row", "children": children}
+            sizes = tree.get("sizes")
+            if isinstance(sizes, list) and len(sizes) == len(children) and all(isinstance(x, (int, float)) for x in sizes):
+                out["sizes"] = sizes
+            return out
+        layouts = [t for t in (clean_tree(t) for t in (p.get("layouts") if isinstance(p.get("layouts"), list) else [])) if t][:64]
+        active = p.get("active") if isinstance(p.get("active"), str) and p.get("active") in ids else ""
+        return {**base, "openSessions": clean_ids(p.get("openSessions")), "layouts": layouts,
+                "tabOrder": clean_ids(p.get("tabOrder")), "active": active}
+
+    async def workspace_configure(self, peer, p: dict) -> dict:
+        current = self.workspace()
+        sync = p.get("sync") if isinstance(p.get("sync"), bool) else current["sync"]
+        displayed_only = p.get("displayedOnly") if isinstance(p.get("displayedOnly"), bool) else current["displayedOnly"]
+        data = {**current, "sync": sync, "displayedOnly": displayed_only and sync}
+        if sync and not current["sync"]:
+            # The client turning it on seeds the shared workspace with what it shows now.
+            data = self._workspace_state(p, data)
+        data["revision"] = current["revision"] + 1
+        self.state.data["workspace"] = data
+        self.state.save()
+        await self.broadcast({"type": "workspace.changed", "workspace": self.workspace(), "from": peer.routing_id})
+        return self.workspace()
+
+    async def workspace_update(self, peer, p: dict) -> dict:
+        current = self.workspace()
+        if not current["sync"]:
+            raise ValueError("Workspace synchronization is off on this host")
+        data = self._workspace_state(p, current)
+        if all(data[k] == current[k] for k in ("openSessions", "layouts", "tabOrder", "active")):
+            return current
+        data["revision"] = current["revision"] + 1
+        self.state.data["workspace"] = data
+        self.state.save()
+        await self.broadcast({"type": "workspace.changed", "workspace": self.workspace(), "from": peer.routing_id})
+        return self.workspace()
+
+    async def workspace_prune(self) -> None:
+        """Sessions that no longer exist leave the shared workspace."""
+        current = self.workspace()
+        if not current["sync"]:
+            return
+        data = self._workspace_state(current, current)
+        if any(data[k] != current[k] for k in ("openSessions", "layouts", "tabOrder", "active")):
+            data["revision"] = current["revision"] + 1
+            self.state.data["workspace"] = data
+            self.state.save()
+            await self.broadcast({"type": "workspace.changed", "workspace": self.workspace(), "from": ""})
 
     async def exec_for_upgrade(self, target: Path) -> dict:
         """Replace the runtime in place once in-flight client actions have drained.

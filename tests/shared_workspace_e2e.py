@@ -98,7 +98,7 @@ async def main():
             await local.get_by_label('Name',exact=True).fill('Second pane')
             await local.get_by_role('button',name='Save',exact=True).click()
             await local.set_viewport_size({'width':1300,'height':900})
-            await remote.locator('.tab-close').click()
+            await remote.locator('.tab-close').click();await remote.locator('.close-menu').get_by_role('button',name='Close view',exact=True).click()
             assert json.loads(h.cli('status'))['sessions'][0]['alive']
             await remote.locator('#list-sessions').click();await remote.locator('#modal .settings-row').filter(has_text='Shared fixture').get_by_role('button',name='Open',exact=True).click()
             assert 'local-proof' in await scrollback(remote) or (h.work/'local.txt').read_text()=='local-proof'

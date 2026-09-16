@@ -1,6 +1,6 @@
-# jaunt Android 0.1.0-beta.10
+# jaunt Android 0.1.0-beta.11
 
-This update adds the **AI sessions** settings group for the selected host: one switch for the Claude Code ↔ Codex bridge (shown only when both runtimes are installed on that host), the list of bridged sessions, and activity rows for cross-runtime messages with their real delivery state. It keeps the beta.9 update experience (pushed host update progress, *Updating host · shells are kept*).
+This update brings the workspace refinements of host beta.19: shared open sessions per host with the *Only displayed sessions exist* sub-option, a Close view / Terminate session choice on the × of tabs, a held press before dragging a tab when the tab strip scrolls (a swipe scrolls it), switch-style settings toggles, and the *New shell in folder* button next to *New shell*. It keeps the **AI sessions** settings group for the selected host: one switch for the Claude Code ↔ Codex bridge (shown only when both runtimes are installed on that host), the list of bridged sessions, and activity rows for cross-runtime messages with their real delivery state. It keeps the beta.9 update experience (pushed host update progress, *Updating host · shells are kept*).
 
 Install the signed `.apk` asset below on Android 8 or newer. Allow installation from your browser when Android asks, open jaunt, then scan the QR produced by `jaunt pair` on your host. No Android, GitHub or Cloudflare account is required to connect. Saved pairing survives app updates.
 
