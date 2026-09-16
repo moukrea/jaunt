@@ -82,7 +82,7 @@
     </div>
   </aside>
   <main class="main">
-    <header class="topbar">
+    <header id="topbar" class="topbar">
       <button class="icon-button mobile-only" id="menu-button" aria-label="Open machines"><span data-icon="menu"></span></button>
       <div class="breadcrumb"><span id="breadcrumb-prefix">Workspace</span><span class="breadcrumb-separator">/</span><strong id="machine-title">Overview</strong></div>
       <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection"><i></i><span>Not connected</span></span><button id="new-session-top" class="button primary small" hidden><span data-icon="plus" data-size="16"></span><span>New shell</span></button></div>
@@ -120,6 +120,7 @@
     <section id="activity" class="activity-strip" aria-label="Activity" hidden></section>
     <section id="workspace" class="workspace" hidden>
       <div id="terminal-view" class="terminal-view">
+        <div id="latency-overlay" class="latency-overlay" role="status" aria-live="polite" hidden><div class="latency-card"><span class="latency-spinner" aria-hidden="true"></span><h2>Extreme latency</h2><p id="latency-overlay-text">Round trips to this host currently take more than 15 seconds. jaunt is waiting for the connection to settle before showing the terminals, so that what you type matches what you see.</p><button id="latency-override" class="text-button">Use anyway (expect lag and a rough experience)</button></div></div>
         <div class="tabs-row"><button id="list-sessions" class="button session-control"><span data-icon="terminal" data-size="15"></span>Sessions</button><button id="arrange-panes" class="button session-control desktop-only" aria-label="Split side by side" title="Split side by side"><span data-icon="split" data-size="15"></span></button><button id="split-below" class="button session-control desktop-only" aria-label="Split above and below" title="Split above and below"><span data-icon="splitRows" data-size="15"></span></button><div id="tabs" class="tabs" role="tablist" aria-label="Shell sessions"></div><button id="new-session-folder" class="icon-button" aria-label="New shell in folder" title="New shell in folder"><span data-icon="folder" data-size="18"></span></button><button id="new-session-tab" class="icon-button" aria-label="Create shell"><span data-icon="plus" data-size="18"></span></button></div>
         <div id="terminal-stage" class="terminal-stage">
           <div id="terminal-empty" class="terminal-empty"><span class="empty-icon" data-icon="terminal" data-size="32"></span><h2>A shell of your own.</h2><p>Create a shell, or reopen one from your session list.<br>Closing this page won't close your shell.</p><button id="new-session-empty" class="button primary"><span data-icon="plus" data-size="17"></span>New shell</button></div>

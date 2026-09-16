@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.14 (versionCode 14)
+
+- Bundles the beta.22 interface (latency tiers). No Android-specific change.
+
 # jaunt Android 0.1.0-beta.13 (versionCode 13)
 
 - Bundles the beta.21 interface: *System* language entry, refreshed public page copy. No Android-specific change.

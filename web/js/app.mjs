@@ -302,8 +302,7 @@ function renderConnection() {
   const restarting = a && state !== 'online' && a.link.enabled && a.restartExpected && Date.now() - a.restartExpected < 180000;
   $('connection').className = 'connection ' + (restarting ? 'reconnecting' : state);
   $('connection').lastElementChild.textContent = restarting ? tr('Updating host') : labels[state] || state;
-  $('latency').hidden = !(state === 'online' && a.link.latency != null);
-  $('latency').textContent = a?.link.latency != null ? `${a.link.latency} ms` : '';
+  renderLatency(a, state);
   $('connection-banner').hidden = !a || state === 'online';
   if(!a || state==='online')return;
   const messages={connecting:tr('Connecting with the saved device key…'),authenticating:a.machine.pending?tr('Pairing this device and verifying the host…'):tr('Verifying the saved encrypted connection…'),waiting:tr('The host is offline. jaunt will reconnect automatically when it returns.'),reconnecting:tr('Network interrupted. Reconnecting automatically with the same pairing.')};
@@ -314,6 +313,28 @@ function renderConnection() {
   if(a.connectionError || /revoked|expired|unknown device/i.test(a.link.message||''))$('connection-banner').append(button(tr('Connection settings'),()=>setView('settings'),'text-button'));
 
 }
+// Latency tiers with hysteresis so a wobbling link does not flash the warnings on and off:
+// high (≥ 2 s, back to normal under 1.5 s) recolours the top bar; extreme (≥ 15 s, back under 10 s)
+// covers the terminals until the link settles, unless the user chooses to go on anyway.
+function renderLatency(a, state) {
+  const lat = state === 'online' && a?.link.latency != null ? a.link.latency : null;
+  const high = lat != null && (lat >= 2000 || (a.highLatency && lat >= 1500));
+  const extreme = lat != null && (lat >= 15000 || (a?.extremeLatency && lat >= 10000));
+  if (a) { a.highLatency = high; if (!extreme) a.latencyOverride = false; a.extremeLatency = extreme; }
+  $('topbar').classList.toggle('high-latency', high);
+  $('latency').hidden = lat == null;
+  $('latency').replaceChildren(...(high ? [el('strong', {text: tr('High latency, expect slowness')}), ' '] : []), lat == null ? '' : `${lat} ms`);
+  const cover = extreme && !a.latencyOverride && view === 'terminal';
+  $('latency-overlay').hidden = !cover;
+  if (cover) $('latency-overlay-text').textContent = tr('Round trips to this host currently take {0} seconds. jaunt is waiting for the connection to settle before showing the terminals, so that what you type matches what you see.', Math.round(lat / 1000));
+}
+$('latency-override').onclick = () => { const a = current(); if (a) a.latencyOverride = true; renderConnection(); };
+// Test hook (?debug): pins the current link's latency to a value; real probes no longer override it.
+if (new URL(location.href).searchParams.has('debug')) window.jauntSimulateLatency = ms => {
+  const a = current(); if (!a) return;
+  if (!a.link.simulated) { const emit = a.link.emit.bind(a.link); a.link.emit = (type, d) => { if (type === 'latency' && d !== a.link.simulatedValue) return; emit(type, d); }; Object.defineProperty(a.link, 'latency', {get: () => a.link.simulatedValue, set() {}}); a.link.simulated = true; }
+  a.link.simulatedValue = ms; a.link.emit('latency', ms);
+};
 function renderMachines() {
   $('machine-count').textContent = machines.size;
   const nodes = [...machines.values()].sort((a,b) => vault.data.machines.indexOf(a.machine) - vault.data.machines.indexOf(b.machine)).map(a => {
