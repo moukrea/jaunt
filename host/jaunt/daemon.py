@@ -729,7 +729,7 @@ class Host:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self.stopping.set)
         transport_task = asyncio.create_task(self.transport.run())
-        detection = asyncio.create_task(self.bridge.detect())
+        detection = asyncio.create_task(self.bridge.refresh_integrations())
         detection.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
         maintenance = asyncio.create_task(self.maintenance())
         update_watch = asyncio.create_task(self.watch_update())

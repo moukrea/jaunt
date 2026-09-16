@@ -47,12 +47,20 @@ def runtime_python() -> str:
     return sys.executable
 
 
+def state_argument() -> str:
+    from .state import state_dir
+    return str(state_dir())
+
+
 def hook_command(runtime: str) -> str:
-    return f'"{runtime_python()}" -m {MARKER} {runtime}'
+    import shlex
+    # The host state directory travels as an argument: hooks must reach the host even
+    # when the runtime hands them a scrubbed environment.
+    return f'"{runtime_python()}" -m {MARKER} {runtime} --state {shlex.quote(state_argument())}'
 
 
 def mcp_command(runtime: str) -> list[str]:
-    return [runtime_python(), "-m", "jaunt.cli", "bridge-mcp", runtime]
+    return [runtime_python(), "-m", "jaunt.cli", "bridge-mcp", runtime, "--state", state_argument()]
 
 
 def mcp_env() -> str:

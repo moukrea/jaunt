@@ -67,8 +67,6 @@ def claude_inbox() -> dict:
 def hook_main(runtime: str) -> int:
     """Called by the runtime for each configured hook event with JSON on stdin."""
     session = jaunt_session()
-    if not session:
-        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except ValueError:
@@ -83,13 +81,16 @@ def hook_main(runtime: str) -> int:
     pid = os.getppid()
     if runtime == "claude" and os.environ.get("CLAUDE_PID", "").isdigit():
         pid = int(os.environ["CLAUDE_PID"])
-    request = {"runtime": runtime, "session": session, "conversation": conversation, "pid": pid, "cwd": cwd,
-               "event": event, "source": str(payload.get("source", "")), "project": project_of(cwd),
+    # The host recognises the hook by the terminal it runs in, so a stripped
+    # environment (no jaunt_SESSION_ID) still registers; outside a jaunt shell the
+    # host answers with a refusal and nothing is printed.
+    request = {"runtime": runtime, "session": session, "conversation": conversation, "pid": pid, "hookPid": os.getpid(),
+               "cwd": cwd, "event": event, "source": str(payload.get("source", "")), "project": project_of(cwd),
                "inbox": claude_inbox() if runtime == "claude" else {}}
     try:
-        result = control("bridge.register", request)
+        result = control("bridge.register", request, timeout=15)
     except Exception:
-        return 0  # host stopped or bridge off: stay silent
+        return 0  # host stopped, bridge off or not a jaunt shell: stay silent
     context = result.get("context") if isinstance(result, dict) else ""
     if context and event in ("start", "prompt", "compact"):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context}}))

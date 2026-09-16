@@ -9,18 +9,23 @@ from jaunt.bridge import Bridge, Participant
 class FakeSession:
     def __init__(self,id,name,pid,cwd,program='',alive=True):self.id,self.name,self.pid,self.cwd,self.program,self.alive=id,name,pid,cwd,program,alive
 
+REAL_SESSION_FOR_PID=Bridge.session_for_pid
+
 @pytest_asyncio.fixture
 async def host(tmp_path,monkeypatch):
     h=Host(State(tmp_path));sent=[]
     async def broadcast(v):sent.append(v)
     h.broadcast=broadcast;h.sent=sent
-    monkeypatch.setattr(Bridge,'_descends',staticmethod(lambda pid,anc:True))
+    # Process identity is faked per test: claims[pid] -> jaunt session id.
+    h.claims={}
+    monkeypatch.setattr(Bridge,'session_for_pid',lambda self,pid:h.claims.get(pid,''))
     h.state.data['bridge']={'enabled':True};h.state.save()
     return h
 
 def project(root,common=''):return {'root':root,'common':common,'kind':'git' if common else 'dir'}
 
 async def register(h,session,runtime,conv,cwd,root=None,event='start',pid=4242,source='startup'):
+    h.claims[pid]=session
     return await h.bridge.register({'runtime':runtime,'session':session,'conversation':conv,'pid':pid,'cwd':cwd,'event':event,'source':source,'project':project(root or cwd)})
 
 @pytest.mark.asyncio
@@ -45,7 +50,7 @@ async def test_awareness_is_automatic_symmetric_and_project_scoped(host):
 
 @pytest.mark.asyncio
 async def test_worktrees_of_one_repository_are_related(host):
-    h=host;h.sessions.items={'s1':FakeSession('s1','A',1,'/repo','claude'),'s2':FakeSession('s2','B',2,'/repo-wt','codex')}
+    h=host;h.sessions.items={'s1':FakeSession('s1','A',1,'/repo','claude'),'s2':FakeSession('s2','B',2,'/repo-wt','codex')};h.claims={1:'s1',2:'s2'}
     await h.bridge.register({'runtime':'claude','session':'s1','conversation':'claude-conv-000001','pid':1,'cwd':'/repo','event':'start','project':project('/repo','/repo/.git')})
     r=await h.bridge.register({'runtime':'codex','session':'s2','conversation':'codex-thread-00001','pid':2,'cwd':'/repo-wt','event':'start','project':project('/repo-wt','/repo/.git')})
     assert 'another worktree of the same repository' in r['context']
@@ -113,6 +118,14 @@ async def test_registration_requires_a_live_jaunt_shell_and_same_runtime_is_refu
     h=host;h.sessions.items={'s1':FakeSession('s1','A',1,'/p','claude'),'s2':FakeSession('s2','B',2,'/p','claude')}
     with pytest.raises(ValueError,match='not a running jaunt shell'):
         await register(h,'nope','claude','claude-conv-000001','/p')
+    # A hook whose process belongs to another terminal cannot register a session it did not run in.
+    h.claims[7777]='s2'
+    with pytest.raises(ValueError,match='does not belong'):
+        await h.bridge.register({'runtime':'claude','session':'s1','conversation':'claude-conv-000009','pid':7777,'cwd':'/p','event':'start','project':project('/p')})
+    # A stripped environment (no session id) still registers through the hook's own process.
+    h.claims[8888]='s1'
+    ok=await h.bridge.register({'runtime':'claude','session':'','conversation':'claude-conv-000010','pid':0,'hookPid':8888,'cwd':'/p','event':'start','project':project('/p')})
+    assert ok['id']=='claude:claude-c' and h.bridge.participants['claude:claude-conv-000010'].session=='s1'
     await register(h,'s1','claude','claude-conv-000001','/p');await register(h,'s2','claude','claude-conv-000002','/p')
     assert h.bridge.peers_for({'runtime':'claude','session':'s1','conversation':'claude-conv-000001'})['peers']==[]
     # Terminal gone: participant ends, sweep reports the change.
@@ -221,7 +234,9 @@ async def test_claude_delivery_frames_authenticate_then_inject(tmp_path,monkeypa
 async def test_mcp_calls_resolve_their_terminal_by_process_ancestry(host,monkeypatch):
     h=host;h.sessions.items={'s1':FakeSession('s1','A',1000,'/p','claude'),'s2':FakeSession('s2','B',2000,'/p','codex')}
     await register(h,'s1','claude','claude-conv-000001','/p',pid=1001);await register(h,'s2','codex','codex-thread-00001','/p',pid=2001)
+    monkeypatch.setattr(Bridge,'session_for_pid',REAL_SESSION_FOR_PID)
     monkeypatch.setattr(Bridge,'_ancestors',classmethod(lambda cls,pid:{2050:[2050,2001,2000,5,1]}.get(pid,[pid])))
+    monkeypatch.setattr(Bridge,'tty_of_pid',staticmethod(lambda pid:''))
     # A Codex MCP server started without the PTY environment still finds its terminal and conversation.
     resolved=h.bridge.resolve({'runtime':'codex','session':'','conversation':'current','pid':2050})
     assert resolved['session']=='s2' and resolved['conversation']=='codex-thread-00001'
@@ -239,3 +254,15 @@ async def test_detection_finds_per_user_installs_outside_the_service_path(host,t
     detected=await host.bridge.detect(force=True)
     assert detected['visible'] and detected['available'],detected
     assert detected['runtimes']['claude']['path']==str(home/'.local/bin/claude') and detected['runtimes']['codex']['version']=='9.9.9'
+
+
+def test_terminal_identity_matches_a_reparented_process(host,monkeypatch):
+    # No ancestry link (the runtime daemonised or was reparented) but the process still
+    # sits on the PTY the host owns: that terminal identifies it.
+    h=host;h.sessions.items={'s1':FakeSession('s1','A',1000,'/p','claude'),'s2':FakeSession('s2','B',2000,'/p','codex')}
+    for s in h.sessions.items.values():s.fd=5
+    monkeypatch.setattr(Bridge,'session_for_pid',REAL_SESSION_FOR_PID)
+    monkeypatch.setattr(Bridge,'_ancestors',classmethod(lambda cls,pid:[pid,1]))
+    monkeypatch.setattr(Bridge,'tty_of_pid',staticmethod(lambda pid:{4242:'dev:34818'}.get(pid,'')))
+    monkeypatch.setattr(Bridge,'session_tty',lambda self,s:{'s1':'dev:34817','s2':'dev:34818'}[s.id])
+    assert h.bridge.session_for_pid(4242)=='s2' and h.bridge.session_for_pid(4243)==''
