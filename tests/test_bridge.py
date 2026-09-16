@@ -286,3 +286,20 @@ async def test_startup_detection_runs_even_when_the_bridge_is_off(host,monkeypat
     monkeypatch.setattr(Bridge,'detect',fake_detect)
     await h.bridge.refresh_integrations()
     assert calls==[True] and h.bridge.status()['visible'] is True
+
+
+@pytest.mark.asyncio
+async def test_hook_under_a_wrapper_shell_registers_the_runtime_process_not_the_wrapper(host,monkeypatch):
+    # hook (pid 30) <- sh wrapper (pid 20, exits right after) <- codex (pid 10) <- jaunt shell (pid 2000)
+    h=host;h.sessions.items={'s2':FakeSession('s2','B',2000,'/p','codex')}
+    monkeypatch.setattr(Bridge,'session_for_pid',REAL_SESSION_FOR_PID)
+    monkeypatch.setattr(Bridge,'_ancestors',classmethod(lambda cls,pid:{30:[30,20,10,2000,1],20:[20,10,2000,1],10:[10,2000,1]}.get(pid,[pid])))
+    monkeypatch.setattr(Bridge,'tty_of_pid',staticmethod(lambda pid:''))
+    monkeypatch.setattr(Bridge,'command_of_pid',staticmethod(lambda pid:{20:'/bin/sh /state/bridge/hook-codex',10:'/home/u/.local/bin/codex'}.get(pid,'')))
+    monkeypatch.setattr(Bridge,'_alive',staticmethod(lambda pid:pid!=20))
+    r=await h.bridge.register({'runtime':'codex','session':'','conversation':'codex-thread-00009','pid':20,'hookPid':30,'cwd':'/p','event':'prompt','project':project('/p')})
+    participant=h.bridge.participants['codex:codex-thread-00009']
+    assert r['enabled'] and participant.session=='s2' and participant.pid==10
+    # The wrapper is gone but the runtime lives: the participant must survive the sweep.
+    assert not h.bridge.sweep() or participant.state!='ended'
+    assert participant.state!='ended'
