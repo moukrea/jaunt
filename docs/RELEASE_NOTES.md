@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.23
+
+- Fix: the top bar could turn the accent colour at normal latency (86 ms) without the warning text. The high-latency class was toggled with a non-boolean value on machines that had never been slow, and `classList.toggle` flips the class on every render in that case. Strict booleans now; the latency e2e checks that repeated normal renders never show the warning.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.22
 
 - Latency tiers. The client measures round trips continuously (more often while the link is degraded; an outstanding probe already counts). From 2 s the top bar turns the accent colour with **High latency, expect slowness** in bold next to the figure and the New shell button, on desktop and mobile, so slowness is not taken for a bug. From 15 s a waiting overlay with a spinner covers the tabs and terminals until the link settles (under 10 s); **Use anyway (expect lag and a rough experience)** lifts it for the current spike. Hysteresis on both tiers. Covered by `tests/latency_e2e.py` in CI.

@@ -16,7 +16,8 @@ async def main():
     await expect(p.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
     await p.locator('#new-session-tab').click();await expect(p.locator('#tabs .session-tab').first).to_be_visible()
     sim=lambda ms:p.evaluate(f'window.jauntSimulateLatency({ms})')
-    await sim(800);assert not await p.locator('#topbar').evaluate("e=>e.classList.contains('high-latency')") and await p.locator('#latency-overlay').is_hidden()
+    for ms in (800,86,120,90):   # repeated normal renders must never flip the warning on (toggle with a non-boolean did)
+     await sim(ms);assert not await p.locator('#topbar').evaluate("e=>e.classList.contains('high-latency')") and await p.locator('#latency-overlay').is_hidden(),f'warning shown at {ms} ms'
     await sim(2500);await expect(p.locator('#topbar')).to_have_class(re.compile("high-latency"));await expect(p.locator('#latency')).to_be_visible();await expect(p.locator('#latency strong')).to_have_text('High latency, expect slowness');await expect(p.locator('#latency')).to_contain_text('2500 ms')
     assert await p.locator('#latency-overlay').is_hidden()
     if SHOTS:await p.screenshot(path=f'{SHOTS}/latency-high-{name}.png')
