@@ -2,11 +2,11 @@
 
 <img src="web/assets/jaunt.png" width="96" alt="jaunt logo">
 
-**Your shells, your files, your machine. From your phone.**
+**Your machines, your shells, your files. On every screen.**
 
-jaunt provides native desktop and Android applications, a mobile/desktop web client, and a POSIX host. It connects you to real terminals, including arbitrary shells, Claude Code, and Codex. The static web app uses a shared relay to carry encrypted outbound connections from the host and client.
+jaunt connects the devices you carry to the machines you work on. Install a small host on each Linux or macOS machine, pair your phone, laptop or desktop once, and every one of them shows the same workspace: real shells in real PTYs, the files next to them, and the sessions you left running. Open, rename, split, reorder, close or terminate shells on any host from any device; with *shared open sessions* on, the same tabs, panes and active shell follow you from screen to screen. Claude Code and Codex run there like any other program, and when both are installed on a host, one switch lets their sessions on the same project know about each other and exchange messages. Clients: a browser (also installable as a PWA), a native Android app and a native desktop app; all three ship the same interface. Connections go host-out through a relay, end-to-end encrypted, with no open port, no VPN and no account.
 
-**Host: 0.1.0-beta.20 · Desktop: 0.1.0-beta.14 · Android: 0.1.0-beta.12.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.21 · Desktop: 0.1.0-beta.15 · Android: 0.1.0-beta.13.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -16,7 +16,7 @@ bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukr
 
 Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled. Compatible hosts retain their shell processes during runtime replacement and wait for transfers to finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.12/jaunt-android-v0.1.0-beta.12.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.13/jaunt-android-v0.1.0-beta.13.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -39,16 +39,20 @@ Pairing grants access as the **system account running the host**, with all of th
 
 | Area | Behavior |
 |---|---|
-| Terminals | Real PTYs, interactive keyboard, multiple tabs, create/rename/open/detach/terminate, shared sizing, mobile Ctrl/Alt/Esc/Tab/arrow keys |
-| Reconnection | Bounded history, automatic reconnection, remembered state; a browser disconnect does not close the shell |
+| Hosts | Pair as many Linux/macOS machines as you like; each keeps its own sessions, files, settings and friendly name; switch from one sidebar; default host and ordering |
+| Terminals | Real PTYs with your own shell, interactive keyboard, tabs, create/rename/open/detach/terminate, drag to reorder, split panes (side by side or stacked), shared sizing, mobile Ctrl/Alt/Esc/Tab/arrow keys, compose box for long input |
+| Shared open sessions | Per host: every client and the host itself show the same tabs, panes, order and active shell; optional "only displayed sessions exist" mode |
+| Reconnection | Bounded history, automatic reconnection, remembered state; a browser disconnect does not close the shell; shells survive in-place host updates |
 | Existing tmux sessions | Legacy tmux sessions remain supported; new sessions in the UI are ordinary shared shells |
 | Files | Browsing, hidden files, pagination, create directories, rename, non-recursive deletion, upload/download, text/image previews |
 | Transfers | Visible progress and retained success/error results; detailed tracking in Files → Transfer activity; 48 KiB chunks, network resume offsets, upload SHA-256, atomic finalization, cancellation |
 | Images | Gallery, file picker, paste, and drag-and-drop; PNG conversion for browser-decodable formats; path insertion or conditional native paste |
 | Clipboard | Selection, retained scrollback copying, host clipboard read/write when available, headless text buffer, copy-only OSC 52 |
+| Claude Code ↔ Codex | One switch per host: sessions on the same project learn about each other through their hooks and can message each other's open conversation; off removes everything jaunt added |
 | Protection | Single-use QR codes, per-device keys, revocation, optional PIN/password-protected browser vault and automatic locking |
 | Notifications | Optional native Android service or browser Web Push; terminal bells, program events, session exit, Settings test and CLI `notify`/`run` |
-| Interface | Native desktop and Android apps with a shared bundled interface; browser client; local JavaScript |
+| Interface | Native desktop and Android apps with a shared bundled interface; browser client and PWA; six languages; dark, light, system and circadian themes |
+| Updates | Host replaces itself in place without ending shells; desktop app and APK check, verify and install their own updates |
 
 ## Desktop client only
 

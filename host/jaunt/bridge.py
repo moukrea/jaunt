@@ -574,6 +574,22 @@ class Bridge:
         return [q for q in self.participants.values()
                 if q is not me and q.state != "ended" and q.runtime != me.runtime and self.same_project(me.project, q.project)]
 
+    def siblings(self, me: Participant) -> list[str]:
+        """Terminals of other sessions of the SAME runtime on this project (registered or not).
+        jaunt does not bridge those; the roster names them so the model does not take
+        the cross-runtime list for the full picture."""
+        names, seen = [], set()
+        for q in self.participants.values():
+            if q is not me and q.state != "ended" and q.runtime == me.runtime and q.session != me.session and self.same_project(me.project, q.project):
+                seen.add(q.session); names.append(self.public(q)["terminal"])
+        for s in self.host.sessions.items.values():
+            if not s.alive or s.program != me.runtime or s.id in seen or s.id == me.session:
+                continue
+            here = {"root": os.path.realpath(self.live_cwd(s)), "common": "", "kind": "dir"}
+            if self.same_project(me.project, here):
+                seen.add(s.id); names.append(s.name)
+        return names
+
     def context_for(self, me: Participant, event: str, source: str = "") -> str:
         """Roster text for the model. Only when something changed, or on (re)start/compaction."""
         forced = event == "start" or event == "compact" or source in ("resume", "clear", "compact")
@@ -583,13 +599,21 @@ class Bridge:
         peers = self.relevant(me)
         present = self.present(me)
         root = me.project.get("root", me.cwd)
-        lines = ["[jaunt bridge] Cross-runtime awareness for this project (" + root + ")."]
+        other = runtime_name("codex" if me.runtime == "claude" else "claude")
+        lines = [f"[jaunt bridge] {other} sessions on this project ({root}). This list covers only {other} sessions reachable through jaunt; "
+                 f"it is not the full picture of every agent on the project."]
+        siblings = self.siblings(me)
+        if siblings:
+            named = ", ".join(f'"{n}"' for n in siblings)
+            how = "use your own ListAgents / SendMessage tools to see and reach them" if me.runtime == "claude" else "jaunt does not relay between them"
+            lines.append(f"- Also {len(siblings)} other {runtime_name(me.runtime)} session(s) open on this project in jaunt terminal(s) {named}: "
+                         f"same runtime, not bridged by jaunt; {how}.")
         for row in present:
             lines.append(f"- A {runtime_name(row['runtime'])} session is open in jaunt terminal \"{row['terminal']}\" (cwd {row['cwd']}) "
                          "but has not started its conversation on the bridge yet; it becomes reachable after its first prompt.")
         if not peers:
             if not present:
-                lines.append("No other AI session of the other runtime is currently working on this project through jaunt. "
+                lines.append(f"No {other} session is currently working on this project through jaunt. "
                              "If one arrives you will be told; you can also call jaunt_peers to check.")
             return "\n".join(lines)
         for q in peers:

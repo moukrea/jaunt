@@ -1,3 +1,12 @@
+# jaunt 0.1.0-beta.21
+
+- Public page and README rewritten around what jaunt actually does: several hosts in one workspace, shells and files on each, sessions that follow you across screens, the Claude Code ↔ Codex bridge, browser/Android/desktop clients. No new capability is claimed; the wording is stated plainly.
+- The preview on the public page is now clearly interactive: two example hosts, a Files view, Claude Code and Codex tabs that look like the real TUIs, the phone mirrors what you click, the stage leans with the pointer (from its resting angle; disabled with reduced-motion), and the phone shows the current time. GitHub link with its icon.
+- Language: the public page shows the language it detected instead of "System language"; in Settings the automatic entry is simply called *System*.
+- Bridge: the roster injected into a session now states that it lists only sessions of the other runtime, and names the other sessions of the same runtime open on the project (not bridged by jaunt; on Claude Code, ListAgents / SendMessage reach them). Reported by a Claude Code session that took the cross-runtime list for the full list of agents. The `jaunt_peers` description says the same.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.20
 
 Fixes after the first use of the beta.19 workspace features, then the beta.19 changes themselves:

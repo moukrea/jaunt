@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.15
+
+- Bundles the beta.21 interface: *System* language entry, refreshed public page copy. No desktop-specific change.
+
 # jaunt desktop 0.1.0-beta.14
 
 This update fixes the first-use issues of the workspace features (touch swipe over a tab scrolls the strip, split with an existing session under shared open sessions, Enter after an inserted text) and keeps the workspace refinements of host beta.19: shared open sessions per host (same tabs, panes and active session on every client and on the host itself) with the *Only displayed sessions exist* sub-option, a Close view / Terminate session choice on the × of tabs and panes, direct pane closing, a held press before dragging a tab on a scrolling tab strip, switch-style settings toggles, and the *New shell in folder* button next to *New shell*. It keeps the **AI sessions** settings group for the selected host: one switch for the Claude Code ↔ Codex bridge (shown only when both runtimes are installed on that host), the list of bridged sessions, and activity rows for cross-runtime messages with their real delivery state. See `docs/BRIDGE.md`.

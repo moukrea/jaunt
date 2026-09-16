@@ -48,7 +48,7 @@ async def test_awareness_is_automatic_symmetric_and_project_scoped(host):
     assert 'Codex session' in (await register(h,'s1','claude','claude-conv-000001','/work/x',event='compact'))['context']
     # A Codex session on an unrelated project is not a collaborator.
     other=await register(h,'s3','codex','codex-thread-00002','/work/y')
-    assert 'No other AI session' in other['context']
+    assert 'No Claude Code session is currently working on this project through jaunt' in other['context']
     assert [p['id'] for p in h.bridge.peers_for({'runtime':'claude','session':'s1','conversation':'claude-conv-000001'})['peers']]==['codex:codex-th']
 
 @pytest.mark.asyncio
@@ -348,3 +348,21 @@ def test_participants_survive_a_runtime_handoff(host):
     rows=h.bridge.export();assert [r['id'] for r in rows]==['claude:c1']
     fresh=Bridge(h);fresh.restore(rows)
     p=fresh.participants['claude:c1'];assert p.mode_class=='bypass' and p.session=='s1' and p.roster_seen==-1 and fresh.version==1
+
+@pytest.mark.asyncio
+async def test_roster_names_same_runtime_sessions_it_does_not_bridge(host):
+    """A second Claude session on the project is not a bridge peer, but the roster must say it exists
+    (a model took the cross-runtime list for the full list of agents and missed a neighbour)."""
+    h=host
+    h.sessions.items={'s1':FakeSession('s1','Claude A',100,'/work/x','claude'),'s2':FakeSession('s2','Claude B',200,'/work/x','claude'),'s3':FakeSession('s3','Codex tab',300,'/work/x','codex')}
+    first=await register(h,'s1','claude','claude-conv-000001','/work/x')
+    assert 'This list covers only Codex sessions' in first['context']
+    assert 'Also 1 other Claude Code session(s) open on this project in jaunt terminal(s) "Claude B"' in first['context'] and 'ListAgents' in first['context']
+    # Registered or not, a same-runtime session is named once, and never listed as a peer.
+    await register(h,'s2','claude','claude-conv-000002','/work/x')
+    again=await register(h,'s1','claude','claude-conv-000001','/work/x',event='compact')
+    assert again['context'].count('Claude B')==1 and 'jaunt_send' not in again['context'].split('Also 1 other')[1].split('\n')[0]
+    assert [p['id'] for p in h.bridge.peers_for({'runtime':'claude','session':'s1','conversation':'claude-conv-000001'})['peers']]==[]
+    # Codex sees both Claude sessions as peers and no sibling line.
+    codex=await register(h,'s3','codex','codex-thread-00001','/work/x')
+    assert codex['context'].count('Claude Code session in jaunt terminal')==2 and 'Also ' not in codex['context']

@@ -81,21 +81,57 @@ if(!desktop&&!isAndroid&&!installedWeb&&!pairedFromURL&&!new URLSearchParams(loc
 }
 function enterWorkspace(){document.body.classList.remove('site-mode');$('site-home').hidden=true;const url=new URL(location.href);url.searchParams.set('app','1');url.hash='';history.replaceState(null,'',url);render();}
 $('open-workspace').onclick=enterWorkspace;$('site-get-started').onclick=enterWorkspace;
-$('site-language').replaceWith(languagePicker('site-language'));
+$('site-language').replaceWith(languagePicker('site-language',true));
 $('site-copy-install').onclick=()=>copyText($('site-install-command').textContent);
 $('site-client-install').onclick=()=>showInstallation(true);
-const previews={
- shell:'~/work/project $ git status --short\n M src/app.ts\n A tests/app.test.ts\n\n~/work/project $ pwd\n/home/me/work/project\n\n~/work/project $ ▌',
- codex:'~/work/project $ codex\n\n> Explain how this project works\n\n• Reading README.md\n• Exploring src/\n\n  src/\n  ├── app.ts\n  └── terminal.ts',
- claude:'~/work/project $ claude\n\n> Explain how this project works\n\n• Reading README.md\n• Exploring src/\n\n  src/\n  ├── app.ts\n  └── terminal.ts'
+// Interactive preview: two hosts, their sessions and files; the phone mirrors the desktop.
+const CLAUDE_BOX='╭──────────────────────────────────────────╮\n│ ✻ Welcome to Claude Code!                │\n│                                          │\n│   /help for help, /status for your setup │\n│   cwd: {cwd}{pad}│\n╰──────────────────────────────────────────╯\n\n';
+const CODEX_BOX='╭──────────────────────────────────────────╮\n│ >_ OpenAI Codex (v0.154.0)               │\n│                                          │\n│ model:     gpt-5-codex                   │\n│ directory: {cwd}{pad}│\n╰──────────────────────────────────────────╯\n\n';
+const box=(template,cwd)=>template.replace('{cwd}',cwd).replace('{pad}',' '.repeat(Math.max(1,(template.includes('Welcome')?34:29)-cwd.length)));
+const demo={
+ workstation:{os:'Linux',cwd:'~/work/project',files:[['..','',''],['src','folder','4 items'],['tests','folder','3 items'],['scripts','folder','2 items'],['README.md','file','2.1 KB · today'],['package.json','file','1.4 KB · yesterday'],['deploy.log','file','38 KB · today'],['screenshot.png','image','412 KB · today']],tabs:{
+  shell:{icon:'terminal',text:'~/work/project $ git status --short\n M src/app.ts\n A tests/retry.test.ts\n\n~/work/project $ npm test\n\n  ✓ app renders (14 ms)\n  ✓ retry backs off (3 ms)\n\n  12 passed, 12 total\n\n~/work/project $ ▌'},
+  claude:{icon:'claude',text:box(CLAUDE_BOX,'~/work/project')+'> Why does scripts/deploy.sh fail on macOS?\n\n⏺ I\'ll read the script first.\n\n⏺ Read(scripts/deploy.sh)\n  ⎿  Read 84 lines\n\n⏺ Line 12 uses readlink -f, which macOS\'s readlink does\n  not support. A portable cd … && pwd -P fixes it.\n\n⏺ Update(scripts/deploy.sh)\n  ⎿  Updated scripts/deploy.sh with 1 addition and 1 removal\n\n⏺ Done. The Codex session on this project confirmed the\n  test suite still passes.\n\n> ▌'},
+  codex:{icon:'openai',text:box(CODEX_BOX,'~/work/project')+'› Add a test for the retry helper\n\n• Explored\n  └ Read src/retry.ts, tests/app.test.ts\n\n• I\'ll cover the backoff schedule and the give-up case.\n\n• Edited tests/retry.test.ts (+24 -0)\n\n• Ran npm test\n  └ 12 passed\n\n• Message from jaunt · claude: "does the suite still\n  pass after the deploy.sh change?" — replied: yes, 12/12.\n\n› ▌'}
+ }},
+ homelab:{os:'Linux',cwd:'/srv/stack',files:[['..','',''],['compose','folder','6 items'],['backups','folder','31 items'],['docker-compose.yml','file','3.8 KB · Mon'],['Caddyfile','file','912 B · Mon'],['.env','file','640 B · Sun'],['media.log','file','1.2 MB · today']],tabs:{
+  shell:{icon:'terminal',text:'/srv/stack $ docker compose ps\nNAME        STATUS          PORTS\ncaddy       running (2d)    80, 443\nmedia       running (2d)\npostgres    running (2d)    5432\n\n/srv/stack $ df -h /srv\nFilesystem  Size  Used  Avail  Use%\n/dev/sdb1   1.8T  1.1T   620G   64%\n\n/srv/stack $ ▌'},
+  deploy:{icon:'terminal',text:'/srv/stack $ ./deploy.sh\n[1/4] pulling images … done\n[2/4] running migrations … done\n[3/4] restarting media … done\n[4/4] health check\n  caddy   ok   12 ms\n  media   ok   48 ms\n\nDeployed 2026.09.16-1 in 41 s\n\n/srv/stack $ ▌'}
+ }}
 };
-for(const button of document.querySelectorAll('[data-preview]'))button.onclick=()=>{
- const key=button.dataset.preview;
- for(const tab of document.querySelectorAll('[data-preview]'))tab.setAttribute('aria-selected',String(tab===button));
- $('preview-desktop-output').textContent=previews[key];$('preview-phone-output').textContent=previews[key];$('preview-phone-tab').textContent=key;
- $('preview-phone-icon').replaceChildren(icon(key==='codex'?'openai':key==='claude'?'claude':'terminal',12));
-};
-document.querySelector('[data-preview=shell]').click();
+const preview={machine:'workstation',view:'terminal',tab:{workstation:'shell',homelab:'shell'}};
+function renderPreview(){
+ const host=demo[preview.machine],tab=preview.tab[preview.machine],session=host.tabs[tab];
+ $('preview-machines').replaceChildren(...Object.entries(demo).map(([name,m])=>{
+  const item=el('button',{class:'machine-item'+(name===preview.machine?' selected':''),'data-preview-machine':name});
+  item.append(icon('monitor',15),el('span',{class:'machine-text'},[el('strong',{text:name}),el('small',{text:m.os})]),el('span',{class:'status-dot online'}));
+  item.onclick=()=>{preview.machine=name;renderPreview();};return item;
+ }));
+ $('preview-machine-title').textContent=preview.machine;$('preview-phone-machine').textContent=preview.machine;
+ $('preview-session-count').textContent=Object.keys(host.tabs).length;
+ for(const button of document.querySelectorAll('[data-preview-view]')){const on=button.dataset.previewView===preview.view;button.classList.toggle('selected',on);button.onclick=()=>{preview.view=button.dataset.previewView;renderPreview();};}
+ $('preview-terminal').hidden=preview.view!=='terminal';$('preview-files').hidden=preview.view!=='files';
+ $('preview-phone-terminal').hidden=preview.view!=='terminal';$('preview-phone-files').hidden=preview.view!=='files';
+ $('preview-tabs').replaceChildren(...Object.entries(host.tabs).map(([name,t])=>{
+  const button=el('button',{role:'tab','aria-selected':String(name===tab),'data-preview':name});
+  button.append(icon(t.icon,12),el('span',{text:name}),el('span',{class:'status-dot online'}));
+  button.onclick=()=>{preview.tab[preview.machine]=name;preview.view='terminal';renderPreview();};return button;
+ }),icon('plus',12));
+ for(const id of ['preview-desktop-output','preview-phone-output']){const pre=$(id);pre.textContent=session.text;pre.scrollTop=pre.scrollHeight;}
+ $('preview-phone-tab').textContent=tab;$('preview-phone-icon').replaceChildren(icon(session.icon,12));$('preview-cwd').textContent=host.cwd;
+ $('preview-files-path').textContent=host.cwd;$('preview-phone-files-path').textContent=host.cwd;$('preview-files-count').textContent=tr('{0} entries',host.files.length-1);
+ const rows=()=>host.files.map(([name,kind,details])=>el('div',{class:'file-entry'},[icon(kind==='folder'||!kind?'folder':kind==='image'?'image':'file',12),el('span',{class:'file-text'},[el('span',{class:'file-name',text:name}),el('span',{class:'file-details',text:details})])]));
+ $('preview-file-list').replaceChildren(...rows());$('preview-phone-file-list').replaceChildren(...rows());
+}
+renderPreview();
+const clock=()=>{$('preview-phone-time').textContent=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit'}).format(new Date());};clock();setInterval(clock,15000);
+// The pseudo-3D stage leans with the pointer, starting from its resting orientation.
+if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
+ const stage=document.querySelector('.site-stage');let frame=0,tilt=[0,0];
+ const apply=()=>{frame=0;stage.style.setProperty('--tilt-y',tilt[0].toFixed(2)+'deg');stage.style.setProperty('--tilt-x',tilt[1].toFixed(2)+'deg');};
+ document.addEventListener('pointermove',event=>{if(document.body.classList.contains('site-mode')===false||event.pointerType==='touch')return;const r=stage.getBoundingClientRect();if(!r.width)return;const nx=Math.max(-1,Math.min(1,(event.clientX-(r.left+r.width/2))/(r.width)));const ny=Math.max(-1,Math.min(1,(event.clientY-(r.top+r.height/2))/(r.height)));tilt=[nx*9,-ny*7];if(!frame)frame=requestAnimationFrame(apply);});
+ document.addEventListener('pointerleave',()=>{tilt=[0,0];if(!frame)frame=requestAnimationFrame(apply);});
+}
 
 
 
@@ -1267,9 +1303,11 @@ async function followHostUpdate(a,start,initial=null,allowRestart=false) {
   } catch(error){if(!tracker.settled){tracker.settled=true;job.fail(error);job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});}}
   finally {clearInterval(poll);clearTimeout(deadline);a.link.removeEventListener('status',onStatus);if(hostUpdateJobs.get(a.machine.room)===tracker)hostUpdateJobs.delete(a.machine.room);if(view==='settings'&&a===current())renderSettings();}
 }
-function languagePicker(id) {
+function languagePicker(id,detected=false) {
+ // The public page shows the language it detected; Settings keeps an explicit "System" entry to return to automatic selection.
  const select=el('select',{'aria-label':tr('Language'),id});
- for(const [value,name] of [['system',tr('System language')],...Object.entries(languages)])select.append(el('option',{value,text:name,selected:value===preference()}));
+ const options=detected?Object.entries(languages):[['system',tr('System')],...Object.entries(languages)];
+ for(const [value,name] of options)select.append(el('option',{value,text:name,selected:value===(detected&&preference()==='system'?language:preference())}));
  select.onchange=async()=>{if(isAndroid)await nativeCall('app.language',{language:select.value});if(desktop?.setLanguage)await desktop.setLanguage(select.value);setLanguage(select.value);};
  return select;
 }
