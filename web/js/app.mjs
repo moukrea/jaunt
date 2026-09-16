@@ -96,6 +96,14 @@ function refreshSettings() {
       if (request === settingsRequest && a === current() && view === 'settings') reportHost(a, error);
     });
   }
+  // Runtime detection is refreshed each time Settings opens, so a runtime installed or
+  // removed since the host started shows up without restarting jaunt.
+  if (a?.link.state === 'online' && a.info?.bridge) {
+    a.link.request('bridge.status', {refresh: true}).then(value => {
+      if (request !== settingsRequest || a !== current() || view !== 'settings') return;
+      a.info.bridge = value; renderSettings();
+    }).catch(() => {});
+  }
 }
 function showPair() {
   const input = el('textarea', {class: 'pair-code', rows: 4, placeholder: tr('jaunt1.… or the complete pairing link'), spellcheck: false, autocapitalize: 'off', 'aria-label': tr('Pairing code')});

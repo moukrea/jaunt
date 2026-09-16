@@ -142,11 +142,10 @@ class Bridge:
 
     # ---- runtime detection ------------------------------------------------
     async def refresh_integrations(self) -> None:
-        """Re-apply the integrations after a host update so hook/MCP commands stay current."""
-        if not self.enabled:
-            return
-        detected = await self.detect()
-        if not detected.get("available"):
+        """Detect the runtimes at start and, when the bridge is on, re-apply the integrations
+        so hook/MCP commands stay current after a host update."""
+        detected = await self.detect(force=True)
+        if not self.enabled or not detected.get("available"):
             return
         from . import bridge_setup
         with contextlib.suppress(Exception):

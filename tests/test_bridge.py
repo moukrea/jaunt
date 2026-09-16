@@ -266,3 +266,13 @@ def test_terminal_identity_matches_a_reparented_process(host,monkeypatch):
     monkeypatch.setattr(Bridge,'tty_of_pid',staticmethod(lambda pid:{4242:'dev:34818'}.get(pid,'')))
     monkeypatch.setattr(Bridge,'session_tty',lambda self,s:{'s1':'dev:34817','s2':'dev:34818'}[s.id])
     assert h.bridge.session_for_pid(4242)=='s2' and h.bridge.session_for_pid(4243)==''
+
+
+@pytest.mark.asyncio
+async def test_startup_detection_runs_even_when_the_bridge_is_off(host,monkeypatch):
+    h=host;h.state.data['bridge']={'enabled':False};h.state.save()
+    calls=[]
+    async def fake_detect(self,force=False):calls.append(force);self.detected={'runtimes':{},'visible':True,'available':True,'reason':'','checkedAt':1};return self.detected
+    monkeypatch.setattr(Bridge,'detect',fake_detect)
+    await h.bridge.refresh_integrations()
+    assert calls==[True] and h.bridge.status()['visible'] is True
