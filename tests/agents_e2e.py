@@ -178,7 +178,7 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         output({'host':'homelab','session':sidB},'again-2')
         assert 'you may type there' in mcp.tool('jaunt_sessions',{'host':'homelab'})
         passed('the grant covers that shell: the second input goes in without a prompt')
-        cut=json.loads(B.cli('agents','cut',sidB));assert cut['kind']=='cut' and cut['session']==sidB
+        cut=json.loads(B.cli('agents','cut','--',sidB));assert cut['kind']=='cut' and cut['session']==sidB
         assert not [x for x in status(B)['sessions'] if x['id']==sidB][0]['agents']
         t=approver('deny');refused=mcp.tool('jaunt_type',{'host':'homelab','session':sidB,'input':'echo nope'});t.join();assert 'Refused' in refused,refused
         passed('cut removes the mark and makes the agent ask again for that shell; deny refuses it')
