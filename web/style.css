@@ -181,3 +181,11 @@
 .icon-cell:hover,.icon-cell:focus-visible{color:var(--text);background:var(--surface-hover);border-color:var(--line)}
 .icon-grid-hint{margin:8px 0 10px;font-size:10px}
 .terminal-loading:before{content:attr(data-loading-label);position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:3;padding:4px 10px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font-size:10px;pointer-events:none}
+.agents-list{padding:0 19px 16px;display:grid;gap:6px}.agents-row{display:flex;align-items:center;gap:10px;font-size:11px;line-height:1.5;padding:8px 10px;border:1px solid var(--line-soft);border-radius:6px;overflow-wrap:anywhere}.agents-row.muted{color:var(--muted)}.agents-row-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.agents-row-text small{color:var(--faint);font-size:10px}
+.agents-add{display:flex;gap:8px;align-items:center}.agents-add input{flex:1;min-width:0;font-size:12px}
+.agents-table{width:100%;border-collapse:collapse;font-size:11px}.agents-table th{text-align:left;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:8px 10px;font-weight:500;border-bottom:1px solid var(--line)}.agents-table td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}.agents-table td small{color:var(--faint)}.agents-table td.muted{color:var(--muted)}
+.agents-actions{display:flex;flex-wrap:wrap;gap:8px;padding-top:4px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.pill{display:inline-block;font-family:ui-monospace,monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--surface);white-space:nowrap}.pill.warn{color:var(--accent);border-color:var(--accent)}.pill.good{color:var(--good);border-color:var(--good)}.pill.danger{color:var(--danger);border-color:var(--danger)}
+.approval-command{font:12px/1.6 ui-monospace,monospace;background:#111515;border:1px solid var(--line);border-radius:7px;padding:12px 14px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 14px;user-select:text}
+.approval-actions{flex-wrap:wrap}

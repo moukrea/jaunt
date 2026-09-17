@@ -19,7 +19,9 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import __version__
+from .agents import Approvals, Executor, Policy, requester_key, DURATIONS
 from .clipboard import Clipboard
+from .hostlink import Links
 from .crypto import Channel, b64, compact, proof, public_key, token, transcript, unb64, verify
 from .files import Files
 from .notifications import deliver, validate_subscription
@@ -111,6 +113,9 @@ class Peer:
                 devices[self.device_id] = {"name": str(enrolled.get("name", "Browser"))[:80],
                                            "secret": enrolled["secret"], "created": time.time(),
                                            "lastSeen": time.time()}
+                if enrolled.get("kind") == "host" and re.fullmatch(r"[A-Za-z0-9_-]{8,80}", str(enrolled.get("room", ""))):
+                    # Another jaunt host enrolling as a device: it may later ask to run agent commands here.
+                    devices[self.device_id].update(kind="host", room=str(enrolled["room"]))
                 del pairs[hello["pair"]]
                 self.host.state.save()
             if self.device_id not in devices:
@@ -199,6 +204,10 @@ class Peer:
     def display_name(self):
         return self.host.state.data['devices'].get(self.device_id, {}).get('name', 'Remote device')
 
+    @property
+    def is_host(self) -> bool:
+        return self.host.state.data['devices'].get(self.device_id, {}).get('kind') == 'host'
+
 
 class LocalPeer:
     """Same-account UI connection over the private 0600 Unix socket.
@@ -241,6 +250,11 @@ class Host:
         self.transport = Transport(state.data, self.receive, self.disconnected)
         self.sessions = Sessions(self.send, self.sessions_changed, state.root, self.attention)
         self.sessions.disk_history = bool(state.data.get("scrollback", {}).get("disk", True))
+        # Agents and machines: trust policy, approvals and executor (target side), links (requester side).
+        self.policy = Policy(state)
+        self.approvals = Approvals(self)
+        self.executor = Executor(state.root, self.policy)
+        self.links = Links(state, {"room": state.data["room"], "name": "host: " + state.data["name"]}, self.link_message)
         self.files = Files(state.root, state.data.get("maxFileBytes", 512 * 1024 * 1024))
         self.clipboard = Clipboard()
         self.last_notification = 0.0
@@ -259,7 +273,7 @@ class Host:
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
                 "replayBytes": 2 * 1024 * 1024, "flowControl": True, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
-                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(),
+                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(), "agents": {"enabled": self.policy.enabled},
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
     def attention(self, session, event, title="", body=""):
@@ -428,6 +442,38 @@ class Host:
             return configure(p.get("automatic"))
         if method == "updates.install":
             return self.launch_update(allow_restart=p.get("allowRestart") is True)
+        if method == "agent.rights":
+            return self.agent_rights(peer, p)
+        if method == "agent.run":
+            return await self.agent_run(peer, p)
+        if method == "agent.read":
+            return self.agent_read(peer, p)
+        if method == "agents.status":
+            return self.agents_status()
+        if method == "agents.configure":
+            return await self.agents_configure(p)
+        if method == "agents.trust":
+            self.policy.set_level(str(p.get("requester", "")), str(p.get("right", "")), str(p.get("level", "")), p.get("duration"))
+            self.policy.journal(kind="trust", requester=p.get("requester"), right=p.get("right"), level=p.get("level"), duration=p.get("duration"), by=peer.display_name)
+            return self.agents_status()
+        if method == "agents.revoke":
+            keys = list(self.policy.data["requesters"]) if p.get("all") is True else [str(k) for k in p.get("requesters", [])]
+            self.policy.revoke(keys)
+            self.policy.journal(kind="revoke", requesters=keys, by=peer.display_name)
+            return self.agents_status()
+        if method == "agents.decide":
+            return self.approvals.decide(str(p.get("id", "")), str(p.get("decision", "")), by=peer.display_name)
+        if method == "links.add":
+            if not self.policy.enabled:
+                raise ValueError("Turn on Agents and machines on this host first")
+            result = await self.links.add(str(p.get("code", "")))
+            self.policy.journal(kind="link", host=result.get("name"), by=peer.display_name)
+            return self.agents_status()
+        if method == "links.remove":
+            await self.links.remove(str(p.get("room", "")))
+            return self.agents_status()
+        if method == "links.list":
+            return self.links.list()
         if method == "workspace.configure":
             return await self.workspace_configure(peer, p)
         if method == "workspace.update":
@@ -516,6 +562,128 @@ class Host:
                 "liveClients": sum(p.ready for p in self.peers.values())}
 
     # ---- shared workspace (open sessions, layouts) -------------------------------
+    # ---- agents and machines ---------------------------------------------------------
+    RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+
+    def agents_status(self) -> dict:
+        return {"enabled": self.policy.enabled, "requesters": self.policy.table(), "links": self.links.list(),
+                "pending": self.approvals.list(), "log": self.policy.data["log"][-50:], "agentShells": []}
+
+    async def agents_configure(self, p: dict) -> dict:
+        enabled = p.get("enabled")
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be true or false")
+        self.policy.data["enabled"] = enabled
+        self.policy.save()
+        detected = await self.bridge.detect(force=True)
+        from . import bridge_setup
+        runtimes = detected.get("runtimes") or {}
+        if enabled:
+            if runtimes and not self.bridge.enabled:
+                await asyncio.to_thread(bridge_setup.install, runtimes, True)
+            self.links.start_all()
+        else:
+            await self.links.stop_all()
+            if runtimes and not self.bridge.enabled:
+                await asyncio.to_thread(bridge_setup.uninstall, runtimes)
+        self.policy.journal(kind="switch", enabled=enabled)
+        return self.agents_status()
+
+    def _requester_of(self, peer, p: dict) -> tuple[str, str]:
+        """(key, display name) of a linked host's session asking for something here."""
+        if not self.policy.enabled:
+            raise ValueError("Agents and machines is off on this host")
+        device = self.state.data["devices"].get(peer.device_id, {})
+        if device.get("kind") != "host":
+            raise ValueError("Only linked jaunt hosts may run agent commands here")
+        runtime = str(p.get("runtime", ""))
+        if runtime not in self.RUNTIME_NAMES:
+            raise ValueError("Unknown runtime")
+        name = f"{device.get('name', 'host')} · {self.RUNTIME_NAMES[runtime]}"
+        key = requester_key(peer.device_id, runtime)
+        self.policy.requester(key, name=name, runtime=runtime, host=peer.device_id)
+        return key, name
+
+    def agent_rights(self, peer, p: dict) -> dict:
+        key, name = self._requester_of(peer, p)
+        return {"requester": name, "exec": self.policy.level(key, "exec"), "type": self.policy.level(key, "type")}
+
+    async def _authorize(self, key: str, name: str, right: str, kind: str, detail: dict) -> None:
+        level = self.policy.level(key, right)
+        if level == "block":
+            self.policy.journal(kind=kind, requester=key, decision="blocked", **detail)
+            raise ValueError(f"Refused: {name} is blocked on {self.state.data['name']}")
+        if level == "ask":
+            decision = await self.approvals.ask({"id": key, "name": name}, right, kind, detail)
+            if decision == "deny":
+                self.policy.journal(kind=kind, requester=key, decision="denied", **detail)
+                raise ValueError(f"Refused by the owner of {self.state.data['name']} (denied, or no answer within 2 minutes)")
+            if decision in DURATIONS:
+                self.policy.set_level(key, right, "trust", decision)
+            detail["decision"] = decision
+        else:
+            detail["decision"] = "trusted"
+
+    async def agent_run(self, peer, p: dict) -> dict:
+        key, name = self._requester_of(peer, p)
+        command, cwd = str(p.get("command", "")), p.get("cwd")
+        timeout = p.get("timeoutSec")
+        detail = {"summary": command[:120], "command": command[:2000], "cwd": cwd or "", "timeout": timeout or 60}
+        await self._authorize(key, name, "exec", "run", detail)
+        result = await self.executor.run(key, command, cwd if isinstance(cwd, str) and cwd else None, timeout)
+        self.policy.journal(kind="run", requester=key, command=command[:200], cwd=cwd or "", status=result["status"],
+                            exitCode=result["exitCode"], bytes=result["bytes"], run=result["run"], decision=detail.get("decision"))
+        return result
+
+    def agent_read(self, peer, p: dict) -> dict:
+        key, name = self._requester_of(peer, p)
+        if self.policy.level(key, "exec") == "block":
+            raise ValueError(f"Refused: {name} is blocked on {self.state.data['name']}")
+        return self.executor.read(str(p.get("run", "")), int(p.get("offset") or 0), int(p.get("limit") or 65536))
+
+    async def link_message(self, link, value: dict) -> None:
+        pass  # a linked host only answers our requests; its broadcasts are not ours to act on
+
+    def _caller(self, p: dict) -> tuple[str, str]:
+        """Which local jaunt shell and runtime an MCP tool call comes from."""
+        if not self.policy.enabled:
+            raise ValueError("Agents and machines is off on this host (Settings → Agents and machines)")
+        runtime = str(p.get("runtime", ""))
+        if runtime not in self.RUNTIME_NAMES:
+            raise ValueError("Unknown runtime")
+        sid = self.bridge.session_for_pid(int(p.get("pid") or 0))
+        if not sid and p.get("session") in self.sessions.items:
+            sid = str(p["session"])
+        if not sid:
+            raise ValueError("This tool works from a session started in a jaunt shell")
+        return sid, runtime
+
+    async def agents_gateway(self, method: str, p: dict) -> dict:
+        if method == "agents.status":
+            return self.agents_status()
+        sid, runtime = self._caller(p)
+        if method == "agents.hosts":
+            async def describe(link):
+                status = link.status()
+                if status["state"] == "online":
+                    try:
+                        status["rights"] = await link.request("agent.rights", {"runtime": runtime}, timeout=8)
+                    except (ValueError, ConnectionError) as exc:
+                        status["rights"] = {"error": str(exc)[:120]}
+                return status
+            return {"hosts": await asyncio.gather(*(describe(l) for l in self.links.links.values()))}
+        link = self.links.get(str(p.get("host", "")))
+        if link is None:
+            raise ValueError("Unknown machine; jaunt_hosts lists the linked ones")
+        if method == "agents.run":
+            timeout = p.get("timeoutSec")
+            params = {"runtime": runtime, "command": p.get("command", ""), "cwd": p.get("cwd"), "timeoutSec": timeout}
+            budget = (int(timeout) if isinstance(timeout, int) else 60) + 150  # execution + possible approval wait
+            return {"host": link.record.get("name"), **await link.request("agent.run", params, timeout=budget)}
+        if method == "agents.read":
+            return {"host": link.record.get("name"), **await link.request("agent.read", {"runtime": runtime, "run": p.get("run"), "offset": p.get("offset", 0), "limit": p.get("limit", 65536)})}
+        raise ValueError("Unknown agents method")
+
     def scrollback(self) -> dict:
         from .scrollback import MAX_BYTES
         return {"disk": self.sessions.disk_history, "maxBytes": MAX_BYTES}
@@ -692,6 +860,11 @@ class Host:
                 result = await self.bridge.send(self.bridge.resolve(p))
             elif method == "bridge.wait":
                 result = await self.bridge.wait_reply(self.bridge.resolve(p))
+            elif method in ("agents.hosts", "agents.run", "agents.read", "agents.status"):
+                result = await self.agents_gateway(method, p)
+            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "links.add", "links.remove", "links.list"):
+                # The CLI acts as the owner at the keyboard; the same handlers serve the UI clients.
+                result = await self.rpc(type("CLI", (), {"display_name": "CLI", "device_id": "local-cli"})(), method, p)
             elif method == "stop":
                 result = {"stopping": True}
                 asyncio.get_running_loop().call_later(0.1, self.stopping.set)
@@ -811,6 +984,8 @@ class Host:
         if not handoff:
             from .scrollback import purge as purge_scrollback
             purge_scrollback(self.state.root, set())  # a fresh start has no sessions: drop stale history
+        if self.policy.enabled:
+            self.links.start_all()
         if handoff:
             from .handoff import restore
             self.lockfile, inherited = restore(self.sessions,int(handoff))

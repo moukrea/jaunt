@@ -267,7 +267,12 @@ class Bridge:
                 failed = "; ".join(f"{runtime_name(n)}: {r.get('error', 'failed')}" for n, r in results.items() if not r.get("ok"))
                 raise ValueError(f"Could not prepare the bridge ({failed}). Nothing was left enabled.")
         else:
-            results = await asyncio.to_thread(bridge_setup.uninstall, detected["runtimes"])
+            if getattr(self.host, "policy", None) and self.host.policy.enabled:
+                # Agents and machines still needs the MCP server: drop the hooks only.
+                await asyncio.to_thread(bridge_setup.uninstall, detected["runtimes"])
+                await asyncio.to_thread(bridge_setup.install, detected["runtimes"], True)
+            else:
+                results = await asyncio.to_thread(bridge_setup.uninstall, detected["runtimes"])
             self.integrations = {}
             self._store(enabled=False, integrations={})
             self.disable_now()

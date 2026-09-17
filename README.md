@@ -6,7 +6,7 @@
 
 jaunt connects the devices you carry to the machines you work on. Install a small host on each Linux or macOS machine, pair your phone, laptop or desktop once, and every one of them shows the same workspace: real shells in real PTYs, the files next to them, and the sessions you left running. Open, rename, split, reorder, close or terminate shells on any host from any device; with *shared open sessions* on, the same tabs, panes and active shell follow you from screen to screen. Claude Code and Codex run there like any other program, and when both are installed on a host, one switch lets their sessions on the same project know about each other and exchange messages. Clients: a browser (also installable as a PWA), a native Android app and a native desktop app; all three ship the same interface. Connections go host-out through a relay, end-to-end encrypted, with no open port, no VPN and no account.
 
-**Host: 0.1.0-beta.31 · Desktop: 0.1.0-beta.25 · Android: 0.1.0-beta.23.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.32 · Desktop: 0.1.0-beta.26 · Android: 0.1.0-beta.24.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -16,7 +16,7 @@ bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukr
 
 Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled. Compatible hosts retain their shell processes during runtime replacement and wait for transfers to finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.23/jaunt-android-v0.1.0-beta.23.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.24/jaunt-android-v0.1.0-beta.24.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -27,6 +27,8 @@ jaunt update                     # Check for an update without closing shells
 jaunt doctor                     # Diagnostics without exposing secrets
 jaunt devices                    # List authorized devices
 jaunt revoke -- DEVICE_ID           # Revoke a lost device
+jaunt link PAIRING_CODE          # Link this host to another host (agents and machines)
+jaunt agents pending             # Requests from linked hosts waiting for your answer
 jaunt notify "Build finished"     # Notify connected devices
 jaunt run -- make test            # Notify when a command finishes
 jaunt clipboard < notes.txt      # Make text available to the client
@@ -48,6 +50,7 @@ Pairing grants access as the **system account running the host**, with all of th
 | Transfers | Visible progress and retained success/error results; detailed tracking in Files → Transfer activity; 48 KiB chunks, network resume offsets, upload SHA-256, atomic finalization, cancellation |
 | Images | Gallery, file picker, paste, and drag-and-drop; PNG conversion for browser-decodable formats; path insertion or conditional native paste |
 | Clipboard | Selection, retained scrollback copying, host clipboard read/write when available, headless text buffer, copy-only OSC 52 |
+| Agents and machines | One switch per host: sessions on linked hosts may run bounded one-shot commands here, each requester (host × runtime) with its own level (ask / trust / block) and a journal; approvals from any device or the CLI |
 | Claude Code ↔ Codex | One switch per host: sessions on the same project learn about each other through their hooks and can message each other's open conversation; off removes everything jaunt added |
 | Protection | Single-use QR codes, per-device keys, revocation, optional PIN/password-protected browser vault and automatic locking |
 | Notifications | Optional native Android service or browser Web Push; terminal bells, program events, session exit, Settings test and CLI `notify`/`run` |
@@ -71,6 +74,8 @@ The installed browser application is named **jaunt (PWA)** so it can be distingu
 Open **jaunt** from the host's applications menu or run `jaunt gui`. Host and remote clients share the same ordinary shells without tmux. **New shell** opens an automatically named shell immediately, inheriting the previous active shell’s current directory. The folder button lets you browse the host’s directories and optionally name the new shell. **Sessions** lists running and exited sessions: open, rename, close only your view, or explicitly terminate a shell for everyone. You can also rename a tab by double-clicking its title, or double-click a pane’s title (Enter saves, Escape cancels). The split picker opens right under the split button you clicked. Drag tabs to reorder them; selecting a tab never changes its position. The device you interact with controls the shared terminal size.
 
 The two **split icons** arrange panes side by side or above/below on desktop, using a new or existing session. Each pane can move into its own tab. Layouts survive reopening; mobile displays their sessions as normal tabs. The desktop sidebar can collapse, with the preference retained. Settings includes friendly host names, ordering and the default host, dark/light/system/circadian themes, and notification controls. Host settings follow the selected machine immediately, including its identity and update controls. The native desktop app also manages the local host service and pairs to other hosts; local service controls appear only for the local host, while desktop application updates remain separate. See the [workspace guide](docs/WORKSPACE.md) and [validation report](docs/WORKSPACE_VALIDATION.md).
+
+**Agents and machines.** A second switch per host lets Claude Code and Codex sessions on *linked* machines run commands here under your rules, and sessions here reach linked machines: link two hosts with one pairing code, then each requester (host × runtime) gets its own rights on the target — ask every time (approval on any of your devices or the CLI), trust for 1 h, 24 h or always, or block — with a journal. Sessions only learn about machines by calling `jaunt_hosts`; nothing is injected into their context and the bridge below is untouched. See the [agents and machines guide](docs/AGENTS.md).
 
 **Claude Code ↔ Codex bridge.** When both `claude` and `codex` are installed on a host, Settings shows one switch. Turned on, real Claude Code and Codex sessions opened in jaunt shells on the same project automatically know about each other (as ordinary hook context) and can message each other's open conversation, at your request or on their own initiative. Off by default; turning it off removes everything jaunt added to both runtimes. See the [bridge guide](docs/BRIDGE.md).
 
@@ -148,6 +153,8 @@ python tests/workspace_sync_e2e.py   # Shared open sessions between two clients,
 python tests/latency_e2e.py          # High and extreme latency tiers (top bar warning, waiting overlay, "use anyway")
 python tests/flow_control_e2e.py     # Visible-only subscriptions, bounded per-viewer backlog on a throttled link, catch-up, notifications from hidden tabs
 python tests/scrollback_e2e.py       # On-disk host history, lazy loading when scrolling up, local cache serving a reload, disk history off
+python tests/agents_e2e.py           # Two hosts linked by pairing code; an MCP-driven session runs commands on the other under ask / trust / block
+python tests/agents_ui_e2e.py        # Linking from Settings, approval modal answered from the browser, requester table
 ```
 
 Set `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.

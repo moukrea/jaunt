@@ -1,3 +1,15 @@
+# jaunt 0.1.0-beta.32
+
+**Agents and machines, phase 1.** A second switch per host, off by default and independent of the Claude Code ↔ Codex bridge (which is untouched: no context injected, no message across hosts).
+
+- Link two hosts with one pairing code (`jaunt link <code>`, or Settings → Agents and machines → Linked machines): host A enrolls on host B as a device of kind *host*, with the same handshake, channel and relay as a phone; revocable in B's devices.
+- Claude Code and Codex sessions on A get `jaunt_hosts` (linked machines and what they allow), `jaunt_run` (one bounded command on a linked machine) and `jaunt_read` (chunks of a run's full output). A refusal is a distinct outcome, never a failed command.
+- The target decides. Each requester (host × runtime) has its own level per right — *Run commands* now, *Write into a shell* reserved for phase 3: ask every time (approval modal on any device showing the target, push notification, or `jaunt agents allow|deny`; refused after 2 minutes; first answer wins), trust for 1 h, 24 h or always (with a confirmation), or block. Requester table with multi-select modify and revoke, revoke all, pending requests and a journal of the last 200 decisions, commands and refusals.
+- Bounds: 60 s default and 600 s max, 64 KiB inline, one command at a time per requester, 20 per minute, full output kept 24 h on the target and readable in 64 KiB slices.
+- Validated with two real hosts and the MCP server driven as Claude Code starts it (`tests/agents_e2e.py`, 10 checks) and in the browser (`tests/agents_ui_e2e.py`, 5 checks). See docs/AGENTS.md.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.31
 
 - Host update safety: the installer never removes the runtime directory that the live daemon executes. Before, it kept only the installed pointer and the newest other version by date, so a host whose in-place handoff had failed (daemon still on version N, N+1 and N+2 installed) lost its own files: lazy imports failed, `jaunt update` answered `[Errno 2] No such file or directory: …/bin/python`, and the host was unusable until restarted. The daemon now also runs its updater with the installed interpreter when its own is gone, and `jaunt update` / `jaunt doctor` say plainly that the service must be restarted to load the installed version.

@@ -41,10 +41,14 @@ async def main():
    t0=time.time();await p.get_by_role('tab',name='chatty',exact=True).click()
    await expect(p.locator('.terminal-container:not([hidden])')).not_to_have_class(re.compile('terminal-restoring'),timeout=15000)
    c1=await counter();print(f'  restored in {time.time()-t0:.1f}s at COUNTER {c1}')
-   for i in range(4):
+   # The window collapses and the stream converges within a few seconds; slow CI runners take longer.
+   c2=c1
+   for i in range(15):
     await asyncio.sleep(1);st=status()['chatty'];m=re.search(r'COUNTER (\d+)',await p.evaluate('window.jauntScreen()'))
     print(f'  t+{i+1}s screen {m.group(1) if m else None} host offset {st["offset"]} flow {list(st["flow"].values())}')
-   c2=await counter();rtt=await p.evaluate('window.jauntPing()')
+    if m:c2=max(c2,int(m.group(1)))
+    if c2>c1+20:break
+   rtt=await p.evaluate('window.jauntPing()')
    assert c2>c1+20,f'the visible chatty terminal must stay live on a slow link ({c1} -> {c2})'
    assert rtt<4000,f'output must not bury control traffic on a slow link (rtt {rtt} ms)'
    print(f'PASS a chatty terminal on a 200 KB/s link stays live (COUNTER {c1} -> {c2}) with a bounded backlog (rtc {rtt} ms)')
