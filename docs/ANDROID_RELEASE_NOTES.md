@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.24 (versionCode 24)
+
+- Bundles the beta.32 interface (Agents and machines settings, approval modal; approvals arrive as notifications).
+
 # jaunt Android 0.1.0-beta.23 (versionCode 23)
 
 - Bundles the beta.31 client (no client change).

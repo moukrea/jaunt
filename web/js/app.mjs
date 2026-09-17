@@ -281,6 +281,11 @@ function handleMessage(a, message) {
       message.session ? {label: tr('Open'), run: () => { selected = a.machine.room; setView('terminal'); selectSession(a, message.session).catch(error=>reportHost(a,error)); }} : null, hostOf(a));
   } else if (message.type === 'clipboard.available') {
     toast(tr('Shared clipboard text.'), false, {label: tr('Open'), run: () => showClipboard(a)}, hostOf(a));
+  } else if (message.type === 'agent.approval') {
+    approvalPrompt(a, message);
+  } else if (message.type === 'agent.approval.closed') {
+    if (openApproval?.id === message.id) { openApproval = null; if ($('modal').open && $('modal-title').textContent === tr('Agent command on {0}', hostName(a))) closeModal(); }
+    if (view === 'settings' && a === current()) refreshAgents(a);
   } else if (message.type === 'workspace.changed') {
     const w = message.workspace; if (a.info) a.info.workspace = w;
     if (message.from === a.peer) { a.wsSent = workspaceSignature(a); if (view === 'settings' && a === current()) renderSettings(); return; }
@@ -1378,6 +1383,94 @@ function bridgeMessageActivity(a,m){
   else if(m.state==='delivered'||m.state==='cancelled')job.finish(text);
   else job.update({status:text});
 }
+// Agents and machines: what AI sessions may do on this host, decided here. Nothing in this group
+// touches the session-to-session bridge above it.
+let openApproval = null;
+const RUNTIME_LABEL = {claude: 'Claude Code', codex: 'Codex'};
+function levelPill(entry) {
+  const level = entry?.level || 'ask';
+  if (level === 'trust') return el('span', {class: 'pill good', text: entry.until ? tr('trusted · {0} left', remaining(entry.until)) : tr('trusted always')});
+  if (level === 'block') return el('span', {class: 'pill danger', text: tr('blocked')});
+  return el('span', {class: 'pill warn', text: tr('asks')});
+}
+function remaining(until) { const s = Math.max(0, until - Date.now() / 1000); return s >= 3600 ? tr('{0} h', Math.round(s / 3600)) : tr('{0} min', Math.max(1, Math.round(s / 60))); }
+async function refreshAgents(a) {
+  try { a.agents = await a.link.request('agents.status'); } catch (error) { a.agents = null; report(error); }
+  if (view === 'settings' && a === current()) renderSettings();
+}
+function approvalPrompt(a, item) {
+  if (openApproval || $('modal').open) { toast(tr('An agent asks to run a command; see Settings → Agents and machines.'), false, null, hostOf(a)); if (view === 'settings' && a === current()) refreshAgents(a); return; }
+  openApproval = item;
+  const d = item.detail || {}, decide = async decision => { openApproval = null; closeModal(); try { await a.link.request('agents.decide', {id: item.id, decision}); } catch (error) { report(error); } };
+  const body = el('div', {},
+    el('p', {class: 'modal-copy', text: tr('{0} asks to run this on {1}, in {2}:', item.requester?.name || '?', hostName(a), d.cwd || tr('the home directory'))}),
+    el('pre', {class: 'approval-command', text: d.command || d.summary || ''}),
+    el('p', {class: 'modal-copy', text: tr('Timeout {0} s · output bounded · journaled. Without an answer within 2 minutes the request is refused. The session cannot see this prompt: it waits for your decision.', d.timeout || 60)}),
+    el('div', {class: 'modal-actions approval-actions'},
+      button(tr('Deny'), () => decide('deny'), 'button danger'),
+      button(tr('Trust always'), () => confirmAction(tr('Trust this requester permanently?'), tr('{0} will run commands here without asking until you revoke it in Settings → Agents and machines.', item.requester?.name || '?'), tr('Trust always'), () => decide('always')), 'button'),
+      button(tr('Trust 1 h'), () => decide('1h'), 'button'),
+      button(tr('Allow once'), () => decide('once'), 'button primary')));
+  modal(tr('Agent command on {0}', hostName(a)), body, () => { openApproval = null; });
+}
+function agentsSettings(a) {
+  const info = a.info?.agents; if (!info) return [];
+  const toggle = el('input', {type: 'checkbox', checked: !!info.enabled, 'aria-label': tr('Agents and machines')});
+  toggle.onchange = async () => { toggle.disabled = true; try { a.agents = await a.link.request('agents.configure', {enabled: toggle.checked}, 120000); a.info.agents = {enabled: a.agents.enabled}; } catch (error) { toggle.checked = !toggle.checked; report(error); } finally { toggle.disabled = false; renderSettings(); } };
+  const rows = [settingsRow(tr('Agents and machines'), info.enabled ? tr('On. Claude Code and Codex sessions on linked machines may ask to run commands here; every requester has its own rights below. Sessions here can reach linked machines.') : tr('Off. Turn on to let AI sessions on linked machines run commands here under your rules, and to let sessions here reach linked machines.'), toggle)];
+  if (!info.enabled) return rows;
+  if (!a.agents) { refreshAgents(a); rows.push(settingsRow(tr('Loading…'), '', el('span'))); return rows; }
+  const st = a.agents;
+  // Linked machines (this host as a requester on others).
+  const links = el('div', {class: 'agents-list'});
+  for (const l of st.links || []) links.append(el('div', {class: 'agents-row agents-link'}, el('span', {class: 'host-symbol ' + (l.state === 'online' ? 'online' : l.state === 'refused' ? 'offline' : 'busy')}, icon('cloud', 14)), el('span', {class: 'agents-row-text'}, el('strong', {text: l.name || l.room}), el('small', {text: (l.platform ? l.platform + ' · ' : '') + (l.state === 'online' ? tr('link online') : l.error || l.state)})), button(tr('Remove'), async () => { try { a.agents = await a.link.request('links.remove', {room: l.room}); } catch (error) { report(error); } renderSettings(); }, 'text-button')));
+  const code = el('input', {placeholder: tr('Pairing code of the other machine (jaunt pair)'), 'aria-label': tr('Pairing code'), autocomplete: 'off'});
+  const add = button(tr('Link'), async () => { add.disabled = true; try { a.agents = await a.link.request('links.add', {code: code.value.trim()}, 60000); code.value = ''; toast(tr('Machine linked.'), false, null, hostOf(a)); } catch (error) { report(error); } finally { add.disabled = false; renderSettings(); } }, 'button');
+  links.append(el('div', {class: 'agents-add'}, code, add));
+  rows.push(settingsRow(tr('Linked machines'), tr('Machines this host can reach as a requester. Run jaunt pair on the other machine and paste its code; the other machine then decides what this host\'s sessions may do there.'), el('span')), links);
+  // Requesters table (others acting here).
+  const selected = new Set();
+  const table = el('table', {class: 'agents-table'}, el('thead', {}, el('tr', {}, el('th', {text: ''}), el('th', {text: tr('Requester')}), el('th', {text: tr('Run commands')}), el('th', {text: tr('Write into a shell')}))));
+  const tbody = el('tbody'); table.append(tbody);
+  for (const r of st.requesters || []) {
+    const box = el('input', {type: 'checkbox', 'aria-label': r.name}); box.onchange = () => { if (box.checked) selected.add(r.id); else selected.delete(r.id); };
+    tbody.append(el('tr', {}, el('td', {}, box), el('td', {}, el('strong', {text: r.name}), el('small', {text: ' · ' + (r.local ? tr('this host') : r.host)})), el('td', {}, levelPill(r.exec)), el('td', {}, levelPill(r.type))));
+  }
+  if (!(st.requesters || []).length) tbody.append(el('tr', {}, el('td', {colspan: 4, class: 'muted', text: tr('No session has asked anything here yet. A requester appears at its first request.')})));
+  const modify = button(tr('Modify selection…'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } trustDialog(a, [...selected]); }, 'button');
+  const revoke = button(tr('Revoke selection'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } confirmAction(tr('Revoke these requesters?'), tr('They will ask again at their next request.'), tr('Revoke'), async () => { a.agents = await a.link.request('agents.revoke', {requesters: [...selected]}); renderSettings(); }, true); }, 'button');
+  const revokeAll = button(tr('Revoke all'), () => confirmAction(tr('Revoke every requester?'), tr('Every requester will ask again at its next request.'), tr('Revoke all'), async () => { a.agents = await a.link.request('agents.revoke', {all: true}); renderSettings(); }, true), 'text-button');
+  rows.push(settingsRow(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block.'), el('span')), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table), el('div', {class: 'agents-actions'}, modify, revoke, revokeAll)));
+  // Pending approvals and log.
+  const pending = st.pending || [];
+  if (pending.length) {
+    const list = el('div', {class: 'agents-list'});
+    for (const item of pending) list.append(el('div', {class: 'agents-row'}, el('span', {class: 'agents-row-text'}, el('strong', {text: (item.requester?.name || '?') + ' · ' + (item.detail?.summary || item.kind)}), el('small', {text: tr('waiting for your answer')})), button(tr('Answer…'), () => approvalPrompt(a, item), 'button primary small')));
+    rows.push(settingsRow(tr('Pending requests'), tr('Answer here or from any other device; the first answer wins.'), el('span')), list);
+  }
+  const log = el('div', {class: 'agents-list agents-log'});
+  for (const entry of [...(st.log || [])].reverse().slice(0, 30)) {
+    const when = new Date(entry.at * 1000).toLocaleString();
+    const text = entry.kind === 'run' ? `${entry.command}${entry.cwd ? ' · ' + entry.cwd : ''} → ${entry.status}${entry.exitCode != null ? ' · ' + tr('exit {0}', entry.exitCode) : ''} · ${entry.decision || ''}` : entry.kind === 'trust' ? tr('{0}: {1} → {2}{3}', entry.requester, entry.right, entry.level, entry.duration ? ' ' + entry.duration : '') : entry.kind === 'revoke' ? tr('revoked {0}', (entry.requesters || []).join(', ')) : entry.kind === 'link' ? tr('linked {0}', entry.host || '') : entry.kind === 'switch' ? (entry.enabled ? tr('turned on') : tr('turned off')) : JSON.stringify(entry);
+    log.append(el('div', {class: 'agents-row muted'}, el('small', {text: when + (entry.requester ? ' · ' + (st.requesters?.find(r => r.id === entry.requester)?.name || entry.requester) : '') + (entry.by ? ' · ' + entry.by : '')}), el('span', {class: 'agents-row-text', text: text})));
+  }
+  if (!(st.log || []).length) log.append(el('div', {class: 'agents-row muted', text: tr('Nothing yet.')}));
+  rows.push(settingsRow(tr('Journal'), tr('The last decisions, commands and refusals on this host.'), button(tr('Refresh'), () => refreshAgents(a), 'text-button')), log);
+  return rows;
+}
+function trustDialog(a, requesters) {
+  const right = el('select', {'aria-label': tr('Right')}, el('option', {value: 'exec', text: tr('Run commands')}), el('option', {value: 'type', text: tr('Write into a shell')}));
+  const level = el('select', {'aria-label': tr('Level')}, el('option', {value: 'ask', text: tr('Ask every time')}), el('option', {value: '1h', text: tr('Trust for 1 hour')}), el('option', {value: '24h', text: tr('Trust for 24 hours')}), el('option', {value: 'always', text: tr('Trust always')}), el('option', {value: 'block', text: tr('Block')}));
+  const apply = async () => {
+    try {
+      for (const id of requesters) {
+        const v = level.value; a.agents = await a.link.request('agents.trust', {requester: id, right: right.value, level: v === 'block' ? 'block' : v === 'ask' ? 'ask' : 'trust', duration: ['1h', '24h', 'always'].includes(v) ? v : undefined});
+      }
+      closeModal(); renderSettings();
+    } catch (error) { reportError(error, 'modal'); }
+  };
+  modal(tr('Modify {0} requester(s)', requesters.length), el('div', {}, field(tr('Right'), right), field(tr('Level'), level), el('div', {class: 'modal-actions'}, button(tr('Cancel'), closeModal), button(tr('Apply'), apply, 'button primary'))));
+}
 function bridgeSettings(a){
   const b=a.info?.bridge;
   if(!b||!b.visible)return [];
@@ -1563,6 +1656,7 @@ function renderSettings() {
       settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
       ...(!a.machine.local ? [settingsRow(tr('Forget this machine'), tr('Removes its saved key from this browser. Revoke it on the host first when possible.'), button(tr('Forget'), () => forgetMachine(a), 'button danger'))] : [])));
     if(a.info?.bridge?.visible)groups.push(settingsGroup(tr('AI SESSIONS'),...bridgeSettings(a)));
+    if(a.info?.agents)groups.push(settingsGroup(tr('AGENTS AND MACHINES'),...agentsSettings(a)));
     groups.push(settingsGroup(tr('NOTIFICATIONS'),
       ...(a.info?.sharedViews ? attentionSettings(a) : []),
       ...(!desktop ? [settingsRow(isAndroid ? tr('Android background notifications') : tr('Background push'), isAndroid ? tr('Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.') : a.machine.push ? tr('Registered for this machine. Delivery depends on browser/OS permissions and the host being online.') : tr('Standard Web Push sent by your host. No ntfy, bot or third-party notification account.'),

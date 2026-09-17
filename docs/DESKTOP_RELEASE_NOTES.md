@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.26
+
+- Bundles the beta.32 interface (Agents and machines settings, approval modal).
+
 # jaunt desktop 0.1.0-beta.25
 
 - Bundles the beta.31 client (no client change).
