@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.31
+
+- Bundles the beta.38 interface (reworded note for unregistered AI sessions).
+
 # jaunt desktop 0.1.0-beta.30
 
 - Bundles the beta.36 interface (four capability switches under Agents and machines).
