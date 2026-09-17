@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.18 (versionCode 18)
+
+- Bundles the beta.26 interface (visible-only terminal subscriptions, acknowledged output): far less traffic and parsing with several Claude Code tabs open.
+
 # jaunt Android 0.1.0-beta.17 (versionCode 17)
 
 - Bundles the beta.25 interface (host symbol and switcher in the top bar, tinted per-host activity strip).

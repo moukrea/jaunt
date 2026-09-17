@@ -142,3 +142,50 @@ async def test_late_stream_frames_after_termination_keep_peer_alive(tmp_path,mon
         assert messages==[{'type':'pong','at':123}]
         assert not sessions.items
     finally:await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_flow_control_bounds_unacknowledged_output_and_catches_up(tmp_path,monkeypatch):
+    """A viewer that stops acknowledging receives at most WINDOW bytes in flight; when it acknowledges
+    again it catches up from a reset with at most CATCHUP bytes. A viewer that keeps acknowledging gets
+    everything. Notifications are still detected while nobody is fed."""
+    from jaunt.sessions import WINDOW,CATCHUP
+    monkeypatch.setenv('SHELL','/bin/sh')
+    from jaunt.crypto import unb64
+    events=[];bells=[];box={}
+    async def send(peer,value):
+        events.append((peer,value))
+        # The fast viewer behaves like a responsive client: it acknowledges each frame as it renders it
+        # (a real send yields to the loop for network I/O; do the same so acknowledgements get processed).
+        if peer=='fast' and value['type']=='terminal.output':
+            asyncio.get_running_loop().create_task(box['sessions'].ack('fast',value['id'],value['offset']+len(unb64(value['data']))))
+        await asyncio.sleep(0)
+    async def changed():pass
+    sessions=Sessions(send,changed,tmp_path,attention=lambda s,event,*rest:bells.append(event));box['sessions']=sessions
+    try:
+        s=await sessions.create({'cwd':str(tmp_path),'cols':80,'rows':24});sid=s['id']
+        await sessions.attach('fast',{'id':sid});await sessions.attach('slow',{'id':sid})
+        received=lambda peer:sum(len(unb64(e['data'])) for p,e in events if p==peer and e['type']=='terminal.output')
+        # 1.5 MiB burst: the fast peer acknowledges every frame, the slow one never does.
+        await sessions.write(sid,b"head -c 1572864 /dev/zero | tr '\\0' x; printf '\\a'; echo END-OF-BU\"\"RST\n")
+        for _ in range(400):
+            await asyncio.sleep(.05)
+            if any(p=='fast' and e['type']=='terminal.output' and b'END-OF-BURST' in unb64(e['data']) for p,e in events):break
+        else:pytest.fail('burst never completed for the acknowledging viewer')
+        session=sessions.get(sid)
+        assert received('fast')>=1572864,'the acknowledging viewer must get the whole stream'
+        assert received('slow')<=WINDOW+65536,'a silent viewer must not be flooded'
+        assert session.subscribers['slow'].behind
+        assert 'bell' in bells,'notifications are detected even while a viewer is not fed'
+        # The slow viewer acknowledges what it has: it is brought to the head with a bounded, reset catch-up.
+        before=len(events)
+        await sessions.ack('slow',sid,session.subscribers['slow'].sent)
+        tail=[e for p,e in events[before:] if p=='slow']
+        assert tail and tail[0]['type']=='terminal.reset' and tail[0]['trimmed']
+        caught=sum(len(unb64(e['data'])) for e in tail if e['type']=='terminal.output')
+        assert 0<caught<=CATCHUP and caught<=session.subscribers['slow'].window and tail[0]['offset']+caught==session.offset
+        assert not session.subscribers['slow'].behind and session.subscribers['slow'].sent==session.offset
+        # A fresh attach far behind the head also gets only the bounded tail.
+        events.clear();await sessions.attach('late',{'id':sid,'after':0})
+        late=[e for p,e in events if p=='late']
+        assert late[0]['type']=='terminal.reset' and sum(len(unb64(e['data'])) for e in late if e['type']=='terminal.output')<=CATCHUP
+    finally:await sessions.shutdown()

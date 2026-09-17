@@ -1,3 +1,15 @@
+# jaunt 0.1.0-beta.26
+
+Performance on slow links and on phones, after a field report of 50 s round trips, endless "Restoring shell…" and RPC timeouts with five Claude Code sessions open (measured: ~25 KB/s and ~90 PTY writes per second at idle, far more while working; every write became one relay frame per client; no flow control; relay disconnections at the 180 frames/s limit; full 2 MiB replays on every resume).
+
+- A device receives only the output of the terminals it displays. Hidden tabs, other hosts' tabs and a backgrounded app are detached on the host and cost nothing on the link; a terminal shown again catches up with a bounded tail (at most 128 KiB, full-screen programs redraw). Notifications are still detected on the host for every terminal.
+- Per-viewer flow control: the client acknowledges output as xterm renders it, the host keeps a bounded window in flight (slow-start 128 KiB → 512 KiB, collapsing to 32 KiB when a viewer falls behind, remembered per device across tabs) and feeds a viewer that cannot keep up with the freshest slice only. Round trips, RPCs and uploads no longer queue behind terminal output. Validated in `tests/flow_control_e2e.py` on a 200 KB/s throttled link against a 400 KB/s producer.
+- PTY reads are coalesced (up to 30 ms / 64 KiB) into one relay frame per viewer, keeping chatty TUIs under the relay's frame budget. The relay close code and reason are now logged when the host is disconnected.
+- No "extreme latency" overlay while a terminal is being restored: the restore itself is the message.
+- Host clipboard: the display is discovered from its sockets (`wayland-*`, `/tmp/.X11-unix`, Xwayland auth) at call time, so a host started by systemd before the graphical session, or updated in place, offers native image paste again instead of the path fallback.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.25
 
 - Top bar: the host is shown with a monitor icon (local host) or a globe (remote host) coloured by its connection state (green online, accent while connecting or reconnecting, red offline). The "Encrypted" label, its dot and the top New shell button are gone (the tab strip keeps New shell). Clicking the host name opens a menu to switch to another paired host. Latency stays on the right and is visible on mobile too.

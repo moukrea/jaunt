@@ -1,5 +1,5 @@
 """jaunt host. Sessions are independent of the browser and relay connection."""
-__version__ = "0.1.0b25"
+__version__ = "0.1.0b26"
 
 # Accept existing installations' environment names while using lowercase branding.
 import os as _os

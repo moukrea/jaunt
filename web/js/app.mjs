@@ -206,8 +206,8 @@ function makeMachine(machine) {
     a.peer = e.detail.peer; a.info = e.detail.machine; a.sessions = e.detail.sessions; syncSessions(a);
     a.restartExpected = 0; if (a.link.expectRestart !== undefined) a.link.expectRestart = false;
     if (a.info?.updates) hostUpdateJobs.get(a.machine.room)?.observe(a.info.updates);
-    // Only attach terminal views this browser actually opened; sessions need no viewer to run.
-    for (const t of a.terms.values()) attachTerm(a, t).catch(error=>reportHost(a,error));
+    // Only the terminals this device is looking at receive the stream; the others catch up when shown.
+    syncSubscriptions();
     if (!a.machine.openSessions) a.machine.openSessions = a.sessions.map(s=>s.id);
     if (!a.active || !a.sessions.some(s => s.id === a.active)) a.active = a.machine.openSessions[0] || '';
     if (a.info?.workspace?.sync) applyHostWorkspace(a, a.info.workspace).then(() => { if (selected === machine.room) { render(); if (a.active) selectSession(a, a.active).catch(error=>reportHost(a,error)); } }).catch(error=>reportHost(a,error));
@@ -263,7 +263,7 @@ function handleMessage(a, message) {
     const skip = Math.max(0, expected - message.offset);
     if (skip >= raw.length) return;
     t.offset = message.offset + raw.length;
-    t.term.write(raw.subarray(skip));
+    t.term.write(raw.subarray(skip), () => ackOutput(a, t));
   } else if (message.type === 'terminal.exit') {
     const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
     render();
@@ -318,7 +318,7 @@ function hostMenu() {
   const r = anchor.getBoundingClientRect(), width = menu.offsetWidth;
   menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) + 'px'; menu.style.top = (r.bottom + 6) + 'px';
   const dismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && (menu.contains(e.target) || anchor.contains(e.target))) return; menu.remove(); anchor.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', dismiss, true); document.removeEventListener('keydown', dismiss, true); };
-  setTimeout(() => { document.addEventListener('pointerdown', dismiss, true); document.addEventListener('keydown', dismiss, true); }, 0);
+  document.addEventListener('keydown', dismiss, true); setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
   (menu.querySelector('.selected') || menu.querySelector('button')).focus();
 }
 window.addEventListener('jaunt-activity', () => { if (vault.data) renderMachines(); });
@@ -354,7 +354,8 @@ function renderLatency(a, state) {
   $('latency').classList.toggle('high', high === true);
   $('latency').hidden = lat == null;
   $('latency').replaceChildren(...(high ? [el('strong', {text: tr('High latency, expect slowness')}), ' '] : []), lat == null ? '' : `${lat} ms`);
-  const cover = extreme && !a.latencyOverride && view === 'terminal';
+  // A replay in progress is shown as "Restoring shell…" on the terminal itself; the latency it causes is not an alert.
+  const cover = extreme && !a.latencyOverride && view === 'terminal' && !restoring(a);
   $('latency-overlay').hidden = !cover;
   if (cover) $('latency-overlay-text').textContent = tr('Round trips to this host currently take {0} seconds. jaunt is waiting for the connection to settle before showing the terminals, so that what you type matches what you see.', Math.round(lat / 1000));
 }
@@ -365,6 +366,11 @@ if (new URL(location.href).searchParams.has('debug')) window.jauntSimulateLatenc
   if (!a.link.simulated) { const emit = a.link.emit.bind(a.link); a.link.emit = (type, d) => { if (type === 'latency' && d !== a.link.simulatedValue) return; emit(type, d); }; Object.defineProperty(a.link, 'latency', {get: () => a.link.simulatedValue, set() {}}); a.link.simulated = true; }
   a.link.simulatedValue = ms; a.link.emit('latency', ms);
 };
+if (new URL(location.href).searchParams.has('debug')) {
+  // Round trip of a real RPC on the current link, and the visible screen text of the active terminal.
+  window.jauntPing = async () => { const a = current(), t0 = performance.now(); await a.link.request('session.list'); return Math.round(performance.now() - t0); };
+  window.jauntScreen = () => { const t = activeTerm(current()); if (!t) return ''; const b = t.term.buffer.active, lines = []; for (let i = 0; i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) || ''); return lines.join('\n'); };
+}
 function renderMachines() {
   $('machine-count').textContent = machines.size;
   const badges = activityBadges();
@@ -398,6 +404,7 @@ function render() {
   $('terminal-empty').hidden = !!a?.active;
   for (const host of machines.values()) for (const [id, t] of host.terms) t.node.hidden = host !== a || !visibleSessions(a).includes(id);
   if (a) layoutPanes(a);
+  syncSubscriptions();
   if (a) {
     renderTabs(a);
     const s = a.sessions.find(s => s.id === a.active), t = activeTerm(a);
@@ -566,6 +573,7 @@ async function attachTerm(a, t) {
     await new Promise(resolve => t.term.write('', resolve));
     if (generation !== a.link.generation || a.link.state !== 'online') return;
     t.generation = generation; t.attached = true; t.replaying=false;updateTermInput(a, t);
+    ackOutput(a, t);
     t.ownsSize = !a.info?.sharedViews || t.session.activeView === a.peer;
     if (a === current() && visibleSessions(a).includes(t.session.id) && !document.hidden) claimSize(a, t);
     if(!t.scrollAnchor || t.scrollAnchor.bottom)t.term.scrollToBottom();
@@ -598,6 +606,37 @@ function visibleSessions(a) {
   if (!a) return [];
   return isMobile() ? [a.active] : leaves(a.machine.layout).length ? leaves(a.machine.layout) : [a.active];
 }
+// Subscribe to the output of the terminals actually on screen, and only those: a hidden tab, another
+// host's tabs or a backgrounded page cost nothing on the link. A terminal that becomes visible again
+// re-attaches from its last offset and the host replays at most a bounded tail (full-screen programs
+// redraw). Notifications are detected by the host on every byte, so they still arrive.
+let subscriptionSync = 0;
+function syncSubscriptions() {
+  if (subscriptionSync) return;
+  subscriptionSync = requestAnimationFrame(() => { subscriptionSync = 0; applySubscriptions(); });
+}
+function wantsStream(h, t) {
+  return h === current() && !document.hidden && $('terminal-view') && !$('terminal-view').hidden && visibleSessions(h).includes(t.session.id) && h.link.state === 'online';
+}
+function applySubscriptions() {
+  for (const h of machines.values()) for (const t of h.terms.values()) {
+    const wanted = wantsStream(h, t);
+    const live = t.attached && t.generation === h.link.generation;
+    if (wanted && !live && !t.attaching) attachTerm(h, t).catch(error => reportHost(h, error));
+    else if (!wanted && live && !t.attaching && !t.detaching && h.link.state === 'online') {
+      t.detaching = true; t.attached = false; updateTermInput(h, t);
+      h.link.request('session.detach', {id: t.session.id}).catch(() => {}).finally(() => { t.detaching = false; syncSubscriptions(); });
+    }
+  }
+}
+function ackOutput(a, t) {
+  if (!a.info?.flowControl || t.ackTimer) return;
+  t.ackTimer = setTimeout(() => {
+    t.ackTimer = null;
+    if (a.link.state === 'online' && t.attached && a.terms.get(t.session.id) === t) a.link.send({type: 'terminal.ack', id: t.session.id, offset: t.offset}).catch(() => {});
+  }, 50);
+}
+function restoring(a) { return !!a && [...a.terms.values()].some(t => t.attaching); }
 function updateGeometryLabel(a, t) {
   if (a !== current() || a.active !== t.session.id) return;
   const viewers = (t.session.viewers || []).map(v => v.name + (v.active ? ' • active' : '')).join(', ');
@@ -714,7 +753,7 @@ function arrangePanes(axis, anchor = $(axis === 'y' ? 'split-below' : 'arrange-p
   picker.style.left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) + 'px';
   picker.style.top = (r.bottom + height + 8 < window.innerHeight ? r.bottom + 6 : Math.max(8, r.top - height - 6)) + 'px';
   const dismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && (picker.contains(e.target) || anchor.contains(e.target))) return; picker.remove(); document.removeEventListener('pointerdown', dismiss, true); document.removeEventListener('keydown', dismiss, true); };
-  setTimeout(() => { document.addEventListener('pointerdown', dismiss, true); document.addEventListener('keydown', dismiss, true); }, 0);
+  document.addEventListener('keydown', dismiss, true); setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
   picker.querySelector('button').focus();
 }
 async function undockPane(a,id) {
@@ -830,7 +869,7 @@ function closeChoice(anchor, a, ids) {
   menu.style.left = Math.max(8, Math.min(r.left + r.width / 2 - width / 2, window.innerWidth - width - 8)) + 'px';
   menu.style.top = (r.bottom + height + 8 < window.innerHeight ? r.bottom + 6 : Math.max(8, r.top - height - 6)) + 'px';
   const dismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && menu.contains(e.target)) return; menu.remove(); document.removeEventListener('pointerdown', dismiss, true); document.removeEventListener('keydown', dismiss, true); };
-  setTimeout(() => { document.addEventListener('pointerdown', dismiss, true); document.addEventListener('keydown', dismiss, true); }, 0);
+  document.addEventListener('keydown', dismiss, true); setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
   menu.querySelector('button').focus();
 }
 async function closeView(a, id) {
@@ -1615,6 +1654,7 @@ function bindEvents() {
   });
   window.addEventListener('online', () => { for (const a of machines.values()) if (a.link.state !== 'online') a.link.reconnect(); });
   document.addEventListener('visibilitychange', () => {
+    syncSubscriptions();
     if (document.hidden) { hiddenAt = Date.now(); return; }
     const minutes = prefs().autoLock;
     if (minutes && vault.protected && hiddenAt && Date.now() - hiddenAt >= minutes * 60000) { lockWorkspace().catch(report); return; }
