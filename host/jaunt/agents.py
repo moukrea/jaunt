@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import logging
 import os
 import shutil
@@ -25,6 +26,7 @@ log = logging.getLogger("jaunt")
 RIGHTS = ("exec", "type")
 LEVELS = ("ask", "trust", "block")
 DURATIONS = {"1h": 3600, "24h": 86400, "always": None}
+RULES_MAX, RULE_CHARS = 50, 200
 APPROVAL_SECONDS = 120
 INLINE_BYTES = 64 * 1024
 MAX_TIMEOUT = 600
@@ -135,10 +137,54 @@ class Policy:
                 self.grants.pop(pair, None)
         self.save()
 
+    # Allow-list (phase 4): command patterns a requester in ask mode may run without a prompt.
+    # Patterns are shell-style globs (`*`, `?`) matched against the whole command, whitespace collapsed.
+    @staticmethod
+    def normalize(command: str) -> str:
+        return " ".join(str(command).split())
+
+    def rules(self, key: str) -> list[str]:
+        row = self.data["requesters"].get(key) or {}
+        return list(row.get("rules") or [])
+
+    def add_rule(self, key: str, pattern: str) -> list[str]:
+        row = self.data["requesters"].get(key)
+        if row is None:
+            raise ValueError("Unknown requester")
+        pattern = self.normalize(pattern)
+        if not pattern or pattern == "*" or len(pattern) > RULE_CHARS:
+            raise ValueError("A rule is a command or a pattern with * and ?, up to 200 characters, never * alone")
+        rules = row.setdefault("rules", [])
+        if pattern not in rules:
+            if len(rules) >= RULES_MAX:
+                raise ValueError("At most 50 rules per requester")
+            rules.append(pattern)
+            self.save()
+        return list(rules)
+
+    def remove_rule(self, key: str, pattern: str) -> list[str]:
+        row = self.data["requesters"].get(key)
+        if row is None:
+            raise ValueError("Unknown requester")
+        rules = row.setdefault("rules", [])
+        pattern = self.normalize(pattern)
+        if pattern in rules:
+            rules.remove(pattern)
+            self.save()
+        return list(rules)
+
+    def matches(self, key: str, command: str) -> str | None:
+        """The first rule that pre-approves this command, or None."""
+        command = self.normalize(command)
+        for pattern in self.rules(key):
+            if fnmatch.fnmatchcase(command, pattern):
+                return pattern
+        return None
+
     def public_row(self, key: str) -> dict:
         row = self.data["requesters"][key]
         out = {"id": key, "name": row.get("name", key), "host": row.get("host", ""), "runtime": row.get("runtime", ""),
-               "local": bool(row.get("local")), "since": row.get("since")}
+               "local": bool(row.get("local")), "since": row.get("since"), "rules": list(row.get("rules") or [])}
         for right in RIGHTS:
             level = self.level(key, right)
             out[right] = {"level": level, "until": (row.get(right) or {}).get("until") if level == "trust" else None}
@@ -195,7 +241,7 @@ class Approvals:
         item = self.pending.get(approval_id)
         if not item or item["future"].done():
             raise ValueError("This request was already answered or has expired")
-        if decision not in ("once", "1h", "24h", "always", "deny"):
+        if decision not in ("once", "rule", "1h", "24h", "always", "deny"):
             raise ValueError("Unknown decision")
         item["by"] = by
         item["future"].set_result(decision)

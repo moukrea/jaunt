@@ -1437,6 +1437,7 @@ function approvalPrompt(a, item) {
       button(tr('Deny'), () => decide('deny'), 'button danger'),
       button(tr('Trust always'), () => confirmAction(tr('Trust this requester permanently?'), tr('{0} will run commands here without asking until you revoke it in Settings → Agents and machines.', who), tr('Trust always'), () => decide('always')), 'button'),
       button(tr('Trust 1 h'), () => decide('1h'), 'button'),
+      ...(d.shell ? [] : [button(tr('Always allow this command'), () => decide('rule'), 'button')]),
       button(tr('Allow once'), () => decide('once'), 'button primary')));
   modal(typing ? tr('Agent in a shell on {0}', hostName(a)) : tr('Agent command on {0}', hostName(a)), body, () => { openApproval = null; });
 }
@@ -1461,7 +1462,7 @@ function agentsSettings(a) {
   const tbody = el('tbody'); table.append(tbody);
   for (const r of st.requesters || []) {
     const box = el('input', {type: 'checkbox', 'aria-label': r.name}); box.onchange = () => { if (box.checked) selected.add(r.id); else selected.delete(r.id); };
-    tbody.append(el('tr', {}, el('td', {}, box), el('td', {}, el('strong', {text: r.name}), el('small', {text: ' · ' + (r.local ? tr('this host') : r.host)})), el('td', {}, levelPill(r.exec)), el('td', {}, levelPill(r.type))));
+    tbody.append(el('tr', {}, el('td', {}, box), el('td', {}, el('strong', {text: r.name}), el('small', {text: ' · ' + (r.local ? tr('this host') : r.host)})), el('td', {}, levelPill(r.exec), ' ', button((r.rules || []).length ? tr('{0} rule(s)', r.rules.length) : tr('Rules…'), () => rulesDialog(a, r), 'text-button small')), el('td', {}, levelPill(r.type))));
   }
   if (!(st.requesters || []).length) tbody.append(el('tr', {}, el('td', {colspan: 4, class: 'muted', text: tr('No session has asked anything here yet. A requester appears at its first request.')})));
   const modify = button(tr('Modify selection…'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } trustDialog(a, [...selected]); }, 'button');
@@ -1519,6 +1520,19 @@ function propagateIdentity(target) {
     if (other === target || other.link.state !== 'online' || !other.info?.agents?.enabled) continue;
     other.link.request('links.update', {room: target.machine.room, name: hostName(target), icon: target.machine.icon || null}).then(status => { other.agents = status; }).catch(() => {});
   }
+}
+// Allow-list of one requester: commands or patterns (* and ?) that run without a prompt while it is in ask mode.
+function rulesDialog(a, r) {
+  const list = el('div', {class: 'agents-list rules-list'});
+  const input = el('input', {placeholder: tr('git status, npm test *, ls *'), 'aria-label': tr('Rule'), autocomplete: 'off', spellcheck: false});
+  const render = rules => {
+    list.replaceChildren(...rules.map(rule => el('div', {class: 'agents-row'}, el('code', {class: 'agents-row-text', text: rule}), button(tr('Remove'), async () => { try { a.agents = await a.link.request('agents.rule', {requester: r.id, pattern: rule, remove: true}); render(a.agents.requesters.find(x => x.id === r.id)?.rules || []); renderSettings(); } catch (error) { report(error); } }, 'text-button'))));
+    if (!rules.length) list.append(el('div', {class: 'agents-row muted', text: tr('No rule yet. Every command asks you.')}));
+  };
+  render(r.rules || []);
+  const add = button(tr('Add'), async () => { const pattern = input.value.trim(); if (!pattern) return; add.disabled = true; try { a.agents = await a.link.request('agents.rule', {requester: r.id, pattern}); input.value = ''; render(a.agents.requesters.find(x => x.id === r.id)?.rules || []); renderSettings(); } catch (error) { report(error); } finally { add.disabled = false; } }, 'button primary');
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add.click(); } };
+  modal(tr('Pre-approved commands for {0}', r.name), el('div', {}, el('p', {class: 'modal-copy', text: tr('While this requester asks before each command, these run at once: a whole command, or a pattern where * stands for anything and ? for one character. They never apply to background shells or typing.')}), list, el('div', {class: 'agents-add'}, input, add)));
 }
 function trustDialog(a, requesters) {
   const right = el('select', {'aria-label': tr('Right')}, el('option', {value: 'exec', text: tr('Run commands')}), el('option', {value: 'type', text: tr('Write into a shell')}));

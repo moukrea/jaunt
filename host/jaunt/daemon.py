@@ -500,6 +500,15 @@ class Host:
                 await self.agent_shells.kill_for(str(p.get("requester", "")), "requester blocked")
             await self._marks_changed()
             return self.agents_status()
+        if method == "agents.rule":
+            key, pattern = str(p.get("requester", "")), str(p.get("pattern", ""))
+            if p.get("remove") is True:
+                self.policy.remove_rule(key, pattern)
+                self.policy.journal(kind="rule", requester=key, removed=self.policy.normalize(pattern), by=peer.display_name)
+            else:
+                self.policy.add_rule(key, pattern)
+                self.policy.journal(kind="rule", requester=key, added=self.policy.normalize(pattern), by=peer.display_name)
+            return self.agents_status()
         if method == "agents.revoke":
             keys = list(self.policy.data["requesters"]) if p.get("all") is True else [str(k) for k in p.get("requesters", [])]
             self.policy.revoke(keys)
@@ -660,15 +669,24 @@ class Host:
 
     def agent_rights(self, peer, p: dict) -> dict:
         key, name = self._requester_of(peer, p)
-        return {"requester": name, "exec": self.policy.level(key, "exec"), "type": self.policy.level(key, "type")}
+        return {"requester": name, "exec": self.policy.level(key, "exec"), "type": self.policy.level(key, "type"), "rules": self.policy.rules(key)}
 
     async def _authorize(self, key: str, name: str, right: str, kind: str, detail: dict) -> None:
         level = self.policy.level(key, right)
         if level == "block":
             self.policy.journal(kind=kind, requester=key, decision="blocked", **detail)
             raise ValueError(f"Refused: {name} is blocked on {self.state.data['name']}")
+        if level == "ask" and kind == "run":
+            rule = self.policy.matches(key, detail.get("command", ""))
+            if rule is not None:
+                detail["decision"], detail["rule"] = "rule", rule
+                return
         if level == "ask":
             decision = await self.approvals.ask({"id": key, "name": name}, right, kind, detail)
+            if decision == "rule" and kind == "run":
+                # "Always allow this command": the exact command becomes a rule for this requester.
+                self.policy.add_rule(key, detail.get("command", ""))
+                self.policy.journal(kind="rule", requester=key, added=self.policy.normalize(detail.get("command", "")))
             if decision == "deny":
                 self.policy.journal(kind=kind, requester=key, decision="denied", **detail)
                 raise ValueError(f"Refused by the owner of {self.state.data['name']} (denied, or no answer within 2 minutes)")
@@ -752,7 +770,7 @@ class Host:
         await self._authorize(key, name, "exec", "run", detail)
         result = await self.executor.run(key, command, cwd if isinstance(cwd, str) and cwd else None, timeout)
         self.policy.journal(kind="run", requester=key, command=command[:200], cwd=cwd or "", status=result["status"],
-                            exitCode=result["exitCode"], bytes=result["bytes"], run=result["run"], decision=detail.get("decision"))
+                            exitCode=result["exitCode"], bytes=result["bytes"], run=result["run"], decision=detail.get("decision"), rule=detail.get("rule"))
         return result
 
     async def agent_shell(self, peer, p: dict) -> dict:
@@ -1042,7 +1060,7 @@ class Host:
                 result = await self.bridge.wait_reply(self.bridge.resolve(p))
             elif method in ("agents.hosts", "agents.run", "agents.read", "agents.shell", "agents.sessions", "agents.type", "agents.output", "agents.status"):
                 result = await self.agents_gateway(method, p)
-            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "agents.cut", "links.add", "links.update", "links.remove", "links.list"):
+            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "agents.cut", "agents.rule", "links.add", "links.update", "links.remove", "links.list"):
                 # The CLI acts as the owner at the keyboard; the same handlers serve the UI clients.
                 result = await self.rpc(type("CLI", (), {"display_name": "CLI", "device_id": "local-cli"})(), method, p)
             elif method == "stop":

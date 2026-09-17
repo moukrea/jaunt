@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.29
+
+- Bundles the beta.35 interface (allow-list rules: modal button and rules dialog).
+
 # jaunt desktop 0.1.0-beta.28
 
 - Bundles the beta.34 interface (typing approvals, agent badge on tabs with cut off).

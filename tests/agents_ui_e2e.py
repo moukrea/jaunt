@@ -45,6 +45,17 @@ async def main():
    t=run('echo second');await expect(pb.locator('#modal')).to_be_visible(timeout=20000);await pb.get_by_role('button',name='Allow once',exact=True).click();t.join(30)
    assert 'second' in box['r'],box['r']
    print('PASS Allow once lets the command run on the target',flush=True)
+   # Phase 4: "Always allow this command" from the modal, then the rule is listed and removed from the table.
+   t=run('echo rule-me');await expect(pb.locator('#modal')).to_be_visible(timeout=20000);await pb.get_by_role('button',name='Always allow this command',exact=True).click();t.join(30);assert 'rule-me' in box['r'],box['r']
+   t=run('echo rule-me');t.join(30);assert 'rule-me' in box['r'] and not ctl(B,'agents.status')['pending'],box['r']
+   print('PASS "always allow this command" makes the same command run again without a prompt',flush=True)
+   await pb.locator('#settings-button').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
+   await pb.locator('.agents-table').get_by_role('button',name='1 rule(s)',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('echo rule-me')
+   await pb.locator('#modal .rules-list').get_by_role('button',name='Remove',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('No rule yet',timeout=15000)
+   await pb.locator('#modal input[aria-label="Rule"]').fill('echo pat-*');await pb.locator('#modal').get_by_role('button',name='Add',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('echo pat-*',timeout=15000)
+   t=run('echo pat-ok');t.join(30);assert 'pat-ok' in box['r'] and not ctl(B,'agents.status')['pending'],box['r']
+   await pb.keyboard.press('Escape')
+   print('PASS rules are listed, removed and added from the requester table, and a * pattern pre-approves matching commands',flush=True)
    await pb.locator('#settings-button').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
    row=pb.locator('.agents-table tbody tr').filter(has_text='host: my-laptop · Claude Code');await expect(row).to_be_visible(timeout=15000)
    await expect(row.locator('td').nth(2)).to_contain_text('asks');await expect(row.locator('td').nth(3)).to_contain_text('asks')
@@ -73,7 +84,7 @@ async def main():
    await expect(pb.locator('.xterm-rows')).to_contain_text('from-agent',timeout=15000)
    print('PASS the typing request names the shell and shows the text; once allowed, the tab carries the agent badge and the input lands in the terminal',flush=True)
    await pb.locator('#tabs .tab-agent').click();await pb.locator('#modal').get_by_role('button',name='Cut off',exact=True).click()
-   await expect(pb.locator('#tabs .tab-agent')).to_have_count(0,timeout=15000)
+   await expect(pb.locator('#tabs .tab-agent')).to_have_count(0,timeout=15000);await expect(pb.locator('#modal')).to_be_hidden(timeout=15000)
    t=type_('echo again');await expect(pb.locator('#modal')).to_be_visible(timeout=20000);await pb.get_by_role('button',name='Deny',exact=True).click();t.join(30);assert 'Refused' in box['r']
    print('PASS cutting from the tab removes the badge; the agent must ask again',flush=True)
    await pb.locator('#settings-button').click()
@@ -81,7 +92,7 @@ async def main():
    await expect(pb.locator('.agents-table tbody')).to_contain_text('No session has asked anything here yet',timeout=15000)
    await expect(pb.locator('.agents-log')).to_contain_text('echo third')
    print('PASS revoke all empties the table; the journal keeps the history',flush=True)
-   await b.close();print('8 agents UI checks passed.')
+   await b.close();print('10 agents UI checks passed.')
  finally:
   if mcp:mcp.close()
   A.close();B.close()

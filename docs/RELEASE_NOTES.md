@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.35
+
+**Agents and machines, phase 4: allow-lists.** A requester that asks before each command can carry rules: whole commands or patterns with `*` and `?`. A matching one-shot command runs at once and is journaled with its rule; everything else still asks. Add a rule from the approval modal (*Always allow this command*), from the requester table in Settings (*Rules…*: list, add, remove) or from the CLI (`jaunt agents rule <requester> --pattern 'npm test *'`). Rules never cover background shells or typing, and are ignored while a requester is trusted or blocked. Sessions see their pre-approved commands in `jaunt_hosts`. This closes the four planned phases of Agents and machines. Validated on two real hosts (`tests/agents_e2e.py`, 21 checks) and in the browser (`tests/agents_ui_e2e.py`, 10 checks).
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.34
 
 **Agents and machines, phase 3: typing into your existing shells.** The second right, *Write into a shell*, is live. A Claude Code or Codex session can list the jaunt shells of a linked machine, or of its own host (`jaunt_sessions`), type into one as if at its keyboard (`jaunt_type`) and read what the terminal shows (`jaunt_output`, plain text). The owner is asked once per shell (the modal names the shell and shows the text; *Allow for this shell*), or trusts the requester, or blocks it, independently of the right to run commands. A shell an agent may type into carries a lightning badge on its tab; clicking it cuts the agent off, and even a trusted requester must then ask again for that shell. A session never types into its own shell; local requesters appear as *Claude Code on this machine*. Every keystroke is journaled. Validated on two real hosts (`tests/agents_e2e.py`, 19 checks) and in the browser (`tests/agents_ui_e2e.py`, 8 checks).

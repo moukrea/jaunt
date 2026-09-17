@@ -223,10 +223,12 @@ def main() -> None:
     unlink = sub.add_parser("unlink", help=tr('Remove a linked host'))
     unlink.add_argument("room")
     agents = sub.add_parser("agents", help=tr('Agents and machines: pending requests, decisions, trust, log'))
-    agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log", "shells", "kill", "cut"])
+    agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log", "shells", "kill", "cut", "rules", "rule"])
     agents.add_argument("target", nargs="?", default="")
     agents.add_argument("--right", choices=["exec", "type"], default="exec")
-    agents.add_argument("--trust", choices=["1h", "24h", "always"], default="")
+    agents.add_argument("--trust", choices=["1h", "24h", "always", "rule"], default="", help=tr("allow: trust for a while, or 'rule' to always allow this exact command"))
+    agents.add_argument("--pattern", default="", help=tr("rule: a command or a pattern with * and ?"))
+    agents.add_argument("--remove", action="store_true", help=tr("rule: remove the pattern instead of adding it"))
     rev = sub.add_parser("revoke")
     rev.add_argument("id")
     notify = sub.add_parser("notify", help=tr('Notify connected browsers and registered push subscriptions'))
@@ -357,6 +359,12 @@ def main() -> None:
                 print(json.dumps(control("agents.status")["agentShells"], indent=2))
             elif args.action == "kill":
                 print(json.dumps(control("agents.kill", {"shell": args.target})["agentShells"], indent=2))
+            elif args.action == "rules":
+                rows = control("agents.status")["requesters"]
+                print(json.dumps({r["id"]: r.get("rules", []) for r in rows if not args.target or r["id"] == args.target}, indent=2))
+            elif args.action == "rule":
+                rows = control("agents.rule", {"requester": args.target, "pattern": args.pattern, "remove": args.remove})["requesters"]
+                print(json.dumps([r.get("rules", []) for r in rows if r["id"] == args.target], indent=2))
             elif args.action == "cut":
                 print(json.dumps(control("agents.cut", {"session": args.target})["log"][-1], indent=2))
         elif args.command == "notify":
