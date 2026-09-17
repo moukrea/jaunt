@@ -102,6 +102,7 @@ jobs:
       - run: python tests/workspace_sync_e2e.py
       - run: python tests/latency_e2e.py
       - run: python tests/flow_control_e2e.py
+      - run: python tests/scrollback_e2e.py
       - run: python tests/i18n_e2e.py
       - run: xvfb-run -a python tests/pwa_e2e.py
       - run: python tests/handoff_e2e.py
