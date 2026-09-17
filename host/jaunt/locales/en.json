@@ -605,6 +605,7 @@
   "Reconnect": "Reconnect",
   "Reconnecting": "Reconnecting",
   "Reconnecting automatically": "Reconnecting automatically",
+  "Reconnecting to the local host…": "Reconnecting to the local host…",
   "Refresh files": "Refresh files",
   "Registered for this machine. Delivery depends on browser/OS permissions and the host being online.": "Registered for this machine. Delivery depends on browser/OS permissions and the host being online.",
   "Relay URL must not contain credentials, a query or a fragment": "Relay URL must not contain credentials, a query or a fragment",

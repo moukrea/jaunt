@@ -605,6 +605,7 @@
   "Reconnect": "Voltar a ligar",
   "Reconnecting": "A voltar a ligar",
   "Reconnecting automatically": "A voltar a ligar automaticamente",
+  "Reconnecting to the local host…": "A restabelecer a ligação ao anfitrião local…",
   "Refresh files": "Atualizar ficheiros",
   "Registered for this machine. Delivery depends on browser/OS permissions and the host being online.": "Registado para esta máquina. A entrega depende das permissões do browser/SO e de o anfitrião estar online.",
   "Relay URL must not contain credentials, a query or a fragment": "O URL do relay não pode conter credenciais, query nem fragmento",

@@ -1,5 +1,7 @@
 # jaunt 0.1.0-beta.29
 
+- Fix (beta.26 regression): a coalesced PTY read could reach 96 KiB, exceed the relay frame limit and be dropped after sealing, leaving the client with a counter gap and the fatal "Out-of-order or replayed frame" banner. Output is now sent in frames of at most 48 KiB, live and during catch-up, and a frame the relay would refuse is rejected before sealing.
+- Desktop: a closed local bridge first shows "Reconnecting to the local host…" (2 s retries) and only speaks of an unavailable host after four failed attempts; a host replacing itself no longer looks broken.
 - Desktop and Android apps check the published version at every launch. When a newer one exists, a dialog asks to update or ignore (ignore lasts for that run). Desktop: with automatic updates on, the package is downloaded and verified first and *Install and reopen* is offered; with them off, the version is only announced and *Update now* downloads it. Android: the existing download-and-install dialog is now shown at each launch instead of at most every six hours (later foregrounds keep the six-hour throttle).
 
 The protocol has not undergone an independent security audit.
