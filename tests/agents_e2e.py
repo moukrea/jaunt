@@ -10,7 +10,7 @@ from browser_e2e import Harness,ROOT,until
 class Mcp:
     """The jaunt MCP server as Claude Code would start it, speaking JSON-RPC over stdio."""
     def __init__(self,host,session):
-        env={**host.env,'jaunt_SESSION_ID':session};self.p=subprocess.Popen([sys.executable,'-m','jaunt.cli','bridge-mcp','claude','--state',str(host.state)],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True);self.n=0
+        env={**host.env,'jaunt_SESSION_ID':session};self.p=subprocess.Popen([sys.executable,'-m','jaunt.cli','bridge-mcp','claude','--state',str(host.state)],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=open(os.environ.get('MCP_STDERR',os.devnull),'a'),text=True);self.n=0
         self.call('initialize',{'protocolVersion':'2024-11-05','capabilities':{},'clientInfo':{'name':'e2e','version':'0'}})
     def call(self,method,params=None,timeout=200):
         self.n+=1;self.p.stdin.write(json.dumps({'jsonrpc':'2.0','id':self.n,'method':method,'params':params or {}})+'\n');self.p.stdin.flush()
@@ -60,18 +60,18 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         passed('the session sees the linked machine and that it will be asked')
         # Ask mode: B's owner approves once from the CLI.
         marker=B.work/'agent-was-here'
-        def approve(decision):
+        def approve(decision,h=B):
             def wait():
-                pending=json.loads(B.cli('agents','pending'))
+                pending=json.loads(h.cli('agents','pending'))
                 if pending:
-                    B.cli('agents','allow' if decision!='deny' else 'deny',pending[0]['id'],*(['--trust',decision] if decision in ('1h','24h','always') else []));return True
+                    h.cli('agents','allow' if decision!='deny' else 'deny',pending[0]['id'],*(['--trust',decision] if decision in ('1h','24h','always') else []));return True
                 return False
             return wait
         import threading
-        def approver(decision):
+        def approver(decision,h=B):
             def run():
                 for _ in range(60):
-                    if approve(decision)():return
+                    if approve(decision,h)():return
                     time.sleep(.5)
             t=threading.Thread(target=run,daemon=True);t.start();return t
         t=approver('once');result=json.loads(mcp.tool('jaunt_run',{'host':'homelab','command':f"echo agent > '{marker}'; echo done; hostname"}));t.join()
@@ -148,6 +148,45 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         else:raise AssertionError('the agent shell outlived the session that opened it')
         sock.close();mcp2.close()
         passed('when the jaunt session that opened an agent shell ends, the shell on the other host is closed')
+        # Phase 3: typing into the owner's EXISTING jaunt shells, remote and local, one grant per shell, cut.
+        def new_session(h):
+            sk=__import__('socket').socket(__import__('socket').AF_UNIX);sk.connect(str(h.state/'control.sock'));sk.sendall(json.dumps({'method':'ui.connect'}).encode()+b'\n')
+            g=sk.makefile('rw');g.readline();g.write(json.dumps({'type':'rpc','id':'n1','method':'session.create','params':{'cwd':str(h.work),'cols':80,'rows':24}})+'\n');g.flush()
+            while True:
+                m=json.loads(g.readline())
+                if m.get('type')=='reply' and m.get('id')=='n1':sk.close();return m['result']['id']
+        def output(args,needle,tries=40):
+            for _ in range(tries):
+                text=mcp.tool('jaunt_output',args,timeout=60)
+                if needle in text:return text
+                time.sleep(.25)
+            raise AssertionError('missing '+needle+': '+text[-400:])
+        sidB=new_session(B);time.sleep(1)
+        listed=mcp.tool('jaunt_sessions',{'host':'homelab'});assert sidB in listed and 'the owner is asked once' in listed,listed
+        t=approver('once');typed=mcp.tool('jaunt_type',{'host':'homelab','session':sidB,'input':'echo typed-$((20+22))'});t.join();assert 'Typed' in typed,typed
+        output({'host':'homelab','session':sidB},'typed-42')
+        sB=[x for x in status(B)['sessions'] if x['id']==sidB][0];assert sB['agents'] and 'laptop' in sB['agents'][0]['name'] and 'Claude Code' in sB['agents'][0]['name'],sB['agents']
+        log=json.loads(B.cli('agents','log'));assert log[-1]['kind']=='typed' and log[-1]['session']==sidB and 'typed-' in log[-1]['input']
+        passed('a session types into one of the owner\'s shells on the other host after one approval; the shell is marked and the keystrokes journaled')
+        mcp.tool('jaunt_type',{'host':'homelab','session':sidB,'input':'echo again-$((1+1))'},timeout=60);assert not json.loads(B.cli('agents','pending'))
+        output({'host':'homelab','session':sidB},'again-2')
+        assert 'you may type there' in mcp.tool('jaunt_sessions',{'host':'homelab'})
+        passed('the grant covers that shell: the second input goes in without a prompt')
+        cut=json.loads(B.cli('agents','cut',sidB));assert cut['kind']=='cut' and cut['session']==sidB
+        assert not [x for x in status(B)['sessions'] if x['id']==sidB][0]['agents']
+        t=approver('deny');refused=mcp.tool('jaunt_type',{'host':'homelab','session':sidB,'input':'echo nope'});t.join();assert 'Refused' in refused,refused
+        passed('cut removes the mark and makes the agent ask again for that shell; deny refuses it')
+        key=[r['id'] for r in json.loads(B.cli('agents','status'))['requesters']][0];B.cli('agents','block',key,'--right','type')
+        assert 'blocked' in mcp.tool('jaunt_type',{'host':'homelab','session':sidB,'input':'echo nope'},timeout=60)
+        assert 'blocked' not in mcp.tool('jaunt_hosts',{}),'exec right untouched by a type block'
+        passed('the type right is blocked independently of the exec right')
+        sidA=new_session(A);time.sleep(1)
+        listed=mcp.tool('jaunt_sessions',{});assert sidA in listed and sid not in listed,listed
+        assert 'own shell' in mcp.tool('jaunt_type',{'session':sid,'input':'echo self'},timeout=30)
+        t=approver('once',A);typed=mcp.tool('jaunt_type',{'session':sidA,'input':'echo local-$((1+1))'});t.join();assert 'Typed' in typed,typed
+        output({'session':sidA},'local-2')
+        rows=json.loads(A.cli('agents','status'))['requesters'];assert any(r['local'] and r['name']=='Claude Code on this machine' for r in rows),rows
+        passed('a local session types into another shell of its own host under a local requester row; never into its own shell')
         A.cli('unlink',links[0]['room'])
         # The messaging bridge is untouched: no hooks were installed for agents alone, and bridge status is off.
         bridge=json.loads(subprocess.check_output([sys.executable,'-c','''

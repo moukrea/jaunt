@@ -60,11 +60,28 @@ async def main():
    await pb.get_by_role('button',name='Kill',exact=True).click();await expect(pb.locator('.agents-row').filter(has_text='lease ends')).to_have_count(0,timeout=15000)
    assert not ctl(B,'agents.status')['agentShells']
    print('PASS an agent shell is listed in Settings and can be killed from there',flush=True)
+   # Phase 3: an agent types into one of B's own shells; the tab shows it; the owner cuts it off from the tab.
+   await pb.locator('[data-view="terminal"]').first.click();await pb.locator('#new-session-tab').click();await expect(pb.locator('#tabs .session-tab').first).to_be_visible()
+   sidB=ctl(B,'status')['sessions'][0]['id']
+   def type_(text):
+    def go():box['r']=mcp.tool('jaunt_type',{'host':'homelab','session':sidB,'input':text})
+    t=threading.Thread(target=go,daemon=True);t.start();return t
+   t=type_('echo from-agent');await expect(pb.locator('#modal')).to_be_visible(timeout=20000)
+   await expect(pb.locator('#modal')).to_contain_text('asks to type this into the shell');await expect(pb.locator('.approval-command')).to_have_text('echo from-agent')
+   await pb.get_by_role('button',name='Allow for this shell',exact=True).click();t.join(30);assert 'Typed' in box['r'],box['r']
+   await expect(pb.locator('#tabs .tab-agent')).to_be_visible(timeout=15000)
+   await expect(pb.locator('.xterm-rows')).to_contain_text('from-agent',timeout=15000)
+   print('PASS the typing request names the shell and shows the text; once allowed, the tab carries the agent badge and the input lands in the terminal',flush=True)
+   await pb.locator('#tabs .tab-agent').click();await pb.locator('#modal').get_by_role('button',name='Cut off',exact=True).click()
+   await expect(pb.locator('#tabs .tab-agent')).to_have_count(0,timeout=15000)
+   t=type_('echo again');await expect(pb.locator('#modal')).to_be_visible(timeout=20000);await pb.get_by_role('button',name='Deny',exact=True).click();t.join(30);assert 'Refused' in box['r']
+   print('PASS cutting from the tab removes the badge; the agent must ask again',flush=True)
+   await pb.locator('#settings-button').click()
    await pb.get_by_role('button',name='Revoke all',exact=True).click();await pb.locator('#modal').get_by_role('button',name='Revoke all',exact=True).click()
    await expect(pb.locator('.agents-table tbody')).to_contain_text('No session has asked anything here yet',timeout=15000)
    await expect(pb.locator('.agents-log')).to_contain_text('echo third')
    print('PASS revoke all empties the table; the journal keeps the history',flush=True)
-   await b.close();print('6 agents UI checks passed.')
+   await b.close();print('8 agents UI checks passed.')
  finally:
   if mcp:mcp.close()
   A.close();B.close()

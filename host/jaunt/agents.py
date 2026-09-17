@@ -47,6 +47,7 @@ class Policy:
         self.data.setdefault("requesters", {})
         self.data.setdefault("log", [])
         self.grants: dict[tuple[str, str], float] = {}  # (requester, shell id) -> granted at (first-use for right `type`)
+        self.cuts: dict[str, float] = {}  # shell id -> cut at: every requester, trusted or not, asks again for it
 
     @property
     def enabled(self) -> bool:
@@ -94,6 +95,38 @@ class Policy:
                 self.grants.pop(pair, None)
         self.save()
         return self.public_row(key)
+
+    # Right `type`: one grant per requester × shell, given at first use in ask mode, gone with the shell,
+    # the requester's trust, or the owner's "cut" on that shell.
+    def grant(self, key: str, sid: str) -> None:
+        self.grants[(key, sid)] = time.time()
+        self.cuts.pop(sid, None)
+
+    def granted(self, key: str, sid: str) -> bool:
+        return (key, sid) in self.grants
+
+    def allowed_shell(self, key: str, sid: str) -> str:
+        """`ask`, `trust` (no prompt) or `block` for this requester on this shell now."""
+        level = self.level(key, "type")
+        if level == "block":
+            return "block"
+        if self.granted(key, sid):
+            return "trust"
+        if level == "trust" and sid not in self.cuts:
+            return "trust"
+        return "ask"
+
+    def cut(self, sid: str) -> list[str]:
+        gone = [g for g in self.grants if g[1] == sid]
+        for pair in gone:
+            self.grants.pop(pair, None)
+        self.cuts[sid] = time.time()
+        return sorted({g[0] for g in gone})
+
+    def forget_session(self, sid: str) -> None:
+        for pair in [g for g in self.grants if g[1] == sid]:
+            self.grants.pop(pair, None)
+        self.cuts.pop(sid, None)
 
     def revoke(self, keys: list[str]) -> None:
         for key in keys:

@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.28
+
+- Bundles the beta.34 interface (typing approvals, agent badge on tabs with cut off).
+
 # jaunt desktop 0.1.0-beta.27
 
 - Bundles the beta.33 interface (agent shells listed in Settings with Kill).

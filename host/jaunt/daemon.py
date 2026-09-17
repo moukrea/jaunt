@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import platform
+import base64
 import re
 import shutil
 import signal
@@ -20,12 +21,14 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import __version__
 from .agents import AgentShells, Approvals, Executor, Policy, requester_key, DURATIONS
+
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 from .clipboard import Clipboard
 from .hostlink import Links
 from .crypto import Channel, b64, compact, proof, public_key, token, transcript, unb64, verify
 from .files import Files
 from .notifications import deliver, validate_subscription
-from .sessions import Sessions
+from .sessions import Session, Sessions
 from .state import State
 from .transport import Transport, relay_url
 
@@ -305,6 +308,7 @@ class Host:
     async def sessions_changed(self) -> None:
         current = set(self.sessions.items)
         for gone in self.known_sessions - current:
+            self.policy.forget_session(gone)
             if gone in self.agent_handles:
                 asyncio.create_task(self.release_agent_shells(gone))
         self.known_sessions = current
@@ -350,7 +354,7 @@ class Host:
             raise ValueError("Host is restarting; reconnect before starting another operation")
         if not isinstance(p, dict):
             raise ValueError("Invalid request parameters")
-        if getattr(peer, "is_host", False) and method not in ("agent.rights", "agent.run", "agent.read", "agent.shell", "ping"):
+        if getattr(peer, "is_host", False) and method not in ("agent.rights", "agent.run", "agent.read", "agent.shell", "agent.sessions", "agent.type", "agent.output", "ping"):
             # A linked host is a requester, never a user of this machine: it gets the agent RPCs only.
             raise ValueError("Linked hosts may only use the agent methods")
         if method == "session.list":
@@ -459,6 +463,23 @@ class Host:
             return self.launch_update(allow_restart=p.get("allowRestart") is True)
         if method == "agent.rights":
             return self.agent_rights(peer, p)
+        if method == "agent.sessions":
+            key, name = self._requester_of(peer, p)
+            return self.agent_sessions(key)
+        if method == "agent.type":
+            key, name = self._requester_of(peer, p)
+            return await self.agent_type(key, name, p)
+        if method == "agent.output":
+            key, name = self._requester_of(peer, p)
+            return await self.agent_output(key, name, p)
+        if method == "agents.cut":
+            sid = str(p.get("session", ""))
+            s = self.sessions.get(sid)
+            cut = self.policy.cut(sid)
+            s.agents.clear()
+            self.policy.journal(kind="cut", session=sid, sessionName=s.name, requesters=cut, by=peer.display_name)
+            await self.sessions_changed()
+            return self.agents_status()
         if method == "agent.run":
             return await self.agent_run(peer, p)
         if method == "agent.read":
@@ -477,6 +498,7 @@ class Host:
             self.policy.journal(kind="trust", requester=p.get("requester"), right=p.get("right"), level=p.get("level"), duration=p.get("duration"), by=peer.display_name)
             if p.get("level") == "block":
                 await self.agent_shells.kill_for(str(p.get("requester", "")), "requester blocked")
+            await self._marks_changed()
             return self.agents_status()
         if method == "agents.revoke":
             keys = list(self.policy.data["requesters"]) if p.get("all") is True else [str(k) for k in p.get("requesters", [])]
@@ -484,6 +506,7 @@ class Host:
             for key in keys:
                 await self.agent_shells.kill_for(key, "requester revoked")
             self.policy.journal(kind="revoke", requesters=keys, by=peer.display_name)
+            await self._marks_changed()
             return self.agents_status()
         if method == "agents.decide":
             return self.approvals.decide(str(p.get("id", "")), str(p.get("decision", "")), by=peer.display_name)
@@ -655,6 +678,72 @@ class Host:
         else:
             detail["decision"] = "trusted"
 
+    # Right `type`: write into and read one of the owner's existing jaunt shells (remote or local requester).
+    def agent_sessions(self, key: str) -> dict:
+        out = []
+        for s in self.sessions.items.values():
+            out.append({"id": s.id, "name": s.name, "cwd": s.cwd, "program": s.program, "alive": s.alive,
+                        "access": self.policy.allowed_shell(key, s.id), "viewers": len(s.viewers)})
+        return {"sessions": out}
+
+    async def _shell_access(self, key: str, name: str, sid: str, detail: dict) -> Session:
+        s = self.sessions.get(sid)
+        access = self.policy.allowed_shell(key, sid)
+        detail = {**detail, "session": sid, "sessionName": s.name, "cwd": s.cwd}
+        if access == "block":
+            self.policy.journal(kind="type", requester=key, decision="blocked", **detail)
+            raise ValueError(f"Refused: {name} is blocked on {self.state.data['name']}")
+        if access == "ask":
+            decision = await self.approvals.ask({"id": key, "name": name}, "type", "type", detail)
+            if decision == "deny":
+                self.policy.journal(kind="type", requester=key, decision="denied", **detail)
+                raise ValueError(f"Refused by the owner of {self.state.data['name']} (denied, or no answer within 2 minutes)")
+            if decision in DURATIONS:
+                self.policy.set_level(key, "type", "trust", decision)
+            self.policy.grant(key, sid)
+            self.policy.journal(kind="type", requester=key, decision=decision, granted=True, **detail)
+        if key not in s.agents:
+            s.agents[key] = {"id": key, "name": name, "since": time.time()}
+            await self.sessions_changed()
+        return s
+
+    async def agent_type(self, key: str, name: str, p: dict) -> dict:
+        sid, text = str(p.get("session", "")), str(p.get("input", ""))
+        if len(text) > 16 * 1024:
+            raise ValueError("Input over 16 KiB; send it in parts")
+        if p.get("origin") and p.get("origin") == sid:
+            raise ValueError("A session cannot type into its own shell")
+        s = await self._shell_access(key, name, sid, {"summary": text[:120], "input": text[:2000]})
+        enter = p.get("enter", True) is not False
+        await self.sessions.write(sid, text.encode() + (b"\r" if enter else b""))
+        self.policy.journal(kind="typed", requester=key, session=sid, sessionName=s.name, input=text[:200], enter=enter)
+        return {"session": sid, "name": s.name, "bytes": len(text), "offset": s.offset}
+
+    async def agent_output(self, key: str, name: str, p: dict) -> dict:
+        sid = str(p.get("session", ""))
+        s = await self._shell_access(key, name, sid, {"summary": "read the output", "read": True})
+        limit = max(1, min(int(p.get("limit") or 16384), 65536))
+        history = await self.sessions.history(sid, s.offset, limit)
+        raw = base64.urlsafe_b64decode(history["data"] + "=" * (-len(history["data"]) % 4)) if history.get("data") else b""
+        text = ANSI.sub("", raw.decode("utf-8", "replace")).replace("\r\n", "\n").replace("\r", "\n")
+        return {"session": sid, "name": s.name, "offset": s.offset, "text": text, "alive": s.alive, "cwd": s.cwd, "program": s.program}
+
+    async def _marks_changed(self) -> None:
+        """Drop the agent marks of sessions whose requester may no longer type there, and tell the clients."""
+        changed = False
+        for s in self.sessions.items.values():
+            for key in [k for k in s.agents if self.policy.allowed_shell(k, s.id) != "trust"]:
+                s.agents.pop(key, None)
+                changed = True
+        if changed:
+            await self.sessions_changed()
+
+    def _local_requester(self, runtime: str) -> tuple[str, str]:
+        name = f"{self.RUNTIME_NAMES[runtime]} on this machine"
+        key = requester_key("local", runtime)
+        self.policy.requester(key, name=name, runtime=runtime, host="local", local=True)
+        return key, name
+
     async def agent_run(self, peer, p: dict) -> dict:
         key, name = self._requester_of(peer, p)
         command, cwd = str(p.get("command", "")), p.get("cwd")
@@ -726,9 +815,27 @@ class Host:
                         status["rights"] = {"error": str(exc)[:120]}
                 return status
             return {"hosts": await asyncio.gather(*(describe(l) for l in self.links.links.values()))}
-        link = self.links.get(str(p.get("host", "")))
+        host = str(p.get("host", "") or "")
+        if method in ("agents.sessions", "agents.type", "agents.output") and host.lower() in ("", "local", "this", "here", self.state.data["name"].lower()):
+            key, name = self._local_requester(runtime)
+            if method == "agents.sessions":
+                result = self.agent_sessions(key)
+                result["sessions"] = [s for s in result["sessions"] if s["id"] != sid]
+                return {"host": self.state.data["name"], "local": True, **result}
+            # `session` in `p` is the caller's own shell; the shell to type into is `target`.
+            if method == "agents.type":
+                return {"host": self.state.data["name"], **await self.agent_type(key, name, {**p, "session": p.get("target"), "origin": sid})}
+            return {"host": self.state.data["name"], **await self.agent_output(key, name, {**p, "session": p.get("target")})}
+        link = self.links.get(host)
         if link is None:
-            raise ValueError("Unknown machine; jaunt_hosts lists the linked ones")
+            raise ValueError("Unknown machine; jaunt_hosts lists the linked ones (omit host for this machine)")
+        shown = link.record.get("label") or link.record.get("name")
+        if method == "agents.sessions":
+            return {"host": shown, **await link.request("agent.sessions", {"runtime": runtime}, timeout=20)}
+        if method == "agents.type":
+            return {"host": shown, **await link.request("agent.type", {"runtime": runtime, "session": p.get("target"), "input": p.get("input", ""), "enter": p.get("enter", True)}, timeout=170)}
+        if method == "agents.output":
+            return {"host": shown, **await link.request("agent.output", {"runtime": runtime, "session": p.get("target"), "limit": p.get("limit", 16384)}, timeout=170)}
         if method == "agents.run":
             timeout = p.get("timeoutSec")
             params = {"runtime": runtime, "command": p.get("command", ""), "cwd": p.get("cwd"), "timeoutSec": timeout}
@@ -933,9 +1040,9 @@ class Host:
                 result = await self.bridge.send(self.bridge.resolve(p))
             elif method == "bridge.wait":
                 result = await self.bridge.wait_reply(self.bridge.resolve(p))
-            elif method in ("agents.hosts", "agents.run", "agents.read", "agents.shell", "agents.status"):
+            elif method in ("agents.hosts", "agents.run", "agents.read", "agents.shell", "agents.sessions", "agents.type", "agents.output", "agents.status"):
                 result = await self.agents_gateway(method, p)
-            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "links.add", "links.update", "links.remove", "links.list"):
+            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "agents.cut", "links.add", "links.update", "links.remove", "links.list"):
                 # The CLI acts as the owner at the keyboard; the same handlers serve the UI clients.
                 result = await self.rpc(type("CLI", (), {"display_name": "CLI", "device_id": "local-cli"})(), method, p)
             elif method == "stop":

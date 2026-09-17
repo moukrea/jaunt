@@ -481,13 +481,27 @@ function tabDrag(node,a,index) {
   node.addEventListener('pointercancel',()=>{clearTimeout(drag?.timer);drag=null;node.removeEventListener('touchmove',block);document.querySelectorAll('.tab-drop-target,.tab-dragging,.tab-armed').forEach(n=>n.classList.remove('tab-drop-target','tab-dragging','tab-armed'));});
   node.addEventListener('keydown',e=>{if(e.altKey&&e.shiftKey&&['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const to=index+(e.key==='ArrowLeft'?-1:1);if(to>=0&&to<$('tabs').children.length)reorderTab(a,index,to).catch(report);}});
 }
+// An AI session is allowed to type into this shell: say so on the tab, and let the owner cut it off.
+function agentBadge(a, sessions) {
+  const names=[...new Set(sessions.flatMap(s=>(s.agents||[]).map(g=>g.name)))].join(', ');
+  const b=button('',()=>cutAgents(a,sessions),'icon-button tab-agent','bolt');
+  b.title=tr('An agent may type here: {0}. Click to cut it off.',names);b.setAttribute('aria-label',b.title);
+  return b;
+}
+function cutAgents(a, sessions) {
+  const names=[...new Set(sessions.flatMap(s=>(s.agents||[]).map(g=>g.name)))].join(', ');
+  confirmAction(tr('Cut the agent off this shell?'), tr('{0} will have to ask again before typing into {1}, even if trusted. Nothing else changes.', names, sessions.map(s=>s.name).join(' + ')), tr('Cut off'), async () => {
+    for (const s of sessions) { try { a.agents = await a.link.request('agents.cut', {session: s.id}); } catch (error) { report(error); } }
+    toast(tr('Agent cut off from {0}.', sessions.map(s=>s.name).join(' + ')), false, null, hostOf(a));
+  });
+}
 function renderTabs(a) {
   const sessions=a.sessions.filter(s=>!a.machine.openSessions||a.machine.openSessions.includes(s.id));
   const order=a.machine.tabOrder||[];
   const ordered=[...sessions].sort((x,y)=>(order.includes(x.id)?order.indexOf(x.id):1e6+sessions.indexOf(x))-(order.includes(y.id)?order.indexOf(y.id):1e6+sessions.indexOf(y)));
   const groups=isMobile()?ordered.map(s=>({id:s.id})):(a.machine.layouts||sessions.map(s=>({id:s.id})));
   if(isMobile())a.machine.tabOrder=ordered.map(s=>s.id);
-  const signature=JSON.stringify(groups.map(tree=>leaves(tree).map(id=>{const s=sessions.find(s=>s.id===id);return [id,s?.name,s?.alive,s?.program];})));
+  const signature=JSON.stringify(groups.map(tree=>leaves(tree).map(id=>{const s=sessions.find(s=>s.id===id);return [id,s?.name,s?.alive,s?.program,(s?.agents||[]).map(g=>g.id)];})));
   const update=()=>{for(const row of $('tabs').children){const active=JSON.parse(row.dataset.ids||'[]').includes(a.active);row.classList.toggle('active',active);const ids=JSON.parse(row.dataset.ids||'[]');const selected=a.sessions.find(s=>s.id===(ids.includes(a.active)?a.active:ids[0]));row.querySelector('.tab-symbol')?.replaceChildren(icon(sessionIcon(selected),15));row.querySelector('[role=tab]')?.setAttribute('aria-selected',String(active));}};
   if($('tabs').dataset.host===a.machine.room&&a.tabSignature===signature){update();return;}
   a.tabSignature=signature;$('tabs').dataset.host=a.machine.room;
@@ -498,7 +512,9 @@ function renderTabs(a) {
     renameGesture(label,()=>renameSession(a,a.sessions.find(s=>s.id===target())));tabDrag(label,a,index);
     label.setAttribute('role','tab');label.setAttribute('aria-selected',String(ids.includes(a.active)));
     const close=button('',()=>closeChoice(close,a,group.map(s=>s.id)),'icon-button tab-close','close');close.setAttribute('aria-label',displayedOnly(a)?tr("Terminate {0}",name):tr("Close {0}",name));
-    return el('div',{class:'session-tab'+(ids.includes(a.active)?' active':''),'data-ids':JSON.stringify(ids)},el('span',{class:'tab-symbol'},icon(sessionIcon(group.find(s=>s.id===target())),15)),label,el('span',{class:`status-dot${group.some(s=>s.alive)?' online':''}`}),close);
+    const driven=group.filter(s=>s.agents?.length);
+    const badge=driven.length?agentBadge(a,driven):null;
+    return el('div',{class:'session-tab'+(ids.includes(a.active)?' active':''),'data-ids':JSON.stringify(ids)},el('span',{class:'tab-symbol'},icon(sessionIcon(group.find(s=>s.id===target())),15)),label,...(badge?[badge]:[]),el('span',{class:`status-dot${group.some(s=>s.alive)?' online':''}`}),close);
   }));
 }
 function createTerm(a, session) {
@@ -960,9 +976,10 @@ async function closeView(a, id) {
 function sessionList() {
   const a=checked(current()), body=el('div',{class:'session-manager'});
   for(const s of a.sessions) body.append(el('div',{class:'settings-row'},
-    el('div',{class:'settings-label'},el('strong',{text:s.name}),el('p',{text:`${s.alive?'Running':'Exited'} · ${s.cwd}`}),el('p',{text:(s.viewers||[]).map(v=>v.name).join(', ')||tr('No open views')})),
+    el('div',{class:'settings-label'},el('strong',{text:s.name}),el('p',{text:`${s.alive?'Running':'Exited'} · ${s.cwd}`}),el('p',{text:(s.viewers||[]).map(v=>v.name).join(', ')||tr('No open views')}),...(s.agents?.length?[el('p',{class:'agent-note',text:tr('Agent may type here: {0}',s.agents.map(g=>g.name).join(', '))})]:[])),
     el('div',{class:'session-actions'},button(tr('Open'),async()=>{closeModal();view='terminal';await selectSession(a,s.id);}),
     button(tr('Rename'),()=>renameSession(a,s)),
+    ...(s.agents?.length?[button(tr('Cut off agent'),()=>cutAgents(a,[s]),'button')]:[]),
     ...(a.machine.openSessions?.includes(s.id)?[button(tr('Close view'),async()=>{await closeView(a,s.id);sessionList();})]:[]),
     button(tr('Terminate'),()=>terminateSession(a,s),'button danger'))));
   if(!a.sessions.length)body.append(el('p',{text:tr('No sessions are running on this host.')}));
@@ -1403,22 +1420,31 @@ function approvalPrompt(a, item) {
   if (openApproval || $('modal').open) { toast(tr('An agent asks to run a command; see Settings → Agents and machines.'), false, null, hostOf(a)); if (view === 'settings' && a === current()) refreshAgents(a); return; }
   openApproval = item;
   const d = item.detail || {}, decide = async decision => { openApproval = null; closeModal(); try { await a.link.request('agents.decide', {id: item.id, decision}); } catch (error) { report(error); } };
-  const body = el('div', {},
-    el('p', {class: 'modal-copy', text: tr('{0} asks to run this on {1}, in {2}:', item.requester?.name || '?', hostName(a), d.cwd || tr('the home directory'))}),
+  const who = item.requester?.name || '?', typing = item.right === 'type';
+  const body = typing ? el('div', {},
+    el('p', {class: 'modal-copy', text: d.read ? tr('{0} asks to read the shell “{1}” on {2}.', who, d.sessionName || d.session, hostName(a)) : tr('{0} asks to type this into the shell “{1}” on {2}:', who, d.sessionName || d.session, hostName(a))}),
+    ...(d.read ? [] : [el('pre', {class: 'approval-command', text: d.input || d.summary || ''})]),
+    el('p', {class: 'modal-copy', text: tr('Allowing covers this shell only, until it ends or you cut the agent off from its tab. Everything typed is journaled. Without an answer within 2 minutes the request is refused.')}),
+    el('div', {class: 'modal-actions approval-actions'},
+      button(tr('Deny'), () => decide('deny'), 'button danger'),
+      button(tr('Trust always'), () => confirmAction(tr('Trust this requester permanently?'), tr('{0} will type into any shell here without asking until you revoke it in Settings → Agents and machines.', who), tr('Trust always'), () => decide('always')), 'button'),
+      button(tr('Trust 1 h'), () => decide('1h'), 'button'),
+      button(tr('Allow for this shell'), () => decide('once'), 'button primary'))) : el('div', {},
+    el('p', {class: 'modal-copy', text: tr('{0} asks to run this on {1}, in {2}:', who, hostName(a), d.cwd || tr('the home directory'))}),
     el('pre', {class: 'approval-command', text: d.command || d.summary || ''}),
     el('p', {class: 'modal-copy', text: tr('Timeout {0} s · output bounded · journaled. Without an answer within 2 minutes the request is refused. The session cannot see this prompt: it waits for your decision.', d.timeout || 60)}),
     el('div', {class: 'modal-actions approval-actions'},
       button(tr('Deny'), () => decide('deny'), 'button danger'),
-      button(tr('Trust always'), () => confirmAction(tr('Trust this requester permanently?'), tr('{0} will run commands here without asking until you revoke it in Settings → Agents and machines.', item.requester?.name || '?'), tr('Trust always'), () => decide('always')), 'button'),
+      button(tr('Trust always'), () => confirmAction(tr('Trust this requester permanently?'), tr('{0} will run commands here without asking until you revoke it in Settings → Agents and machines.', who), tr('Trust always'), () => decide('always')), 'button'),
       button(tr('Trust 1 h'), () => decide('1h'), 'button'),
       button(tr('Allow once'), () => decide('once'), 'button primary')));
-  modal(tr('Agent command on {0}', hostName(a)), body, () => { openApproval = null; });
+  modal(typing ? tr('Agent in a shell on {0}', hostName(a)) : tr('Agent command on {0}', hostName(a)), body, () => { openApproval = null; });
 }
 function agentsSettings(a) {
   const info = a.info?.agents; if (!info) return [];
   const toggle = el('input', {type: 'checkbox', checked: !!info.enabled, 'aria-label': tr('Agents and machines')});
   toggle.onchange = async () => { toggle.disabled = true; try { a.agents = await a.link.request('agents.configure', {enabled: toggle.checked}, 120000); a.info.agents = {enabled: a.agents.enabled, links: (a.agents.links || []).map(l => l.room)}; syncLinks(); } catch (error) { toggle.checked = !toggle.checked; report(error); } finally { toggle.disabled = false; renderSettings(); } };
-  const rows = [settingsRow(tr('Agents and machines'), info.enabled ? tr('On. Claude Code and Codex sessions on linked machines may ask to run commands here; every requester has its own rights below. Sessions here can reach linked machines.') : tr('Off. Turn on to let AI sessions on linked machines run commands here under your rules, and to let sessions here reach linked machines.'), toggle)];
+  const rows = [settingsRow(tr('Agents and machines'), info.enabled ? tr('On. Claude Code and Codex sessions, here or on linked machines, may ask to run commands or to type into your shells here; every requester has its own rights below. Sessions here can reach linked machines.') : tr('Off. Turn on to let AI sessions on linked machines run commands here under your rules, and to let sessions here reach linked machines.'), toggle)];
   if (!info.enabled) return rows;
   if (!a.agents) { refreshAgents(a); rows.push(settingsRow(tr('Loading…'), '', el('span'))); return rows; }
   const st = a.agents;

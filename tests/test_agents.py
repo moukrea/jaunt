@@ -131,3 +131,18 @@ async def test_links_carry_label_and_icon(tmp_path):
     assert links.get('serveur 2') is not None and links.get('homelab') is not None and links.get('nope') is None
     assert links.list()[0]['label']=='Serveur 2' and links.list()[0]['icon'] is None
     with pytest.raises(ValueError):await links.update('unknown','x',None)
+
+
+def test_policy_shell_grants_and_cut(tmp_path):
+    """Right `type`: one grant per requester × shell, dropped by cut, trust change, revoke or shell end."""
+    state=State(tmp_path/'state.json');state.save();policy=Policy(state)
+    k=requester_key('host-a','claude');policy.requester(k,name='a')
+    assert policy.allowed_shell(k,'s1')=='ask'
+    policy.grant(k,'s1');assert policy.allowed_shell(k,'s1')=='trust' and policy.allowed_shell(k,'s2')=='ask'
+    assert policy.cut('s1')==[k] and policy.allowed_shell(k,'s1')=='ask'
+    policy.set_level(k,'type','trust','always');assert policy.allowed_shell(k,'s2')=='trust' and policy.allowed_shell(k,'s1')=='ask','a cut shell asks again even for a trusted requester'
+    policy.grant(k,'s1');assert policy.allowed_shell(k,'s1')=='trust' and 's1' not in policy.cuts
+    policy.set_level(k,'type','ask');assert policy.allowed_shell(k,'s1')=='ask','lowering trust drops the grants'
+    policy.grant(k,'s3');policy.forget_session('s3');assert not policy.granted(k,'s3')
+    policy.grant(k,'s4');policy.revoke([k]);assert not policy.grants
+    policy.requester(k,name='a');policy.set_level(k,'type','block');policy.grant(k,'s5');assert policy.allowed_shell(k,'s5')=='block'

@@ -137,6 +137,7 @@ class Session:
     created: float = field(default_factory=time.time)
     alive: bool = True
     exit_code: int | None = None
+    agents: dict = field(default_factory=dict)  # requester key -> {name, since}: AI sessions allowed to type here
     offset: int = 0
     ring: deque = field(default_factory=deque)
     ring_bytes: int = 0
@@ -165,6 +166,7 @@ class Session:
                 "cols": self.cols, "rows": self.rows, "alive": self.alive,
                 "exitCode": self.exit_code, "created": self.created, "tmux": self.tmux,
                 "program": self.program, "viewers": list(self.viewers.values()), "activeView": self.active_view,
+                "agents": list(self.agents.values()),
                 "offset": self.offset, "retained": self.retained(),
                 "flow": {peer: {"lag": self.offset - v.acked, "inflight": v.sent - v.acked, "window": v.window, "behind": v.behind}
                          for peer, v in self.subscribers.items()}}
