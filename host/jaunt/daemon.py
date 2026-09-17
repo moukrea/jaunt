@@ -779,7 +779,16 @@ class Host:
         if self.update_process is not None and self.update_process.poll() is None:
             from .updates import status
             return status(self.state.root)
-        args = [sys.executable, "-m", "jaunt.updates"]
+        python = sys.executable
+        if not os.path.exists(python):
+            # This runtime's directory was removed (an older installer pruned it after a failed
+            # handoff): the installed pointer is the only interpreter left to run the updater.
+            from .updates import installation as install_record
+            fallback = Path(install_record(self.state.root).get("prefix", "")) / "current/bin/python"
+            if not fallback.is_file():
+                raise ValueError("The running host's runtime directory was removed; restart the host service (systemctl --user restart jaunt) to load the installed version")
+            python = str(fallback)
+        args = [python, "-m", "jaunt.updates"]
         if automatic:
             args.append("--automatic")
         elif allow_restart is True:

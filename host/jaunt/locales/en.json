@@ -782,6 +782,7 @@
   "The local host action failed. Check the host connection and try again.": "The local host action failed. Check the host connection and try again.",
   "The local host executable could not be found.": "The local host executable could not be found.",
   "The release download was interrupted. Check the host's internet connection and try again.": "The release download was interrupted. Check the host's internet connection and try again.",
+  "The running host executes a runtime whose files were removed. Restart it to load the installed version: systemctl --user restart jaunt (shells end).": "The running host executes a runtime whose files were removed. Restart it to load the installed version: systemctl --user restart jaunt (shells end).",
   "The system clipboard did not respond": "The system clipboard did not respond",
   "The terminal has text ready to copy.": "The terminal has text ready to copy.",
   "The two values do not match.": "The two values do not match.",

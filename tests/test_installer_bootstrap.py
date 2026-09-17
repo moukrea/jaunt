@@ -94,3 +94,21 @@ def test_official_command_ignores_curlrc_output_redirection(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+def test_prune_keeps_the_runtime_the_live_daemon_executes(tmp_path):
+    """A failed handoff leaves the daemon on an older runtime; pruning must never remove it."""
+    import re,subprocess,os,json,time,sys
+    from pathlib import Path
+    src=(Path(__file__).resolve().parents[1]/'install.sh').read_text()
+    snippet=re.search(r"<<'PYPRUNE' \|\| true\n(.*?)PYPRUNE",src,re.S).group(1)
+    prefix=tmp_path/'runtime';state=tmp_path/'state';state.mkdir()
+    for i,tag in enumerate(['v1-old','v2-running','v3-prev','v4-current']):
+        d=prefix/'versions'/tag;(d/'bin').mkdir(parents=True);(d/'bin/python').write_text('');os.utime(d,(time.time()-100+i*10,)*2)
+    (prefix/'current').symlink_to(prefix/'versions'/'v4-current')
+    (state/'runtime.json').write_text(json.dumps({'pid':os.getpid(),'runtime':str(prefix/'versions/v2-running/bin/python')}))
+    subprocess.run([sys.executable,'-',str(prefix),str(state)],input=snippet,text=True,check=True)
+    assert sorted(p.name for p in (prefix/'versions').iterdir())==['v2-running','v3-prev','v4-current']
+    # A dead daemon's record does not pin anything.
+    (state/'runtime.json').write_text(json.dumps({'pid':2**22-1,'runtime':str(prefix/'versions/v2-running/bin/python')}))
+    subprocess.run([sys.executable,'-',str(prefix),str(state)],input=snippet,text=True,check=True)
+    assert sorted(p.name for p in (prefix/'versions').iterdir())==['v3-prev','v4-current']

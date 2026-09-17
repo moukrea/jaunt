@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.25
+
+- Bundles the beta.31 client (no client change).
+
 # jaunt desktop 0.1.0-beta.24
 
 - Archive updates no longer fail on a leftover staging directory; bundles the beta.30 client (channel re-keying on desync).

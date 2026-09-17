@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.31
+
+- Host update safety: the installer never removes the runtime directory that the live daemon executes. Before, it kept only the installed pointer and the newest other version by date, so a host whose in-place handoff had failed (daemon still on version N, N+1 and N+2 installed) lost its own files: lazy imports failed, `jaunt update` answered `[Errno 2] No such file or directory: …/bin/python`, and the host was unusable until restarted. The daemon now also runs its updater with the installed interpreter when its own is gone, and `jaunt update` / `jaunt doctor` say plainly that the service must be restarted to load the installed version.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.30
 
 - Secure channel: a rejected out-of-order frame no longer stops the connection for good. The client re-keys with a fresh handshake (up to three times in a row) and the message now carries the counters (`expected N, got M`) so a persistent case can be diagnosed. The host closes its relay socket when a send times out, instead of continuing with counters it cannot trust.
