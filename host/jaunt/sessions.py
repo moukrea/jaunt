@@ -39,6 +39,9 @@ CATCHUP = 128 * 1024  # several full-screen redraws; a phone should not wait for
 # frame per viewer: chatty TUIs write dozens of times per second and the relay caps frames.
 COALESCE = 0.03
 COALESCE_BYTES = 64 * 1024
+# A relay frame carries at most 131000 bytes once the output is base64-encoded, wrapped in JSON,
+# sealed and base64-encoded again: 48 KiB of raw output per frame keeps every frame well under it.
+FRAME_BYTES = 48 * 1024
 
 
 @dataclass
@@ -456,7 +459,7 @@ class Sessions:
                 while s.ring_bytes > MAX_REPLAY and len(s.ring) > 1:
                     _, old, _, _ = s.ring.popleft()
                     s.ring_bytes -= len(old)
-                event = {"type": "terminal.output", "id": s.id, "offset": start, "data": b64(chunk)}
+                frames = [(start + i, chunk[i:i + FRAME_BYTES]) for i in range(0, len(chunk), FRAME_BYTES)]
                 for peer, viewer in tuple(s.subscribers.items()):
                     if viewer.behind or viewer.sent != start:
                         viewer.behind = True
@@ -470,7 +473,8 @@ class Sessions:
                         viewer.streak = 0
                         continue
                     viewer.sent = s.offset
-                    await self._safe_send(peer, event)
+                    for offset, part in frames:
+                        await self._safe_send(peer, {"type": "terminal.output", "id": s.id, "offset": offset, "data": b64(part)})
 
     async def ack(self, peer: str, sid: str, offset: int) -> None:
         """A viewer confirmed it rendered the stream up to `offset`."""
@@ -520,8 +524,9 @@ class Sessions:
                                                 "viewers": list(s.viewers.values())})
                     replay_size = (cols, rows)
                 begin = max(after, offset)
-                await self._safe_send(peer, {"type": "terminal.output", "id": s.id,
-                                            "offset": begin, "data": b64(chunk[begin - offset:])})
+                for at in range(begin, end, FRAME_BYTES):
+                    await self._safe_send(peer, {"type": "terminal.output", "id": s.id,
+                                                "offset": at, "data": b64(chunk[at - offset:min(end, at + FRAME_BYTES) - offset])})
         viewer = s.subscribers.get(peer)
         if viewer is not None:
             viewer.sent = s.offset

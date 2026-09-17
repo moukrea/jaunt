@@ -6,8 +6,8 @@ android {
         applicationId 'dev.jaunt.android'
         minSdk 26
         targetSdk 36
-        versionCode 20
-        versionName '0.1.0-beta.20'
+        versionCode 21
+        versionName '0.1.0-beta.21'
         testInstrumentationRunner 'dev.jaunt.android.ClipboardFixture'
     }
     signingConfigs {

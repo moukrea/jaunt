@@ -49,6 +49,10 @@ class Peer:
         async with self.lock:
             if not self.channel:
                 raise ConnectionError("No encrypted channel")
+            # Never burn a channel counter on a frame the relay would refuse: a sealed frame that is
+            # dropped after sealing leaves the client with an unexplainable gap ("out-of-order frame").
+            if len(compact(data)) > 92_000:
+                raise ValueError("Application frame is too large for the relay")
             await self.plain(self.channel.seal(data))
 
     async def frame(self, timeout: int = 20) -> dict:

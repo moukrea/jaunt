@@ -218,3 +218,37 @@ async def test_history_reads_beyond_the_ring_from_disk_and_purges_on_termination
         sessions.configure_history(True);assert session.history is not None
         await sessions.terminate(sid);assert not (tmp_path/'scrollback'/sid).exists()
     finally:await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_output_frames_never_exceed_the_relay_budget(tmp_path,monkeypatch):
+    """A single large PTY write (or a coalesced burst) is delivered in frames of at most FRAME_BYTES,
+    live and during catch-up; one oversized frame used to be dropped after sealing and desynchronise the channel."""
+    from jaunt.sessions import FRAME_BYTES
+    from jaunt.crypto import unb64
+    monkeypatch.setenv('SHELL','/bin/sh')
+    events=[];box={}
+    async def send(peer,value):
+        events.append((peer,value))
+        if peer=='live' and value['type']=='terminal.output':  # a responsive viewer keeps acknowledging
+            asyncio.get_running_loop().create_task(box['s'].ack('live',value['id'],value['offset']+len(unb64(value['data']))))
+        await asyncio.sleep(0)
+    async def changed():pass
+    sessions=Sessions(send,changed,tmp_path);box['s']=sessions
+    try:
+        s=await sessions.create({'cwd':str(tmp_path),'cols':80,'rows':24});sid=s['id']
+        await sessions.attach('live',{'id':sid})
+        await sessions.write(sid,b"head -c 200000 /dev/zero | tr '\\0' z; echo DO\"\"NE\n")
+        for _ in range(200):
+            await asyncio.sleep(.05)
+            if any(p=='live' and e['type']=='terminal.output' and b'DONE' in unb64(e['data']) for p,e in events):break
+        else:pytest.fail('burst did not complete')
+        outputs=[e for p,e in events if p=='live' and e['type']=='terminal.output']
+        assert max(len(unb64(e['data'])) for e in outputs)<=FRAME_BYTES
+        assert sum(len(unb64(e['data'])) for e in outputs)>=200000
+        # Offsets are contiguous across the split frames.
+        expected=outputs[0]['offset']
+        for e in outputs:assert e['offset']==expected;expected+=len(unb64(e['data']))
+        events.clear();await sessions.attach('late',{'id':sid,'after':0})
+        late=[e for p,e in events if p=='late' and e['type']=='terminal.output']
+        assert late and max(len(unb64(e['data'])) for e in late)<=FRAME_BYTES
+    finally:await sessions.shutdown()

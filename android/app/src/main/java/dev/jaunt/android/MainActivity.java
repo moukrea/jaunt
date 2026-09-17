@@ -109,7 +109,7 @@ public class MainActivity extends Activity {
     private void dispatch(String method,JSONObject p,Reply reply){
         try{
             switch(method){
-                case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);updater.check(getIntent().getBooleanExtra("checkUpdate",false));getIntent().removeExtra("checkUpdate");return;
+                case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);updater.check(getIntent().getBooleanExtra("checkUpdate",false),true);getIntent().removeExtra("checkUpdate");return;
                 case "app.language":Lang.set(p.getString("language"));reply.done(true,null);return;
                 case "app.updates":updater.check(true);reply.done(true,null);return;
                 case "clipboard.read":{

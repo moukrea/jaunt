@@ -70,3 +70,21 @@ test('a decrypted welcome from an obsolete channel cannot make it online again',
  release({type:'welcome',machine:{name:'obsolete'},sessions:[]});await pending;
  assert.equal(link.channel,replacement);assert.equal(link.state,'connecting');assert.equal(link.machine.name,undefined);
 });
+test('desktop updater: a launch check with automatic updates off announces the version without downloading; asking to update downloads it',async()=>{
+ const {DesktopUpdates}=await import('../desktop/updates.cjs');
+ const os=await import('node:os'),fs=await import('node:fs/promises'),path=await import('node:path');
+ const cache=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-desktop-updates-'));
+ const fetched=[];const payload=Buffer.from('fake desktop package');
+ const digest=createHash('sha256').update(payload).digest('hex');
+ const fetch=async url=>{fetched.push(url);const body=url.endsWith('config.json')?JSON.stringify({desktopRelease:'desktop-v9.9.9'}):url.endsWith('SHA256SUMS')?`${digest}  jaunt-desktop-9.9.9-x64.tar.gz\n`:payload;
+  return {ok:true,url:'https://example/'+url,headers:new Map([['content-length',String(body.length)]]),body:(async function*(){yield Buffer.from(body);})()};};
+ const events=[];const app={isPackaged:true,getVersion:()=>'0.1.0-beta.1',getPath:()=>cache};
+ const updates=new DesktopUpdates({app,fetch,emit:e=>events.push(e.state),platform:'linux',arch:'x64',kind:'archive',cache,spawnProcess:()=>({unref(){}})});
+ await updates.init();
+ const announced=await updates.check(false);
+ assert.equal(announced.state,'available');assert.equal(announced.target,'desktop-v9.9.9');
+ assert.ok(!fetched.some(u=>u.endsWith('.tar.gz')),'no package downloaded while automatic updates are off');
+ const ready=await updates.check(true);
+ assert.equal(ready.state,'ready');assert.ok(fetched.some(u=>u.endsWith('.tar.gz')));
+ await fs.rm(cache,{recursive:true,force:true});
+});

@@ -63,7 +63,7 @@ app.whenReady().then(async()=>{
     allowed(e);
     if(action==='status')return {...updates.state};
     if(action==='configure')return updates.configure(value);
-    if(action==='check')return updates.check();
+    if(action==='check')return updates.check(value!==false);
     if(action==='install'){
       await updates.install(true);installingDesktop=true;setImmediate(()=>app.exit());return updates.state;
     }
@@ -71,7 +71,8 @@ app.whenReady().then(async()=>{
   });
   if(app.isPackaged){
     const check=()=>{if(updates.state.automatic&&!installingDesktop)updates.check().catch(()=>{});};
-    setTimeout(()=>{if(updates.state.state!=='error')check();},15000).unref();setInterval(check,15*60*1000).unref();
+    // Every launch checks the published version (downloading only when automatic updates are on); the periodic check stays automatic-only.
+    setTimeout(()=>{if(!installingDesktop)updates.check(updates.state.automatic).catch(()=>{});},3000).unref();setInterval(check,15*60*1000).unref();
   }
   win.loadURL('jaunt://app/');
 });
