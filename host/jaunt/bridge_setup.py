@@ -21,7 +21,7 @@ MCP_NAME = "jaunt-bridge"
 # The bridge's own tools only route messages through the host; allowing them by
 # name is what lets a session in "don't ask" or auto mode use the bridge at all.
 # Nothing else gains a permission.
-TOOL_RULES = [f"mcp__{MCP_NAME}__{tool}" for tool in ("jaunt_peers", "jaunt_send", "jaunt_wait_reply")]
+TOOL_RULES = [f"mcp__{MCP_NAME}__{tool}" for tool in ("jaunt_peers", "jaunt_send", "jaunt_wait_reply", "jaunt_hosts", "jaunt_run", "jaunt_read")]
 HOOK_EVENTS = {
     "claude": ["SessionStart", "UserPromptSubmit", "PostCompact", "Stop", "SessionEnd"],
     "codex": ["SessionStart", "UserPromptSubmit", "PostCompact", "Stop", "SessionEnd"],
@@ -223,9 +223,10 @@ def _run(command: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
 
 
-def install_claude(path: str) -> dict:
+def install_claude(path: str, mcp_only: bool = False) -> dict:
     settings_path = claude_settings_path()
-    settings = add_tool_rules(add_hooks(_load(settings_path), "claude"))
+    # Agents and machines alone needs the MCP server and its allow rules, not the session hooks.
+    settings = add_tool_rules(_load(settings_path) if mcp_only else add_hooks(_load(settings_path), "claude"))
     _write_json(settings_path, settings)
     # The runtime's own CLI keeps its MCP store consistent; the name is ours alone.
     _run([path, "mcp", "remove", "--scope", "user", MCP_NAME])
@@ -252,9 +253,10 @@ def remove_hooks_file(path: Path) -> None:
             path.unlink()  # jaunt created it; leave nothing behind
 
 
-def install_codex(path: str) -> dict:
+def install_codex(path: str, mcp_only: bool = False) -> dict:
     hooks_path = codex_hooks_path()
-    _write_json(hooks_path, add_hooks(_load(hooks_path), "codex"))
+    if not mcp_only:
+        _write_json(hooks_path, add_hooks(_load(hooks_path), "codex"))
     _run([path, "mcp", "remove", MCP_NAME])
     result = _run([path, "mcp", "add", MCP_NAME, "--env", mcp_env(), "--", *mcp_command("codex")])
     if result.returncode:
@@ -270,11 +272,13 @@ def uninstall_codex(path: str) -> dict:
     return {"ok": True}
 
 
-def install(runtimes: dict) -> dict:
+def install(runtimes: dict, mcp_only: bool = False) -> dict:
     results = {}
     for name, installer in (("claude", install_claude), ("codex", install_codex)):
+        if name not in runtimes:
+            continue
         try:
-            results[name] = installer(runtimes[name]["path"])
+            results[name] = installer(runtimes[name]["path"], mcp_only)
         except Exception as exc:
             results[name] = {"ok": False, "error": str(exc)[:160]}
     return results

@@ -131,6 +131,31 @@ TOOLS = [
                      "properties": {"id": {"type": "string"}, "seconds": {"type": "integer", "minimum": 1, "maximum": 600}}}},
 ]
 
+# Agents and machines: listed only while that switch is on for this host (see mcp_main).
+AGENT_TOOLS = [
+    {"name": "jaunt_hosts",
+     "description": "List the other machines linked to this host through jaunt, with their platform, link state and what this session is allowed to do there (exec: run commands; each machine's owner decides, may ask first, may refuse). Nothing about these machines is injected in your context: call this when you need it.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "jaunt_run",
+     "description": "Run ONE shell command on a linked machine (its owner's login shell, no TTY). The target machine may ask its owner for permission first (the call then waits up to 2 minutes) or refuse. Output over 64 KiB is kept in a file on that machine: read it with jaunt_read. Never use this against the machine you already run on.",
+     "inputSchema": {"type": "object", "required": ["host", "command"], "additionalProperties": False,
+                     "properties": {"host": {"type": "string", "description": "Machine name from jaunt_hosts"},
+                                    "command": {"type": "string"}, "cwd": {"type": "string", "description": "Working directory on that machine"},
+                                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600}}}},
+    {"name": "jaunt_read",
+     "description": "Read a slice of the full output of an earlier jaunt_run (its 'run' id), 64 KiB at a time.",
+     "inputSchema": {"type": "object", "required": ["host", "run"], "additionalProperties": False,
+                     "properties": {"host": {"type": "string"}, "run": {"type": "string"},
+                                    "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 65536}}}},
+]
+
+
+def agents_enabled() -> bool:
+    try:
+        return bool(control("agents.status", {}, timeout=5).get("enabled"))
+    except Exception:
+        return False
+
 
 def _identity(runtime: str) -> dict:
     # Runtimes may start MCP servers with a reduced environment (Codex does).
@@ -167,6 +192,26 @@ def _tool(runtime: str, name: str, args: dict) -> str:
             seconds = int(args.get("seconds") or 60)
             waited = control("bridge.wait", {**identity, "id": args.get("id", ""), "seconds": seconds}, timeout=seconds + 20)
             return _describe_wait(waited)
+        if name == "jaunt_hosts":
+            hosts = control("agents.hosts", identity, timeout=30).get("hosts", [])
+            if not hosts:
+                return "No machine is linked to this host yet (Settings → Agents and machines → Link a machine)."
+            lines = []
+            for h in hosts:
+                rights = h.get("rights") or {}
+                allowed = {"ask": "asks its owner before each command", "trust": "trusted: commands run at once", "block": "blocked: commands are refused"}.get(rights.get("exec"), rights.get("error", "unknown"))
+                lines.append(f"- {h['name']} ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}")
+            return "\n".join(lines)
+        if name == "jaunt_run":
+            timeout = args.get("timeout_seconds")
+            result = control("agents.run", {**identity, "host": args.get("host", ""), "command": args.get("command", ""), "cwd": args.get("cwd"), "timeoutSec": timeout},
+                             timeout=(int(timeout) if timeout else 60) + 170)
+            return json.dumps(result, ensure_ascii=False)
+        if name == "jaunt_read":
+            result = control("agents.read", {**identity, "host": args.get("host", ""), "run": args.get("run", ""), "offset": args.get("offset", 0), "limit": args.get("limit", 65536)}, timeout=30)
+            import base64
+            data = base64.urlsafe_b64decode(result["data"] + "=" * (-len(result["data"]) % 4))
+            return json.dumps({**{k: v for k, v in result.items() if k != "data"}, "text": data.decode("utf-8", "replace")}, ensure_ascii=False)
     except Exception as exc:
         return f"jaunt bridge: {exc}"
     return "Unknown tool"
@@ -214,7 +259,7 @@ def mcp_main(runtime: str) -> int:
         elif method == "ping":
             reply(rid, {})
         elif method == "tools/list":
-            reply(rid, {"tools": TOOLS})
+            reply(rid, {"tools": TOOLS + (AGENT_TOOLS if agents_enabled() else [])})
         elif method == "tools/call":
             text = _tool(runtime, str(params.get("name", "")), params.get("arguments") or {})
             reply(rid, {"content": [{"type": "text", "text": text}], "isError": text.startswith("jaunt bridge: ")})

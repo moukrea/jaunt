@@ -217,6 +217,16 @@ def main() -> None:
     pair.add_argument("--qr-svg", action="store_true", help=tr('Include a QR image in JSON for the native desktop UI'))
     pair.add_argument("--no-qr", action="store_true")
     sub.add_parser("devices")
+    link = sub.add_parser("link", help=tr('Link this host to another jaunt host (paste its pairing code)'))
+    link.add_argument("code")
+    sub.add_parser("links", help=tr('List linked hosts'))
+    unlink = sub.add_parser("unlink", help=tr('Remove a linked host'))
+    unlink.add_argument("room")
+    agents = sub.add_parser("agents", help=tr('Agents and machines: pending requests, decisions, trust, log'))
+    agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log"])
+    agents.add_argument("target", nargs="?", default="")
+    agents.add_argument("--right", choices=["exec", "type"], default="exec")
+    agents.add_argument("--trust", choices=["1h", "24h", "always"], default="")
     rev = sub.add_parser("revoke")
     rev.add_argument("id")
     notify = sub.add_parser("notify", help=tr('Notify connected browsers and registered push subscriptions'))
@@ -322,6 +332,27 @@ def main() -> None:
                 print(tr('Treat this code like a password. Never put it in an issue or a build log.'))
         elif args.command == "revoke":
             print(json.dumps(control("revoke", {"id": args.id}), indent=2))
+        elif args.command == "link":
+            print(json.dumps(control("links.add", {"code": args.code})["links"], indent=2))
+        elif args.command == "links":
+            print(json.dumps(control("links.list"), indent=2))
+        elif args.command == "unlink":
+            print(json.dumps(control("links.remove", {"room": args.room})["links"], indent=2))
+        elif args.command == "agents":
+            if args.action == "status":
+                print(json.dumps(control("agents.status"), indent=2))
+            elif args.action == "pending":
+                print(json.dumps(control("agents.status")["pending"], indent=2))
+            elif args.action in ("allow", "deny"):
+                decision = "deny" if args.action == "deny" else (args.trust or "once")
+                print(json.dumps(control("agents.decide", {"id": args.target, "decision": decision}), indent=2))
+            elif args.action in ("trust", "block"):
+                level = "block" if args.action == "block" else "trust"
+                print(json.dumps(control("agents.trust", {"requester": args.target, "right": args.right, "level": level, "duration": args.trust or "always"})["requesters"], indent=2))
+            elif args.action == "revoke":
+                print(json.dumps(control("agents.revoke", {"all": True} if args.target in ("", "all") else {"requesters": [args.target]})["requesters"], indent=2))
+            elif args.action == "log":
+                print(json.dumps(control("agents.status")["log"], indent=2))
         elif args.command == "notify":
             print(json.dumps(control("notify", {"title": args.title, "body": args.body,
                                                "session": args.session}), indent=2))
