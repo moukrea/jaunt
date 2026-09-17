@@ -40,9 +40,11 @@ final class UpdateManager {
             return out.toByteArray();
         }
     }
-    void check(boolean explicit){
+    void check(boolean explicit){check(explicit,false);}
+    /** startup: every launch checks the published version and offers the update; later foregrounds are throttled. */
+    void check(boolean explicit,boolean startup){
         if(context.getPackageName().endsWith(".debug"))return;
-        long now=System.currentTimeMillis();if(!explicit&&now-preferences().getLong("checked",0)<6*60*60*1000L)return;
+        long now=System.currentTimeMillis();if(!explicit&&!startup&&now-preferences().getLong("checked",0)<6*60*60*1000L)return;
         if(downloadBusy.get()||!checkingBusy.compareAndSet(false,true))return;
         preferences().edit().putLong("checked",now).apply();
         final ProgressDialog checking=explicit&&activity!=null?new ProgressDialog(activity):null;
@@ -56,7 +58,7 @@ final class UpdateManager {
             if(tag.isEmpty()||!tag.startsWith("android-v")||!newer(tag,current)){if(explicit)message("jaunt is up to date",Lang.t("You already have the latest published Android release."));return;}
             String name="jaunt-"+tag+".apk";
             if(activity==null){notifyAvailable(tag);return;}
-            activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(Lang.t("jaunt update available")).setMessage(Lang.format("Version {0} is available. Your paired machines will be kept. Android will ask you to confirm installation.",tag.substring(9))).setNegativeButton(Lang.t("Later"),null).setPositiveButton(Lang.t("Download and install"),(d,w)->download(tag,name)).show();}});
+            activity.runOnUiThread(()->{if(!activity.isFinishing()&&!activity.isDestroyed()){if(resultDialog!=null)resultDialog.dismiss();resultDialog=new AlertDialog.Builder(activity).setTitle(Lang.t("jaunt update available")).setMessage(Lang.format("Version {0} is available. Your paired machines will be kept. Android will ask you to confirm installation.",tag.substring(9))).setNegativeButton(Lang.t("Ignore"),null).setPositiveButton(Lang.t("Update"),(d,w)->download(tag,name)).show();}});
         }catch(Exception e){if(explicit)message(Lang.t("Update check unavailable"),Lang.t("Could not verify the latest release. Check your connection and try again."));}finally{checkingBusy.set(false);if(checking!=null)activity.runOnUiThread(checking::dismiss);}});
     }
     private void notifyAvailable(String tag){

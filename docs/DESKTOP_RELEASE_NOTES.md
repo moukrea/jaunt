@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.23
+
+- Checks the published version at every launch and asks Update now / Ignore; an `available` state announces a version without downloading when automatic updates are off.
+
 # jaunt desktop 0.1.0-beta.22
 
 - Bundles the beta.28 interface (lazy scrollback with a local IndexedDB cache).

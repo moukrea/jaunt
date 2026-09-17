@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.21 (versionCode 21)
+
+- Checks the published version at every launch and asks Update / Ignore (later foregrounds keep the six-hour throttle).
+
 # jaunt Android 0.1.0-beta.20 (versionCode 20)
 
 - Bundles the beta.28 interface (lazy scrollback with a local IndexedDB cache; resumes render the cached tail before asking the host).

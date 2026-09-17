@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.29
+
+- Desktop and Android apps check the published version at every launch. When a newer one exists, a dialog asks to update or ignore (ignore lasts for that run). Desktop: with automatic updates on, the package is downloaded and verified first and *Install and reopen* is offered; with them off, the version is only announced and *Update now* downloads it. Android: the existing download-and-install dialog is now shown at each launch instead of at most every six hours (later foregrounds keep the six-hour throttle).
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.28
 
 Scrollback, designed rather than patched, after beta.26's bounded replay left older output unreachable:

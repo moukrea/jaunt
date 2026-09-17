@@ -54,17 +54,19 @@ class DesktopUpdates {
     for await(const chunk of response.body){length+=chunk.length;if(length>65536)throw new Error('Invalid update metadata');parts.push(chunk);}
     return Buffer.concat(parts).toString('utf8');
   }
-  async check(){
+  async check(download=true){
     if(this.busy)return this.busy;
-    this.busy=this.performCheck().finally(()=>{this.busy=null;});return this.busy;
+    this.busy=this.performCheck(download).finally(()=>{this.busy=null;});return this.busy;
   }
-  async performCheck(){
+  async performCheck(download=true){
     try{
       if(!this.app.isPackaged){return this.publish({state:'current',message:'Desktop updates are disabled in a source checkout.'});}
       this.publish({state:'checking',message:'Checking desktop release…',percent:null});
       const config=JSON.parse(await this.small('https://moukrea.github.io/jaunt/config.json'));
       const tag=config.desktopRelease;
       if(!newer(tag,this.app.getVersion()))return this.publish({state:'current',message:`Desktop is up to date · ${this.app.getVersion()}`,percent:null});
+      // Automatic updates off: only announce the newer version; the user decides whether to download it.
+      if(!download&&this.state.state!=='ready')return this.publish({state:'available',target:tag,message:`Desktop ${tag.replace(/^desktop-v/,'')} is available · you have ${this.app.getVersion()}`,percent:null});
       const name=artifact(tag,this.platform,this.arch,this.kind);
       const base=`https://github.com/moukrea/jaunt/releases/download/${tag}`;
       const checks=await this.small(base+'/SHA256SUMS');

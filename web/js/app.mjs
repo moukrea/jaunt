@@ -1410,15 +1410,27 @@ function bridgeSettings(a){
   }
   return rows;
 }
+let updatePromptTarget='';
+// One modal per launch when a newer desktop version is known: update now, or ignore for this run.
+function desktopUpdatePrompt(value) {
+  if(!['available','ready'].includes(value.state) || !value.target || updatePromptTarget===value.target || $('modal').open) return;
+  updatePromptTarget=value.target;
+  const target=value.target.replace(/^desktop-v/,''), current=value.currentVersion||'';
+  const install=async()=>{closeModal();try{if(value.state==='ready')await desktop.updates('install');else{const state=await desktop.updates('check',true);if(state.state==='ready')await desktop.updates('install');}}catch(error){report(error);}};
+  modal(tr('Update available'), el('div',{},el('p',{class:'modal-copy',text:tr('jaunt desktop {0} is available; you have {1}. Your hosts, pairings and shells are kept.',target,current)}),
+    el('div',{class:'modal-actions'},button(tr('Ignore'),closeModal),button(value.state==='ready'?tr('Install and reopen'):tr('Update now'),install,'button primary'))));
+}
 function desktopUpdateStatus(value) {
   value={...value,message:tr(value.message||'')};
   const changed=desktopUpdateState?.state!==value.state || desktopUpdateState?.automatic!==value.automatic;
   desktopUpdateState=value;
+  desktopUpdatePrompt(value);
   if((!desktopUpdateOperation || desktopUpdateOperation.item.dismissed) && ['downloading','verifying','ready','installed','error'].includes(value.state))desktopUpdateOperation=activity('desktop-update',tr('Desktop update'));
   const job=desktopUpdateOperation;
   if(job){
     job.update({status:value.message+(value.target?' · '+value.target:''),percent:value.percent??null,done:false,error:false,waiting:false,action:null});
     if(value.state==='error'){job.fail(new Error(value.message));job.update({action:{label:tr('Try again'),run:checkDesktopUpdate}});}
+    else if(value.state==='available')job.update({done:true,waiting:true,status:value.message,action:{label:tr('Update now'),run:()=>desktop.updates('check',true).then(desktopUpdateStatus).catch(report)}});
     else if(value.state==='ready')job.update({done:true,waiting:true,status:value.message+(value.target?' · '+value.target:'')+(value.requiresAuthorization?' System authorization will be requested.':''),action:{label:tr('Install and reopen'),run:()=>desktop.updates('install')}});
     else if(['current','installed'].includes(value.state))job.finish(value.message);
   }
