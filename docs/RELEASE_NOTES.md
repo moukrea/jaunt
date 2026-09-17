@@ -1,3 +1,11 @@
+# jaunt 0.1.0-beta.33
+
+**Agents and machines, phase 2: background agent shells.** `jaunt_shell` gives a session its own shell on a linked machine for a sequence of steps that share state: open (one approval in ask mode), send, read from an offset, close, list. Started like a jaunt shell but never a session — no tab, no Sessions entry, no sharing — it lives by a 10-minute lease renewed by every call and dies without exception when closed, when the lease expires, when the jaunt session that opened it ends, when the requesting host stays disconnected for two minutes, when the requester is revoked or blocked, and when the host stops. Two per requester, eight per host. Settings lists live agent shells with *Kill*; the journal records every open and close with its reason. Validated on two real hosts (`tests/agents_e2e.py`, 14 checks) and in the browser (`tests/agents_ui_e2e.py`, 6 checks).
+
+**Nothing to pair twice.** A device paired with several hosts links them among themselves as soon as the switch is on: it asks the target for a one-use code and hands it to the requester host with the friendly names and icons it uses, so the requester shows up on the target as *host: my-laptop* and the target is listed on the requester under its own label and icon; renaming or re-iconing a machine follows. The pairing-code field remains, folded, for a machine that is not paired on any device. Linked hosts are confined to the agent methods on the target.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.32
 
 **Agents and machines, phase 1.** A second switch per host, off by default and independent of the Claude Code ↔ Codex bridge (which is untouched: no context injected, no message across hosts).

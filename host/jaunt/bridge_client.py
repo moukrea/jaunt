@@ -142,6 +142,12 @@ AGENT_TOOLS = [
                      "properties": {"host": {"type": "string", "description": "Machine name from jaunt_hosts"},
                                     "command": {"type": "string"}, "cwd": {"type": "string", "description": "Working directory on that machine"},
                                     "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600}}}},
+    {"name": "jaunt_shell",
+     "description": "A background shell of your own on a linked machine, for a sequence of steps that share state (cd, environment, several commands, a long process). Actions: open (cwd optional; the owner may be asked once), send (a line of input; enter appended unless enter=false), read (output from an offset, 64 KiB max), close, list. The shell dies when you close it, after 10 minutes without a call, when your session ends, or when the owner revokes you. It is never one of the owner's own shells.",
+     "inputSchema": {"type": "object", "required": ["host", "action"], "additionalProperties": False,
+                     "properties": {"host": {"type": "string"}, "action": {"type": "string", "enum": ["open", "send", "read", "close", "list"]},
+                                    "shell": {"type": "string", "description": "Shell id from open"}, "input": {"type": "string"}, "enter": {"type": "boolean"},
+                                    "cwd": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 65536}}}},
     {"name": "jaunt_read",
      "description": "Read a slice of the full output of an earlier jaunt_run (its 'run' id), 64 KiB at a time.",
      "inputSchema": {"type": "object", "required": ["host", "run"], "additionalProperties": False,
@@ -200,12 +206,21 @@ def _tool(runtime: str, name: str, args: dict) -> str:
             for h in hosts:
                 rights = h.get("rights") or {}
                 allowed = {"ask": "asks its owner before each command", "trust": "trusted: commands run at once", "block": "blocked: commands are refused"}.get(rights.get("exec"), rights.get("error", "unknown"))
-                lines.append(f"- {h['name']} ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}")
+                shown = h.get('label') or h['name']
+                lines.append(f"- {shown}" + (f" (machine name {h['name']})" if h.get('label') and h['label'] != h['name'] else "") + f" ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}")
             return "\n".join(lines)
         if name == "jaunt_run":
             timeout = args.get("timeout_seconds")
             result = control("agents.run", {**identity, "host": args.get("host", ""), "command": args.get("command", ""), "cwd": args.get("cwd"), "timeoutSec": timeout},
                              timeout=(int(timeout) if timeout else 60) + 170)
+            return json.dumps(result, ensure_ascii=False)
+        if name == "jaunt_shell":
+            result = control("agents.shell", {**identity, "host": args.get("host", ""), "action": args.get("action", ""), "shell": args.get("shell"), "input": args.get("input"),
+                                              "enter": args.get("enter", True), "cwd": args.get("cwd"), "offset": args.get("offset", 0), "limit": args.get("limit", 65536)}, timeout=190)
+            if "data" in result:
+                import base64
+                data = base64.urlsafe_b64decode(result["data"] + "=" * (-len(result["data"]) % 4))
+                result = {**{k: v for k, v in result.items() if k != "data"}, "text": data.decode("utf-8", "replace")}
             return json.dumps(result, ensure_ascii=False)
         if name == "jaunt_read":
             result = control("agents.read", {**identity, "host": args.get("host", ""), "run": args.get("run", ""), "offset": args.get("offset", 0), "limit": args.get("limit", 65536)}, timeout=30)

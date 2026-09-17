@@ -203,7 +203,8 @@ class HostLink:
             self.pending.pop(rid, None)
 
     def status(self) -> dict:
-        return {"room": self.record["room"], "name": self.record.get("name", ""), "state": self.state,
+        return {"room": self.record["room"], "name": self.record.get("name", ""), "label": self.record.get("label") or self.record.get("name", ""),
+                "icon": self.record.get("icon"), "state": self.state,
                 "platform": self.machine.get("platform", ""), "user": self.machine.get("user", ""),
                 "error": self.last_error if self.state != "online" else ""}
 
@@ -233,7 +234,9 @@ class Links:
             self.links[room] = HostLink(record, self.identity, self.on_message, self.persist)
         return self.links[room]
 
-    async def add(self, code: str) -> dict:
+    async def add(self, code: str, label: str = "", icon: dict | None = None, self_name: str = "") -> dict:
+        """Link from a pairing code. `label`/`icon` are the user's own name and icon for the other
+        machine (as chosen in the client); `self_name` is how this host is named there."""
         parsed = parse_pairing(code)
         if parsed["room"] == self.identity["room"]:
             raise ValueError("A host cannot link to itself")
@@ -241,15 +244,35 @@ class Links:
         if record and record.get("secret"):
             raise ValueError("This machine is already linked")
         record = {**parsed, "deviceId": "host-" + token(12), "added": time.time()}
+        self.decorate(record, label, icon)
         self.records[parsed["room"]] = record
         await self.persist()
         link = self._link(parsed["room"], record)
+        if self_name:
+            link.identity = {**self.identity, "name": "host: " + str(self_name)[:70]}
         link.start()
         try:
             await asyncio.wait_for(link.online.wait(), 30)
         except asyncio.TimeoutError:
             raise ValueError("The remote host did not complete the link in time: " + (link.last_error or "is it online?"))
         return link.status()
+
+    @staticmethod
+    def decorate(record: dict, label: str = "", icon: dict | None = None) -> None:
+        """Store the user's own name and icon for the other machine (icon = client shape {name, nodes})."""
+        if label:
+            record["label"] = str(label)[:80]
+        if isinstance(icon, dict) and isinstance(icon.get("nodes"), list) and len(compact(icon)) < 8000:
+            record["icon"] = {"name": str(icon.get("name", ""))[:60], "nodes": icon["nodes"]}
+        else:
+            record.pop("icon", None)
+
+    async def update(self, room: str, label: str = "", icon: dict | None = None) -> None:
+        record = self.records.get(room)
+        if record is None:
+            raise ValueError("Unknown linked machine")
+        self.decorate(record, label, icon)
+        await self.persist()
 
     async def remove(self, room: str) -> None:
         link = self.links.pop(room, None)
@@ -259,11 +282,12 @@ class Links:
         await self.persist()
 
     def get(self, room_or_name: str) -> HostLink | None:
-        if room_or_name in self.links:
-            return self.links[room_or_name]
-        for link in self.links.values():
-            if link.record.get("name", "").lower() == room_or_name.lower():
-                return link
+        if room_or_name in self.records:
+            return self._link(room_or_name, self.records[room_or_name])
+        wanted = room_or_name.lower()
+        for room, record in self.records.items():
+            if record.get("label", "").lower() == wanted or record.get("name", "").lower() == wanted:
+                return self._link(room, record)
         return None
 
     def list(self) -> list[dict]:

@@ -273,3 +273,182 @@ class Executor:
             f.seek(offset)
             data = f.read(limit)
         return {"run": run_id, "offset": offset, "data": b64(data), "bytes": size, "eof": offset + len(data) >= size}
+
+
+# ---- background agent shells (phase 2) --------------------------------------------------------
+LEASE_SECONDS = int(os.environ.get("jaunt_AGENT_LEASE", "600"))
+ORPHAN_GRACE = int(os.environ.get("jaunt_AGENT_ORPHAN_GRACE", "120"))
+SHELLS_PER_REQUESTER = 2
+SHELLS_PER_HOST = 8
+
+
+class AgentShell:
+    """A PTY that belongs to an agent: never a jaunt session, never visible in the interface,
+    alive only while its lease is renewed by the agent that opened it."""
+
+    def __init__(self, shell_id: str, requester: str, requester_name: str, origin: str, cwd: str, pid: int, fd: int, log_path: Path):
+        self.id, self.requester, self.requester_name, self.origin = shell_id, requester, requester_name, origin
+        self.cwd, self.pid, self.fd, self.log_path = cwd, pid, fd, log_path
+        self.created = self.last_used = time.time()
+        self.offset = 0
+        self.alive = True
+        self.orphaned_at: float | None = None
+
+    def info(self) -> dict:
+        return {"id": self.id, "requester": self.requester, "requesterName": self.requester_name, "origin": self.origin,
+                "cwd": self.cwd, "created": self.created, "lastUsed": self.last_used, "bytes": self.offset,
+                "leaseEndsAt": self.last_used + LEASE_SECONDS, "alive": self.alive, "log": f"agent-runs/{self.id}.log"}
+
+
+class AgentShells:
+    def __init__(self, root: Path, journal):
+        self.root, self.journal = root, journal
+        self.runs_dir = root / "agent-runs"
+        self.runs_dir.mkdir(exist_ok=True, mode=0o700)
+        self.items: dict[str, AgentShell] = {}
+        self.loop = asyncio.get_event_loop()
+        self.sweeper: asyncio.Task | None = None
+
+    def start(self) -> None:
+        if self.sweeper is None or self.sweeper.done():
+            self.sweeper = asyncio.create_task(self._sweep_loop())
+
+    async def _sweep_loop(self) -> None:
+        while True:
+            await asyncio.sleep(5)
+            now = time.time()
+            for s in list(self.items.values()):
+                if not s.alive:
+                    self._remove(s, "exited")
+                elif now - s.last_used > LEASE_SECONDS:
+                    await self.kill(s.id, "lease expired")
+                elif s.orphaned_at is not None and now - s.orphaned_at > ORPHAN_GRACE:
+                    await self.kill(s.id, "requesting host disconnected")
+
+    def get(self, shell_id: str, requester: str) -> AgentShell:
+        s = self.items.get(shell_id)
+        if s is None or s.requester != requester:
+            raise ValueError("Unknown agent shell (closed, expired or not yours)")
+        return s
+
+    async def open(self, requester: str, requester_name: str, origin: str, cwd: str | None) -> AgentShell:
+        mine = [s for s in self.items.values() if s.requester == requester]
+        if len(mine) >= SHELLS_PER_REQUESTER:
+            raise ValueError(f"At most {SHELLS_PER_REQUESTER} background shells per requester; close one first")
+        if len(self.items) >= SHELLS_PER_HOST:
+            raise ValueError(f"At most {SHELLS_PER_HOST} agent shells on this host; try again later")
+        workdir = Path(cwd).expanduser() if cwd else Path.home()
+        if not workdir.is_dir():
+            raise ValueError(f"Working directory does not exist: {workdir}")
+        import fcntl, pty, struct, subprocess, sys, termios
+        shell = os.environ.get("SHELL") or shutil.which("bash") or "/bin/sh"
+        if Path(shell).name not in ("bash", "zsh", "sh", "dash", "ksh", "fish") or not os.access(shell, os.X_OK):
+            shell = "/bin/sh"
+        command = [shell, "-l", "-c", 'exec "$0" -i', shell] if Path(shell).name == "bash" else [shell, "-i", "-l"]
+        shell_id = "s_" + token(6)
+        fd, slave = pty.openpty()
+        from .clipboard import Clipboard
+        display = {k: v for k, v in Clipboard.display_env().items() if k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY")}
+        env = {**display, **os.environ, "TERM": "dumb", "SHELL": shell, "jaunt_AGENT_SHELL": shell_id, "jaunt_AGENT_REQUESTER": requester, "jaunt_STATE": str(self.root)}
+        try:
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+            process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("pty_exec.py")), *command],
+                                       stdin=slave, stdout=slave, stderr=slave, cwd=str(workdir), env=env,
+                                       start_new_session=True, close_fds=True)
+        except BaseException:
+            os.close(fd); raise
+        finally:
+            os.close(slave)
+        os.set_blocking(fd, False)
+        s = AgentShell(shell_id, requester, requester_name, origin, str(workdir), process.pid, fd, self.runs_dir / f"{shell_id}.log")
+        s.process = process
+        s.sink = open(s.log_path, "ab")
+        os.fchmod(s.sink.fileno(), 0o600)
+        self.items[shell_id] = s
+        self.loop.add_reader(fd, self._read, s)
+        self.start()
+        self.journal(kind="shell", action="open", requester=requester, shell=shell_id, cwd=str(workdir), origin=origin)
+        return s
+
+    def _read(self, s: AgentShell) -> None:
+        try:
+            data = os.read(s.fd, 65536)
+        except BlockingIOError:
+            return
+        except OSError:
+            data = b""
+        if not data:
+            self.loop.remove_reader(s.fd)
+            s.alive = False
+            return
+        s.sink.write(data); s.sink.flush()
+        s.offset += len(data)
+
+    def send(self, s: AgentShell, text: str, enter: bool = True) -> dict:
+        if not s.alive:
+            raise ValueError("This agent shell has exited")
+        if len(text) > 8192:
+            raise ValueError("At most 8 KiB per send")
+        s.last_used = time.time()
+        payload = text.encode() + (b"\n" if enter else b"")
+        os.write(s.fd, payload)
+        return {"shell": s.id, "sent": len(payload), "offset": s.offset}
+
+    def read(self, s: AgentShell, offset: int = 0, limit: int = INLINE_BYTES) -> dict:
+        s.last_used = time.time()
+        offset = max(0, int(offset)); limit = max(1, min(int(limit), INLINE_BYTES))
+        with open(s.log_path, "rb") as f:
+            f.seek(offset)
+            data = f.read(limit)
+        return {"shell": s.id, "offset": offset, "data": b64(data), "bytes": s.offset, "eof": offset + len(data) >= s.offset, "alive": s.alive}
+
+    async def kill(self, shell_id: str, reason: str) -> None:
+        s = self.items.get(shell_id)
+        if s is None:
+            return
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(s.pid, 1)  # SIGHUP: the shell and its jobs
+        for _ in range(20):
+            if s.process.poll() is not None:
+                break
+            await asyncio.sleep(0.1)
+        else:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(s.pid, 9)
+        self._remove(s, reason)
+
+    def _remove(self, s: AgentShell, reason: str) -> None:
+        if self.items.pop(s.id, None) is None:
+            return
+        with contextlib.suppress(Exception):
+            self.loop.remove_reader(s.fd)
+        with contextlib.suppress(OSError):
+            os.close(s.fd)
+        with contextlib.suppress(Exception):
+            s.sink.close()
+        with contextlib.suppress(Exception):
+            s.process.poll()
+        s.alive = False
+        self.journal(kind="shell", action="closed", requester=s.requester, shell=s.id, reason=reason)
+
+    async def kill_for(self, requester: str, reason: str) -> None:
+        for s in list(self.items.values()):
+            if s.requester == requester:
+                await self.kill(s.id, reason)
+
+    async def kill_origin(self, host_device: str, origin: str, reason: str) -> None:
+        for s in list(self.items.values()):
+            if s.requester.startswith(host_device + ":") and s.origin == origin:
+                await self.kill(s.id, reason)
+
+    def mark_orphans(self, host_device: str, orphaned: bool) -> None:
+        for s in self.items.values():
+            if s.requester.startswith(host_device + ":"):
+                s.orphaned_at = time.time() if orphaned else None
+
+    async def shutdown(self) -> None:
+        for s in list(self.items.values()):
+            await self.kill(s.id, "host stopping")
+
+    def list(self) -> list[dict]:
+        return [s.info() for s in self.items.values()]

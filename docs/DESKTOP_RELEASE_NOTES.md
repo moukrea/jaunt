@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.27
+
+- Bundles the beta.33 interface (agent shells listed in Settings with Kill).
+
 # jaunt desktop 0.1.0-beta.26
 
 - Bundles the beta.32 interface (Agents and machines settings, approval modal).

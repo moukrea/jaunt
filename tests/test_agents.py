@@ -65,3 +65,69 @@ async def test_executor_bounds_truncation_log_and_rate(tmp_path,monkeypatch):
     await running
     # Old logs are swept.
     old=tmp_path/'agent-runs'/'r_old.log';old.write_bytes(b'x');os.utime(old,(time.time()-90000,)*2);executor.sweep();assert not old.exists()
+
+@pytest.mark.asyncio
+async def test_agent_shells_lease_caps_and_kill(tmp_path,monkeypatch):
+    from jaunt import agents
+    from jaunt.crypto import unb64
+    monkeypatch.setenv('SHELL','/bin/sh');monkeypatch.setattr(agents,'LEASE_SECONDS',2);monkeypatch.setattr(agents,'ORPHAN_GRACE',1)
+    journal=[];shells=agents.AgentShells(tmp_path,lambda **e:journal.append(e))
+    try:
+        s=await shells.open('host-a:claude','laptop · Claude Code','sess-1',str(tmp_path))
+        assert s.alive and (tmp_path/'agent-runs'/(s.id+'.log')).exists() and journal[-1]['action']=='open'
+        shells.send(s,'cd / && export MARK=leased && echo start-$MARK-end')
+        for _ in range(100):
+            await asyncio.sleep(.05)
+            text=unb64(shells.read(s,0,65536)['data']).decode()
+            if 'start-leased-end' in text:break
+        else:pytest.fail('agent shell produced no output: '+text[-200:])
+        assert shells.read(s,0,10)['bytes']==s.offset and not shells.read(s,0,65536)['eof'] is None
+        # Caps: two per requester, eight per host.
+        await shells.open('host-a:claude','x','sess-1',None)
+        with pytest.raises(ValueError):await shells.open('host-a:claude','x','sess-1',None)
+        # Wrong requester cannot touch it.
+        with pytest.raises(ValueError):shells.get(s.id,'host-b:codex')
+        # kill_for and kill_origin.
+        await shells.kill_for('host-a:claude','test');assert not shells.items and journal[-1]['action']=='closed'
+        t=await shells.open('host-a:claude','x','sess-9',None);await shells.kill_origin('host-a','sess-9','origin gone');assert not shells.items
+        # Lease expiry and orphan grace are enforced by the sweeper.
+        u=await shells.open('host-a:claude','x','sess-2',None);await asyncio.sleep(0)
+        u.last_used=time.time()-10
+        for _ in range(140):
+            await asyncio.sleep(.1)
+            if u.id not in shells.items:break
+        else:pytest.fail('lease expiry did not kill the shell')
+        assert journal[-1]['reason']=='lease expired'
+        monkeypatch.setattr(agents,'LEASE_SECONDS',30)
+        v=await shells.open('host-a:claude','x','sess-3',None);shells.mark_orphans('host-a',True)
+        for _ in range(140):
+            await asyncio.sleep(.1)
+            if v.id not in shells.items:break
+        else:pytest.fail('orphan grace did not kill the shell')
+        assert journal[-1]['reason']=='requesting host disconnected'
+        w=await shells.open('host-a:claude','x','sess-4',None);shells.mark_orphans('host-a',True);shells.mark_orphans('host-a',False);await asyncio.sleep(1.5);assert w.id in shells.items,'a host that came back keeps its shells'
+        shells.send(w,'exit');
+        for _ in range(100):
+            await asyncio.sleep(.05)
+            if w.id not in shells.items:break
+        else:pytest.fail('an exited shell was not reaped')
+    finally:await shells.shutdown()
+
+@pytest.mark.asyncio
+async def test_links_carry_label_and_icon(tmp_path):
+    """The device's friendly name and icon for a machine are stored with the link and survive updates."""
+    from jaunt.hostlink import Links
+    from jaunt.crypto import b64
+    state=State(tmp_path/'state.json');state.data.setdefault('links',{});state.save()
+    links=Links(state,{'room':'me','name':'host: me'},None)
+    record={'room':'other','relay':'wss://x','relayToken':b64(b'\0'*32),'pairId':'p','pairSecret':b64(b'\0'*32),'name':'homelab','deviceId':'host-x','added':0}
+    links.records['other']=record
+    Links.decorate(record,'Serveur',{'name':'server','nodes':[['path',{'d':'M0 0'}]],'junk':1})
+    assert record['label']=='Serveur' and record['icon']=={'name':'server','nodes':[['path',{'d':'M0 0'}]]}
+    await links.update('other','Serveur 2',None)
+    assert record['label']=='Serveur 2' and 'icon' not in record
+    Links.decorate(record,'',{'name':'big','nodes':[['path',{'d':'M'*9000}]]})
+    assert 'icon' not in record and record['label']=='Serveur 2'
+    assert links.get('serveur 2') is not None and links.get('homelab') is not None and links.get('nope') is None
+    assert links.list()[0]['label']=='Serveur 2' and links.list()[0]['icon'] is None
+    with pytest.raises(ValueError):await links.update('unknown','x',None)

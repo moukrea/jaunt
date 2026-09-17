@@ -209,6 +209,7 @@ function makeMachine(machine) {
     a.peer = e.detail.peer; a.info = e.detail.machine; a.sessions = e.detail.sessions; syncSessions(a);
     a.restartExpected = 0; if (a.link.expectRestart !== undefined) a.link.expectRestart = false;
     if (a.info?.updates) hostUpdateJobs.get(a.machine.room)?.observe(a.info.updates);
+    syncLinks();
     // Only the terminals this device is looking at receive the stream; the others catch up when shown.
     syncSubscriptions();
     if (!a.machine.openSessions) a.machine.openSessions = a.sessions.map(s=>s.id);
@@ -1333,14 +1334,14 @@ setInterval(() => { if (vault.data) applyTheme(); }, 60000);
 matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (vault.data) applyTheme(); });
 function hostPreferences(a) {
   const name = el('input', {value:a.machine.friendlyName || a.machine.name, maxlength:80, 'aria-label':tr('Friendly host name')});
-  name.onchange = async () => { a.machine.friendlyName = name.value.trim().slice(0,80) || a.machine.name; await persist(); render(); };
+  name.onchange = async () => { a.machine.friendlyName = name.value.trim().slice(0,80) || a.machine.name; await persist(); render(); propagateIdentity(a); };
   const order = el('div',{class:'modal-actions'});
   for (const [delta,label] of [[-1,tr('Move up')],[1,tr('Move down')]]) order.append(button(label,async()=>{
     const list=vault.data.machines, visible=list.filter(m=>machines.has(m.room)), from=visible.indexOf(a.machine), to=from+delta;
     if(to<0||to>=visible.length)return;
     const x=list.indexOf(visible[from]),y=list.indexOf(visible[to]);[list[x],list[y]]=[list[y],list[x]];await persist();renderMachines();
   }));
-  const iconChoice=el('span',{class:'host-icon-choice'},hostIcon(a.machine,18),button(tr('Choose…'),()=>iconPicker(a).catch(report),'button'),...(a.machine.icon?[button(tr('Default'),async()=>{delete a.machine.icon;await persist();render();renderSettings();},'text-button')]:[]));
+  const iconChoice=el('span',{class:'host-icon-choice'},hostIcon(a.machine,18),button(tr('Choose…'),()=>iconPicker(a).catch(report),'button'),...(a.machine.icon?[button(tr('Default'),async()=>{delete a.machine.icon;await persist();render();renderSettings();propagateIdentity(a);},'text-button')]:[]));
   return [settingsRow(tr('Friendly name'),tr('Only changes the name on this device.'),name),settingsRow(tr('Icon'),tr('Any icon from the icon set, only on this device.'),iconChoice),settingsRow(tr('Host order'),tr('Choose the order in the sidebar.'),order),
     settingsRow(tr('Open by default'),prefs().defaultHost === a.machine.room ? tr('This host opens when the app starts.') : tr('Choose the first host shown when the app starts.'),button(tr('Use this host'),async()=>{vault.data.preferences.defaultHost=a.machine.room;await persist();renderSettings();}))];
 }
@@ -1359,7 +1360,7 @@ async function iconPicker(a) {
     const q=search.value.trim().toLowerCase().replace(/\s+/g,'-');
     const hits=names.filter(n=>!q||kebab(n).includes(q));
     const shown=hits.slice(0,300);
-    grid.replaceChildren(...shown.map(n=>{const b=button('',async()=>{a.machine.icon={name:kebab(n),nodes:icons[n]};await persist();closeModal();render();renderSettings();},'icon-cell');b.title=kebab(n);b.setAttribute('aria-label',kebab(n));b.append(iconFromNodes(kebab(n),icons[n],20));return b;}));
+    grid.replaceChildren(...shown.map(n=>{const b=button('',async()=>{a.machine.icon={name:kebab(n),nodes:icons[n]};await persist();closeModal();render();renderSettings();propagateIdentity(a);},'icon-cell');b.title=kebab(n);b.setAttribute('aria-label',kebab(n));b.append(iconFromNodes(kebab(n),icons[n],20));return b;}));
     hint.textContent=hits.length>shown.length?tr('{0} icons match; showing the first {1}. Type to narrow the list.',hits.length,shown.length):tr('{0} icons',hits.length);
   };
   search.oninput=show;show();
@@ -1416,18 +1417,18 @@ function approvalPrompt(a, item) {
 function agentsSettings(a) {
   const info = a.info?.agents; if (!info) return [];
   const toggle = el('input', {type: 'checkbox', checked: !!info.enabled, 'aria-label': tr('Agents and machines')});
-  toggle.onchange = async () => { toggle.disabled = true; try { a.agents = await a.link.request('agents.configure', {enabled: toggle.checked}, 120000); a.info.agents = {enabled: a.agents.enabled}; } catch (error) { toggle.checked = !toggle.checked; report(error); } finally { toggle.disabled = false; renderSettings(); } };
+  toggle.onchange = async () => { toggle.disabled = true; try { a.agents = await a.link.request('agents.configure', {enabled: toggle.checked}, 120000); a.info.agents = {enabled: a.agents.enabled, links: (a.agents.links || []).map(l => l.room)}; syncLinks(); } catch (error) { toggle.checked = !toggle.checked; report(error); } finally { toggle.disabled = false; renderSettings(); } };
   const rows = [settingsRow(tr('Agents and machines'), info.enabled ? tr('On. Claude Code and Codex sessions on linked machines may ask to run commands here; every requester has its own rights below. Sessions here can reach linked machines.') : tr('Off. Turn on to let AI sessions on linked machines run commands here under your rules, and to let sessions here reach linked machines.'), toggle)];
   if (!info.enabled) return rows;
   if (!a.agents) { refreshAgents(a); rows.push(settingsRow(tr('Loading…'), '', el('span'))); return rows; }
   const st = a.agents;
   // Linked machines (this host as a requester on others).
   const links = el('div', {class: 'agents-list'});
-  for (const l of st.links || []) links.append(el('div', {class: 'agents-row agents-link'}, el('span', {class: 'host-symbol ' + (l.state === 'online' ? 'online' : l.state === 'refused' ? 'offline' : 'busy')}, icon('cloud', 14)), el('span', {class: 'agents-row-text'}, el('strong', {text: l.name || l.room}), el('small', {text: (l.platform ? l.platform + ' · ' : '') + (l.state === 'online' ? tr('link online') : l.error || l.state)})), button(tr('Remove'), async () => { try { a.agents = await a.link.request('links.remove', {room: l.room}); } catch (error) { report(error); } renderSettings(); }, 'text-button')));
-  const code = el('input', {placeholder: tr('Pairing code of the other machine (jaunt pair)'), 'aria-label': tr('Pairing code'), autocomplete: 'off'});
-  const add = button(tr('Link'), async () => { add.disabled = true; try { a.agents = await a.link.request('links.add', {code: code.value.trim()}, 60000); code.value = ''; toast(tr('Machine linked.'), false, null, hostOf(a)); } catch (error) { report(error); } finally { add.disabled = false; renderSettings(); } }, 'button');
-  links.append(el('div', {class: 'agents-add'}, code, add));
-  rows.push(settingsRow(tr('Linked machines'), tr('Machines this host can reach as a requester. Run jaunt pair on the other machine and paste its code; the other machine then decides what this host\'s sessions may do there.'), el('span')), links);
+  for (const l of st.links || []) links.append(el('div', {class: 'agents-row agents-link'}, el('span', {class: 'host-symbol ' + (l.state === 'online' ? 'online' : l.state === 'refused' ? 'offline' : 'busy')}, hostIcon({icon: l.icon, local: false}, 14)), el('span', {class: 'agents-row-text'}, el('strong', {text: l.label || l.name || l.room}), el('small', {text: (l.platform ? l.platform + ' · ' : '') + (l.state === 'online' ? tr('link online') : l.error || l.state)})), ...(machines.has(l.room) ? [] : [button(tr('Remove'), async () => { try { a.agents = await a.link.request('links.remove', {room: l.room}); } catch (error) { report(error); } renderSettings(); }, 'text-button')])));
+  const code = el('input', {placeholder: tr('Pairing code of a host that is not paired on this device'), 'aria-label': tr('Pairing code'), autocomplete: 'off'});
+  const add = button(tr('Link'), async () => { add.disabled = true; try { a.agents = await a.link.request('links.add', {code: code.value.trim(), selfName: hostName(a)}, 60000); code.value = ''; toast(tr('Machine linked.'), false, null, hostOf(a)); } catch (error) { report(error); } finally { add.disabled = false; renderSettings(); } }, 'button');
+  links.append(el('details', {class: 'agents-fallback'}, el('summary', {text: tr('Reach a machine that is not paired on this device')}), el('div', {class: 'agents-add'}, code, add)));
+  rows.push(settingsRow(tr('Reachable machines'), tr('Every machine paired on this device is reachable from this host as a requester, under the name and icon you use here; nothing to pair again. Each machine still decides what this host\'s sessions may do there.'), el('span')), links);
   // Requesters table (others acting here).
   const selected = new Set();
   const table = el('table', {class: 'agents-table'}, el('thead', {}, el('tr', {}, el('th', {text: ''}), el('th', {text: tr('Requester')}), el('th', {text: tr('Run commands')}), el('th', {text: tr('Write into a shell')}))));
@@ -1441,6 +1442,13 @@ function agentsSettings(a) {
   const revoke = button(tr('Revoke selection'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } confirmAction(tr('Revoke these requesters?'), tr('They will ask again at their next request.'), tr('Revoke'), async () => { a.agents = await a.link.request('agents.revoke', {requesters: [...selected]}); renderSettings(); }, true); }, 'button');
   const revokeAll = button(tr('Revoke all'), () => confirmAction(tr('Revoke every requester?'), tr('Every requester will ask again at its next request.'), tr('Revoke all'), async () => { a.agents = await a.link.request('agents.revoke', {all: true}); renderSettings(); }, true), 'text-button');
   rows.push(settingsRow(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block.'), el('span')), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table), el('div', {class: 'agents-actions'}, modify, revoke, revokeAll)));
+  // Background agent shells alive on this host (never jaunt sessions), with a kill switch.
+  const shells = st.agentShells || [];
+  if (shells.length) {
+    const list = el('div', {class: 'agents-list'});
+    for (const sh of shells) list.append(el('div', {class: 'agents-row'}, el('span', {class: 'agents-row-text'}, el('strong', {text: (sh.requesterName || sh.requester) + ' · ' + sh.cwd}), el('small', {text: tr('opened {0} · lease ends {1} · {2} bytes', new Date(sh.created * 1000).toLocaleTimeString(), new Date(sh.leaseEndsAt * 1000).toLocaleTimeString(), sh.bytes)})), button(tr('Kill'), async () => { try { a.agents = await a.link.request('agents.kill', {shell: sh.id}); } catch (error) { report(error); } renderSettings(); }, 'button danger small')));
+    rows.push(settingsRow(tr('Agent shells'), tr('Background shells opened by requesters. They are not sessions: no tab, no sharing. Each dies when closed, 10 minutes after its last use, when its session ends, or when you revoke the requester.'), el('span')), list);
+  }
   // Pending approvals and log.
   const pending = st.pending || [];
   if (pending.length) {
@@ -1451,12 +1459,40 @@ function agentsSettings(a) {
   const log = el('div', {class: 'agents-list agents-log'});
   for (const entry of [...(st.log || [])].reverse().slice(0, 30)) {
     const when = new Date(entry.at * 1000).toLocaleString();
-    const text = entry.kind === 'run' ? `${entry.command}${entry.cwd ? ' · ' + entry.cwd : ''} → ${entry.status}${entry.exitCode != null ? ' · ' + tr('exit {0}', entry.exitCode) : ''} · ${entry.decision || ''}` : entry.kind === 'trust' ? tr('{0}: {1} → {2}{3}', entry.requester, entry.right, entry.level, entry.duration ? ' ' + entry.duration : '') : entry.kind === 'revoke' ? tr('revoked {0}', (entry.requesters || []).join(', ')) : entry.kind === 'link' ? tr('linked {0}', entry.host || '') : entry.kind === 'switch' ? (entry.enabled ? tr('turned on') : tr('turned off')) : JSON.stringify(entry);
+    const text = entry.kind === 'shell' ? tr('agent shell {0} {1}{2}', entry.shell || '', entry.action || '', entry.reason ? ' · ' + entry.reason : entry.cwd ? ' · ' + entry.cwd : '') : entry.kind === 'run' ? `${entry.command}${entry.cwd ? ' · ' + entry.cwd : ''} → ${entry.status}${entry.exitCode != null ? ' · ' + tr('exit {0}', entry.exitCode) : ''} · ${entry.decision || ''}` : entry.kind === 'trust' ? tr('{0}: {1} → {2}{3}', entry.requester, entry.right, entry.level, entry.duration ? ' ' + entry.duration : '') : entry.kind === 'revoke' ? tr('revoked {0}', (entry.requesters || []).join(', ')) : entry.kind === 'link' ? tr('linked {0}', entry.host || '') : entry.kind === 'switch' ? (entry.enabled ? tr('turned on') : tr('turned off')) : JSON.stringify(entry);
     log.append(el('div', {class: 'agents-row muted'}, el('small', {text: when + (entry.requester ? ' · ' + (st.requesters?.find(r => r.id === entry.requester)?.name || entry.requester) : '') + (entry.by ? ' · ' + entry.by : '')}), el('span', {class: 'agents-row-text', text: text})));
   }
   if (!(st.log || []).length) log.append(el('div', {class: 'agents-row muted', text: tr('Nothing yet.')}));
   rows.push(settingsRow(tr('Journal'), tr('The last decisions, commands and refusals on this host.'), button(tr('Refresh'), () => refreshAgents(a), 'text-button')), log);
   return rows;
+}
+// Pairing a host on this device makes it reachable from every other host of the workspace: the device,
+// which already holds every pairing, asks the target for a one-use code and hands it to the requester
+// host together with the names and icons it uses. Nothing to pair twice, nothing to copy.
+const linking = new Set();
+function syncLinks() {
+  for (const x of machines.values()) {
+    if (x.link.state !== 'online' || !x.info?.agents?.enabled) continue;
+    const known = x.info.agents.links || (x.info.agents.links = []);
+    for (const y of machines.values()) {
+      const key = x.machine.room + ':' + y.machine.room;
+      if (y === x || y.link.state !== 'online' || known.includes(y.machine.room) || linking.has(key)) continue;
+      linking.add(key);
+      (async () => {
+        const issued = await y.link.request('pair.issue');
+        x.agents = await x.link.request('links.add', {code: issued.code, name: hostName(y), icon: y.machine.icon || null, selfName: hostName(x)}, 60000);
+        if (!known.includes(y.machine.room)) known.push(y.machine.room);
+        if (view === 'settings' && x === current()) renderSettings();
+      })().catch(error => console.warn('link', hostName(x), '→', hostName(y), error)).finally(() => linking.delete(key));
+    }
+  }
+}
+// The name and icon you give a machine follow it into every host that links it.
+function propagateIdentity(target) {
+  for (const other of machines.values()) {
+    if (other === target || other.link.state !== 'online' || !other.info?.agents?.enabled) continue;
+    other.link.request('links.update', {room: target.machine.room, name: hostName(target), icon: target.machine.icon || null}).then(status => { other.agents = status; }).catch(() => {});
+  }
 }
 function trustDialog(a, requesters) {
   const right = el('select', {'aria-label': tr('Right')}, el('option', {value: 'exec', text: tr('Run commands')}), el('option', {value: 'type', text: tr('Write into a shell')}));

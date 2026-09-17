@@ -27,7 +27,7 @@ class Mcp:
     def close(self):self.p.kill()
 
 def main():
-    A=Harness(name='laptop');B=Harness(name='homelab')
+    A=Harness(name='laptop');B=Harness(name='homelab',extra_env={'jaunt_AGENT_LEASE':'4'})
     try:
         checks=[]
         def passed(s):checks.append(s);print('PASS',s,flush=True)
@@ -107,6 +107,48 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         A.cli('unlink',links[0]['room']);assert not json.loads(A.cli('links'))
         assert 'No machine is linked' in mcp.tool('jaunt_hosts',{})
         passed('revoke resets to ask; unlink removes the machine for the session')
+        # Background agent shell (phase 2): its own PTY on B, never a jaunt session, dies on close / lease / revoke.
+        links=json.loads(A.cli('link',B.pair()['code']))
+        t=approver('always');opened=json.loads(mcp.tool('jaunt_shell',{'host':'homelab','action':'open','cwd':str(B.work)}));t.join()
+        shell=opened['id'];assert opened['alive'] and shell.startswith('s_')
+        assert all(s['id']!=shell for s in status(B)['sessions']),'an agent shell is not a jaunt session'
+        assert json.loads(B.cli('agents','shells'))[0]['id']==shell
+        mcp.tool('jaunt_shell',{'host':'homelab','action':'send','input':'cd / && export STATEFUL=yes'})
+        mcp.tool('jaunt_shell',{'host':'homelab','action':'send','shell':shell,'input':'cd / && export STATEFUL=yes'})
+        mcp.tool('jaunt_shell',{'host':'homelab','action':'send','shell':shell,'input':'echo got-$STATEFUL-$(pwd)'})
+        for _ in range(40):
+            out=json.loads(mcp.tool('jaunt_shell',{'host':'homelab','action':'read','shell':shell,'offset':0}))
+            if 'got-yes-/' in out['text']:break
+            time.sleep(.25)
+        else:raise AssertionError('shell output missing: '+out['text'][-300:])
+        passed('a background agent shell keeps state between sends and its output is read from an offset')
+        mcp.tool('jaunt_shell',{'host':'homelab','action':'close','shell':shell});assert not json.loads(B.cli('agents','shells'))
+        opened=json.loads(mcp.tool('jaunt_shell',{'host':'homelab','action':'open'}));shell=opened['id']
+        for _ in range(40):
+            if not json.loads(B.cli('agents','shells')):break
+            time.sleep(.5)
+        else:raise AssertionError('lease expiry did not kill the forgotten shell')
+        log=json.loads(B.cli('agents','log'));assert any(e.get('shell')==shell and e.get('reason')=='lease expired' for e in log)
+        passed('a forgotten agent shell dies when its lease expires (4 s in this run) and the journal says why')
+        opened=json.loads(mcp.tool('jaunt_shell',{'host':'homelab','action':'open'}));shell=opened['id']
+        B.cli('agents','revoke','all');assert not json.loads(B.cli('agents','shells'))
+        assert 'Unknown agent shell' in mcp.tool('jaunt_shell',{'host':'homelab','action':'read','shell':shell},timeout=60) or 'Refused' in mcp.tool('jaunt_shell',{'host':'homelab','action':'read','shell':shell},timeout=60)
+        passed('revoking the requester kills its agent shells at once')
+        # The jaunt session that opened a shell elsewhere ends: A releases it on B.
+        sock=__import__('socket').socket(__import__('socket').AF_UNIX);sock.connect(str(A.state/'control.sock'));sock.sendall(json.dumps({'method':'ui.connect'}).encode()+b'\n')
+        f=sock.makefile('rw');f.readline();f.write(json.dumps({'type':'rpc','id':'c2','method':'session.create','params':{'cwd':str(A.work),'cols':80,'rows':24}})+'\n');f.flush()
+        while True:
+            m=json.loads(f.readline())
+            if m.get('type')=='reply' and m.get('id')=='c2':sid2=m['result']['id'];break
+        mcp2=Mcp(A,sid2);t=approver('always');opened=json.loads(mcp2.tool('jaunt_shell',{'host':'homelab','action':'open'}));t.join();assert json.loads(B.cli('agents','shells'))
+        f.write(json.dumps({'type':'rpc','id':'c3','method':'session.terminate','params':{'id':sid2}})+'\n');f.flush()
+        for _ in range(40):
+            if not json.loads(B.cli('agents','shells')):break
+            time.sleep(.5)
+        else:raise AssertionError('the agent shell outlived the session that opened it')
+        sock.close();mcp2.close()
+        passed('when the jaunt session that opened an agent shell ends, the shell on the other host is closed')
+        A.cli('unlink',links[0]['room'])
         # The messaging bridge is untouched: no hooks were installed for agents alone, and bridge status is off.
         bridge=json.loads(subprocess.check_output([sys.executable,'-c','''
 import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;print(json.dumps(control("bridge.status" if False else "status")["machine"]["bridge"]))''',str(ROOT/'host')],env=A.env))

@@ -13,7 +13,8 @@ Host (Python):
 - [x] Notifications: approval → `notify()` push + broadcast; CLI `jaunt link/links/unlink`, `jaunt agents pending|allow|deny|log|status`.
 
 Client (web, desktop, Android):
-- [x] Settings group "Agents and machines": switch, linked machines (add by pairing code, remove), requester table with one column per right, multi-select modify/revoke, revoke all, log.
+- [x] Settings group "Agents and machines": switch, reachable machines (linked by the client from its own pairings, with the device's friendly names and icons; pairing code only as a fallback), requester table with one column per right, multi-select modify/revoke, revoke all, log.
+- [x] Automatic links: `pair.issue` RPC for authenticated devices, `links.add {code, name, icon, selfName}`, `links.update`, `info.agents.links`, client `syncLinks()` on every welcome/switch; linked hosts confined to `agent.*` RPCs.
 - [x] Approval modal (command, cwd, requester, program), 4 actions, closes when answered elsewhere; toast/notification.
 - [x] `jaunt_hosts`, `jaunt_run`, `jaunt_read` MCP tools.
 
@@ -25,7 +26,7 @@ Tests:
 Docs: [x] `docs/AGENTS.md`, [x] README section, [x] PROTOCOL, [x] release notes.
 
 ## Phase 2 — background agent shells (lease)
-- [ ] `agent.shell open/send/read/close`, lease 10 min renewed by calls, kill on: close, lease expiry, requester session end/replace, link down > 2 min, revocation, daemon stop; caps 2 per requester, 8 per host; never a jaunt session; listed in settings with kill; e2e.
+- [x] `agent.shell open/send/read/close/list`, lease 10 min renewed by calls, kill on: close, lease expiry, requester session end (release from the requesting host), link down > 2 min (orphan grace), revocation/block, daemon stop; caps 2 per requester, 8 per host; never a jaunt session; listed in settings with kill; unit test + e2e (host and UI).
 
 ## Phase 3 — writing into existing shells (remote and local)
 - [ ] Right 2: `agent.sessions`, `agent.type`, `agent.output`; first-use grant per requester × shell; agent badge on the tab; "cut" in settings; local requester row "this host × runtime"; e2e.
