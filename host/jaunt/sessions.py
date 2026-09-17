@@ -569,7 +569,7 @@ class Sessions:
 
     def get(self, sid: str) -> Session:
         if sid not in self.items:
-            raise ValueError("This terminal no longer exists")
+            raise ValueError("No jaunt terminal with this id (it may have ended)")
         return self.items[sid]
 
     async def attach(self, peer: str, data: dict) -> dict:

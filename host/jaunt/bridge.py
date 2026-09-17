@@ -226,7 +226,12 @@ class Bridge:
 
     def status(self) -> dict:
         detected = self.detected or {"runtimes": {}, "visible": False, "available": False, "reason": "", "checkedAt": 0}
-        return {"enabled": self.enabled, **detected, "integrations": self.integrations,
+        from . import bridge_setup
+        try:
+            seen = bridge_setup.installed(detected.get("runtimes") or {})
+        except Exception:
+            seen = {}
+        return {"enabled": self.enabled, **detected, "integrations": self.integrations, "hooksSeen": seen,
                 "participants": [self.public(p) for p in self.participants.values() if p.state != "ended"],
                 "unbridged": self.unbridged(), "version": self.version}
 

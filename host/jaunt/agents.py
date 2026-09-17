@@ -239,7 +239,7 @@ class Approvals:
 
     async def ask(self, requester: dict, right: str, kind: str, detail: dict) -> str:
         """Returns the decision: once, 1h, 24h, always, deny (deny after the timeout)."""
-        approval_id = token(9)
+        approval_id = "ap" + token(8)  # never starts with "-": it travels as a CLI argument
         future = asyncio.get_running_loop().create_future()
         item = {"id": approval_id, "requester": requester, "right": right, "kind": kind, "detail": detail,
                 "created": time.time(), "expires": time.time() + APPROVAL_SECONDS, "future": future}

@@ -224,7 +224,7 @@ def main() -> None:
     unlink.add_argument("room")
     agents = sub.add_parser("agents", help=tr('Agents and machines: pending requests, decisions, trust, log'))
     agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log", "shells", "kill", "cut", "rules", "rule", "features", "enable", "disable"])
-    agents.add_argument("target", nargs="?", default="")
+    agents.add_argument("target", nargs="?", default="", help=tr("request id, requester, shell or session id (put -- before an id that starts with a dash)"))
     agents.add_argument("--right", choices=["exec", "type"], default="exec")
     agents.add_argument("--trust", choices=["1h", "24h", "always", "rule"], default="", help=tr("allow: trust for a while, or 'rule' to always allow this exact command"))
     agents.add_argument("--pattern", default="", help=tr("rule: a command or a pattern with * and ?"))
