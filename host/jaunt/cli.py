@@ -257,6 +257,13 @@ def main() -> None:
                 subprocess.Popen([str(desktop)], start_new_session=True, stdin=subprocess.DEVNULL)
         elif args.command == "update":
             start()
+            try:
+                record = json.loads((state_dir() / "runtime.json").read_text())
+                os.kill(int(record["pid"]), 0)
+                if not Path(record["runtime"]).exists():
+                    print("jaunt: " + tr("The running host executes a runtime whose files were removed. Restart it to load the installed version: systemctl --user restart jaunt (shells end)."), file=sys.stderr)
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
             print(json.dumps(control("updates.install", {"allowRestart": args.allow_restart}), indent=2))
         elif args.command == "init":
             try:
@@ -344,7 +351,10 @@ def main() -> None:
             try:
                 status = control("status")
                 result.update({"running": True, "relayConnected": status["connected"], "sessions": len(status["sessions"]),
-                               "hostClipboard": status["machine"]["clipboard"]})
+                               "hostClipboard": status["machine"]["clipboard"], "runtime": status.get("runtime", ""),
+                               "runtimePresent": bool(status.get("runtime")) and Path(status["runtime"]).exists()})
+                if not result["runtimePresent"]:
+                    result["warning"] = "The running host's runtime files were removed; restart the host service to load the installed version."
             except OSError:
                 result["running"] = False
             result["note"] = "Plain shells survive network loss, not daemon restarts. tmux sessions are independently managed."

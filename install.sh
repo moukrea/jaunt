@@ -352,13 +352,20 @@ if [[ -t 1 && "${jaunt_NO_GUI:-0}" != 1 && ( -n "${DISPLAY:-}" || -n "${WAYLAND_
   fi
 fi
 "$BIN/jaunt" --version >/dev/null
-# Keep the previous runtime for one rollback; older ones only consume disk.
-"$PY" - "$PREFIX" <<'PYPRUNE' || true
-import os,pathlib,shutil,sys
+# Keep the previous runtime for one rollback and, above all, the runtime the live daemon
+# executes (a failed handoff leaves it on an older version); older ones only consume disk.
+"$PY" - "$PREFIX" "${jaunt_STATE:-}" <<'PYPRUNE' || true
+import json,os,pathlib,shutil,sys
 prefix=pathlib.Path(sys.argv[1]);current=os.path.realpath(prefix/'current')
 versions=sorted((d for d in (prefix/'versions').iterdir() if d.is_dir()),key=lambda d:d.stat().st_mtime)
 keep={current}
 if len(versions)>1:keep.add(os.path.realpath(versions[-2] if os.path.realpath(versions[-1])==current else versions[-1]))
+try:
+    record=json.loads((pathlib.Path(sys.argv[2])/'runtime.json').read_text());os.kill(int(record['pid']),0)
+    running=os.path.realpath(record['runtime'])
+    for d in versions:
+        if running.startswith(os.path.realpath(d)+os.sep):keep.add(os.path.realpath(d))
+except Exception:pass
 for d in versions:
     if os.path.realpath(d) not in keep:shutil.rmtree(d,ignore_errors=True)
 PYPRUNE

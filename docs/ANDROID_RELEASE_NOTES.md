@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.23 (versionCode 23)
+
+- Bundles the beta.31 client (no client change).
+
 # jaunt Android 0.1.0-beta.22 (versionCode 22)
 
 - Bundles the beta.30 client (secure channel re-keys on a desynchronised frame instead of stopping).

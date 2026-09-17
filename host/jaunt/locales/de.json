@@ -782,6 +782,7 @@
   "The local host action failed. Check the host connection and try again.": "Die Aktion des lokalen Hosts ist fehlgeschlagen. Prüfen Sie die Host-Verbindung und versuchen Sie es erneut.",
   "The local host executable could not be found.": "Die ausführbare Datei des lokalen Hosts wurde nicht gefunden.",
   "The release download was interrupted. Check the host's internet connection and try again.": "Der Download des Releases wurde unterbrochen. Prüfen Sie die Internetverbindung des Hosts und versuchen Sie es erneut.",
+  "The running host executes a runtime whose files were removed. Restart it to load the installed version: systemctl --user restart jaunt (shells end).": "Der laufende Host verwendet eine Laufzeit, deren Dateien entfernt wurden. Starten Sie ihn neu, um die installierte Version zu laden: systemctl --user restart jaunt (Shells werden beendet).",
   "The system clipboard did not respond": "Die System-Zwischenablage hat nicht reagiert",
   "The terminal has text ready to copy.": "Im Terminal liegt Text zum Kopieren bereit.",
   "The two values do not match.": "Die beiden Werte stimmen nicht überein.",

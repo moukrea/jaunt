@@ -782,6 +782,7 @@
   "The local host action failed. Check the host connection and try again.": "La acción del host local ha fallado. Comprueba la conexión con el host e inténtalo de nuevo.",
   "The local host executable could not be found.": "No se ha encontrado el ejecutable del host local.",
   "The release download was interrupted. Check the host's internet connection and try again.": "La descarga de la versión se interrumpió. Comprueba la conexión a Internet del host e inténtalo de nuevo.",
+  "The running host executes a runtime whose files were removed. Restart it to load the installed version: systemctl --user restart jaunt (shells end).": "El host en ejecución usa un runtime cuyos archivos se eliminaron. Reinícialo para cargar la versión instalada: systemctl --user restart jaunt (los shells terminan).",
   "The system clipboard did not respond": "El portapapeles del sistema no ha respondido",
   "The terminal has text ready to copy.": "El terminal tiene texto listo para copiar.",
   "The two values do not match.": "Los dos valores no coinciden.",
