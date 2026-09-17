@@ -27,6 +27,8 @@ RIGHTS = ("exec", "type")
 LEVELS = ("ask", "trust", "block")
 DURATIONS = {"1h": 3600, "24h": 86400, "always": None}
 RULES_MAX, RULE_CHARS = 50, 200
+# Independent capabilities, each behind its own switch on the host.
+FEATURES = ("exec", "typeLocal", "typeRemote", "messages")
 APPROVAL_SECONDS = 120
 INLINE_BYTES = 64 * 1024
 MAX_TIMEOUT = 600
@@ -48,12 +50,31 @@ class Policy:
         self.data = state.data.setdefault("agents", {"enabled": False, "requesters": {}, "log": []})
         self.data.setdefault("requesters", {})
         self.data.setdefault("log", [])
+        if "features" not in self.data:
+            # One switch before beta.36: it covered commands and typing, local and remote.
+            was = bool(self.data.get("enabled"))
+            self.data["features"] = {"exec": was, "typeLocal": was, "typeRemote": was, "messages": False}
         self.grants: dict[tuple[str, str], float] = {}  # (requester, shell id) -> granted at (first-use for right `type`)
         self.cuts: dict[str, float] = {}  # shell id -> cut at: every requester, trusted or not, asks again for it
 
     @property
     def enabled(self) -> bool:
-        return bool(self.data.get("enabled"))
+        """Any capability on."""
+        return any(self.feature(f) for f in FEATURES)
+
+    def feature(self, name: str) -> bool:
+        return bool((self.data.get("features") or {}).get(name))
+
+    def features(self) -> dict:
+        return {f: self.feature(f) for f in FEATURES}
+
+    def set_feature(self, name: str, on: bool) -> dict:
+        if name not in FEATURES or type(on) is not bool:
+            raise ValueError("Unknown capability, or enabled is not true/false")
+        self.data.setdefault("features", {})[name] = on
+        self.data["enabled"] = self.enabled
+        self.save()
+        return self.features()
 
     def save(self) -> None:
         self.state.save()

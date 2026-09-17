@@ -20,7 +20,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import __version__
-from .agents import AgentShells, Approvals, Executor, Policy, requester_key, DURATIONS
+from .agents import AgentShells, Approvals, Executor, Policy, requester_key, DURATIONS, FEATURES
 
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 from .clipboard import Clipboard
@@ -283,7 +283,7 @@ class Host:
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
                 "replayBytes": 2 * 1024 * 1024, "flowControl": True, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
-                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(), "agents": {"enabled": self.policy.enabled, "links": list(self.links.records)},
+                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(), "agents": {"enabled": self.policy.enabled, "features": self.policy.features(), "links": list(self.links.records)},
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
     def attention(self, session, event, title="", body=""):
@@ -354,7 +354,7 @@ class Host:
             raise ValueError("Host is restarting; reconnect before starting another operation")
         if not isinstance(p, dict):
             raise ValueError("Invalid request parameters")
-        if getattr(peer, "is_host", False) and method not in ("agent.rights", "agent.run", "agent.read", "agent.shell", "agent.sessions", "agent.type", "agent.output", "ping"):
+        if getattr(peer, "is_host", False) and method not in ("agent.rights", "agent.run", "agent.read", "agent.shell", "agent.sessions", "agent.type", "agent.output", "agent.peers", "agent.message", "ping"):
             # A linked host is a requester, never a user of this machine: it gets the agent RPCs only.
             raise ValueError("Linked hosts may only use the agent methods")
         if method == "session.list":
@@ -464,14 +464,19 @@ class Host:
         if method == "agent.rights":
             return self.agent_rights(peer, p)
         if method == "agent.sessions":
-            key, name = self._requester_of(peer, p)
+            key, name = self._requester_of(peer, p, "typeRemote")
             return self.agent_sessions(key)
         if method == "agent.type":
-            key, name = self._requester_of(peer, p)
+            key, name = self._requester_of(peer, p, "typeRemote")
             return await self.agent_type(key, name, p)
         if method == "agent.output":
-            key, name = self._requester_of(peer, p)
+            key, name = self._requester_of(peer, p, "typeRemote")
             return await self.agent_output(key, name, p)
+        if method == "agent.peers":
+            self._requester_of(peer, p, "messages")
+            return {"sessions": [self.bridge.public(q) for q in self.bridge.participants.values() if q.state != "ended"]}
+        if method == "agent.message":
+            return await self.agent_message(peer, p)
         if method == "agents.cut":
             sid = str(p.get("session", ""))
             s = self.sessions.get(sid)
@@ -629,33 +634,57 @@ class Host:
     RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 
     def agents_status(self) -> dict:
-        return {"enabled": self.policy.enabled, "requesters": self.policy.table(), "links": self.links.list(),
+        return {"enabled": self.policy.enabled, "features": self.policy.features(), "requesters": self.policy.table(), "links": self.links.list(),
                 "pending": self.approvals.list(), "log": self.policy.data["log"][-50:], "agentShells": self.agent_shells.list()}
 
     async def agents_configure(self, p: dict) -> dict:
+        """One capability at a time (`feature` + `enabled`); `enabled` alone drives the three shell
+        capabilities together, as the single switch of earlier versions did."""
         enabled = p.get("enabled")
         if type(enabled) is not bool:
             raise ValueError("enabled must be true or false")
-        self.policy.data["enabled"] = enabled
-        self.policy.save()
+        names = [str(p["feature"])] if p.get("feature") else ["exec", "typeLocal", "typeRemote"]
+        for name in names:
+            self.policy.set_feature(name, enabled)
+            self.policy.journal(kind="switch", feature=name, enabled=enabled)
         detected = await self.bridge.detect(force=True)
-        from . import bridge_setup
-        runtimes = detected.get("runtimes") or {}
-        if enabled:
-            if runtimes and not self.bridge.enabled:
-                await asyncio.to_thread(bridge_setup.install, runtimes, True)
+        await self.apply_agent_integrations(detected)
+        if self.policy.feature("exec") or self.policy.feature("typeRemote") or self.policy.feature("messages"):
             self.links.start_all()
         else:
             await self.links.stop_all()
-            if runtimes and not self.bridge.enabled:
-                await asyncio.to_thread(bridge_setup.uninstall, runtimes)
-        self.policy.journal(kind="switch", enabled=enabled)
+        if not self.policy.feature("messages"):
+            self.bridge.forget_remote()
+            if not self.bridge.registering:
+                self.bridge.disable_now()
         return self.agents_status()
 
-    def _requester_of(self, peer, p: dict) -> tuple[str, str]:
+    async def apply_agent_integrations(self, detected: dict) -> None:
+        """What the runtimes need for the capabilities that are on: hooks (sessions register) for
+        cross-host messages, the MCP server alone for the rest, nothing when everything is off.
+        The local bridge, when on, already installs both and is left alone."""
+        from . import bridge_setup
+        runtimes = detected.get("runtimes") or {}
+        if self.bridge.enabled or not runtimes:
+            return
+        if self.policy.feature("messages"):
+            await asyncio.to_thread(bridge_setup.install, runtimes, False)
+        elif self.policy.enabled:
+            await asyncio.to_thread(bridge_setup.uninstall, runtimes)
+            await asyncio.to_thread(bridge_setup.install, runtimes, True)
+        else:
+            await asyncio.to_thread(bridge_setup.uninstall, runtimes)
+
+    FEATURE_NAMES = {"exec": "Commands and background shells on linked machines", "typeLocal": "Typing into shells of this host",
+                     "typeRemote": "Typing into shells across machines", "messages": "Messages between sessions across machines"}
+
+    def _require(self, feature: str) -> None:
+        if not self.policy.feature(feature):
+            raise ValueError(f"{self.FEATURE_NAMES[feature]} is off on {self.state.data['name']} (Settings → Agents and machines)")
+
+    def _requester_of(self, peer, p: dict, feature: str = "exec") -> tuple[str, str]:
         """(key, display name) of a linked host's session asking for something here."""
-        if not self.policy.enabled:
-            raise ValueError("Agents and machines is off on this host")
+        self._require(feature)
         device = self.state.data["devices"].get(peer.device_id, {})
         if device.get("kind") != "host":
             raise ValueError("Only linked jaunt hosts may run agent commands here")
@@ -823,6 +852,8 @@ class Host:
         if method == "agents.status":
             return self.agents_status()
         sid, runtime = self._caller(p)
+        if method in ("agents.hosts", "agents.run", "agents.read", "agents.shell"):
+            self._require("exec")
         if method == "agents.hosts":
             async def describe(link):
                 status = link.status()
@@ -834,6 +865,9 @@ class Host:
                 return status
             return {"hosts": await asyncio.gather(*(describe(l) for l in self.links.links.values()))}
         host = str(p.get("host", "") or "")
+        if method in ("agents.sessions", "agents.type", "agents.output"):
+            local = host.lower() in ("", "local", "this", "here", self.state.data["name"].lower())
+            self._require("typeLocal" if local else "typeRemote")
         if method in ("agents.sessions", "agents.type", "agents.output") and host.lower() in ("", "local", "this", "here", self.state.data["name"].lower()):
             key, name = self._local_requester(runtime)
             if method == "agents.sessions":
@@ -873,6 +907,135 @@ class Host:
                 self.agent_handles[sid] = [h for h in handles if h[1] != p.get("shell")]
             return {"host": link.record.get("name"), **result}
         raise ValueError("Unknown agents method")
+
+    # ---- messages between sessions across machines -------------------------------------
+    def _caller_enabled(self, p: dict) -> bool:
+        try:
+            self._caller(p)
+            return True
+        except ValueError:
+            return False
+
+    async def bridge_peers(self, p: dict) -> dict:
+        """The local bridge's peers, plus the sessions of linked machines when messages are on."""
+        p = self.bridge.resolve(p)
+        result = self.bridge.peers_for(p) if self.bridge.enabled else {"enabled": False, "peers": [], "present": [], "note": "The jaunt bridge is turned off on this host"}
+        result["messages"] = self.policy.feature("messages")
+        if not result["messages"]:
+            return result
+        runtime = str(p.get("runtime", ""))
+        async def ask(link):
+            shown = link.record.get("label") or link.record.get("name")
+            try:
+                reply = await link.request("agent.peers", {"runtime": runtime}, timeout=10)
+                return {"host": shown, "sessions": reply.get("sessions", [])}
+            except (ValueError, ConnectionError) as exc:
+                return {"host": shown, "sessions": [], "error": str(exc)[:120]}
+        result["remote"] = await asyncio.gather(*(ask(l) for l in self.links.links.values() if l.state == "online"))
+        return result
+
+    def _link_for_machine(self, label: str):
+        link = self.links.get(label)
+        if link is None:
+            raise ValueError(f"Unknown machine {label!r}; jaunt_peers lists the reachable ones")
+        return link
+
+    async def bridge_send(self, p: dict) -> dict:
+        """`to` = "<machine>/<id>" goes to a session on a linked machine; anything else is the local bridge."""
+        p = self.bridge.resolve(p)
+        to = str(p.get("to", ""))
+        if "/" not in to:
+            return await self.bridge.send(p)
+        self._require("messages")
+        me = self.bridge.sender_of(p)
+        label, target = to.split("/", 1)
+        link = self._link_for_machine(label)
+        text = str(p.get("text", "")).strip()
+        if not text:
+            raise ValueError("Empty message")
+        from .bridge import MESSAGE_LIMIT, MAX_HOPS
+        if len(text) > MESSAGE_LIMIT:
+            raise ValueError(f"Message exceeds {MESSAGE_LIMIT} characters")
+        reply_to = str(p.get("inReplyTo", "")) or None
+        hops = 0
+        if reply_to and reply_to in self.bridge.messages:
+            hops = self.bridge.messages[reply_to].get("hops", 0) + 1
+            if hops > MAX_HOPS:
+                raise ValueError("This exchange has gone back and forth too many times; stop and let the user decide")
+        message = {"id": "m-" + token(6), "from": me.id, "to": to, "text": text, "inReplyTo": reply_to, "hops": hops,
+                   "state": "delivering", "detail": "", "at": time.time()}
+        self.bridge.messages[message["id"]] = message
+        await self.broadcast({"type": "bridge.message", **self.bridge.message_public(message)})
+        sender = self.bridge.public(me)
+        params = {"runtime": me.runtime, "id": message["id"], "to": target, "text": text, "inReplyTo": reply_to, "hops": hops,
+                  "from": {"id": me.id, "runtime": me.runtime, "terminal": sender["terminal"], "cwd": me.cwd,
+                           "project": me.project.get("root", me.cwd), "modeClass": me.mode_class}}
+        try:
+            reply = await link.request("agent.message", params, timeout=90)
+            message["state"], message["detail"] = reply.get("state", "delivered"), reply.get("detail", "")
+        except (ValueError, ConnectionError) as exc:
+            message["state"], message["detail"] = "failed", str(exc)[:200]
+            await self.broadcast({"type": "bridge.message", **self.bridge.message_public(message)})
+            self.policy.journal(kind="message", to=to, sender=me.id, status="failed", detail=message["detail"])
+            raise ValueError(f"Could not deliver to {to}: {message['detail']}") from None
+        await self.broadcast({"type": "bridge.message", **self.bridge.message_public(message)})
+        self.policy.journal(kind="message", to=to, sender=me.id, status=message["state"], id=message["id"])
+        return self.bridge.message_public(message)
+
+    async def agent_message(self, peer, p: dict) -> dict:
+        """A session on a linked machine writes to one of the sessions registered here."""
+        key, name = self._requester_of(peer, p, "messages")
+        device = self.state.data["devices"].get(peer.device_id, {})
+        label = str(device.get("name", "host"))
+        label = label[6:] if label.startswith("host: ") else label
+        origin = p.get("from") if isinstance(p.get("from"), dict) else {}
+        from .bridge import Participant, RUNTIMES, MESSAGE_LIMIT
+        if origin.get("runtime") not in RUNTIMES:
+            raise ValueError("Unknown runtime")
+        sender = Participant(id=f"{label}/{str(origin.get('id', ''))[:40]}", session="", runtime=origin["runtime"], conversation="remote", pid=0,
+                             cwd=str(origin.get("cwd", ""))[:300], project={"root": str(origin.get("project", ""))[:300], "common": "", "kind": "dir"},
+                             name=str(origin.get("terminal", ""))[:80], mode_class=origin.get("modeClass") if origin.get("modeClass") in ("bypass", "prompting") else "",
+                             machine=label)
+        target = str(p.get("to", ""))
+        recipient = next((q for q in self.bridge.participants.values() if q.id == target and q.state != "ended"), None)
+        if recipient is None:
+            raise ValueError(f"No live session with id {target!r} on {self.state.data['name']}; call jaunt_peers for the current list")
+        text = str(p.get("text", "")).strip()
+        if not text or len(text) > MESSAGE_LIMIT:
+            raise ValueError("Empty message or over the size limit")
+        message_id = str(p.get("id", "")) or "m-" + token(6)
+        if not re.fullmatch(r"m-[A-Za-z0-9_-]{4,16}", message_id):
+            raise ValueError("Invalid message id")
+        reply_to = str(p.get("inReplyTo", "")) or None
+        pair = tuple(sorted((sender.id, recipient.id)))
+        from .bridge import PAIR_RATE
+        window = [t for t in self.bridge.rates.get(pair, []) if time.time() - t < PAIR_RATE[1]]
+        if len(window) >= PAIR_RATE[0]:
+            raise ValueError("Too many messages between these two sessions in the last minute; wait before sending more")
+        window.append(time.time()); self.bridge.rates[pair] = window
+        message = {"id": message_id, "from": sender.id, "to": recipient.id, "text": text, "inReplyTo": reply_to,
+                   "hops": int(p.get("hops") or 0), "state": "accepted", "detail": "", "at": time.time(), "machine": label}
+        self.bridge.messages[message_id] = message
+        waiter = self.bridge.waiters.get(reply_to) if reply_to else None
+        if waiter is not None and not waiter.done():
+            message["state"], message["detail"] = "delivered", "handed to the waiting call"
+            waiter.set_result({"state": "replied", "reply": self.bridge.message_public(message)})
+            await self.broadcast({"type": "bridge.message", **self.bridge.message_public(message)})
+            self.policy.journal(kind="message", requester=key, sender=sender.id, to=recipient.id, status="delivered", id=message_id)
+            return {"state": "delivered", "detail": message["detail"]}
+        message["state"] = "delivering"
+        try:
+            from . import bridge_deliver
+            await bridge_deliver.deliver(self.bridge, sender, recipient, message)
+            message["state"] = "delivered"
+        except Exception as exc:
+            message["state"], message["detail"] = "failed", str(exc)[:200]
+            await self.broadcast({"type": "bridge.message", **self.bridge.message_public(message)})
+            self.policy.journal(kind="message", requester=key, sender=sender.id, to=recipient.id, status="failed", detail=message["detail"])
+            raise ValueError(f"Could not deliver to {recipient.id}: {message['detail']}") from None
+        await self.broadcast({"type": "bridge.message", **self.bridge.message_public(message)})
+        self.policy.journal(kind="message", requester=key, sender=sender.id, to=recipient.id, status="delivered", id=message_id)
+        return {"state": "delivered", "detail": ""}
 
     async def release_agent_shells(self, sid: str) -> None:
         """The local session that opened background shells elsewhere is gone: close them."""
@@ -1053,9 +1216,9 @@ class Host:
             elif method == "bridge.register":
                 result = await self.bridge.register(p)
             elif method == "bridge.peers":
-                result = self.bridge.peers_for(self.bridge.resolve(p))
+                result = await self.bridge_peers(p)
             elif method == "bridge.send":
-                result = await self.bridge.send(self.bridge.resolve(p))
+                result = await self.bridge_send(p)
             elif method == "bridge.wait":
                 result = await self.bridge.wait_reply(self.bridge.resolve(p))
             elif method in ("agents.hosts", "agents.run", "agents.read", "agents.shell", "agents.sessions", "agents.type", "agents.output", "agents.status"):

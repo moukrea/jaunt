@@ -27,7 +27,13 @@ class Mcp:
     def close(self):self.p.kill()
 
 def main():
-    A=Harness(name='laptop');B=Harness(name='homelab',extra_env={'jaunt_AGENT_LEASE':'4'})
+    # Stand-in runtimes: enough of `claude` / `codex` for detection, the MCP registration and Codex's queue.
+    import tempfile
+    fake=Path(tempfile.mkdtemp(prefix='jaunt-fake-runtimes-'));queue_log=fake/'codex-queue.log'
+    (fake/'claude').write_text('#!/bin/sh\ncase "$1" in --version) echo "2.1.300 (Claude Code)";; esac\nexit 0\n');(fake/'claude').chmod(0o755)
+    (fake/'codex').write_text('#!/bin/sh\ncase "$1" in --version) echo "codex-cli 0.160.0";; queue) printf \'%s\\n\' "$@" >> "$CODEX_QUEUE_LOG";; esac\nexit 0\n');(fake/'codex').chmod(0o755)
+    runtimes_env={'PATH':str(fake)+':'+os.environ.get('PATH',''),'CODEX_QUEUE_LOG':str(queue_log)}
+    A=Harness(name='laptop',extra_env=runtimes_env);B=Harness(name='homelab',extra_env={'jaunt_AGENT_LEASE':'4',**runtimes_env})
     try:
         checks=[]
         def passed(s):checks.append(s);print('PASS',s,flush=True)
@@ -201,6 +207,69 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         B.cli('agents','rule',key,'--pattern','echo pat-*','--remove');assert json.loads(B.cli('agents','rules',key))[key]==['echo rule-$((2+2))']
         t=approver('deny');assert 'Refused' in mcp.tool('jaunt_run',{'host':'homelab','command':'echo pat-3'});t.join()
         passed('rules with * are managed from the CLI, shown to the session in jaunt_hosts, and stop applying once removed')
+        # Messages between sessions across machines: its own switch; sessions register through the hooks;
+        # discovery and delivery go through the links, both directions, whatever the runtimes.
+        import socket as _socket,threading as _threading
+        def ctl(h,method,params):
+            return json.loads(subprocess.check_output([sys.executable,'-c','import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;print(json.dumps(control(sys.argv[2],json.loads(sys.argv[3]))))',str(ROOT/'host'),method,json.dumps(params)],env=h.env))
+        assert json.loads(A.cli('agents','enable','messages'))['messages'] and json.loads(B.cli('agents','enable','messages'))['messages']
+        assert '/bridge/hook-claude' in (A.root/'home/.claude/settings.json').read_text() and '/bridge/hook-codex' in (B.root/'home/.codex/hooks.json').read_text(),'the switch installs the hooks so sessions register'
+        B.cli('link',A.pair()['code'])
+        def register(h,session,runtime,conv,inbox=None):
+            pid=[x for x in status(h)['sessions'] if x['id']==session][0]['pid']
+            r=ctl(h,'bridge.register',{'runtime':runtime,'session':session,'conversation':conv,'pid':pid,'cwd':str(h.work),'event':'start','project':{'root':str(h.work),'common':'','kind':'dir'},'modeClass':'prompting','inbox':inbox or {}})
+            assert r.get('id'),r;return r['id'],pid
+        idA,_=register(A,sid,'claude','convA-laptop-0001')
+        assert 'context' in ctl(A,'bridge.register',{'runtime':'claude','session':sid,'conversation':'convA-laptop-0001','pid':[x for x in status(A)['sessions'] if x['id']==sid][0]['pid'],'cwd':str(A.work),'event':'prompt','project':{'root':str(A.work)}}) and not ctl(A,'bridge.register',{'runtime':'claude','session':sid,'conversation':'convA-laptop-0001','pid':[x for x in status(A)['sessions'] if x['id']==sid][0]['pid'],'cwd':str(A.work),'event':'start','project':{'root':str(A.work)}})['context'],'no roster is injected while the local bridge is off'
+        sidB2=new_session(B);time.sleep(1)
+        idBcodex,_=register(B,sidB,'codex','convB-codex-0001')
+        # A stand-in Claude Code inbox on B: the session registry entry plus the private socket.
+        inbox_dir=B.root/'home/.claude/sessions';inbox_dir.mkdir(parents=True,exist_ok=True);sock_path=str(B.root/'inbox.sock');frames=[]
+        srv=_socket.socket(_socket.AF_UNIX);srv.bind(sock_path);srv.listen(4)
+        def serve():
+            while True:
+                try:c,_=srv.accept()
+                except OSError:return
+                with c:
+                    data=b''
+                    c.settimeout(3)
+                    try:
+                        while not data.endswith(b'\n') or data.count(b'\n')<2:
+                            chunk=c.recv(65536)
+                            if not chunk:break
+                            data+=chunk
+                    except OSError:pass
+                    frames.extend(json.loads(l) for l in data.decode().splitlines() if l.strip())
+        _threading.Thread(target=serve,daemon=True).start()
+        pidB2=[x for x in status(B)['sessions'] if x['id']==sidB2][0]['pid']
+        (inbox_dir/f'{pidB2}.json').write_text(json.dumps({'pid':pidB2,'sessionId':'convB-claude-0002','messagingSocketPath':sock_path}))
+        idBclaude,_=register(B,sidB2,'claude','convB-claude-0002',{'socket':sock_path})
+        peers=mcp.tool('jaunt_peers',{});assert f'homelab/{idBcodex}' in peers and f'homelab/{idBclaude}' in peers and 'turned off on this host (this machine)' in peers,peers
+        passed('with messages on, jaunt_peers lists the Claude Code and Codex sessions of the linked machine while the local bridge stays off')
+        sent=mcp.tool('jaunt_send',{'to':f'homelab/{idBcodex}','text':'ping codex'});assert 'Delivered to homelab/' in sent,sent
+        for _ in range(20):
+            if queue_log.exists() and 'ping codex' in queue_log.read_text():break
+            time.sleep(.25)
+        text=queue_log.read_text();assert '--thread\nconvB-codex-0001' in text and '[jaunt bridge]' in text and 'on the machine "laptop"' in text and f'to="laptop/{idA}"' in text,text
+        sent=mcp.tool('jaunt_send',{'to':f'homelab/{idBclaude}','text':'ping claude'});msg_id=sent.split('message id ')[1].split(')')[0]
+        for _ in range(20):
+            if any(f.get('type')=='user' for f in frames):break
+            time.sleep(.25)
+        user=[f for f in frames if f.get('type')=='user'][0]['message']['content'];assert 'ping claude' in user and f'from-name="jaunt · laptop/{idA}"' in user and 'from-mode="prompting"' in user,user
+        passed('a session sends to a Codex and to a Claude Code session on the other machine, same runtime included; each lands in the runtime\'s own inbox with its provenance')
+        mcpB=Mcp(B,sidB2);box={}
+        def waiter():box['r']=mcp.tool('jaunt_wait_reply',{'id':msg_id,'seconds':40},timeout=60)
+        t=_threading.Thread(target=waiter,daemon=True);t.start();time.sleep(1.5)
+        reply=mcpB.tool('jaunt_send',{'to':f'laptop/{idA}','text':'pong from homelab','in_reply_to':msg_id});assert 'Delivered to laptop/' in reply,reply
+        t.join(60);assert 'pong from homelab' in box.get('r','') and 'homelab/' in box['r'],box.get('r')
+        log=json.loads(A.cli('agents','log'));assert any(e.get('kind')=='message' and e.get('status')=='delivered' for e in log)
+        passed('the reply travels back over the other link and is handed to the waiting call; both hosts journal the exchange')
+        B.cli('agents','disable','messages')
+        refused=mcp.tool('jaunt_send',{'to':f'homelab/{idBcodex}','text':'again'},timeout=60);assert 'off on homelab' in refused,refused
+        A.cli('agents','disable','messages');mcpB.close();srv.close()
+        assert not status(A)['machine']['bridge']['participants'],'nothing registers once messages and the bridge are off'
+        passed('turning messages off on the target refuses further messages; off on both, the sessions are forgotten')
+        B.cli('unlink',json.loads(B.cli('links'))[0]['room'])
         A.cli('unlink',links[0]['room'])
         # The messaging bridge is untouched: no hooks were installed for agents alone, and bridge status is off.
         bridge=json.loads(subprocess.check_output([sys.executable,'-c','''
