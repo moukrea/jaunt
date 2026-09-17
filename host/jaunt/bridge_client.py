@@ -220,7 +220,9 @@ def _tool(runtime: str, name: str, args: dict) -> str:
                 rights = h.get("rights") or {}
                 allowed = {"ask": "asks its owner before each command", "trust": "trusted: commands run at once", "block": "blocked: commands are refused"}.get(rights.get("exec"), rights.get("error", "unknown"))
                 shown = h.get('label') or h['name']
-                lines.append(f"- {shown}" + (f" (machine name {h['name']})" if h.get('label') and h['label'] != h['name'] else "") + f" ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}")
+                rules = rights.get("rules") or []
+                lines.append(f"- {shown}" + (f" (machine name {h['name']})" if h.get('label') and h['label'] != h['name'] else "") + f" ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}"
+                             + (f"; pre-approved without a prompt: {', '.join(rules)}" if rules and rights.get("exec") == "ask" else ""))
             return "\n".join(lines)
         if name == "jaunt_run":
             timeout = args.get("timeout_seconds")

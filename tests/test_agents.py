@@ -146,3 +146,18 @@ def test_policy_shell_grants_and_cut(tmp_path):
     policy.grant(k,'s3');policy.forget_session('s3');assert not policy.granted(k,'s3')
     policy.grant(k,'s4');policy.revoke([k]);assert not policy.grants
     policy.requester(k,name='a');policy.set_level(k,'type','block');policy.grant(k,'s5');assert policy.allowed_shell(k,'s5')=='block'
+
+
+def test_policy_rules_pre_approve_commands(tmp_path):
+    """Allow-list: globs on the whole normalized command, capped, never * alone."""
+    state=State(tmp_path/'state.json');state.save();policy=Policy(state)
+    k=requester_key('host-a','claude');policy.requester(k,name='a')
+    assert policy.matches(k,'git status') is None
+    assert policy.add_rule(k,'git  status')==['git status'] and policy.matches(k,' git status ')=='git status' and policy.matches(k,'git status --short') is None
+    policy.add_rule(k,'npm test *');assert policy.matches(k,'npm test -- --grep x')=='npm test *' and policy.matches(k,'npm testing') is None
+    for bad in ('','*','x'*201):
+        with pytest.raises(ValueError):policy.add_rule(k,bad)
+    assert policy.remove_rule(k,'git status')==['npm test *'] and policy.public_row(k)['rules']==['npm test *']
+    for i in range(49):policy.add_rule(k,f'cmd{i}')
+    with pytest.raises(ValueError):policy.add_rule(k,'one-too-many')
+    with pytest.raises(ValueError):policy.add_rule('nobody','ls')

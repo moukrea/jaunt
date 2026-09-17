@@ -17,7 +17,7 @@ class Mcp:
         deadline=time.time()+timeout
         while time.time()<deadline:
             line=self.p.stdout.readline()
-            if not line:raise AssertionError('MCP server exited')
+            if not line:raise AssertionError(f'MCP server exited rc={self.p.poll()}')
             m=json.loads(line)
             if m.get('id')==self.n:return m
         raise AssertionError('MCP reply timed out')
@@ -64,7 +64,7 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
             def wait():
                 pending=json.loads(h.cli('agents','pending'))
                 if pending:
-                    h.cli('agents','allow' if decision!='deny' else 'deny',pending[0]['id'],*(['--trust',decision] if decision in ('1h','24h','always') else []));return True
+                    h.cli('agents','allow' if decision!='deny' else 'deny',pending[0]['id'],*(['--trust',decision] if decision in ('1h','24h','always','rule') else []));return True
                 return False
             return wait
         import threading
@@ -187,6 +187,20 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         output({'session':sidA},'local-2')
         rows=json.loads(A.cli('agents','status'))['requesters'];assert any(r['local'] and r['name']=='Claude Code on this machine' for r in rows),rows
         passed('a local session types into another shell of its own host under a local requester row; never into its own shell')
+        # Phase 4: allow-lists. "Always allow this command" from an approval, patterns from the CLI, removal.
+        B.cli('agents','revoke','all')
+        t=approver('rule');result=json.loads(mcp.tool('jaunt_run',{'host':'homelab','command':'echo rule-$((2+2))'}));t.join();assert 'rule-4' in result['stdout'],result
+        txt=mcp.tool('jaunt_run',{'host':'homelab','command':'echo  rule-$((2+2))'},timeout=60);assert txt.startswith('{'),txt;result=json.loads(txt);assert 'rule-4' in result['stdout'] and not json.loads(B.cli('agents','pending'))
+        log=json.loads(B.cli('agents','log'));assert log[-1]['kind']=='run' and log[-1]['decision']=='rule' and log[-1]['rule']=='echo rule-$((2+2))',log[-1]
+        t=approver('deny');assert 'Refused' in mcp.tool('jaunt_run',{'host':'homelab','command':'echo other'});t.join()
+        passed('"always allow this command" turns the exact command into a rule: it runs without a prompt, other commands still ask')
+        key=[r['id'] for r in json.loads(B.cli('agents','status'))['requesters']][0]
+        B.cli('agents','rule',key,'--pattern','echo pat-*');rules=json.loads(B.cli('agents','rules',key))[key];assert rules==['echo rule-$((2+2))','echo pat-*'],rules
+        result=json.loads(mcp.tool('jaunt_run',{'host':'homelab','command':'echo pat-1 pat-2'},timeout=60));assert 'pat-1 pat-2' in result['stdout'] and not json.loads(B.cli('agents','pending'))
+        assert 'pre-approved without a prompt: echo rule-$((2+2)), echo pat-*' in mcp.tool('jaunt_hosts',{})
+        B.cli('agents','rule',key,'--pattern','echo pat-*','--remove');assert json.loads(B.cli('agents','rules',key))[key]==['echo rule-$((2+2))']
+        t=approver('deny');assert 'Refused' in mcp.tool('jaunt_run',{'host':'homelab','command':'echo pat-3'});t.join()
+        passed('rules with * are managed from the CLI, shown to the session in jaunt_hosts, and stop applying once removed')
         A.cli('unlink',links[0]['room'])
         # The messaging bridge is untouched: no hooks were installed for agents alone, and bridge status is off.
         bridge=json.loads(subprocess.check_output([sys.executable,'-c','''

@@ -32,4 +32,4 @@ Docs: [x] `docs/AGENTS.md`, [x] README section, [x] PROTOCOL, [x] release notes.
 - [x] Right 2: `agent.sessions`, `agent.type`, `agent.output` (host peers) and `agents.sessions/type/output` on the control socket (host omitted = local); `Policy.grant/allowed_shell/cut/forget_session`; session `agents` marks broadcast with the session list; badge on the tab + cut (`agents.cut`, `jaunt agents cut`); local requester row `local:<runtime>`; MCP `jaunt_sessions`, `jaunt_type`, `jaunt_output`; unit test + e2e (host 5 checks, UI 2 checks).
 
 ## Phase 4 — allow-lists
-- [ ] Pre-authorised command patterns on "ask" requesters.
+- [x] Pre-authorised command patterns on "ask" requesters: `Policy.rules/add_rule/remove_rule/matches` (fnmatch on the normalized command, 50 × 200 chars, never `*`), `_authorize` short-circuit for kind `run`, approval decision `rule`, RPC `agents.rule {requester, pattern, remove?}`, rows carry `rules`, `agent.rights.rules` → `jaunt_hosts`; modal button, Settings rules dialog, CLI `agents rules|rule`, `allow --trust rule`; unit + e2e (host 2, UI 2).
