@@ -64,7 +64,7 @@ export async function channel(privateKey, publicKey, secret, transcriptBytes, se
     },
     async open(frame) {
       if (frame.type !== 'box' || !Number.isSafeInteger(frame.n) || frame.n !== received + 1) {
-        throw new Error('Out-of-order or replayed frame');
+        const error = new Error(`Out-of-order or replayed frame (expected ${received + 1}, got ${frame.n})`); error.code = 'desync'; throw error;
       }
       const data = await crypto.subtle.decrypt({name: 'AES-GCM', iv: nonce(frame.n), additionalData: aad},
         server ? c2h : h2c, unb64(frame.ct));

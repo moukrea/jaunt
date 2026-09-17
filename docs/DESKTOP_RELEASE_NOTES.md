@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.24
+
+- Archive updates no longer fail on a leftover staging directory; bundles the beta.30 client (channel re-keying on desync).
+
 # jaunt desktop 0.1.0-beta.23
 
 - Checks the published version at every launch and asks Update now / Ignore; an `available` state announces a version without downloading when automatic updates are off.

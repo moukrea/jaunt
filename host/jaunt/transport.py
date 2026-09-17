@@ -48,7 +48,9 @@ class Transport:
             self.next_send = loop.time() + max(0.008, len(raw) / (1.5 * 1024 * 1024))
             try:
                 await asyncio.wait_for(ws.send(raw), 12)
-            except (ConnectionClosed, OSError) as exc:
+            except (ConnectionClosed, OSError, asyncio.TimeoutError) as exc:
+                # A send that timed out may or may not have left: the channel counters can no
+                # longer be trusted, so the socket is closed and every peer re-keys on reconnect.
                 # Keep callers such as the PTY output pump alive across an outage.
                 # A failed encrypted send also invalidates this transport/channel.
                 if self.ws is ws:

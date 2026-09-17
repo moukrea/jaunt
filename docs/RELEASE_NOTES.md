@@ -1,3 +1,11 @@
+# jaunt 0.1.0-beta.30
+
+- Secure channel: a rejected out-of-order frame no longer stops the connection for good. The client re-keys with a fresh handshake (up to three times in a row) and the message now carries the counters (`expected N, got M`) so a persistent case can be diagnosed. The host closes its relay socket when a send times out, instead of continuing with counters it cannot trust.
+- Native image paste: jaunt shells now receive the graphical session's display variables (DISPLAY, WAYLAND_DISPLAY, XAUTHORITY) even when the host was started by systemd at boot, so Claude Code's own clipboard read sees the same clipboard jaunt writes to. On a Wayland session without `wl-clipboard`, Settings → Host clipboard and the paste dialog say what to install. Existing shells need to be reopened to get the variables.
+- Desktop (archive installs): a leftover staging directory that cannot be removed no longer fails an update that was installed (`ENOTEMPTY … resources`).
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.29
 
 - Fix (beta.26 regression): a coalesced PTY read could reach 96 KiB, exceed the relay frame limit and be dropped after sealing, leaving the client with a counter gap and the fatal "Out-of-order or replayed frame" banner. Output is now sent in frames of at most 48 KiB, live and during catch-up, and a frame the relay would refuse is rejected before sealing.
