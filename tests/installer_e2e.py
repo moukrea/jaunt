@@ -129,7 +129,14 @@ def main():
                 devices=set(json.loads((t/'state/host.json').read_text())['devices'])
                 upgraded=install()
                 assert upgraded.returncode==0,upgraded.stdout+upgraded.stderr
-                after=json.loads(cli('status'))
+                # The in-place runtime replacement finishes after the installer returns: the control
+                # socket is re-bound by the new runtime, so poll instead of racing it.
+                deadline=time.time()+20
+                while True:
+                    try:after=json.loads(cli('status'));break
+                    except subprocess.CalledProcessError:
+                        if time.time()>deadline:raise
+                        time.sleep(.2)
                 assert after['pid']==before['pid'] and after['sessions'][0]['pid']==before['sessions'][0]['pid']
                 assert after['sessions'][0]['alive'] and (t/'runtime/current').resolve()!=pointer
                 assert after['machine']['room']==room

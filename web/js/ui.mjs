@@ -1,6 +1,6 @@
 import {t as tr} from './i18n.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
-import {icon} from './icons.mjs';
+import {icon, hostIcon} from './icons.mjs';
 export const $ = id => document.getElementById(id);
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -54,7 +54,7 @@ export function toast(message, error = false, action, host = null) {
   const key=host?`${host.name}\u0000${message}`:message;
   const previous=notices.get(key);if(previous){clearTimeout(previous.timer);previous.timer=setTimeout(()=>removeNotice(key),5000);return;}
   const body = el('p', {text: message});
-  if (host) body.prepend(el('span', {class: 'toast-host'}, icon(host.local ? 'monitor' : 'globe', 12), el('span', {text: host.name})));
+  if (host) body.prepend(el('span', {class: 'toast-host'}, hostIcon(host.machine || {local: host.local}, 12), el('span', {text: host.name})));
   const node = el('div', {class:'toast',role:'status'}, el('span', {}, icon('check', 17)), body);
   if (action) node.append(button(action.label, action.run, 'text-button'));
   const dismiss=button('',()=>removeNotice(key),'icon-button','close');dismiss.setAttribute('aria-label',tr('Dismiss notification'));node.append(dismiss);

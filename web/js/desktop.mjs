@@ -14,7 +14,7 @@ export class LocalLink extends EventTarget {
         // An in-place host update closes the bridge for a moment; reconnect
         // quickly and say so instead of reporting a missing host.
         if(this.expectRestart){this.status('reconnecting',tr('The host is restarting to finish its update. Reconnecting automatically.'));this.timer=setTimeout(()=>{if(this.enabled)this.start();},1000);}
-        else{this.status('offline',tr('Local host is unavailable or needs an update. Open Settings → This computer.'));this.timer=setTimeout(()=>{if(this.enabled)this.start();},5000);}
+        else{this.status('offline',tr('Local host is unavailable or needs an update. Open Settings → Local.'));this.timer=setTimeout(()=>{if(this.enabled)this.start();},5000);}
       }
       else this.emit('message',frame);
     });

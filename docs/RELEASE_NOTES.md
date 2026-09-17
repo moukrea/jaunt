@@ -1,3 +1,10 @@
+# jaunt 0.1.0-beta.27
+
+- Host icons: a house for the local host and a cloud for remote hosts replace the monitor and globe. Each host can carry any icon of the icon set (about 2,100 Lucide icons), chosen in Settings → selected machine → Icon with a search; the choice is stored on the device and shows in the sidebar, the top bar, the host menu and toasts. *Default* restores the house or cloud.
+- The local host is named "Local" in the app language instead of "This computer"; a friendly name set by the user still wins.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.26
 
 Performance on slow links and on phones, after a field report of 50 s round trips, endless "Restoring shell…" and RPC timeouts with five Claude Code sessions open (measured: ~25 KB/s and ~90 PTY writes per second at idle, far more while working; every write became one relay frame per client; no flow control; relay disconnections at the 180 frames/s limit; full 2 MiB replays on every resume).

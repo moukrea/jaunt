@@ -175,3 +175,8 @@
 .notif-badge.error{background:var(--danger);color:#fff}
 .machine-item{position:relative}
 .toast-host{display:inline-flex;align-items:center;gap:5px;margin-right:8px;padding:1px 7px 1px 5px;border:1px solid var(--line);border-radius:10px;font-size:9px;color:var(--muted);vertical-align:middle;white-space:nowrap}
+.host-icon-choice{display:inline-flex;align-items:center;gap:10px}
+.icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:4px;max-height:48dvh;overflow:auto;padding:2px}
+.icon-cell{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:8px;color:var(--muted);background:none;border:1px solid transparent}
+.icon-cell:hover,.icon-cell:focus-visible{color:var(--text);background:var(--surface-hover);border-color:var(--line)}
+.icon-grid-hint{margin:8px 0 10px;font-size:10px}
