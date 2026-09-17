@@ -112,3 +112,22 @@ async def test_agent_shells_lease_caps_and_kill(tmp_path,monkeypatch):
             if w.id not in shells.items:break
         else:pytest.fail('an exited shell was not reaped')
     finally:await shells.shutdown()
+
+@pytest.mark.asyncio
+async def test_links_carry_label_and_icon(tmp_path):
+    """The device's friendly name and icon for a machine are stored with the link and survive updates."""
+    from jaunt.hostlink import Links
+    from jaunt.crypto import b64
+    state=State(tmp_path/'state.json');state.data.setdefault('links',{});state.save()
+    links=Links(state,{'room':'me','name':'host: me'},None)
+    record={'room':'other','relay':'wss://x','relayToken':b64(b'\0'*32),'pairId':'p','pairSecret':b64(b'\0'*32),'name':'homelab','deviceId':'host-x','added':0}
+    links.records['other']=record
+    Links.decorate(record,'Serveur',{'name':'server','nodes':[['path',{'d':'M0 0'}]],'junk':1})
+    assert record['label']=='Serveur' and record['icon']=={'name':'server','nodes':[['path',{'d':'M0 0'}]]}
+    await links.update('other','Serveur 2',None)
+    assert record['label']=='Serveur 2' and 'icon' not in record
+    Links.decorate(record,'',{'name':'big','nodes':[['path',{'d':'M'*9000}]]})
+    assert 'icon' not in record and record['label']=='Serveur 2'
+    assert links.get('serveur 2') is not None and links.get('homelab') is not None and links.get('nope') is None
+    assert links.list()[0]['label']=='Serveur 2' and links.list()[0]['icon'] is None
+    with pytest.raises(ValueError):await links.update('unknown','x',None)

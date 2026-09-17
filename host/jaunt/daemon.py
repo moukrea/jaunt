@@ -280,7 +280,7 @@ class Host:
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
                 "replayBytes": 2 * 1024 * 1024, "flowControl": True, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
-                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(), "agents": {"enabled": self.policy.enabled},
+                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(), "agents": {"enabled": self.policy.enabled, "links": list(self.links.records)},
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
     def attention(self, session, event, title="", body=""):
@@ -350,6 +350,9 @@ class Host:
             raise ValueError("Host is restarting; reconnect before starting another operation")
         if not isinstance(p, dict):
             raise ValueError("Invalid request parameters")
+        if getattr(peer, "is_host", False) and method not in ("agent.rights", "agent.run", "agent.read", "agent.shell", "ping"):
+            # A linked host is a requester, never a user of this machine: it gets the agent RPCs only.
+            raise ValueError("Linked hosts may only use the agent methods")
         if method == "session.list":
             return self.sessions.list()
         if method == "session.directory":
@@ -484,11 +487,18 @@ class Host:
             return self.agents_status()
         if method == "agents.decide":
             return self.approvals.decide(str(p.get("id", "")), str(p.get("decision", "")), by=peer.display_name)
+        if method == "pair.issue":
+            # An authenticated device already holds the account's rights: it may mint a one-use pairing code
+            # for another host to enroll here, so linking needs no manual copy of codes.
+            return self.pair()
         if method == "links.add":
             if not self.policy.enabled:
                 raise ValueError("Turn on Agents and machines on this host first")
-            result = await self.links.add(str(p.get("code", "")))
-            self.policy.journal(kind="link", host=result.get("name"), by=peer.display_name)
+            result = await self.links.add(str(p.get("code", "")), str(p.get("name", "") or ""), p.get("icon") if isinstance(p.get("icon"), dict) else None, str(p.get("selfName", "") or ""))
+            self.policy.journal(kind="link", host=result.get("label") or result.get("name"), by=peer.display_name)
+            return self.agents_status()
+        if method == "links.update":
+            await self.links.update(str(p.get("room", "")), str(p.get("name", "") or ""), p.get("icon") if isinstance(p.get("icon"), dict) else None)
             return self.agents_status()
         if method == "links.remove":
             await self.links.remove(str(p.get("room", "")))
@@ -723,7 +733,7 @@ class Host:
             timeout = p.get("timeoutSec")
             params = {"runtime": runtime, "command": p.get("command", ""), "cwd": p.get("cwd"), "timeoutSec": timeout}
             budget = (int(timeout) if isinstance(timeout, int) else 60) + 150  # execution + possible approval wait
-            return {"host": link.record.get("name"), **await link.request("agent.run", params, timeout=budget)}
+            return {"host": link.record.get("label") or link.record.get("name"), **await link.request("agent.run", params, timeout=budget)}
         if method == "agents.read":
             return {"host": link.record.get("name"), **await link.request("agent.read", {"runtime": runtime, "run": p.get("run"), "offset": p.get("offset", 0), "limit": p.get("limit", 65536)})}
         if method == "agents.shell":
@@ -925,7 +935,7 @@ class Host:
                 result = await self.bridge.wait_reply(self.bridge.resolve(p))
             elif method in ("agents.hosts", "agents.run", "agents.read", "agents.shell", "agents.status"):
                 result = await self.agents_gateway(method, p)
-            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "links.add", "links.remove", "links.list"):
+            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "links.add", "links.update", "links.remove", "links.list"):
                 # The CLI acts as the owner at the keyboard; the same handlers serve the UI clients.
                 result = await self.rpc(type("CLI", (), {"display_name": "CLI", "device_id": "local-cli"})(), method, p)
             elif method == "stop":

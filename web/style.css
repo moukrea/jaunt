@@ -189,3 +189,4 @@
 .pill{display:inline-block;font-family:ui-monospace,monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--surface);white-space:nowrap}.pill.warn{color:var(--accent);border-color:var(--accent)}.pill.good{color:var(--good);border-color:var(--good)}.pill.danger{color:var(--danger);border-color:var(--danger)}
 .approval-command{font:12px/1.6 ui-monospace,monospace;background:#111515;border:1px solid var(--line);border-radius:7px;padding:12px 14px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 14px;user-select:text}
 .approval-actions{flex-wrap:wrap}
+.agents-fallback summary{font-size:10px;color:var(--faint);cursor:pointer;padding:2px 0}.agents-fallback .agents-add{margin-top:6px}.agents-add select{flex:1;min-width:0;font-size:12px}

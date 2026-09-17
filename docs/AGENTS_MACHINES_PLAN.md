@@ -13,7 +13,8 @@ Host (Python):
 - [x] Notifications: approval → `notify()` push + broadcast; CLI `jaunt link/links/unlink`, `jaunt agents pending|allow|deny|log|status`.
 
 Client (web, desktop, Android):
-- [x] Settings group "Agents and machines": switch, linked machines (add by pairing code, remove), requester table with one column per right, multi-select modify/revoke, revoke all, log.
+- [x] Settings group "Agents and machines": switch, reachable machines (linked by the client from its own pairings, with the device's friendly names and icons; pairing code only as a fallback), requester table with one column per right, multi-select modify/revoke, revoke all, log.
+- [x] Automatic links: `pair.issue` RPC for authenticated devices, `links.add {code, name, icon, selfName}`, `links.update`, `info.agents.links`, client `syncLinks()` on every welcome/switch; linked hosts confined to `agent.*` RPCs.
 - [x] Approval modal (command, cwd, requester, program), 4 actions, closes when answered elsewhere; toast/notification.
 - [x] `jaunt_hosts`, `jaunt_run`, `jaunt_read` MCP tools.
 

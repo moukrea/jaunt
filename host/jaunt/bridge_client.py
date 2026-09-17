@@ -206,7 +206,8 @@ def _tool(runtime: str, name: str, args: dict) -> str:
             for h in hosts:
                 rights = h.get("rights") or {}
                 allowed = {"ask": "asks its owner before each command", "trust": "trusted: commands run at once", "block": "blocked: commands are refused"}.get(rights.get("exec"), rights.get("error", "unknown"))
-                lines.append(f"- {h['name']} ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}")
+                shown = h.get('label') or h['name']
+                lines.append(f"- {shown}" + (f" (machine name {h['name']})" if h.get('label') and h['label'] != h['name'] else "") + f" ({h.get('platform') or '?'}, user {h.get('user') or '?'}) — link {h['state']}; exec: {allowed}")
             return "\n".join(lines)
         if name == "jaunt_run":
             timeout = args.get("timeout_seconds")

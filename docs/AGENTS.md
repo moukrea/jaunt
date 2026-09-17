@@ -4,7 +4,7 @@ What an AI session (Claude Code or Codex) running in a jaunt shell may do on a m
 
 ## Model
 
-- **Link**: host A enrolls on host B as one of B's devices, with a one-use pairing code from B (`jaunt pair` on B, `jaunt link <code>` on A, or Settings → Agents and machines → Linked machines). Same handshake, same encrypted channel, same relay as a phone; B lists A among its devices with kind `host` and can revoke it.
+- **Link**: nothing to pair twice. A device that is paired with several hosts already holds every pairing, so as soon as the switch is on it links the hosts among themselves: the client asks the target for a one-use code (`pair.issue`, an RPC of any authenticated device) and hands it to the requester host (`links.add`) together with the friendly names and icons it uses for both machines; renaming or re-iconing a machine on the device follows (`links.update`). Host A then enrolls on host B as one of B's devices with the same handshake, encrypted channel and relay as a phone; B lists A among its devices with kind `host`, confines it to the `agent.*` methods, and can revoke it. A machine that is not paired on any device can still be linked by hand (`jaunt pair` on B, then `jaunt link <code>` on A or the folded field under Settings → Agents and machines → Reachable machines).
 - **Requester**: a linked host × a runtime (`host-…:claude`, `host-…:codex`). Trust is never granted to a machine as a whole.
 - **Rights**, each with its own level per requester, decided on the machine that executes:
   - *Run commands* (`exec`): one-shot commands (phase 1), background agent shells (phase 2).
