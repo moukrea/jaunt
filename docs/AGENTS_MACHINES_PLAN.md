@@ -25,7 +25,7 @@ Tests:
 Docs: [x] `docs/AGENTS.md`, [x] README section, [x] PROTOCOL, [x] release notes.
 
 ## Phase 2 — background agent shells (lease)
-- [ ] `agent.shell open/send/read/close`, lease 10 min renewed by calls, kill on: close, lease expiry, requester session end/replace, link down > 2 min, revocation, daemon stop; caps 2 per requester, 8 per host; never a jaunt session; listed in settings with kill; e2e.
+- [x] `agent.shell open/send/read/close/list`, lease 10 min renewed by calls, kill on: close, lease expiry, requester session end (release from the requesting host), link down > 2 min (orphan grace), revocation/block, daemon stop; caps 2 per requester, 8 per host; never a jaunt session; listed in settings with kill; unit test + e2e (host and UI).
 
 ## Phase 3 — writing into existing shells (remote and local)
 - [ ] Right 2: `agent.sessions`, `agent.type`, `agent.output`; first-use grant per requester × shell; agent badge on the tab; "cut" in settings; local requester row "this host × runtime"; e2e.

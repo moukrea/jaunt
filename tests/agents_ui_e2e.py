@@ -42,11 +42,17 @@ async def main():
    await expect(row.locator('td').nth(2)).to_contain_text('trusted always',timeout=15000);await expect(row.locator('td').nth(3)).to_contain_text('asks')
    t=run('echo third');t.join(30);assert 'third' in box['r'] and not ctl(B,'agents.status')['pending']
    print('PASS the requester table shows one column per right; modifying the selection to trust always makes commands run without a prompt',flush=True)
+   # An agent shell shows in Settings and can be killed from there.
+   opened=json.loads(mcp.tool('jaunt_shell',{'host':'homelab','action':'open'}))
+   await pb.get_by_role('button',name='Refresh',exact=True).click();await expect(pb.locator('.agents-row').filter(has_text='host: laptop · Claude Code').filter(has_text='lease ends')).to_be_visible(timeout=15000)
+   await pb.get_by_role('button',name='Kill',exact=True).click();await expect(pb.locator('.agents-row').filter(has_text='lease ends')).to_have_count(0,timeout=15000)
+   assert not ctl(B,'agents.status')['agentShells']
+   print('PASS an agent shell is listed in Settings and can be killed from there',flush=True)
    await pb.get_by_role('button',name='Revoke all',exact=True).click();await pb.locator('#modal').get_by_role('button',name='Revoke all',exact=True).click()
    await expect(pb.locator('.agents-table tbody')).to_contain_text('No session has asked anything here yet',timeout=15000)
    await expect(pb.locator('.agents-log')).to_contain_text('echo third')
    print('PASS revoke all empties the table; the journal keeps the history',flush=True)
-   await b.close();print('5 agents UI checks passed.')
+   await b.close();print('6 agents UI checks passed.')
  finally:
   if mcp:mcp.close()
   A.close();B.close()

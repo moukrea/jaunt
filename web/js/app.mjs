@@ -1441,6 +1441,13 @@ function agentsSettings(a) {
   const revoke = button(tr('Revoke selection'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } confirmAction(tr('Revoke these requesters?'), tr('They will ask again at their next request.'), tr('Revoke'), async () => { a.agents = await a.link.request('agents.revoke', {requesters: [...selected]}); renderSettings(); }, true); }, 'button');
   const revokeAll = button(tr('Revoke all'), () => confirmAction(tr('Revoke every requester?'), tr('Every requester will ask again at its next request.'), tr('Revoke all'), async () => { a.agents = await a.link.request('agents.revoke', {all: true}); renderSettings(); }, true), 'text-button');
   rows.push(settingsRow(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block.'), el('span')), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table), el('div', {class: 'agents-actions'}, modify, revoke, revokeAll)));
+  // Background agent shells alive on this host (never jaunt sessions), with a kill switch.
+  const shells = st.agentShells || [];
+  if (shells.length) {
+    const list = el('div', {class: 'agents-list'});
+    for (const sh of shells) list.append(el('div', {class: 'agents-row'}, el('span', {class: 'agents-row-text'}, el('strong', {text: (sh.requesterName || sh.requester) + ' · ' + sh.cwd}), el('small', {text: tr('opened {0} · lease ends {1} · {2} bytes', new Date(sh.created * 1000).toLocaleTimeString(), new Date(sh.leaseEndsAt * 1000).toLocaleTimeString(), sh.bytes)})), button(tr('Kill'), async () => { try { a.agents = await a.link.request('agents.kill', {shell: sh.id}); } catch (error) { report(error); } renderSettings(); }, 'button danger small')));
+    rows.push(settingsRow(tr('Agent shells'), tr('Background shells opened by requesters. They are not sessions: no tab, no sharing. Each dies when closed, 10 minutes after its last use, when its session ends, or when you revoke the requester.'), el('span')), list);
+  }
   // Pending approvals and log.
   const pending = st.pending || [];
   if (pending.length) {
@@ -1451,7 +1458,7 @@ function agentsSettings(a) {
   const log = el('div', {class: 'agents-list agents-log'});
   for (const entry of [...(st.log || [])].reverse().slice(0, 30)) {
     const when = new Date(entry.at * 1000).toLocaleString();
-    const text = entry.kind === 'run' ? `${entry.command}${entry.cwd ? ' · ' + entry.cwd : ''} → ${entry.status}${entry.exitCode != null ? ' · ' + tr('exit {0}', entry.exitCode) : ''} · ${entry.decision || ''}` : entry.kind === 'trust' ? tr('{0}: {1} → {2}{3}', entry.requester, entry.right, entry.level, entry.duration ? ' ' + entry.duration : '') : entry.kind === 'revoke' ? tr('revoked {0}', (entry.requesters || []).join(', ')) : entry.kind === 'link' ? tr('linked {0}', entry.host || '') : entry.kind === 'switch' ? (entry.enabled ? tr('turned on') : tr('turned off')) : JSON.stringify(entry);
+    const text = entry.kind === 'shell' ? tr('agent shell {0} {1}{2}', entry.shell || '', entry.action || '', entry.reason ? ' · ' + entry.reason : entry.cwd ? ' · ' + entry.cwd : '') : entry.kind === 'run' ? `${entry.command}${entry.cwd ? ' · ' + entry.cwd : ''} → ${entry.status}${entry.exitCode != null ? ' · ' + tr('exit {0}', entry.exitCode) : ''} · ${entry.decision || ''}` : entry.kind === 'trust' ? tr('{0}: {1} → {2}{3}', entry.requester, entry.right, entry.level, entry.duration ? ' ' + entry.duration : '') : entry.kind === 'revoke' ? tr('revoked {0}', (entry.requesters || []).join(', ')) : entry.kind === 'link' ? tr('linked {0}', entry.host || '') : entry.kind === 'switch' ? (entry.enabled ? tr('turned on') : tr('turned off')) : JSON.stringify(entry);
     log.append(el('div', {class: 'agents-row muted'}, el('small', {text: when + (entry.requester ? ' · ' + (st.requesters?.find(r => r.id === entry.requester)?.name || entry.requester) : '') + (entry.by ? ' · ' + entry.by : '')}), el('span', {class: 'agents-row-text', text: text})));
   }
   if (!(st.log || []).length) log.append(el('div', {class: 'agents-row muted', text: tr('Nothing yet.')}));

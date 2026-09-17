@@ -65,3 +65,50 @@ async def test_executor_bounds_truncation_log_and_rate(tmp_path,monkeypatch):
     await running
     # Old logs are swept.
     old=tmp_path/'agent-runs'/'r_old.log';old.write_bytes(b'x');os.utime(old,(time.time()-90000,)*2);executor.sweep();assert not old.exists()
+
+@pytest.mark.asyncio
+async def test_agent_shells_lease_caps_and_kill(tmp_path,monkeypatch):
+    from jaunt import agents
+    from jaunt.crypto import unb64
+    monkeypatch.setenv('SHELL','/bin/sh');monkeypatch.setattr(agents,'LEASE_SECONDS',2);monkeypatch.setattr(agents,'ORPHAN_GRACE',1)
+    journal=[];shells=agents.AgentShells(tmp_path,lambda **e:journal.append(e))
+    try:
+        s=await shells.open('host-a:claude','laptop · Claude Code','sess-1',str(tmp_path))
+        assert s.alive and (tmp_path/'agent-runs'/(s.id+'.log')).exists() and journal[-1]['action']=='open'
+        shells.send(s,'cd / && export MARK=leased && echo start-$MARK-end')
+        for _ in range(100):
+            await asyncio.sleep(.05)
+            text=unb64(shells.read(s,0,65536)['data']).decode()
+            if 'start-leased-end' in text:break
+        else:pytest.fail('agent shell produced no output: '+text[-200:])
+        assert shells.read(s,0,10)['bytes']==s.offset and not shells.read(s,0,65536)['eof'] is None
+        # Caps: two per requester, eight per host.
+        await shells.open('host-a:claude','x','sess-1',None)
+        with pytest.raises(ValueError):await shells.open('host-a:claude','x','sess-1',None)
+        # Wrong requester cannot touch it.
+        with pytest.raises(ValueError):shells.get(s.id,'host-b:codex')
+        # kill_for and kill_origin.
+        await shells.kill_for('host-a:claude','test');assert not shells.items and journal[-1]['action']=='closed'
+        t=await shells.open('host-a:claude','x','sess-9',None);await shells.kill_origin('host-a','sess-9','origin gone');assert not shells.items
+        # Lease expiry and orphan grace are enforced by the sweeper.
+        u=await shells.open('host-a:claude','x','sess-2',None);await asyncio.sleep(0)
+        u.last_used=time.time()-10
+        for _ in range(140):
+            await asyncio.sleep(.1)
+            if u.id not in shells.items:break
+        else:pytest.fail('lease expiry did not kill the shell')
+        assert journal[-1]['reason']=='lease expired'
+        monkeypatch.setattr(agents,'LEASE_SECONDS',30)
+        v=await shells.open('host-a:claude','x','sess-3',None);shells.mark_orphans('host-a',True)
+        for _ in range(140):
+            await asyncio.sleep(.1)
+            if v.id not in shells.items:break
+        else:pytest.fail('orphan grace did not kill the shell')
+        assert journal[-1]['reason']=='requesting host disconnected'
+        w=await shells.open('host-a:claude','x','sess-4',None);shells.mark_orphans('host-a',True);shells.mark_orphans('host-a',False);await asyncio.sleep(1.5);assert w.id in shells.items,'a host that came back keeps its shells'
+        shells.send(w,'exit');
+        for _ in range(100):
+            await asyncio.sleep(.05)
+            if w.id not in shells.items:break
+        else:pytest.fail('an exited shell was not reaped')
+    finally:await shells.shutdown()

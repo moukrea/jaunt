@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.25 (versionCode 25)
+
+- Bundles the beta.33 interface (agent shells listed in Settings with Kill).
+
 # jaunt Android 0.1.0-beta.24 (versionCode 24)
 
 - Bundles the beta.32 interface (Agents and machines settings, approval modal; approvals arrive as notifications).

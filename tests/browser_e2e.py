@@ -25,7 +25,7 @@ def port():
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
 class Harness:
-    def __init__(self, name="jaunt workstation", relay_url=None):
+    def __init__(self, name="jaunt workstation", relay_url=None, extra_env=None):
         self.tmp=tempfile.TemporaryDirectory(prefix='jaunt-browser-');self.root=Path(self.tmp.name)
         self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir();(self.root/'home').mkdir()
         self.rport=port();self.env={**os.environ,'jaunt_CLIPBOARD':'headless','PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state),'HOME':str(self.root/'home'),'XDG_CONFIG_HOME':str(self.root/'home/.config'),'XDG_DATA_HOME':str(self.root/'home/.local/share'),'XDG_CACHE_HOME':str(self.root/'home/.cache')}
@@ -36,6 +36,7 @@ class Harness:
         shell=self.root/'test-shell'
         shell.write_text('#!/bin/sh\nexec /bin/bash --noprofile --norc -i\n');shell.chmod(0o700)
         self.env['SHELL']=str(shell)
+        if extra_env:self.env.update(extra_env)
         class Handler(http.server.SimpleHTTPRequestHandler):
             def log_message(self,*_):pass
             def end_headers(self):self.send_header('Cache-Control','no-store');super().end_headers()

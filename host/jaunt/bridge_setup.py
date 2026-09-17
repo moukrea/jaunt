@@ -21,7 +21,7 @@ MCP_NAME = "jaunt-bridge"
 # The bridge's own tools only route messages through the host; allowing them by
 # name is what lets a session in "don't ask" or auto mode use the bridge at all.
 # Nothing else gains a permission.
-TOOL_RULES = [f"mcp__{MCP_NAME}__{tool}" for tool in ("jaunt_peers", "jaunt_send", "jaunt_wait_reply", "jaunt_hosts", "jaunt_run", "jaunt_read")]
+TOOL_RULES = [f"mcp__{MCP_NAME}__{tool}" for tool in ("jaunt_peers", "jaunt_send", "jaunt_wait_reply", "jaunt_hosts", "jaunt_run", "jaunt_read", "jaunt_shell")]
 HOOK_EVENTS = {
     "claude": ["SessionStart", "UserPromptSubmit", "PostCompact", "Stop", "SessionEnd"],
     "codex": ["SessionStart", "UserPromptSubmit", "PostCompact", "Stop", "SessionEnd"],

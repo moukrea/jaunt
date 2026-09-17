@@ -145,7 +145,7 @@ def test_setup_edits_are_targeted_and_reversible(tmp_path,monkeypatch):
     monkeypatch.setattr(bridge_setup,'_run',lambda cmd,timeout=60:(calls.append(cmd) or type('R',(),{'returncode':0,'stdout':'','stderr':''})()))
     assert bridge_setup.install({'claude':{'path':'/bin/claude'},'codex':{'path':'/bin/codex'}})=={'claude':{'ok':True,'hooks':str(settings),'mcp':'jaunt-bridge'},'codex':{'ok':True,'hooks':str(tmp_path/'codex/hooks.json'),'mcp':'jaunt-bridge'}}
     after=json.loads(settings.read_text())
-    assert after['permissions']['allow']==['Bash(ls)','mcp__jaunt-bridge__jaunt_peers','mcp__jaunt-bridge__jaunt_send','mcp__jaunt-bridge__jaunt_wait_reply','mcp__jaunt-bridge__jaunt_hosts','mcp__jaunt-bridge__jaunt_run','mcp__jaunt-bridge__jaunt_read'] and after['enabledPlugins']==original['enabledPlugins']
+    assert after['permissions']['allow']==['Bash(ls)','mcp__jaunt-bridge__jaunt_peers','mcp__jaunt-bridge__jaunt_send','mcp__jaunt-bridge__jaunt_wait_reply','mcp__jaunt-bridge__jaunt_hosts','mcp__jaunt-bridge__jaunt_run','mcp__jaunt-bridge__jaunt_read','mcp__jaunt-bridge__jaunt_shell'] and after['enabledPlugins']==original['enabledPlugins']
     assert after['hooks']['PreToolUse']==original['hooks']['PreToolUse']
     wrapper=tmp_path/'state/bridge/hook-claude'
     assert after['hooks']['SessionStart'][0]==original['hooks']['SessionStart'][0] and after['hooks']['SessionStart'][1]['hooks'][0]['command']==str(wrapper)

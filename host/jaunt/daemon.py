@@ -19,7 +19,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import __version__
-from .agents import Approvals, Executor, Policy, requester_key, DURATIONS
+from .agents import AgentShells, Approvals, Executor, Policy, requester_key, DURATIONS
 from .clipboard import Clipboard
 from .hostlink import Links
 from .crypto import Channel, b64, compact, proof, public_key, token, transcript, unb64, verify
@@ -123,6 +123,8 @@ class Peer:
             devices[self.device_id]["lastSeen"] = time.time()
             self.host.state.save()
             self.ready = True
+            if self.is_host:
+                self.host.agent_shells.mark_orphans(self.device_id, False)
             await self.send({"type": "welcome", "machine": self.host.info(),
                              "sessions": self.host.sessions.list(), "device": self.device_id, "peer": self.routing_id})
             while True:
@@ -147,6 +149,8 @@ class Peer:
         finally:
             self.ready = False
             self.host.sessions.detach(self.routing_id)
+            if self.device_id and self.is_host and not any(p is not self and getattr(p, "device_id", "") == self.device_id and p.ready for p in self.host.peers.values()):
+                self.host.agent_shells.mark_orphans(self.device_id, True)  # killed after the grace period unless it comes back
             if self.host.peers.get(self.routing_id) is self:
                 self.host.peers.pop(self.routing_id, None)
             await self.host.sessions_changed()
@@ -254,6 +258,9 @@ class Host:
         self.policy = Policy(state)
         self.approvals = Approvals(self)
         self.executor = Executor(state.root, self.policy)
+        self.agent_shells = AgentShells(state.root, self.policy.journal)
+        self.agent_handles: dict[str, list] = {}  # local session id -> [(room, shell id, runtime)] opened on linked hosts
+        self.known_sessions: set[str] = set()
         self.links = Links(state, {"room": state.data["room"], "name": "host: " + state.data["name"]}, self.link_message)
         self.files = Files(state.root, state.data.get("maxFileBytes", 512 * 1024 * 1024))
         self.clipboard = Clipboard()
@@ -296,6 +303,11 @@ class Host:
                     await peer.send(value)
 
     async def sessions_changed(self) -> None:
+        current = set(self.sessions.items)
+        for gone in self.known_sessions - current:
+            if gone in self.agent_handles:
+                asyncio.create_task(self.release_agent_shells(gone))
+        self.known_sessions = current
         await self.broadcast({"type": "sessions", "sessions": self.sessions.list()})
         with contextlib.suppress(Exception):
             await self.workspace_prune()
@@ -448,6 +460,11 @@ class Host:
             return await self.agent_run(peer, p)
         if method == "agent.read":
             return self.agent_read(peer, p)
+        if method == "agent.shell":
+            return await self.agent_shell(peer, p)
+        if method == "agents.kill":
+            await self.agent_shells.kill(str(p.get("shell", "")), "killed by " + peer.display_name)
+            return self.agents_status()
         if method == "agents.status":
             return self.agents_status()
         if method == "agents.configure":
@@ -455,10 +472,14 @@ class Host:
         if method == "agents.trust":
             self.policy.set_level(str(p.get("requester", "")), str(p.get("right", "")), str(p.get("level", "")), p.get("duration"))
             self.policy.journal(kind="trust", requester=p.get("requester"), right=p.get("right"), level=p.get("level"), duration=p.get("duration"), by=peer.display_name)
+            if p.get("level") == "block":
+                await self.agent_shells.kill_for(str(p.get("requester", "")), "requester blocked")
             return self.agents_status()
         if method == "agents.revoke":
             keys = list(self.policy.data["requesters"]) if p.get("all") is True else [str(k) for k in p.get("requesters", [])]
             self.policy.revoke(keys)
+            for key in keys:
+                await self.agent_shells.kill_for(key, "requester revoked")
             self.policy.journal(kind="revoke", requesters=keys, by=peer.display_name)
             return self.agents_status()
         if method == "agents.decide":
@@ -567,7 +588,7 @@ class Host:
 
     def agents_status(self) -> dict:
         return {"enabled": self.policy.enabled, "requesters": self.policy.table(), "links": self.links.list(),
-                "pending": self.approvals.list(), "log": self.policy.data["log"][-50:], "agentShells": []}
+                "pending": self.approvals.list(), "log": self.policy.data["log"][-50:], "agentShells": self.agent_shells.list()}
 
     async def agents_configure(self, p: dict) -> dict:
         enabled = p.get("enabled")
@@ -635,6 +656,29 @@ class Host:
                             exitCode=result["exitCode"], bytes=result["bytes"], run=result["run"], decision=detail.get("decision"))
         return result
 
+    async def agent_shell(self, peer, p: dict) -> dict:
+        key, name = self._requester_of(peer, p)
+        action = str(p.get("action", ""))
+        if action == "open":
+            cwd = p.get("cwd")
+            detail = {"summary": "background shell" + (f" in {cwd}" if cwd else ""), "command": "", "cwd": cwd or "", "shell": True}
+            await self._authorize(key, name, "exec", "shell", detail)
+            self.executor._rate(key)
+            self.executor.active.discard(key)
+            s = await self.agent_shells.open(key, name, str(p.get("origin", "")), cwd if isinstance(cwd, str) and cwd else None)
+            return s.info()
+        if action == "list":
+            return {"shells": [s.info() for s in self.agent_shells.items.values() if s.requester == key]}
+        s = self.agent_shells.get(str(p.get("shell", "")), key)
+        if action == "send":
+            return self.agent_shells.send(s, str(p.get("input", "")), p.get("enter", True) is not False)
+        if action == "read":
+            return self.agent_shells.read(s, int(p.get("offset") or 0), int(p.get("limit") or 65536))
+        if action == "close":
+            await self.agent_shells.kill(s.id, "closed by the agent")
+            return {"shell": s.id, "closed": True}
+        raise ValueError("Unknown shell action")
+
     def agent_read(self, peer, p: dict) -> dict:
         key, name = self._requester_of(peer, p)
         if self.policy.level(key, "exec") == "block":
@@ -682,7 +726,26 @@ class Host:
             return {"host": link.record.get("name"), **await link.request("agent.run", params, timeout=budget)}
         if method == "agents.read":
             return {"host": link.record.get("name"), **await link.request("agent.read", {"runtime": runtime, "run": p.get("run"), "offset": p.get("offset", 0), "limit": p.get("limit", 65536)})}
+        if method == "agents.shell":
+            action = str(p.get("action", ""))
+            params = {"runtime": runtime, "action": action, "shell": p.get("shell"), "input": p.get("input"), "enter": p.get("enter", True),
+                      "cwd": p.get("cwd"), "offset": p.get("offset", 0), "limit": p.get("limit", 65536), "origin": sid}
+            result = await link.request("agent.shell", params, timeout=170 if action == "open" else 45)
+            handles = self.agent_handles.setdefault(sid, [])
+            if action == "open":
+                handles.append((link.record["room"], result["id"], runtime))
+            elif action == "close":
+                self.agent_handles[sid] = [h for h in handles if h[1] != p.get("shell")]
+            return {"host": link.record.get("name"), **result}
         raise ValueError("Unknown agents method")
+
+    async def release_agent_shells(self, sid: str) -> None:
+        """The local session that opened background shells elsewhere is gone: close them."""
+        for room, shell_id, runtime in self.agent_handles.pop(sid, []):
+            link = self.links.links.get(room)
+            if link and link.state == "online":
+                with contextlib.suppress(Exception):
+                    await link.request("agent.shell", {"runtime": runtime, "action": "close", "shell": shell_id}, timeout=15)
 
     def scrollback(self) -> dict:
         from .scrollback import MAX_BYTES
@@ -860,9 +923,9 @@ class Host:
                 result = await self.bridge.send(self.bridge.resolve(p))
             elif method == "bridge.wait":
                 result = await self.bridge.wait_reply(self.bridge.resolve(p))
-            elif method in ("agents.hosts", "agents.run", "agents.read", "agents.status"):
+            elif method in ("agents.hosts", "agents.run", "agents.read", "agents.shell", "agents.status"):
                 result = await self.agents_gateway(method, p)
-            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "links.add", "links.remove", "links.list"):
+            elif method in ("agents.configure", "agents.trust", "agents.revoke", "agents.decide", "agents.kill", "links.add", "links.remove", "links.list"):
                 # The CLI acts as the owner at the keyboard; the same handlers serve the UI clients.
                 result = await self.rpc(type("CLI", (), {"display_name": "CLI", "device_id": "local-cli"})(), method, p)
             elif method == "stop":
@@ -1068,6 +1131,7 @@ class Host:
                     from .state import atomic_json
                     atomic_json(self.state.root/'update-status.json',{'state':'error','message':'Runtime replacement failed; existing shells were preserved.'})
                     os.execve(sys.executable,[sys.executable,"-m","jaunt.cli","daemon"],env)
+            await self.agent_shells.shutdown()
             await self.sessions.shutdown()
             self.files.cleanup(all_files=True)
             server.close()
