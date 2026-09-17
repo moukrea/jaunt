@@ -39,7 +39,7 @@ async def test_approvals_first_answer_wins_and_timeout(tmp_path,monkeypatch):
     approvals.decide(pending[0]['id'],'1h',by='phone')
     with pytest.raises(ValueError):approvals.decide(pending[0]['id'],'deny',by='desktop')
     assert await task=='1h' and host.events[-1]=={'type':'agent.approval.closed','id':pending[0]['id']}
-    assert await approvals.ask(requester,'exec','run',{'summary':'x'})=='deny','no answer within the deadline denies'
+    assert await approvals.ask(requester,'exec','run',{'summary':'x'})=='expired','no answer within the deadline expires, and is never reported as a denial'
     with pytest.raises(ValueError):approvals.decide('nope','once')
 
 @pytest.mark.asyncio
@@ -173,3 +173,25 @@ def test_policy_features_migrate_and_switch(tmp_path):
     with pytest.raises(ValueError):policy.set_feature('nope',True)
     with pytest.raises(ValueError):policy.set_feature('exec','yes')
     fresh=Policy(State(tmp_path/'fresh.json'));assert not fresh.enabled and fresh.features()['messages'] is False
+
+
+@pytest.mark.asyncio
+async def test_expired_approval_is_not_reported_as_a_denial(tmp_path,monkeypatch):
+    """An unanswered request refuses the caller, but says so as an expiry, in the journal and in the error."""
+    monkeypatch.setattr('jaunt.agents.APPROVAL_SECONDS',1)
+    import types
+    from jaunt.daemon import Host
+    state=State(tmp_path);state.data.setdefault('name','homelab');state.save()
+    host=types.SimpleNamespace(state=state,policy=Policy(state),REFUSAL=Host.REFUSAL)
+    host.approvals=Approvals(FakeHost(state))
+    key=requester_key('host-a','claude');host.policy.requester(key,name='laptop · Claude Code')
+    with pytest.raises(ValueError) as exc:
+        await Host._authorize(host,key,'laptop · Claude Code','exec','run',{'summary':'docker ps','command':'docker ps'})
+    assert 'nobody answered' in str(exc.value) and 'expiry, not a refusal' in str(exc.value)
+    assert host.policy.data['log'][-1]['decision']=='expired'
+    # An explicit denial keeps saying "denied".
+    async def deny(*a,**k):return 'deny'
+    host.approvals.ask=deny
+    with pytest.raises(ValueError) as exc:
+        await Host._authorize(host,key,'laptop · Claude Code','exec','run',{'summary':'ls','command':'ls'})
+    assert 'denied this request' in str(exc.value) and host.policy.data['log'][-1]['decision']=='denied'

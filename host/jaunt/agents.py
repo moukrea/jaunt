@@ -238,7 +238,8 @@ class Approvals:
         return [self.public(i) for i in self.pending.values() if i["expires"] > now]
 
     async def ask(self, requester: dict, right: str, kind: str, detail: dict) -> str:
-        """Returns the decision: once, 1h, 24h, always, deny (deny after the timeout)."""
+        """The owner's decision: once, rule, 1h, 24h, always, deny — or "expired" when nobody answered.
+        An unanswered request is refused like a denial, but it is never reported as one."""
         approval_id = "ap" + token(8)  # never starts with "-": it travels as a CLI argument
         future = asyncio.get_running_loop().create_future()
         item = {"id": approval_id, "requester": requester, "right": right, "kind": kind, "detail": detail,
@@ -252,7 +253,7 @@ class Approvals:
             try:
                 return await asyncio.wait_for(future, APPROVAL_SECONDS)
             except asyncio.TimeoutError:
-                return "deny"
+                return "expired"
         finally:
             self.pending.pop(approval_id, None)
             with contextlib.suppress(Exception):

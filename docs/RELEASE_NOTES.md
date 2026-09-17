@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.39
+
+**Tools that point at the right channel, and answers that match reality.** jaunt adds machines to an AI session's reach; it never replaces the messaging a runtime already has for its own sessions on one machine. The tools now say so where it matters: `jaunt_sessions` flags a shell that itself runs a Claude Code or Codex session, names the identity that session answers to in its own runtime, and states that typing there drives its terminal rather than talking to it; `jaunt_type` says the same, and its result warns that a long or multi-line text arrives in such a terminal as a pasted block that Enter does not submit — the keystrokes reached the terminal, nothing more. `jaunt_sessions` also reports the shell's current directory instead of the one it started in. And an approval nobody answered is now an **expiry**, distinct from a denial, in the journal and in the message the caller gets. Reported by a Claude Code session that had announced a message as sent when it had only been typed. Host only; the clients are unchanged.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.38
 
 **Unregistered sessions on other machines are named.** `jaunt_peers` now also lists, per linked machine, the Claude Code or Codex programs open in jaunt shells that have not registered with jaunt there, instead of showing nothing (the target host already sent them; the requester host dropped them). Settings no longer claim that such a session "was started before the bridge": Codex only runs its hooks from the first prompt on, so the note now says it joins at its next prompt, and that a session started before the switch needs a restart or `/clear` first. Validated live between two real hosts (commands, long output, background shell, typing into a remote and a local shell, messages both ways).
