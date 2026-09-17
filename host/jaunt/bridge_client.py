@@ -148,6 +148,19 @@ AGENT_TOOLS = [
                      "properties": {"host": {"type": "string"}, "action": {"type": "string", "enum": ["open", "send", "read", "close", "list"]},
                                     "shell": {"type": "string", "description": "Shell id from open"}, "input": {"type": "string"}, "enter": {"type": "boolean"},
                                     "cwd": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 65536}}}},
+    {"name": "jaunt_sessions",
+     "description": "List the jaunt shells (the owner's own terminals) on a machine — this one when host is omitted — with their name, working directory, running program and whether you may type there (ask: the owner is asked once per shell; trust; block). Your own shell is not listed for this machine.",
+     "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"host": {"type": "string", "description": "Machine name from jaunt_hosts; omit for this machine"}}}},
+    {"name": "jaunt_type",
+     "description": "Type into one of the owner's existing jaunt shells (from jaunt_sessions), on this machine or a linked one, as if at its keyboard: the text is sent to that terminal, Enter appended unless enter=false. The owner is asked the first time for each shell (up to 2 minutes) and can cut you off at any time; everything is journaled. Read what happened with jaunt_output. Never type into your own shell.",
+     "inputSchema": {"type": "object", "required": ["session", "input"], "additionalProperties": False,
+                     "properties": {"host": {"type": "string", "description": "Omit for this machine"}, "session": {"type": "string", "description": "Session id from jaunt_sessions"},
+                                    "input": {"type": "string"}, "enter": {"type": "boolean"}}}},
+    {"name": "jaunt_output",
+     "description": "The latest output of one of the owner's jaunt shells (plain text, escape sequences removed, up to 64 KiB, default 16 KiB), to read a prompt, a result or an error there. Same permission as jaunt_type.",
+     "inputSchema": {"type": "object", "required": ["session"], "additionalProperties": False,
+                     "properties": {"host": {"type": "string", "description": "Omit for this machine"}, "session": {"type": "string"},
+                                    "limit": {"type": "integer", "minimum": 1, "maximum": 65536, "description": "Bytes from the end"}}}},
     {"name": "jaunt_read",
      "description": "Read a slice of the full output of an earlier jaunt_run (its 'run' id), 64 KiB at a time.",
      "inputSchema": {"type": "object", "required": ["host", "run"], "additionalProperties": False,
@@ -222,6 +235,20 @@ def _tool(runtime: str, name: str, args: dict) -> str:
                 data = base64.urlsafe_b64decode(result["data"] + "=" * (-len(result["data"]) % 4))
                 result = {**{k: v for k, v in result.items() if k != "data"}, "text": data.decode("utf-8", "replace")}
             return json.dumps(result, ensure_ascii=False)
+        if name == "jaunt_sessions":
+            result = control("agents.sessions", {**identity, "host": args.get("host", "")}, timeout=40)
+            rows = result.get("sessions", [])
+            if not rows:
+                return f"No other jaunt shell on {result.get('host')}."
+            access = {"ask": "the owner is asked once", "trust": "you may type there", "block": "blocked"}
+            return f"jaunt shells on {result.get('host')}:\n" + "\n".join(
+                f"- {s['name']} (id {s['id']}) — {s['program'] or 'shell'} in {s['cwd']}, {'running' if s['alive'] else 'exited'}, {s['viewers']} open view(s); type: {access.get(s['access'], s['access'])}" for s in rows)
+        if name == "jaunt_type":
+            result = control("agents.type", {**identity, "host": args.get("host", ""), "target": args.get("session", ""), "input": args.get("input", ""), "enter": args.get("enter", True)}, timeout=190)
+            return f"Typed {result['bytes']} bytes into \"{result['name']}\" on {result['host']}. Read the result with jaunt_output (session {result['session']})."
+        if name == "jaunt_output":
+            result = control("agents.output", {**identity, "host": args.get("host", ""), "target": args.get("session", ""), "limit": args.get("limit", 16384)}, timeout=190)
+            return f"Output of \"{result['name']}\" on {result['host']} ({result['program'] or 'shell'} in {result['cwd']}, {'running' if result['alive'] else 'exited'}):\n{result['text']}"
         if name == "jaunt_read":
             result = control("agents.read", {**identity, "host": args.get("host", ""), "run": args.get("run", ""), "offset": args.get("offset", 0), "limit": args.get("limit", 65536)}, timeout=30)
             import base64
