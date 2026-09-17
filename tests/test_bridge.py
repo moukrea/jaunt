@@ -156,7 +156,7 @@ def test_setup_edits_are_targeted_and_reversible(tmp_path,monkeypatch):
     broken=tmp_path/'state/bridge/hook-codex';broken.write_text(broken.read_text().replace(sys.executable,'/nonexistent/python'))
     r=subprocess.run([str(broken)],input=b'{}',capture_output=True);assert r.returncode==0 and 'interpreter not executable' in (tmp_path/'state/bridge/hook.log').read_text()
     assert all(any('/bridge/hook-' in h['command'] for g in after['hooks'][e] for h in g['hooks']) for e in ('UserPromptSubmit','Stop','SessionEnd','PostCompact'))
-    assert bridge_setup.installed({})=={'claude':{'hooks':True},'codex':{'hooks':True}}
+    assert bridge_setup.installed({})=={'claude':{'hooks':True},'codex':{'hooks':True,'lastHook':0.0}}
     assert [c[:4] for c in calls if c[1]=='mcp' and c[2]=='add']==[['/bin/claude','mcp','add','--scope'],['/bin/codex','mcp','add','jaunt-bridge']]
     assert all(any(a.startswith('jaunt_STATE=') for a in c) and c[-1]==str(tmp_path/'state/bridge'/('mcp-claude' if c[0]=='/bin/claude' else 'mcp-codex')) for c in calls if c[1]=='mcp' and c[2]=='add')
     # Installing twice never duplicates entries.
@@ -165,7 +165,7 @@ def test_setup_edits_are_targeted_and_reversible(tmp_path,monkeypatch):
     bridge_setup.uninstall({'claude':{'path':'/bin/claude'},'codex':{'path':'/bin/codex'}})
     assert json.loads(settings.read_text())==original
     assert not (tmp_path/'codex/hooks.json').exists() and not (tmp_path/'state/bridge').exists()
-    assert bridge_setup.installed({})=={'claude':{'hooks':False},'codex':{'hooks':False}}
+    assert bridge_setup.installed({})=={'claude':{'hooks':False},'codex':{'hooks':False,'lastHook':0.0}}
 
 def test_hook_client_is_silent_outside_jaunt_shells(monkeypatch,capsys):
     from jaunt import bridge_client
@@ -366,3 +366,29 @@ async def test_roster_names_same_runtime_sessions_it_does_not_bridge(host):
     # Codex sees both Claude sessions as peers and no sibling line.
     codex=await register(h,'s3','codex','codex-thread-00001','/work/x')
     assert codex['context'].count('Claude Code session in jaunt terminal')==2 and 'Also ' not in codex['context']
+
+
+def test_codex_hook_trust_hash_matches_codex(tmp_path):
+    """Vectors recorded by Codex 0.154.0 itself (its TUI 'Hooks need review' → trust) for jaunt's hooks."""
+    from jaunt import bridge_setup as b
+    cmd='/home/eco/.local/share/jaunt/bridge/hook-codex'
+    assert b.codex_hook_hash('SessionStart',cmd,10)=='sha256:7ff57960c78b49df5dd723fa99153e61372719befb314f1558fb845c606a6147'
+    assert b.codex_hook_hash('UserPromptSubmit',cmd,10)=='sha256:8cdafb9791e6b230e115572dff30e8bc6b28070a226317d32d2f41182cab8f32'
+    assert b.codex_hook_hash('PostCompact',cmd,10)=='sha256:a33a2e0faa01e7a25ff93629f0b1e42517c0ba51fd15c3bf9a1ede9ae572f1d1'
+    assert b.codex_hook_hash('Stop',cmd,10)=='sha256:e931d64f1618b0ea9e2bb337661501170995eb931b513eea3b84a14991296988'
+    assert b.codex_hook_hash('SessionEnd',cmd,3)=='sha256:9d121f4764b5d4f86e8a7a3032f54c7d3729a48c0b76387e37e192915dd0afa2'
+    # Keys carry the group index of OUR group, after any user-defined groups.
+    hooks={'hooks':{'Stop':[{'hooks':[{'type':'command','command':'/theirs','timeout':5}]},{'hooks':[{'type':'command','command':cmd,'timeout':10}]}],'SessionEnd':[{'hooks':[{'type':'command','command':cmd,'timeout':3}]}]}}
+    entries=b.codex_trust_entries(hooks,tmp_path/'hooks.json')
+    assert set(entries)=={f'{tmp_path}/hooks.json:stop:1:0',f'{tmp_path}/hooks.json:session_end:0:0'}
+    # Recording touches nothing else in config.toml, is idempotent, replaces a stale hash, and is removable.
+    import tomllib
+    cfg=tmp_path/'config.toml';cfg.write_text('model = "gpt-5"\n\n[hooks.state]\n\n[hooks.state."'+str(tmp_path)+'/hooks.json:stop:1:0"]\ntrusted_hash = "sha256:stale"\n\n[mcp_servers.other]\ncommand = "x"\n')
+    b.trust_codex_hooks(entries,cfg);once=cfg.read_text();b.trust_codex_hooks(entries,cfg);assert cfg.read_text()==once
+    parsed=tomllib.loads(once);assert parsed['model']=='gpt-5' and parsed['mcp_servers']['other']['command']=='x'
+    assert parsed['hooks']['state'][f'{tmp_path}/hooks.json:stop:1:0']['trusted_hash']==entries[f'{tmp_path}/hooks.json:stop:1:0']
+    b.untrust_codex_hooks(entries,cfg);after=tomllib.loads(cfg.read_text());assert 'state' not in after.get('hooks',{}) or not after['hooks']['state'];assert after['mcp_servers']['other']['command']=='x'
+    cfg.write_text('this = = broken\n')
+    import pytest as _p
+    with _p.raises(ValueError):b.trust_codex_hooks(entries,cfg)
+    assert cfg.read_text()=='this = = broken\n','an unparsable config is left untouched'

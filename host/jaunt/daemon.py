@@ -474,7 +474,10 @@ class Host:
             return await self.agent_output(key, name, p)
         if method == "agent.peers":
             self._requester_of(peer, p, "messages")
-            return {"sessions": [self.bridge.public(q) for q in self.bridge.participants.values() if q.state != "ended"]}
+            # Registered sessions, and the runtimes visibly open in jaunt shells that have not registered
+            # (no prompt yet, hooks not trusted, started before the switch): both, so absence is never mistaken for "none".
+            return {"sessions": [self.bridge.public(q) for q in self.bridge.participants.values() if q.state != "ended"],
+                    "present": self.bridge.unbridged()}
         if method == "agent.message":
             return await self.agent_message(peer, p)
         if method == "agents.cut":

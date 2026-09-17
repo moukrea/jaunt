@@ -205,7 +205,7 @@ def _tool(runtime: str, name: str, args: dict) -> str:
                 lines += [f"- {p['runtime']} session open in terminal \"{p['terminal']}\" (cwd {p['cwd']}) but not reachable yet: it joins the bridge after its first prompt"
                           for p in result.get("present", [])]
                 if not lines:
-                    lines.append("No other AI session of the other runtime is working on this project through jaunt on this machine right now.")
+                    lines.append("No session of the other runtime is registered with the bridge on this machine right now (this is the registry's state, not proof that none is open).")
             else:
                 lines.append(result.get("note", "The jaunt bridge is turned off on this host.") + (" (this machine)" if result.get("messages") else ""))
             if result.get("messages"):
@@ -216,15 +216,18 @@ def _tool(runtime: str, name: str, args: dict) -> str:
                     if host.get("error"):
                         lines.append(f"- On machine {host['host']}: {host['error']}")
                         continue
-                    if not host.get("sessions"):
-                        lines.append(f"- On machine {host['host']}: no AI session open in a jaunt shell right now.")
+                    if not host.get("sessions") and not host.get("present"):
+                        lines.append(f"- On machine {host['host']}: no AI session registered, none visibly open in a jaunt shell.")
                     for s in host["sessions"]:
                         lines.append(f"- On machine {host['host']}: {s['runtime']} session in terminal \"{s['terminal']}\" (id {host['host']}/{s['id']}), cwd {s['cwd']}, {s['state']}. Reachable with jaunt_send(to=\"{host['host']}/{s['id']}\").")
+                    for s in host.get("present") or []:
+                        lines.append(f"- On machine {host['host']}: a {s['runtime']} session is open in terminal \"{s['terminal']}\" but is NOT registered with jaunt there (no prompt yet, hooks not trusted, or started before the switch); it cannot receive messages until it registers.")
             return "\n".join(lines)
         if name == "jaunt_send":
             result = control("bridge.send", {**identity, "to": args.get("to", ""), "text": args.get("text", ""),
                                              "inReplyTo": args.get("in_reply_to", "")})
-            text = f"Delivered to {result['to']} (message id {result['id']}). It is now in that session's conversation; a reply, if any, arrives as a bridge message."
+            text = (f"Delivered to {result['to']} (message id {result['id']}): the runtime accepted it for that conversation. "
+                    "Claude Code may hold it for its user's review before the model sees it (its inbound gate compares permission classes); a reply, if any, arrives as a bridge message.")
             wait = int(args.get("wait_seconds") or 0)
             if wait > 0:
                 waited = control("bridge.wait", {**identity, "id": result["id"], "seconds": wait}, timeout=wait + 20)

@@ -76,6 +76,8 @@ def write_wrapper(kind: str, runtime: str) -> Path:
                   "if [ ! -x \"$PY\" ]; then printf '%s hook-" + runtime + ": interpreter not executable: %s\\n' \"$(date '+%F %T')\" \"$PY\" >> \"$LOG\" 2>/dev/null; exit 0; fi\n"
                   f"\"$PY\" -m jaunt.cli bridge-hook {runtime} --state {state} \"$@\" 2>>\"$LOG\"\n"
                   "rc=$?\n"
+                  # One touch per invocation: the file's mtime says when the runtime last ran the hook.
+                  f": >> {shlex.quote(str(directory / ('last-hook-' + runtime)))} 2>/dev/null\n"
                   "if [ \"$rc\" -ne 0 ]; then printf '%s hook-" + runtime + ": exit %s\\n' \"$(date '+%F %T')\" \"$rc\" >> \"$LOG\" 2>/dev/null; fi\n"
                   "exit 0\n")
     else:
@@ -209,6 +211,115 @@ def codex_hooks_path() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "hooks.json"
 
 
+def codex_config_path() -> Path:
+    return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+
+
+# ---- Codex hook trust ------------------------------------------------------------
+# Codex runs a hook from hooks.json only once a human has reviewed it in its TUI (/hooks,
+# "Hooks need review"); until then the hook is skipped silently. The review stores, in
+# config.toml, `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"] trusted_hash`,
+# a sha256 over the hook's normalized identity (codex-rs/hooks/src/engine/discovery.rs
+# `hook_hash` + config/src/fingerprint.rs `version_for_toml`, rust-v0.154.0). Turning the
+# switch on in jaunt is that review: the user chose to run jaunt's own hook, so jaunt
+# records the trust for exactly that hook and removes it when the switch goes off.
+CODEX_EVENT_LABELS = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit", "PostCompact": "post_compact",
+                      "Stop": "stop", "SessionEnd": "session_end"}
+
+
+def codex_hook_hash(event: str, command: str, timeout: int) -> str:
+    """Codex's trust hash of one command hook: sorted-key compact JSON of the normalized
+    identity {event_name, hooks: [{type, command, timeout, async}]}, sha256, "sha256:" prefix."""
+    import hashlib
+
+    def canonical(value):
+        if isinstance(value, dict):
+            return {k: canonical(value[k]) for k in sorted(value)}
+        if isinstance(value, list):
+            return [canonical(v) for v in value]
+        return value
+    identity = {"event_name": CODEX_EVENT_LABELS[event], "hooks": [{"type": "command", "command": command, "timeout": int(timeout), "async": False}]}
+    data = json.dumps(canonical(identity), separators=(",", ":"), ensure_ascii=False).encode()
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def codex_trust_entries(hooks_file: dict, hooks_path: Path) -> dict[str, str]:
+    """{state key: trusted hash} for jaunt's own hooks as they sit in hooks.json (group index included)."""
+    entries = {}
+    for event, groups in (hooks_file.get("hooks") or {}).items():
+        if event not in CODEX_EVENT_LABELS or not isinstance(groups, list):
+            continue
+        for gi, group in enumerate(groups):
+            for hi, hook in enumerate((group or {}).get("hooks") or []):
+                if isinstance(hook, dict) and _is_ours(hook) and hook.get("type", "command") == "command":
+                    timeout = hook.get("timeout")
+                    timeout = min(max(int(timeout), 1), 3) if event == "SessionEnd" and timeout is not None else (int(timeout) if timeout is not None else 600)
+                    entries[f"{hooks_path}:{CODEX_EVENT_LABELS[event]}:{gi}:{hi}"] = codex_hook_hash(event, str(hook.get("command", "")), timeout)
+    return entries
+
+
+def _codex_state_section(key: str) -> str:
+    return "[hooks.state.\"" + key.replace("\\", "\\\\").replace("\"", "\\\"") + "\"]"
+
+
+def _strip_codex_state(text: str, keys) -> str:
+    """Remove our `[hooks.state."key"]` sections (header up to the next table header)."""
+    for key in keys:
+        header = re.escape(_codex_state_section(key))
+        text = re.sub(r"(?m)^" + header + r"[ \t]*(?:#[^\n]*)?\n(?:(?!^\[).*\n?)*", "", text)
+    return text
+
+
+def trust_codex_hooks(entries: dict[str, str], config_path: Path | None = None) -> None:
+    """Record (or refresh) the trust of jaunt's hooks in Codex's config.toml, touching nothing else.
+    The result is parsed back before it replaces the file; a config jaunt cannot parse is left alone."""
+    import tomllib
+    config_path = config_path or codex_config_path()
+    text = config_path.read_text() if config_path.exists() else ""
+    if text:
+        try:
+            tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Codex config.toml is not valid TOML ({exc}); hook trust not recorded") from None
+    text = _strip_codex_state(text, entries).rstrip("\n")
+    text = text + "\n" if text else ""
+    for key, digest in entries.items():
+        text += f"\n{_codex_state_section(key)}\ntrusted_hash = \"{digest}\"\n"
+    parsed = tomllib.loads(text)
+    for key, digest in entries.items():
+        if parsed.get("hooks", {}).get("state", {}).get(key, {}).get("trusted_hash") != digest:
+            raise ValueError("Codex hook trust could not be written consistently")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=".jaunt-", dir=config_path.parent)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(text)
+    if config_path.exists():
+        shutil.copymode(config_path, temp)
+    os.replace(temp, config_path)
+
+
+def untrust_codex_hooks(keys, config_path: Path | None = None) -> None:
+    config_path = config_path or codex_config_path()
+    if not keys or not config_path.exists():
+        return
+    text = config_path.read_text()
+    stripped = _strip_codex_state(text, keys)
+    if stripped != text:
+        fd, temp = tempfile.mkstemp(prefix=".jaunt-", dir=config_path.parent)
+        with os.fdopen(fd, "w") as stream:
+            stream.write(stripped)
+        shutil.copymode(config_path, temp)
+        os.replace(temp, config_path)
+
+
+def codex_hooks_last_run() -> float:
+    """When Codex last ran jaunt's hook on this machine (0 if never)."""
+    try:
+        return (wrapper_dir() / "last-hook-codex").stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def _load(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -255,18 +366,30 @@ def remove_hooks_file(path: Path) -> None:
 
 def install_codex(path: str, mcp_only: bool = False) -> dict:
     hooks_path = codex_hooks_path()
+    trust_note = ""
     if not mcp_only:
-        _write_json(hooks_path, add_hooks(_load(hooks_path), "codex"))
+        hooks_file = add_hooks(_load(hooks_path), "codex")
+        _write_json(hooks_path, hooks_file)
+        try:
+            trust_codex_hooks(codex_trust_entries(hooks_file, hooks_path))
+        except (OSError, ValueError) as exc:
+            trust_note = str(exc)[:160]
     _run([path, "mcp", "remove", MCP_NAME])
     result = _run([path, "mcp", "add", MCP_NAME, "--env", mcp_env(), "--", *mcp_command("codex")])
     if result.returncode:
         remove_hooks_file(hooks_path)
         return {"ok": False, "error": "codex mcp add failed: " + (result.stderr or result.stdout).strip()[:160]}
-    return {"ok": True, "hooks": str(hooks_path), "mcp": MCP_NAME}
+    out = {"ok": True, "hooks": str(hooks_path), "mcp": MCP_NAME}
+    if trust_note:
+        out["warning"] = "Codex will ask you to trust jaunt's hooks in its TUI: " + trust_note
+    return out
 
 
 def uninstall_codex(path: str) -> dict:
-    remove_hooks_file(codex_hooks_path())
+    hooks_path = codex_hooks_path()
+    with contextlib_suppress(OSError, ValueError):
+        untrust_codex_hooks(codex_trust_entries(_load(hooks_path), hooks_path))
+    remove_hooks_file(hooks_path)
     if path:
         _run([path, "mcp", "remove", MCP_NAME])
     return {"ok": True}
@@ -306,4 +429,5 @@ def installed(runtimes: dict) -> dict:
         except (OSError, ValueError):
             present = False
         state[name] = {"hooks": present}
+    state["codex"]["lastHook"] = codex_hooks_last_run()
     return state
