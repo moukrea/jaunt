@@ -149,10 +149,10 @@ AGENT_TOOLS = [
                                     "shell": {"type": "string", "description": "Shell id from open"}, "input": {"type": "string"}, "enter": {"type": "boolean"},
                                     "cwd": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 65536}}}},
     {"name": "jaunt_sessions",
-     "description": "List the jaunt shells (the owner's own terminals) on a machine — this one when host is omitted — with their name, working directory, running program and whether you may type there (ask: the owner is asked once per shell; trust; block). Your own shell is not listed for this machine.",
+     "description": "List the jaunt shells (the owner's own terminals) on a machine — this one when host is omitted — with their name, working directory, running program and whether you may type there (ask: the owner is asked once per shell; trust; block). Your own shell is not listed for this machine. A shell may itself run a Claude Code or Codex session: such a shell is flagged, with the name that session answers to in its own runtime. Typing into it drives its terminal and is not how you talk to it — jaunt adds machines to your reach, it does not replace the messaging your runtime already has for its own sessions here.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"host": {"type": "string", "description": "Machine name from jaunt_hosts; omit for this machine"}}}},
     {"name": "jaunt_type",
-     "description": "Type into one of the owner's existing jaunt shells (from jaunt_sessions), on this machine or a linked one, as if at its keyboard: the text is sent to that terminal, Enter appended unless enter=false. The owner is asked the first time for each shell (up to 2 minutes) and can cut you off at any time; everything is journaled. Read what happened with jaunt_output. Never type into your own shell.",
+     "description": "Type into one of the owner's existing jaunt shells (from jaunt_sessions), on this machine or a linked one, as if at its keyboard: the text is sent to that terminal, Enter appended unless enter=false. This is for what a keyboard does — a command, an answer to a prompt, an interrupt. It is NOT a way to message an AI session: if the shell runs a Claude Code or Codex session, a long or multi-line text arrives there as a pasted block that Enter does not submit; talk to it with your own runtime's tools (same runtime, this machine) or with jaunt_send (another machine). The owner is asked the first time for each shell (up to 2 minutes) and can cut you off at any time; everything is journaled. Read what happened with jaunt_output. Never type into your own shell.",
      "inputSchema": {"type": "object", "required": ["session", "input"], "additionalProperties": False,
                      "properties": {"host": {"type": "string", "description": "Omit for this machine"}, "session": {"type": "string", "description": "Session id from jaunt_sessions"},
                                     "input": {"type": "string"}, "enter": {"type": "boolean"}}}},
@@ -269,11 +269,17 @@ def _tool(runtime: str, name: str, args: dict) -> str:
             if not rows:
                 return f"No other jaunt shell on {result.get('host')}."
             access = {"ask": "the owner is asked once", "trust": "you may type there", "block": "blocked"}
-            return f"jaunt shells on {result.get('host')}:\n" + "\n".join(
-                f"- {s['name']} (id {s['id']}) — {s['program'] or 'shell'} in {s['cwd']}, {'running' if s['alive'] else 'exited'}, {s['viewers']} open view(s); type: {access.get(s['access'], s['access'])}" for s in rows)
+            lines = []
+            for s in rows:
+                lines.append(f"- {s['name']} (id {s['id']}) — {s['program'] or 'shell'} in {s['cwd']}, {'running' if s['alive'] else 'exited'}, "
+                             f"{s['viewers']} open view(s); type: {access.get(s['access'], s['access'])}")
+                if s.get("note"):
+                    lines.append(f"  {s['note']}")
+            return f"jaunt shells on {result.get('host')}:\n" + "\n".join(lines)
         if name == "jaunt_type":
             result = control("agents.type", {**identity, "host": args.get("host", ""), "target": args.get("session", ""), "input": args.get("input", ""), "enter": args.get("enter", True)}, timeout=190)
-            return f"Typed {result['bytes']} bytes into \"{result['name']}\" on {result['host']}. Read the result with jaunt_output (session {result['session']})."
+            text = f"Typed {result['bytes']} bytes into \"{result['name']}\" on {result['host']}. Read the result with jaunt_output (session {result['session']})."
+            return text + ("\n" + result["warning"] if result.get("warning") else "")
         if name == "jaunt_output":
             result = control("agents.output", {**identity, "host": args.get("host", ""), "target": args.get("session", ""), "limit": args.get("limit", 16384)}, timeout=190)
             return f"Output of \"{result['name']}\" on {result['host']} ({result['program'] or 'shell'} in {result['cwd']}, {'running' if result['alive'] else 'exited'}):\n{result['text']}"

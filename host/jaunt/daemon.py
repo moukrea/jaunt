@@ -678,6 +678,9 @@ class Host:
         else:
             await asyncio.to_thread(bridge_setup.uninstall, runtimes)
 
+    REFUSAL = {"deny": "Refused: the owner of {host} denied this request",
+               "expired": "Not allowed: nobody answered the request on {host} within 2 minutes, so it was not run. "
+                          "This is an expiry, not a refusal: ask again when someone is at the keyboard, or have the owner trust this session."}
     FEATURE_NAMES = {"exec": "Commands and background shells on linked machines", "typeLocal": "Typing into shells of this host",
                      "typeRemote": "Typing into shells across machines", "messages": "Messages between sessions across machines"}
 
@@ -719,9 +722,9 @@ class Host:
                 # "Always allow this command": the exact command becomes a rule for this requester.
                 self.policy.add_rule(key, detail.get("command", ""))
                 self.policy.journal(kind="rule", requester=key, added=self.policy.normalize(detail.get("command", "")))
-            if decision == "deny":
-                self.policy.journal(kind=kind, requester=key, decision="denied", **detail)
-                raise ValueError(f"Refused by the owner of {self.state.data['name']} (denied, or no answer within 2 minutes)")
+            if decision in ("deny", "expired"):
+                self.policy.journal(kind=kind, requester=key, decision="denied" if decision == "deny" else "expired", **detail)
+                raise ValueError(self.REFUSAL[decision].format(host=self.state.data["name"]))
             if decision in DURATIONS:
                 self.policy.set_level(key, right, "trust", decision)
             detail["decision"] = decision
@@ -729,11 +732,50 @@ class Host:
             detail["decision"] = "trusted"
 
     # Right `type`: write into and read one of the owner's existing jaunt shells (remote or local requester).
+    def native_agents(self) -> dict:
+        """Which AI session runs in which jaunt shell, under the identity its own runtime uses.
+
+        Claude Code publishes `~/.claude/sessions/<pid>.json` with the very name its own
+        cross-session tools address (ListAgents / SendMessage); Codex sessions registered
+        with the bridge carry their thread. Without this, a caller told to "use your runtime's
+        own tools" has no way to know which of its peers is the shell it is looking at.
+        """
+        found: dict[str, dict] = {}
+        with contextlib.suppress(Exception):
+            from .bridge_deliver import claude_sessions_dir
+            for path in claude_sessions_dir().glob("*.json"):
+                try:
+                    record = json.loads(path.read_text())
+                except (OSError, ValueError):
+                    continue
+                pid = int(record.get("pid") or 0)
+                sid = self.bridge.session_for_pid(pid) if pid else ""
+                if sid and record.get("name"):
+                    found[sid] = {"runtime": "claude", "name": str(record["name"])[:80],
+                                  "conversation": str(record.get("sessionId", ""))[:64], "status": str(record.get("status", ""))[:16]}
+        for p in self.bridge.participants.values():
+            if p.state != "ended" and p.session and p.session not in found:
+                found[p.session] = {"runtime": p.runtime, "name": "", "conversation": p.conversation[:64], "bridgeId": p.id}
+        return found
+
+    AGENT_NOTE = ("this shell runs a {runtime} session: typing here drives its terminal, it is NOT how you talk to it. "
+                  "To send it a message use your own runtime's tools when it runs the same runtime as you on this machine "
+                  "({native}), or jaunt_send for a session on another machine. Keep jaunt_type for what a keyboard is for: "
+                  "answering a prompt, interrupting, a short command.")
+
     def agent_sessions(self, key: str) -> dict:
+        natives = self.native_agents()
         out = []
         for s in self.sessions.items.values():
-            out.append({"id": s.id, "name": s.name, "cwd": s.cwd, "program": s.program, "alive": s.alive,
-                        "access": self.policy.allowed_shell(key, s.id), "viewers": len(s.viewers)})
+            row = {"id": s.id, "name": s.name, "cwd": self.bridge.live_cwd(s), "startedIn": s.cwd, "program": s.program,
+                   "alive": s.alive, "access": self.policy.allowed_shell(key, s.id), "viewers": len(s.viewers)}
+            native = natives.get(s.id)
+            if native or s.program in ("claude", "codex"):
+                native = native or {"runtime": s.program, "name": "", "conversation": ""}
+                row["agent"] = native
+                named = f"it is known there as {native['name']!r}" if native.get("name") else "it has not published an addressable name yet"
+                row["note"] = self.AGENT_NOTE.format(runtime="Claude Code" if native["runtime"] == "claude" else "Codex", native=named)
+            out.append(row)
         return {"sessions": out}
 
     async def _shell_access(self, key: str, name: str, sid: str, detail: dict) -> Session:
@@ -745,9 +787,9 @@ class Host:
             raise ValueError(f"Refused: {name} is blocked on {self.state.data['name']}")
         if access == "ask":
             decision = await self.approvals.ask({"id": key, "name": name}, "type", "type", detail)
-            if decision == "deny":
-                self.policy.journal(kind="type", requester=key, decision="denied", **detail)
-                raise ValueError(f"Refused by the owner of {self.state.data['name']} (denied, or no answer within 2 minutes)")
+            if decision in ("deny", "expired"):
+                self.policy.journal(kind="type", requester=key, decision="denied" if decision == "deny" else "expired", **detail)
+                raise ValueError(self.REFUSAL[decision].format(host=self.state.data["name"]))
             if decision in DURATIONS:
                 self.policy.set_level(key, "type", "trust", decision)
             self.policy.grant(key, sid)
@@ -767,7 +809,15 @@ class Host:
         enter = p.get("enter", True) is not False
         await self.sessions.write(sid, text.encode() + (b"\r" if enter else b""))
         self.policy.journal(kind="typed", requester=key, session=sid, sessionName=s.name, input=text[:200], enter=enter)
-        return {"session": sid, "name": s.name, "bytes": len(text), "offset": s.offset}
+        result = {"session": sid, "name": s.name, "bytes": len(text), "offset": s.offset, "typed": True, "submitted": None}
+        if s.program in ("claude", "codex"):
+            runtime = "Claude Code" if s.program == "claude" else "Codex"
+            result["agent"] = self.native_agents().get(sid) or {"runtime": s.program}
+            result["warning"] = (f"The keystrokes reached the terminal, nothing more: it runs a {runtime} session, whose interface decides "
+                                 "what to do with them. A long or multi-line text lands there as a pasted block that Enter does NOT submit, "
+                                 "so this is not a way to send a message. Read jaunt_output to see what actually happened, and use your "
+                                 "runtime's own messaging (same runtime, this machine) or jaunt_send (another machine) to talk to it.")
+        return result
 
     async def agent_output(self, key: str, name: str, p: dict) -> dict:
         sid = str(p.get("session", ""))

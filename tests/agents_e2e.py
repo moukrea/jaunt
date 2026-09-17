@@ -30,7 +30,7 @@ def main():
     # Stand-in runtimes: enough of `claude` / `codex` for detection, the MCP registration and Codex's queue.
     import tempfile
     fake=Path(tempfile.mkdtemp(prefix='jaunt-fake-runtimes-'));queue_log=fake/'codex-queue.log'
-    (fake/'claude').write_text('#!/bin/sh\ncase "$1" in --version) echo "2.1.300 (Claude Code)";; esac\nexit 0\n');(fake/'claude').chmod(0o755)
+    (fake/'claude').write_text('#!/bin/bash\ncase "$1" in --version) echo "2.1.300 (Claude Code)";; "") exec -a claude sleep 600;; esac\nexit 0\n');(fake/'claude').chmod(0o755)
     (fake/'codex').write_text('#!/bin/bash\ncase "$1" in --version) echo "codex-cli 0.160.0";; queue) printf \'%s\\n\' "$@" >> "$CODEX_QUEUE_LOG";; "") exec -a codex sleep 600;; esac\nexit 0\n');(fake/'codex').chmod(0o755)
     runtimes_env={'PATH':str(fake)+':'+os.environ.get('PATH',''),'CODEX_QUEUE_LOG':str(queue_log)}
     A=Harness(name='laptop',extra_env=runtimes_env);B=Harness(name='homelab',extra_env={'jaunt_AGENT_LEASE':'4',**runtimes_env})
@@ -193,6 +193,21 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         output({'session':sidA},'local-2')
         rows=json.loads(A.cli('agents','status'))['requesters'];assert any(r['local'] and r['name']=='Claude Code on this machine' for r in rows),rows
         passed('a local session types into another shell of its own host under a local requester row; never into its own shell')
+        sidAgent=new_session(A);time.sleep(1)
+        # A shell that runs an AI session is flagged, with the identity its own runtime uses, and steers away from typing.
+        _sk2=__import__('socket').socket(__import__('socket').AF_UNIX);_sk2.connect(str(A.state/'control.sock'));_sk2.sendall(json.dumps({'method':'ui.connect'}).encode()+b'\n')
+        from jaunt.crypto import b64 as _b64x
+        _sk2.makefile('r').readline();_sk2.sendall((json.dumps({'type':'terminal.input','id':sidAgent,'data':_b64x(b'claude\r')})+'\n').encode())
+        for _ in range(40):
+            if any(x['id']==sidAgent and x['program']=='claude' for x in status(A)['sessions']):break
+            time.sleep(.5)
+        else:raise AssertionError('the stand-in claude was not detected as the program of the shell')
+        listed=mcp.tool('jaunt_sessions',{})
+        assert 'this shell runs a Claude Code session' in listed and 'NOT how you talk to it' in listed,listed
+        t=approver('once',A);typed=mcp.tool('jaunt_type',{'session':sidAgent,'input':'hello there'});t.join()
+        assert 'Typed' in typed and 'Enter does NOT submit' in typed,typed
+        passed('a shell running an AI session is flagged and both jaunt_sessions and jaunt_type send the caller to the right channel')
+        _sk2.close()
         # Phase 4: allow-lists. "Always allow this command" from an approval, patterns from the CLI, removal.
         B.cli('agents','revoke','all')
         t=approver('rule');result=json.loads(mcp.tool('jaunt_run',{'host':'homelab','command':'echo rule-$((2+2))'}));t.join();assert 'rule-4' in result['stdout'],result

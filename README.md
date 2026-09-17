@@ -6,7 +6,7 @@
 
 jaunt connects the devices you carry to the machines you work on. Install a small host on each Linux or macOS machine, pair your phone, laptop or desktop once, and every one of them shows the same workspace: real shells in real PTYs, the files next to them, and the sessions you left running. Open, rename, split, reorder, close or terminate shells on any host from any device; with *shared open sessions* on, the same tabs, panes and active shell follow you from screen to screen. Claude Code and Codex run there like any other program, and when both are installed on a host, one switch lets their sessions on the same project know about each other and exchange messages. Clients: a browser (also installable as a PWA), a native Android app and a native desktop app; all three ship the same interface. Connections go host-out through a relay, end-to-end encrypted, with no open port, no VPN and no account.
 
-**Host: 0.1.0-beta.38 · Desktop: 0.1.0-beta.31 · Android: 0.1.0-beta.29.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.39 · Desktop: 0.1.0-beta.31 · Android: 0.1.0-beta.29.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
