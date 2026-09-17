@@ -3,7 +3,7 @@
   "relay": "wss://jaunt-relay.moukrea.workers.dev",
   "page": "https://moukrea.github.io/jaunt/",
   "repository": "moukrea/jaunt",
-  "release": "v0.1.0-beta.37",
-  "androidRelease": "android-v0.1.0-beta.28",
-  "desktopRelease": "desktop-v0.1.0-beta.30"
+  "release": "v0.1.0-beta.38",
+  "androidRelease": "android-v0.1.0-beta.29",
+  "desktopRelease": "desktop-v0.1.0-beta.31"
 }

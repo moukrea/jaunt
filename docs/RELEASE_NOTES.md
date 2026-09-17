@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.38
+
+**Unregistered sessions on other machines are named.** `jaunt_peers` now also lists, per linked machine, the Claude Code or Codex programs open in jaunt shells that have not registered with jaunt there, instead of showing nothing (the target host already sent them; the requester host dropped them). Settings no longer claim that such a session "was started before the bridge": Codex only runs its hooks from the first prompt on, so the note now says it joins at its next prompt, and that a session started before the switch needs a restart or `/clear` first. Validated live between two real hosts (commands, long output, background shell, typing into a remote and a local shell, messages both ways).
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.37
 
 **Codex hooks now register without a review prompt.** Codex runs a hook from `hooks.json` only after it has been trusted; otherwise it skips it silently, which left every Codex session invisible to the bridge and to messages across machines on hosts where that review never happened (reported by a Claude Code session diagnosing a linked host). Turning the switch on now records the trust of jaunt's own hook in Codex's `config.toml`, exactly as Codex's TUI would (same hash, verified against hashes Codex 0.154.0 wrote itself), and removes it when the switch goes off; nothing else in that file is touched. Also: `jaunt_peers` names, per machine, the Claude Code or Codex programs open in jaunt shells that have not registered, instead of reporting nothing; its wording says what the registry knows rather than stating that no session exists; a delivery report says Claude Code may hold the message for review; every hook run touches `bridge/last-hook-codex` so "installed but never triggered" is visible; an unknown terminal id is reported as such. Host only; the clients are unchanged.

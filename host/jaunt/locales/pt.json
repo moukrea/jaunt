@@ -1098,7 +1098,7 @@
   "{0} h": "{0} h",
   "{0} icons": "{0} ícones",
   "{0} icons match; showing the first {1}. Type to narrow the list.": "{0} ícones correspondem; são mostrados os primeiros {1}. Escreva para restringir a lista.",
-  "{0} in \"{1}\" was started before the bridge and joins after its next restart or /clear.": "{0} em «{1}» foi iniciado antes da ponte e junta-se após o próximo reinício ou /clear.",
+  "{0} in \"{1}\" has not registered yet: it joins at its next prompt (a session started before the switch needs a restart or /clear first).": "{0} em “{1}” ainda não se registou: junta-se no próximo prompt (uma sessão iniciada antes de ativar precisa primeiro de reiniciar ou /clear).",
   "{0} min": "{0} min",
   "{0} operation in progress": "{0} operação em curso",
   "{0} operation needs attention": "{0} operação precisa de atenção",

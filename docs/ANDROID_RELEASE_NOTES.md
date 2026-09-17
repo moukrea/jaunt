@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.29 (versionCode 29)
+
+- Bundles the beta.38 interface (reworded note for unregistered AI sessions).
+
 # jaunt Android 0.1.0-beta.28 (versionCode 28)
 
 - Bundles the beta.36 interface (four capability switches under Agents and machines).

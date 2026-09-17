@@ -1098,7 +1098,7 @@
   "{0} h": "{0} h",
   "{0} icons": "{0} icons",
   "{0} icons match; showing the first {1}. Type to narrow the list.": "{0} icons match; showing the first {1}. Type to narrow the list.",
-  "{0} in \"{1}\" was started before the bridge and joins after its next restart or /clear.": "{0} in \"{1}\" was started before the bridge and joins after its next restart or /clear.",
+  "{0} in \"{1}\" has not registered yet: it joins at its next prompt (a session started before the switch needs a restart or /clear first).": "{0} in \"{1}\" has not registered yet: it joins at its next prompt (a session started before the switch needs a restart or /clear first).",
   "{0} min": "{0} min",
   "{0} operation in progress": "{0} operation in progress",
   "{0} operation needs attention": "{0} operation needs attention",

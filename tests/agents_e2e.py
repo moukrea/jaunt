@@ -31,7 +31,7 @@ def main():
     import tempfile
     fake=Path(tempfile.mkdtemp(prefix='jaunt-fake-runtimes-'));queue_log=fake/'codex-queue.log'
     (fake/'claude').write_text('#!/bin/sh\ncase "$1" in --version) echo "2.1.300 (Claude Code)";; esac\nexit 0\n');(fake/'claude').chmod(0o755)
-    (fake/'codex').write_text('#!/bin/sh\ncase "$1" in --version) echo "codex-cli 0.160.0";; queue) printf \'%s\\n\' "$@" >> "$CODEX_QUEUE_LOG";; esac\nexit 0\n');(fake/'codex').chmod(0o755)
+    (fake/'codex').write_text('#!/bin/bash\ncase "$1" in --version) echo "codex-cli 0.160.0";; queue) printf \'%s\\n\' "$@" >> "$CODEX_QUEUE_LOG";; "") exec -a codex sleep 600;; esac\nexit 0\n');(fake/'codex').chmod(0o755)
     runtimes_env={'PATH':str(fake)+':'+os.environ.get('PATH',''),'CODEX_QUEUE_LOG':str(queue_log)}
     A=Harness(name='laptop',extra_env=runtimes_env);B=Harness(name='homelab',extra_env={'jaunt_AGENT_LEASE':'4',**runtimes_env})
     try:
@@ -244,8 +244,18 @@ import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;pri
         pidB2=[x for x in status(B)['sessions'] if x['id']==sidB2][0]['pid']
         (inbox_dir/f'{pidB2}.json').write_text(json.dumps({'pid':pidB2,'sessionId':'convB-claude-0002','messagingSocketPath':sock_path}))
         idBclaude,_=register(B,sidB2,'claude','convB-claude-0002',{'socket':sock_path})
+        # A Codex program open in a jaunt shell of B that has NOT registered (no prompt yet) is named as such, not hidden.
+        sidB3=new_session(B);_sk=__import__('socket').socket(__import__('socket').AF_UNIX);_sk.connect(str(B.state/'control.sock'));_sk.sendall(json.dumps({'method':'ui.connect'}).encode()+b'\n')
+        from jaunt.crypto import b64 as _b64
+        _sk.makefile('r').readline();_sk.sendall((json.dumps({'type':'terminal.input','id':sidB3,'data':_b64(b'codex\r')})+'\n').encode())
+        for _ in range(40):
+            if any(x['id']==sidB3 and x['program']=='codex' for x in status(B)['sessions']):break
+            time.sleep(.5)
+        else:raise AssertionError('the stand-in codex was not detected as the program of the shell')
         peers=mcp.tool('jaunt_peers',{});assert f'homelab/{idBcodex}' in peers and f'homelab/{idBclaude}' in peers and 'turned off on this host (this machine)' in peers,peers
-        passed('with messages on, jaunt_peers lists the Claude Code and Codex sessions of the linked machine while the local bridge stays off')
+        assert 'a codex session is open in terminal' in peers and 'NOT registered' in peers,peers
+        _sk.close()
+        passed('with messages on, jaunt_peers lists the registered Claude Code and Codex sessions of the linked machine, names the unregistered Codex program, and the local bridge stays off')
         sent=mcp.tool('jaunt_send',{'to':f'homelab/{idBcodex}','text':'ping codex'});assert 'Delivered to homelab/' in sent,sent
         for _ in range(20):
             if queue_log.exists() and 'ping codex' in queue_log.read_text():break

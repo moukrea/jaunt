@@ -931,7 +931,7 @@ class Host:
             shown = link.record.get("label") or link.record.get("name")
             try:
                 reply = await link.request("agent.peers", {"runtime": runtime}, timeout=10)
-                return {"host": shown, "sessions": reply.get("sessions", [])}
+                return {"host": shown, "sessions": reply.get("sessions", []), "present": reply.get("present", [])}
             except (ValueError, ConnectionError) as exc:
                 return {"host": shown, "sessions": [], "error": str(exc)[:120]}
         result["remote"] = await asyncio.gather(*(ask(l) for l in self.links.links.values() if l.state == "online"))

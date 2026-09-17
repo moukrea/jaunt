@@ -58,13 +58,13 @@ async def main():
    await pb.locator('#modal .rules-list').get_by_role('button',name='Remove',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('No rule yet',timeout=15000)
    await pb.locator('#modal input[aria-label="Rule"]').fill('echo pat-*');await pb.locator('#modal').get_by_role('button',name='Add',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('echo pat-*',timeout=15000)
    t=run('echo pat-ok');t.join(30);assert 'pat-ok' in box['r'] and not ctl(B,'agents.status')['pending'],box['r']
-   await pb.keyboard.press('Escape')
+   await pb.locator('#modal-close').click();await expect(pb.locator('#modal')).to_be_hidden(timeout=15000)
    print('PASS rules are listed, removed and added from the requester table, and a * pattern pre-approves matching commands',flush=True)
    await pb.locator('#settings-button').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
    row=pb.locator('.agents-table tbody tr').filter(has_text='host: my-laptop · Claude Code');await expect(row).to_be_visible(timeout=15000)
    await expect(row.locator('td').nth(2)).to_contain_text('asks');await expect(row.locator('td').nth(3)).to_contain_text('asks')
    await row.locator('input[type=checkbox]').check();await pb.get_by_role('button',name='Modify selection…',exact=True).click()
-   await pb.get_by_label('Level').select_option('always');await pb.get_by_role('button',name='Apply',exact=True).click()
+   await expect(pb.locator('#modal')).to_be_visible(timeout=15000);await pb.get_by_label('Level').select_option('always');await pb.get_by_role('button',name='Apply',exact=True).click()
    await expect(row.locator('td').nth(2)).to_contain_text('trusted always',timeout=15000);await expect(row.locator('td').nth(3)).to_contain_text('asks')
    t=run('echo third');t.join(30);assert 'third' in box['r'] and not ctl(B,'agents.status')['pending']
    print('PASS the requester table shows one column per right; modifying the selection to trust always makes commands run without a prompt',flush=True)
