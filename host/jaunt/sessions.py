@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable, Awaitable
 
 from .process_wait import exit_status
+from .scrollback import Scrollback, purge as purge_scrollback, MAX_BYTES as SCROLLBACK_BYTES
 from .crypto import b64, token
 
 Send = Callable[[str, dict], Awaitable[None]]
@@ -147,13 +148,21 @@ class Session:
     resize_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pump: asyncio.Task | None = None
     reaper: asyncio.Task | None = None
+    history: Scrollback | None = None  # on-disk scrollback (None when disabled)
+
+    def retained(self) -> int:
+        """Earliest stream offset still available (on disk, else in the replay ring)."""
+        ring_start = self.ring[0][0] if self.ring else self.offset
+        if self.history is not None and self.history.start is not None:
+            return min(self.history.start, ring_start)
+        return ring_start
 
     def info(self) -> dict:
         return {"id": self.id, "name": self.name, "cwd": self.cwd, "pid": self.pid,
                 "cols": self.cols, "rows": self.rows, "alive": self.alive,
                 "exitCode": self.exit_code, "created": self.created, "tmux": self.tmux,
                 "program": self.program, "viewers": list(self.viewers.values()), "activeView": self.active_view,
-                "offset": self.offset,
+                "offset": self.offset, "retained": self.retained(),
                 "flow": {peer: {"lag": self.offset - v.acked, "inflight": v.sent - v.acked, "window": v.window, "behind": v.behind}
                          for peer, v in self.subscribers.items()}}
 
@@ -165,6 +174,7 @@ class Sessions:
         self.accepting = True
         self.attention = attention or (lambda *_: None)
         self.peer_window: dict[str, int] = {}
+        self.disk_history = True  # host setting: keep terminal history on disk (scrollback/)
         self.loop = asyncio.get_running_loop()
 
     def list(self) -> list[dict]:
@@ -304,6 +314,7 @@ class Sessions:
         s = Session(sid, name, str(cwd), process.pid, fd, cols, rows,
                     tmux=tmux, process=process)
         self.items[sid] = s
+        self.open_history(s)
         self.resize(sid, {"cols": cols, "rows": rows})
         self._resume_reader(s)
         s.pump = asyncio.create_task(self._pump(s))
@@ -383,6 +394,47 @@ class Sessions:
             total += len(more)
         return b"".join(parts)
 
+    def open_history(self, s: Session) -> None:
+        if self.disk_history and s.history is None:
+            try:
+                s.history = Scrollback(self.root, s.id)
+            except OSError:
+                s.history = None
+
+    def configure_history(self, disk: bool) -> None:
+        """Turn on-disk history on or off for every session; off deletes what was written."""
+        self.disk_history = bool(disk)
+        for s in self.items.values():
+            if self.disk_history:
+                self.open_history(s)
+            elif s.history is not None:
+                s.history.delete(); s.history = None
+        if not self.disk_history:
+            purge_scrollback(self.root, set())
+
+    async def history(self, sid: str, before, limit) -> dict:
+        """Older output ending at `before`, for lazy scrollback: from disk when kept, else from the ring."""
+        s = self.get(sid)
+        if type(before) is not int or before < 0 or type(limit) is not int or limit <= 0:
+            raise ValueError("Invalid history range")
+        # One reply must fit a relay frame once base64-encoded, JSON-wrapped and sealed.
+        limit = min(limit, 64 * 1024)
+        before = min(before, s.offset)
+        async with s.lock:
+            if s.history is not None and s.history.start is not None and s.history.start <= max(s.retained(), before - limit):
+                begin, data = await asyncio.to_thread(s.history.read, before, limit)
+                if begin <= before - min(limit, before - s.history.start):
+                    return {"offset": begin, "data": b64(data), "retained": s.retained()}
+            start = s.ring[0][0] if s.ring else s.offset
+            begin = max(start, before - limit)
+            out = bytearray()
+            for offset, chunk, _, _ in s.ring:
+                end = offset + len(chunk)
+                lo, hi = max(begin, offset), min(before, end)
+                if lo < hi:
+                    out += chunk[lo - offset:hi - offset]
+            return {"offset": begin, "data": b64(bytes(out)), "retained": s.retained()}
+
     def _viewer(self, peer: str, offset: int) -> Viewer:
         # The link and device speed belong to the peer, not to one session: a viewer that had to be
         # slowed down on one tab starts every other tab with that same, proven window.
@@ -396,6 +448,11 @@ class Sessions:
                 s.offset += len(chunk)
                 s.ring.append((start, chunk, s.cols, s.rows))
                 s.ring_bytes += len(chunk)
+                if s.history is not None:
+                    try:
+                        s.history.append(start, chunk)
+                    except OSError:
+                        s.history.close(); s.history = None  # disk trouble never stalls the stream
                 while s.ring_bytes > MAX_REPLAY and len(s.ring) > 1:
                     _, old, _, _ = s.ring.popleft()
                     s.ring_bytes -= len(old)
@@ -722,6 +779,10 @@ class Sessions:
             s.pump.cancel()
         if s.process is not None:
             await asyncio.to_thread(s.process.wait, timeout=3)
+        if s.history is not None:
+            s.history.delete()
+        else:
+            purge_scrollback(self.root, set(self.items) - {sid})
         self.items.pop(sid, None)
         await self.changed()
 

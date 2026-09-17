@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.22
+
+- Bundles the beta.28 interface (lazy scrollback with a local IndexedDB cache).
+
 # jaunt desktop 0.1.0-beta.21
 
 - Bundles the beta.27 interface (host icons, "Local" host name).

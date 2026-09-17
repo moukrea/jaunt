@@ -70,7 +70,7 @@ def restore(sessions,fd):
         s.created=row['created'];s.alive=row['alive'];s.exit_code=row['exitCode'];s.offset=row['offset']
         s.ring=deque((n,unb64(payload),cols,height) for n,payload,cols,height in row['ring']);s.ring_bytes=sum(len(r[1]) for r in s.ring)
         parser=row['parser'];s.attention.state=parser['state'];s.attention.payload=bytearray(unb64(parser['payload']));s.attention.overflow=parser['overflow']
-        sessions.items[s.id]=s;s.pump=asyncio.create_task(sessions._pump(s))
+        sessions.items[s.id]=s;sessions.open_history(s);s.pump=asyncio.create_task(sessions._pump(s))
         if s.alive:sessions._resume_reader(s)
         s.reaper=asyncio.create_task(sessions._reap(s,announce=s.alive))
     return os.fdopen(lockfd,'a+'),{k:v for k,v in data.items() if k not in ('schema','pid','lockfd','sessions')}

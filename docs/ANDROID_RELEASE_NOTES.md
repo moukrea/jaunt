@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.20 (versionCode 20)
+
+- Bundles the beta.28 interface (lazy scrollback with a local IndexedDB cache; resumes render the cached tail before asking the host).
+
 # jaunt Android 0.1.0-beta.19 (versionCode 19)
 
 - Bundles the beta.27 interface (host icons).

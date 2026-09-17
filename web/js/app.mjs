@@ -1,5 +1,8 @@
 import {t as tr,languages,language,preference,setLanguage,translateStatic} from './i18n.mjs';
 import {activity,clearActivity,scopeActivity,activityBadges} from './activity.mjs';
+import {ScrollbackCache} from './scrollback.mjs';
+const scrollback = new ScrollbackCache();
+const cacheKey = (a, id) => a.machine.room + ':' + id;
 import {bindTouchScroll} from './touch-scroll.mjs';
 import {desktop, LocalLink} from './desktop.mjs';
 import {leaves, prune, split, themeMode} from './workspace.mjs';
@@ -231,6 +234,9 @@ function makeMachine(machine) {
 function syncSessions(a) {
   if(a.machine.layouts) a.machine.layouts = a.machine.layouts.map(tree=>prune(tree,new Set(a.sessions.map(s=>s.id)))).filter(Boolean);
   a.machine.layout = a.machine.layouts?.find(tree=>leaves(tree).includes(a.active)) || prune(a.machine.layout, new Set(a.sessions.map(s => s.id)));
+  const alive = new Set(a.sessions.map(s => s.id));
+  for (const id of a.knownSessions || []) if (!alive.has(id)) scrollback.purge(cacheKey(a, id)).catch(() => {});
+  a.knownSessions = [...alive];
   for (const [id, t] of a.terms) {
     const s = a.sessions.find(s => s.id === id);
     if (!s) { t.term.dispose(); t.node.remove(); a.terms.delete(id); }
@@ -251,7 +257,7 @@ function handleMessage(a, message) {
   } else if (message.type === 'terminal.reset') {
     const t = a.terms.get(message.id); if (!t) return;
     t.scrollAnchor?.marker?.dispose();t.scrollAnchor=null;
-    t.term.reset(); t.offset = message.offset; t.trimmed = message.trimmed;
+    t.term.reset(); t.offset = message.offset; t.trimmed = message.trimmed; t.renderedStart = message.offset;
     if (message.cols && message.rows) t.term.resize(message.cols, message.rows);
   } else if (message.type === 'terminal.output') {
     const t = a.terms.get(message.id); if (!t) return;
@@ -263,6 +269,8 @@ function handleMessage(a, message) {
     const skip = Math.max(0, expected - message.offset);
     if (skip >= raw.length) return;
     t.offset = message.offset + raw.length;
+    scrollback.put(cacheKey(a, t.session.id), message.offset + skip, raw.subarray(skip));
+    if (t.rebuilding) { t.pendingOutput.push(raw.subarray(skip)); return; }
     t.term.write(raw.subarray(skip), () => ackOutput(a, t));
   } else if (message.type === 'terminal.exit') {
     const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
@@ -323,6 +331,7 @@ function hostMenu() {
 }
 window.addEventListener('jaunt-activity', () => { if (vault.data) renderMachines(); });
 $('host-switch').onclick = () => { if (document.querySelector('.host-menu')) { document.querySelector('.host-menu').remove(); $('host-switch').setAttribute('aria-expanded', 'false'); } else hostMenu(); };
+const hostName = a => a.machine.friendlyName || a.machine.name;
 const hostOf = a => a ? {name: a.machine.friendlyName || a.machine.name, local: !!a.machine.local, machine: a.machine} : null;
 function renderConnection() {
   const a = current(), state = a?.link.state || 'offline';
@@ -369,6 +378,10 @@ if (new URL(location.href).searchParams.has('debug')) window.jauntSimulateLatenc
 if (new URL(location.href).searchParams.has('debug')) {
   // Round trip of a real RPC on the current link, and the visible screen text of the active terminal.
   window.jauntPing = async () => { const a = current(), t0 = performance.now(); await a.link.request('session.list'); return Math.round(performance.now() - t0); };
+  window.jauntScrollTop = () => { const t = activeTerm(current()); t?.term.scrollToTop(); };
+  window.jauntHistoryFetches = () => historyFetches;
+  window.jauntCacheStats = () => scrollback.stats();
+  window.jauntRendered = () => { const t = activeTerm(current()); return t ? {start: t.renderedStart, offset: t.offset, retained: t.session.retained, lines: t.term.buffer.active.length} : null; };
   window.jauntScreen = () => { const t = activeTerm(current()); if (!t) return ''; const b = t.term.buffer.active, lines = []; for (let i = 0; i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) || ''); return lines.join('\n'); };
 }
 function renderMachines() {
@@ -493,16 +506,17 @@ function createTerm(a, session) {
   closePane.setAttribute('aria-label',tr('Close {0}',session.name));
   node.append(el('div',{class:'pane-caption'},el('span',{class:'pane-symbol'},icon(sessionIcon(session),15)),title,undock,closePane));
   const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
-    cursorBlink: true, cursorStyle: 'bar', scrollback: 10000, allowProposedApi: true, convertEol: false,
+    cursorBlink: true, cursorStyle: 'bar', scrollback: isMobile() ? 20000 : 50000, allowProposedApi: true, convertEol: false,
     screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
     linkHandler: {activate: (_event, uri) => { try { const u = new URL(uri); if (['https:', 'http:'].includes(u.protocol)) window.open(u.href, '_blank', 'noopener,noreferrer'); } catch {} }},
     theme: {background: '#111314', foreground: '#d9dfd3', cursor: '#e7a246', selectionBackground: '#455342', black: '#151918', brightBlack: '#70786f', red: '#d8897c', green: '#a3c391', yellow: '#e7bc73', blue: '#88adcb', magenta: '#c59bc7', cyan: '#8fc5bf', white: '#dbe0d3', brightWhite: '#f1f3eb'}});
   const mount = el('div',{class:'terminal-mount'});node.append(mount);
   const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
   bindTouchScroll(mount,term);
-  const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false};
+  const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false, renderedStart: null, rebuilding: false, pendingOutput: []};
   a.terms.set(session.id, t);
   term.onScroll(() => {
+    if (term.buffer.active.viewportY === 0 && term.buffer.active.baseY > 0) loadEarlierSoon(a, t);
     const d=fit.proposeDimensions();
     // Browser layout changes can reset xterm's viewport before its PTY resize.
     // Only record deliberate scrolling at the last committed dimensions.
@@ -567,7 +581,16 @@ async function attachTerm(a, t) {
   if (t.attaching?.generation === generation) return t.attaching.promise;
   t.attached = false; t.replaying=true; t.node.classList.add('terminal-restoring');t.node.dataset.loadingLabel=tr('Restoring shell…');updateTermInput(a, t);
   const promise = (async () => {
-    await a.link.request('session.attach', {id: t.session.id, after: t.offset});
+    // Cache first: what this device already rendered for this session (last 128 KiB) is shown
+    // at once and the host only sends what follows; the network cost of a resume is the delta.
+    if (t.offset == null) {
+      const cached = await scrollback.tail(cacheKey(a, t.session.id), 128 * 1024).catch(() => null);
+      if (generation !== a.link.generation || !a.terms.has(t.session.id)) return;
+      if (cached) { t.term.reset(); t.term.write(cached.bytes); t.offset = cached.end; t.renderedStart = cached.start; }
+    }
+    if (t.renderedStart == null) t.renderedStart = t.offset;
+    const info = await a.link.request('session.attach', {id: t.session.id, after: t.offset});
+    if (info && typeof info.retained === 'number') t.session.retained = info.retained;
     // xterm writes are asynchronous: drain replay before allowing parser responses/input.
     if(generation!==a.link.generation || !a.terms.has(t.session.id))return;
     await new Promise(resolve => t.term.write('', resolve));
@@ -637,6 +660,52 @@ function ackOutput(a, t) {
   }, 50);
 }
 function restoring(a) { return !!a && [...a.terms.values()].some(t => t.attaching); }
+// Lazy scrollback: reaching the top of what is rendered loads an earlier slice (cache first, then
+// the host's on-disk history), and the terminal is rebuilt with the longer stream while the
+// viewport keeps the same distance from the bottom. Output arriving meanwhile is queued.
+const EARLIER_STEP = 512 * 1024;
+let historyFetches = 0;
+function loadEarlierSoon(a, t) {
+  if (t.loadEarlierTimer || t.rebuilding || !t.attached) return;
+  t.loadEarlierTimer = setTimeout(() => { t.loadEarlierTimer = 0; loadEarlier(a, t).catch(error => reportHost(a, error)); }, 200);
+}
+async function loadEarlier(a, t) {
+  const retained = t.session.retained ?? 0;
+  if (t.rebuilding || !t.attached || t.renderedStart == null || t.renderedStart <= retained || a.link.state !== 'online') return;
+  if (t.term.buffer.active.length >= t.term.options.scrollback) return; // xterm keeps no more lines anyway
+  const key = cacheKey(a, t.session.id), head = t.offset;
+  let want = Math.max(retained, t.renderedStart - EARLIER_STEP);
+  t.rebuilding = true; t.pendingOutput = []; t.node.classList.add('terminal-loading'); t.node.dataset.loadingLabel = tr('Loading earlier output…');
+  try {
+    await scrollback.flush(key);
+    // Assemble [want, head): cached pieces stay local, the rest comes from the host in bounded requests.
+    const parts = []; let cursor = head;
+    while (cursor > want) {
+      const lo = Math.max(want, cursor - 48 * 1024); // one relay frame per reply
+      let piece = await scrollback.read(key, lo, cursor);
+      if (!piece) {
+        historyFetches++;
+        const reply = await a.link.request('session.history', {id: t.session.id, before: cursor, limit: cursor - lo});
+        if (typeof reply.retained === 'number') t.session.retained = reply.retained;
+        piece = unb64(reply.data);
+        if (!piece.length || reply.offset >= cursor) { want = cursor; break; } // nothing older is available
+        scrollback.put(key, reply.offset, piece); if (reply.offset > lo) want = Math.max(want, reply.offset);
+        cursor = reply.offset; parts.unshift(piece); continue;
+      }
+      parts.unshift(piece); cursor = lo;
+    }
+    if (want >= t.renderedStart) return;
+    const total = parts.reduce((n, p) => n + p.length, 0), bytes = new Uint8Array(total); let at = 0;
+    for (const p of parts) { bytes.set(p, at); at += p.length; }
+    const b = t.term.buffer.active, fromBottom = b.baseY - b.viewportY;
+    t.term.reset();
+    await new Promise(resolve => t.term.write(bytes, resolve));
+    for (const late of t.pendingOutput) await new Promise(resolve => t.term.write(late, resolve));
+    t.pendingOutput = []; t.renderedStart = want;
+    t.term.scrollToLine(Math.max(0, t.term.buffer.active.baseY - fromBottom));
+    ackOutput(a, t);
+  } finally { t.rebuilding = false; t.node.classList.remove('terminal-loading'); for (const late of t.pendingOutput) t.term.write(late); t.pendingOutput = []; }
+}
 function updateGeometryLabel(a, t) {
   if (a !== current() || a.active !== t.session.id) return;
   const viewers = (t.session.viewers || []).map(v => v.name + (v.active ? ' • active' : '')).join(', ');
@@ -1012,7 +1081,7 @@ function renderTransfers() {
 async function putFile(a, file, options = {}, operation = null) {
   if (file.size > (a.info?.maxFileBytes || 512 * 1024 * 1024)) throw new Error('This file exceeds the host’s transfer limit.');
   const item = transferItem(a, file.name, 'up', file.size);
-  const job=operation || activity(item.key,`${file.name} → ${a.machine.name}`,a.machine.room);
+  const job=operation || activity(item.key,`${file.name} → ${hostName(a)}`,a.machine.room);
   job.update({action:{label:tr('Cancel transfer'),run:()=>item.controller.abort()}});
   try {
     const result = await upload(a.link, file, options, value=>{progressFor(item)(value);job.update({status:`${value.status} · ${size(value.offset)} / ${size(value.total)}`,percent:value.total?Math.round(value.offset/value.total*100):null});}, item.controller.signal);
@@ -1023,7 +1092,7 @@ async function putFile(a, file, options = {}, operation = null) {
   } catch (e) { job.fail(e);item.done = true; item.error = e.name!=='AbortError'&&e.message!=='Transfer cancelled'; item.status = item.error?e.message:tr('Cancelled'); renderTransfers(); throw e; }
 }
 async function getFile(a, path, name, writer) {
-  const item = transferItem(a, name, 'down', 0),job=activity(item.key,`${name} ← ${a.machine.name}`,a.machine.room);
+  const item = transferItem(a, name, 'down', 0),job=activity(item.key,`${name} ← ${hostName(a)}`,a.machine.room);
   job.update({status:tr('Preparing download…'),action:{label:tr('Cancel transfer'),run:()=>item.controller.abort()}});
   try {
     const result = await download(a.link, path, value=>{progressFor(item)(value);job.update({status:value.status+' · '+size(value.offset)+(value.total?' / '+size(value.total):''),percent:value.total?Math.round(value.offset/value.total*100):null});}, {writer, signal: item.controller.signal});
@@ -1046,7 +1115,7 @@ async function attachFiles(a, t, files) {
   const image = files.length === 1 && files[0].type.startsWith('image/');
   let previewURL = '';
   if (image) { previewURL = URL.createObjectURL(files[0]); body.append(el('img', {class: 'modal-preview', src: previewURL, alt: files[0].name})); }
-  body.append(el('p', {class: 'modal-copy', text: `${files.map(f => f.name).join(', ')} → ${a.machine.name} / ${t.session.name}`}),
+  body.append(el('p', {class: 'modal-copy', text: `${files.map(f => f.name).join(', ')} → ${hostName(a)} / ${t.session.name}`}),
     el('p', {class: 'modal-copy', text: tr('Upload & insert path transfers the file to the host and inserts a safely quoted path, without Enter. Ask your CLI agent to read that path. Native paste instead puts a PNG in the host desktop clipboard, then sends Ctrl+V.')}));
   const doUpload = async native => {
     closeModal();
@@ -1230,7 +1299,10 @@ function workspaceSettings(a) {
   sync.onchange = async () => { sync.disabled = true; try { a.info.workspace = await a.link.request('workspace.configure', {sync: sync.checked, ...(sync.checked ? workspacePayload(a) : {})}); if (sync.checked) a.wsSent = workspaceSignature(a); } catch (e) { sync.checked = !sync.checked; report(e); } finally { sync.disabled = false; renderSettings(); } };
   const only = el('input', {type: 'checkbox', checked: !!w.displayedOnly, disabled: !w.sync, 'aria-label': tr('Only displayed sessions exist')});
   only.onchange = async () => { only.disabled = true; try { a.info.workspace = await a.link.request('workspace.configure', {displayedOnly: only.checked}); } catch (e) { only.checked = !only.checked; report(e); } finally { only.disabled = false; renderSettings(); render(); } };
-  return [settingsRow(tr('Share open sessions'), tr('Every client and the host itself show the same tabs, panes and active session for this host. Changes made anywhere follow everywhere.'), sync),
+  const disk = el('input', {type: 'checkbox', checked: a.info.scrollback?.disk !== false, disabled: !a.info.scrollback, 'aria-label': tr('Keep terminal history on disk')});
+  disk.onchange = async () => { disk.disabled = true; try { a.info.scrollback = await a.link.request('scrollback.configure', {disk: disk.checked}); } catch (e) { disk.checked = !disk.checked; report(e); } finally { disk.disabled = false; renderSettings(); } };
+  return [settingsRow(tr('Keep terminal history on disk'), tr('Up to 32 MiB per shell in the host\'s private jaunt directory, so older output loads when you scroll up on any device. Off keeps only the last 2 MiB in memory and deletes the files.'), disk),
+    settingsRow(tr('Share open sessions'), tr('Every client and the host itself show the same tabs, panes and active session for this host. Changes made anywhere follow everywhere.'), sync),
     settingsRow(tr('Only displayed sessions exist'), w.sync ? tr('Closing a tab or pane terminates its shell; the Sessions list and the close-or-terminate choice disappear for this host.') : tr('Requires shared open sessions.'), only)];
 }
 function hostVersionText(a) {
@@ -1298,7 +1370,7 @@ const bridgeJobs=new Map();
 function bridgeMessageActivity(a,m){
   const key='bridge-'+a.machine.room+'-'+m.id;
   let job=bridgeJobs.get(key);
-  if(!job){job=activity(key,tr("AI sessions · {0}",a.machine.name),a.machine.room);bridgeJobs.set(key,job);}
+  if(!job){job=activity(key,tr("AI sessions · {0}",hostName(a)),a.machine.room);bridgeJobs.set(key,job);}
   const who=`${m.from} → ${m.to}`;
   const labels={accepted:tr('Accepted'),delivering:tr('Delivering…'),delivered:tr('Delivered to the session'),failed:tr('Delivery failed'),cancelled:tr('Cancelled')};
   const text=`${who} · ${labels[m.state]||m.state}${m.detail?' · '+m.detail:''}${m.preview?' · '+m.preview:''}`;
@@ -1318,7 +1390,7 @@ function bridgeSettings(a){
   } else {
     const toggle=el('input',{type:'checkbox',checked:!!b.enabled,'aria-label':tr('Claude Code ↔ Codex bridge')});
     toggle.onchange=async()=>{
-      toggle.disabled=true;const job=activity('bridge-setup-'+a.machine.room,tr("AI sessions · {0}",a.machine.name),a.machine.room);
+      toggle.disabled=true;const job=activity('bridge-setup-'+a.machine.room,tr("AI sessions · {0}",hostName(a)),a.machine.room);
       job.update({status:toggle.checked?tr('Preparing the integrations in Claude Code and Codex…'):tr('Turning the bridge off…')});
       try{a.info.bridge=await a.link.request('bridge.configure',{enabled:toggle.checked},120000);job.finish(toggle.checked?tr('Bridge on. Sessions opened from now on take part; sessions already open join after their next restart. Codex asks once in its terminal to trust the new hooks.'):tr('Bridge off. Existing sessions keep running; no further cross-runtime messages are delivered.'));}
       catch(error){toggle.checked=!toggle.checked;job.fail(error);}
@@ -1379,7 +1451,7 @@ function checkHostUpdate(a,allowRestart=false){return followHostUpdate(a,()=>a.l
 async function followHostUpdate(a,start,initial=null,allowRestart=false) {
   const existing=hostUpdateJobs.get(a.machine.room);
   if(existing){existing.job.update({});return;}
-  const job=activity('host-update-'+a.machine.room,tr("Host update · {0}",a.machine.name),a.machine.room);
+  const job=activity('host-update-'+a.machine.room,tr("Host update · {0}",hostName(a)),a.machine.room);
   const tracker={job,operation:initial?.operation||null,requestedAt:Date.now()/1000,settled:false};
   hostUpdateJobs.set(a.machine.room,tracker);
   let settle;const settled=new Promise(resolve=>{settle=resolve;});
@@ -1546,6 +1618,7 @@ function forgetMachine(a) {
   confirmAction(tr('Forget this machine?'), tr('This removes its key locally. It does not terminate shells or revoke other browsers. To revoke this saved identity on the host, use Authorized devices first.'), tr('Forget'), async () => {
     if (isAndroid) await nativeCall('notifications.disable', {room: a.machine.room});
     a.link.stop(); for (const t of a.terms.values()) { t.term.dispose(); t.node.remove(); }
+    for (const id of a.knownSessions || []) scrollback.purge(cacheKey(a, id)).catch(() => {});
     machines.delete(a.machine.room); vault.data.machines = vault.data.machines.filter(m => m.room !== a.machine.room);
     if (selected === a.machine.room) selected = [...machines.keys()][0] || null;
     await persist(); render(); renderSettings();
@@ -1567,6 +1640,7 @@ async function resumeWorkspace() {
   // The local host is named after the current language; a friendly name set by the user still wins.
   for(const m of vault.data.machines)if(m.local&&m.name!==tr('Local')){if(m.friendlyName===m.name)m.friendlyName='';m.name=tr('Local');}
   for (const m of vault.data.machines) if(!m.local||desktopHostAvailable)makeMachine(m);
+  scrollback.sweep().catch(() => {});
   selected = machines.has(deepLink.get('host')) ? deepLink.get('host') : (machines.has(prefs().defaultHost) ? prefs().defaultHost : [...machines.keys()][0]) || null;
   applyTheme();try{const saved=localStorage.getItem('jaunt-sidebar-collapsed');if(saved!==null)vault.data.preferences.sidebarCollapsed=saved==='true';}catch{}document.body.classList.toggle('sidebar-collapsed',!!prefs().sidebarCollapsed);$('sidebar-toggle').setAttribute('aria-expanded',String(!prefs().sidebarCollapsed));$('sidebar-toggle').setAttribute('aria-label',prefs().sidebarCollapsed?tr('Expand sidebar'):tr('Collapse sidebar'));
   for (const a of machines.values()) a.link.start();

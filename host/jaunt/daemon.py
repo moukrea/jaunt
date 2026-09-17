@@ -236,6 +236,7 @@ class Host:
         self.runtime_id = token(12)
         self.transport = Transport(state.data, self.receive, self.disconnected)
         self.sessions = Sessions(self.send, self.sessions_changed, state.root, self.attention)
+        self.sessions.disk_history = bool(state.data.get("scrollback", {}).get("disk", True))
         self.files = Files(state.root, state.data.get("maxFileBytes", 512 * 1024 * 1024))
         self.clipboard = Clipboard()
         self.last_notification = 0.0
@@ -254,7 +255,7 @@ class Host:
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
                 "replayBytes": 2 * 1024 * 1024, "flowControl": True, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
-                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(),
+                "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(), "scrollback": self.scrollback(),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
     def attention(self, session, event, title="", body=""):
@@ -329,6 +330,15 @@ class Host:
             result = await self.sessions.attach(peer.routing_id, p)
             await self.sessions.add_view(peer.routing_id, p['id'], peer.display_name)
             return result
+        if method == "session.history":
+            return await self.sessions.history(p["id"], p.get("before"), p.get("limit", 48 * 1024))
+        if method == "scrollback.configure":
+            if not isinstance(p.get("disk"), bool):
+                raise ValueError("disk must be a boolean")
+            self.state.data["scrollback"] = {"disk": p["disk"]}
+            self.state.save()
+            self.sessions.configure_history(p["disk"])
+            return self.scrollback()
         if method == "session.detach":
             session = self.sessions.get(p["id"])
             session.subscribers.pop(peer.routing_id, None)
@@ -502,6 +512,10 @@ class Host:
                 "liveClients": sum(p.ready for p in self.peers.values())}
 
     # ---- shared workspace (open sessions, layouts) -------------------------------
+    def scrollback(self) -> dict:
+        from .scrollback import MAX_BYTES
+        return {"disk": self.sessions.disk_history, "maxBytes": MAX_BYTES}
+
     def workspace(self) -> dict:
         data = self.state.data.get("workspace") or {}
         return {"sync": bool(data.get("sync")), "displayedOnly": bool(data.get("displayedOnly")),
@@ -781,6 +795,9 @@ class Host:
     async def run(self) -> None:
         relay_url(self.state.data["relay"], self.state.data["room"])
         handoff = os.environ.pop("jaunt_HANDOFF_FD", "")
+        if not handoff:
+            from .scrollback import purge as purge_scrollback
+            purge_scrollback(self.state.root, set())  # a fresh start has no sessions: drop stale history
         if handoff:
             from .handoff import restore
             self.lockfile, inherited = restore(self.sessions,int(handoff))

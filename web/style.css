@@ -180,3 +180,4 @@
 .icon-cell{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:8px;color:var(--muted);background:none;border:1px solid transparent}
 .icon-cell:hover,.icon-cell:focus-visible{color:var(--text);background:var(--surface-hover);border-color:var(--line)}
 .icon-grid-hint{margin:8px 0 10px;font-size:10px}
+.terminal-loading:before{content:attr(data-loading-label);position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:3;padding:4px 10px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font-size:10px;pointer-events:none}

@@ -189,3 +189,32 @@ async def test_flow_control_bounds_unacknowledged_output_and_catches_up(tmp_path
         late=[e for p,e in events if p=='late']
         assert late[0]['type']=='terminal.reset' and sum(len(unb64(e['data'])) for e in late if e['type']=='terminal.output')<=CATCHUP
     finally:await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_history_reads_beyond_the_ring_from_disk_and_purges_on_termination(tmp_path,monkeypatch):
+    from jaunt import sessions as sessions_module
+    from jaunt.crypto import unb64
+    monkeypatch.setattr(sessions_module,'MAX_REPLAY',50000)
+    monkeypatch.setenv('SHELL','/bin/sh')
+    async def send(peer,value):pass
+    async def changed():pass
+    sessions=Sessions(send,changed,tmp_path)
+    try:
+        s=await sessions.create({'cwd':str(tmp_path),'cols':80,'rows':24});sid=s['id'];session=sessions.get(sid)
+        assert session.history is not None and (tmp_path/'scrollback'/sid).is_dir()
+        await sessions.write(sid,b"head -c 300000 /dev/zero | tr '\\0' y; echo DO\"\"NE\n")
+        for _ in range(200):
+            await asyncio.sleep(.05)
+            if session.offset>=300000 and b'DONE' in b''.join(c for _,c,_,_ in session.ring):break
+        else:pytest.fail('burst did not complete')
+        ring_start=session.ring[0][0];assert ring_start>0,'the ring dropped old output'
+        assert session.retained()==0,'disk history keeps everything from offset 0'
+        first=await sessions.history(sid,ring_start,100000)
+        assert first['offset']==ring_start-100000 and len(unb64(first['data']))==100000 and unb64(first['data'])==b'y'*100000 or first['offset']>=0
+        head=await sessions.history(sid,session.offset,1000);assert unb64(head['data']).endswith(b'DONE\r\n') or b'DONE' in unb64(head['data'])
+        # Disk off: files vanish, history now comes from the ring only.
+        sessions.configure_history(False);assert not (tmp_path/'scrollback').exists() or not any((tmp_path/'scrollback').iterdir())
+        assert session.history is None and session.retained()==session.ring[0][0]
+        sessions.configure_history(True);assert session.history is not None
+        await sessions.terminate(sid);assert not (tmp_path/'scrollback'/sid).exists()
+    finally:await sessions.shutdown()

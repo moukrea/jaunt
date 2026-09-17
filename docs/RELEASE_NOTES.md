@@ -1,3 +1,15 @@
+# jaunt 0.1.0-beta.28
+
+Scrollback, designed rather than patched, after beta.26's bounded replay left older output unreachable:
+
+- The host keeps each shell's output on disk (up to 32 MiB per shell, 8 MiB segments named by absolute offset, private 0600 files in the jaunt state directory; survives in-place host updates; deleted when the shell ends). Settings → *Keep terminal history on disk* turns it off, which deletes the files and keeps only the 2 MiB in memory.
+- Opening a terminal renders the last 128 KiB. Scrolling to the top loads earlier output lazily ("Loading earlier output…"), 512 KiB per step, and rebuilds the terminal with the viewport kept at the same distance from the bottom while live output is queued. xterm keeps 50,000 lines (20,000 on phones).
+- Every device caches what it renders in IndexedDB (browser, Android and desktop alike; asynchronous, large, survives reloads), keyed by host room, session and absolute stream offset: reconciliation is a range check, never a diff. A resume shows the cached tail at once and asks the host only for what follows; scrolling back is served from the cache and the host is asked only for ranges the device never received, including the bytes a slow link skipped. Per shell 32 MiB, 256 MiB in total, least recently used shells evicted, a shell's cache dropped when it ends or the host is forgotten.
+- History replies are sized to one relay frame (64 KiB); requests are sequential and paced like all traffic.
+- Activity titles (host update, transfers, AI sessions) use the host's friendly name when you set one.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.27
 
 - Host icons: a house for the local host and a cloud for remote hosts replace the monitor and globe. Each host can carry any icon of the icon set (about 2,100 Lucide icons), chosen in Settings → selected machine → Icon with a search; the choice is stored on the device and shows in the sidebar, the top bar, the host menu and toasts. *Default* restores the house or cloud.
