@@ -184,6 +184,8 @@ class Peer:
             if session is None or not session.alive:
                 return
             await self.host.sessions.activity(self.routing_id, message["id"], message, self.display_name)
+        elif kind == "terminal.ack":
+            await self.host.sessions.ack(self.routing_id, str(message.get("id", "")), message.get("offset"))
         elif kind == "ping":
             await self.send({"type": "pong", "at": message.get("at")})
         else:
@@ -251,7 +253,7 @@ class Host:
                 "version": __version__, "platform": platform.system(), "user": getpass.getuser(),
                 "home": str(Path.home()), "tmux": bool(shutil.which("tmux")),
                 "clipboard": self.clipboard.capabilities(), "maxFileBytes": self.files.max_bytes,
-                "replayBytes": 2 * 1024 * 1024, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
+                "replayBytes": 2 * 1024 * 1024, "flowControl": True, "sharedViews": True, "sessionDirectory": True, "seamlessUpdates": True,
                 "updates": update_status(self.state.root), "bridge": self.bridge.status(), "workspace": self.workspace(),
                 "notifications": self.state.data.get('attention', {'bell': True, 'program': True, 'exit': True})}
 
@@ -329,7 +331,7 @@ class Host:
             return result
         if method == "session.detach":
             session = self.sessions.get(p["id"])
-            session.subscribers.discard(peer.routing_id)
+            session.subscribers.pop(peer.routing_id, None)
             session.viewers.pop(peer.routing_id, None)
             if session.active_view == peer.routing_id:
                 session.active_view = ""

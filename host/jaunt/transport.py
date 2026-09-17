@@ -85,6 +85,11 @@ class Transport:
                         await self.receive(message)
             except asyncio.CancelledError:
                 break
+            except ConnectionClosed as exc:
+                # The close code tells a relay rate-limit ("Slow down") from a network drop.
+                received = getattr(exc, "rcvd", None)
+                code = getattr(received, "code", None); reason = (getattr(received, "reason", "") or "")[:60]
+                log.warning("Relay disconnected (%s, code %s %s); reconnecting", type(exc).__name__, code, reason)
             except Exception as exc:
                 # Do not log credentials or message bodies.
                 log.warning("Relay disconnected (%s); reconnecting", type(exc).__name__)

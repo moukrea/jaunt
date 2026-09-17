@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.20
+
+- Bundles the beta.26 interface (visible-only terminal subscriptions, acknowledged output).
+
 # jaunt desktop 0.1.0-beta.19
 
 - Bundles the beta.25 interface (host symbol and switcher in the top bar, tinted per-host activity strip).

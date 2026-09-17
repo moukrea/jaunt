@@ -16,19 +16,47 @@ class Clipboard:
     def __init__(self):
         self.text = ""
 
+    @staticmethod
+    def display_env() -> dict:
+        """Environment for clipboard tools. A host started by systemd at boot has no DISPLAY or
+        WAYLAND_DISPLAY (and an in-place update keeps that environment), so the display is
+        discovered from its sockets at call time instead of trusted from the process environment."""
+        env = dict(os.environ)
+        if env.get("jaunt_CLIPBOARD") == "headless":
+            env.pop("DISPLAY", None); env.pop("WAYLAND_DISPLAY", None)
+            return env
+        runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        if not env.get("WAYLAND_DISPLAY"):
+            for candidate in sorted(Path(runtime).glob("wayland-*")) if Path(runtime).is_dir() else []:
+                if not candidate.name.endswith(".lock") and candidate.is_socket():
+                    env["WAYLAND_DISPLAY"] = candidate.name
+                    break
+        if not env.get("DISPLAY"):
+            sockets = sorted(Path("/tmp/.X11-unix").glob("X*"), key=lambda p: int(p.name[1:]) if p.name[1:].isdigit() else 1 << 30) if Path("/tmp/.X11-unix").is_dir() else []
+            for candidate in sockets:
+                if candidate.name[1:].isdigit() and candidate.is_socket():
+                    env["DISPLAY"] = ":" + candidate.name[1:]
+                    break
+        if env.get("DISPLAY") and not env.get("XAUTHORITY") and not (Path.home() / ".Xauthority").exists():
+            for candidate in sorted(Path(runtime).glob(".mutter-Xwaylandauth.*")) if Path(runtime).is_dir() else []:
+                env["XAUTHORITY"] = str(candidate)
+                break
+        return env
+
     def capabilities(self) -> dict:
         if sys.platform == "darwin" and shutil.which("osascript"):
             return {"text": True, "image": True, "backend": "macOS"}
-        if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-copy") and shutil.which("wl-paste"):
+        env = self.display_env()
+        if env.get("WAYLAND_DISPLAY") and shutil.which("wl-copy") and shutil.which("wl-paste"):
             return {"text": True, "image": True, "backend": "Wayland"}
-        if os.environ.get("DISPLAY") and shutil.which("xclip"):
+        if env.get("DISPLAY") and shutil.which("xclip"):
             return {"text": True, "image": True, "backend": "X11"}
         return {"text": False, "image": False, "backend": "jaunt buffer (headless)"}
 
     async def run(self, args: list[str], data: bytes | None = None) -> bytes:
         proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.DEVNULL)
+                                                    stderr=asyncio.subprocess.DEVNULL, env=self.display_env())
         try:
             output, _ = await asyncio.wait_for(proc.communicate(data), 5)
         except asyncio.TimeoutError:
@@ -90,7 +118,7 @@ class Clipboard:
         # capture inherited stdout pipes, which would make communicate hang.
         proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.DEVNULL,
-                                                    stderr=asyncio.subprocess.DEVNULL)
+                                                    stderr=asyncio.subprocess.DEVNULL, env=self.display_env())
         assert proc.stdin
         proc.stdin.write(data)
         await proc.stdin.drain()

@@ -26,6 +26,27 @@ from .crypto import b64, token
 
 Send = Callable[[str, dict], Awaitable[None]]
 MAX_REPLAY = 2 * 1024 * 1024
+# Flow control per viewer: at most WINDOW bytes of output in flight (sent but not acknowledged)
+# per peer; a viewer that falls further behind stops receiving the live stream and catches up
+# from its acknowledgement with at most CATCHUP bytes (older output is skipped after a reset:
+# full-screen programs redraw, and a phone never needs megabytes of stale spinner frames).
+WINDOW = 512 * 1024        # ceiling: ~300 ms of full-rate relay output, a WAN viewer keeps up
+WINDOW_START = 128 * 1024  # a new viewer starts here and doubles while it keeps up (slow-start)
+MIN_WINDOW = 32 * 1024     # a viewer that falls behind (slow link or slow parser) restarts from small, fresh slices
+CATCHUP = 128 * 1024  # several full-screen redraws; a phone should not wait for more before it can act
+# PTY reads are coalesced for up to COALESCE seconds (or 64 KiB) before becoming one relay
+# frame per viewer: chatty TUIs write dozens of times per second and the relay caps frames.
+COALESCE = 0.03
+COALESCE_BYTES = 64 * 1024
+
+
+@dataclass
+class Viewer:
+    sent: int = 0      # stream offset up to which this peer has been sent output
+    acked: int = 0     # stream offset the peer has confirmed it rendered
+    behind: bool = False
+    window: int = WINDOW_START  # bytes allowed in flight; collapses when the viewer falls behind, regrows while it keeps up
+    streak: int = 0        # acknowledgements in a row without falling behind
 
 
 class AttentionParser:
@@ -115,7 +136,7 @@ class Session:
     offset: int = 0
     ring: deque = field(default_factory=deque)
     ring_bytes: int = 0
-    subscribers: set = field(default_factory=set)
+    subscribers: dict = field(default_factory=dict)  # peer -> Viewer (flow control)
     viewers: dict = field(default_factory=dict)
     active_view: str = ""
     attention: AttentionParser = field(default_factory=AttentionParser)
@@ -131,7 +152,10 @@ class Session:
         return {"id": self.id, "name": self.name, "cwd": self.cwd, "pid": self.pid,
                 "cols": self.cols, "rows": self.rows, "alive": self.alive,
                 "exitCode": self.exit_code, "created": self.created, "tmux": self.tmux,
-                "program": self.program, "viewers": list(self.viewers.values()), "activeView": self.active_view}
+                "program": self.program, "viewers": list(self.viewers.values()), "activeView": self.active_view,
+                "offset": self.offset,
+                "flow": {peer: {"lag": self.offset - v.acked, "inflight": v.sent - v.acked, "window": v.window, "behind": v.behind}
+                         for peer, v in self.subscribers.items()}}
 
 
 class Sessions:
@@ -140,6 +164,7 @@ class Sessions:
         self.items: dict[str, Session] = {}
         self.accepting = True
         self.attention = attention or (lambda *_: None)
+        self.peer_window: dict[str, int] = {}
         self.loop = asyncio.get_running_loop()
 
     def list(self) -> list[dict]:
@@ -320,17 +345,52 @@ class Sessions:
         except (ConnectionError, RuntimeError):
             pass
 
-    async def _pump(self, s: Session) -> None:
-        while True:
-            chunk = await s.queue.get()
-            for event in s.attention.feed(chunk):
-                if event == 'program':
-                    for title, body in s.attention.messages:
-                        self.attention(s, event, title, body)
-                else:
-                    self.attention(s, event)
+    def _feed_attention(self, s: Session, chunk: bytes) -> None:
+        # Notifications are detected on every byte the program writes, whether or not
+        # any viewer currently receives the stream.
+        for event in s.attention.feed(chunk):
+            if event == 'program':
+                for title, body in s.attention.messages:
+                    self.attention(s, event, title, body)
+            else:
+                self.attention(s, event)
+
+    async def _gather(self, s: Session) -> bytes:
+        """One PTY read, plus whatever follows within COALESCE seconds when the program is
+        redrawing (a lone keystroke echo is not delayed)."""
+        chunk = await s.queue.get()
+        s.queue.task_done()
+        self._feed_attention(s, chunk)
+        if s.alive:
+            self._resume_reader(s)
+        if len(chunk) < 512 and s.queue.empty():
+            return chunk
+        parts, total = [chunk], len(chunk)
+        deadline = self.loop.time() + COALESCE
+        while total < COALESCE_BYTES:
+            remaining = deadline - self.loop.time()
+            if remaining <= 0 and s.queue.empty():
+                break
+            try:
+                more = await asyncio.wait_for(s.queue.get(), max(0.0, remaining))
+            except asyncio.TimeoutError:
+                break
+            s.queue.task_done()
+            self._feed_attention(s, more)
             if s.alive:
                 self._resume_reader(s)
+            parts.append(more)
+            total += len(more)
+        return b"".join(parts)
+
+    def _viewer(self, peer: str, offset: int) -> Viewer:
+        # The link and device speed belong to the peer, not to one session: a viewer that had to be
+        # slowed down on one tab starts every other tab with that same, proven window.
+        return Viewer(sent=offset, acked=offset, window=self.peer_window.get(peer, WINDOW_START))
+
+    async def _pump(self, s: Session) -> None:
+        while True:
+            chunk = await self._gather(s)
             async with s.lock:
                 start = s.offset
                 s.offset += len(chunk)
@@ -340,9 +400,74 @@ class Sessions:
                     _, old, _, _ = s.ring.popleft()
                     s.ring_bytes -= len(old)
                 event = {"type": "terminal.output", "id": s.id, "offset": start, "data": b64(chunk)}
-                for peer in tuple(s.subscribers):
+                for peer, viewer in tuple(s.subscribers.items()):
+                    if viewer.behind or viewer.sent != start:
+                        viewer.behind = True
+                        continue
+                    if s.offset - viewer.acked > viewer.window:
+                        # Too much unconfirmed output for this peer: stop streaming to it and
+                        # let its next acknowledgement drive a bounded catch-up, with a smaller window.
+                        viewer.behind = True
+                        viewer.window = MIN_WINDOW
+                        self.peer_window[peer] = viewer.window
+                        viewer.streak = 0
+                        continue
+                    viewer.sent = s.offset
                     await self._safe_send(peer, event)
-            s.queue.task_done()
+
+    async def ack(self, peer: str, sid: str, offset: int) -> None:
+        """A viewer confirmed it rendered the stream up to `offset`."""
+        s = self.items.get(sid)
+        if s is None or peer not in s.subscribers or type(offset) is not int:
+            return
+        viewer = s.subscribers[peer]
+        viewer.acked = max(viewer.acked, min(offset, s.offset))
+        if not viewer.behind:
+            viewer.streak += 1
+            if viewer.streak >= 8 and viewer.window < WINDOW:
+                viewer.window = min(WINDOW, viewer.window * 2)
+                self.peer_window[peer] = viewer.window
+                viewer.streak = 0
+            return
+        async with s.lock:
+            viewer = s.subscribers.get(peer)
+            if viewer is None:
+                return
+            if viewer.sent - viewer.acked > viewer.window // 2:
+                return  # still digesting what it was sent; wait for a later acknowledgement
+            # Catch up with the freshest slice only: what this viewer can render before the next one.
+            await self._send_from(peer, s, viewer.sent, limit=max(MIN_WINDOW // 2, viewer.window // 2))
+            viewer.behind = False
+
+    async def _send_from(self, peer: str, s: Session, after: int, limit: int = CATCHUP) -> None:
+        """Send the stream from `after` to the head, at most `limit` bytes (older output is
+        skipped after a reset). Caller holds s.lock. Marks the viewer as sent to the head."""
+        start = s.ring[0][0] if s.ring else s.offset
+        floor = max(start, s.offset - limit)
+        if after < floor:
+            after = floor
+            await self._safe_send(peer, {"type": "terminal.reset", "id": s.id,
+                                        "offset": after, "trimmed": True,
+                                        "cols": s.cols, "rows": s.rows})
+        viewer = s.subscribers.get(peer)
+        if viewer is not None:
+            # Skipped bytes were never sent: only what follows `after` counts as in flight.
+            viewer.acked = max(viewer.acked, after)
+        replay_size = None
+        for offset, chunk, cols, rows in s.ring:
+            end = offset + len(chunk)
+            if end > after:
+                if replay_size != (cols, rows):
+                    await self._safe_send(peer, {"type": "terminal.geometry", "id": s.id,
+                                                "cols": cols, "rows": rows, "activeView": s.active_view,
+                                                "viewers": list(s.viewers.values())})
+                    replay_size = (cols, rows)
+                begin = max(after, offset)
+                await self._safe_send(peer, {"type": "terminal.output", "id": s.id,
+                                            "offset": begin, "data": b64(chunk[begin - offset:])})
+        viewer = s.subscribers.get(peer)
+        if viewer is not None:
+            viewer.sent = s.offset
 
     async def _reap(self, s: Session, announce: bool = True) -> None:
         while s.alive:
@@ -386,27 +511,19 @@ class Sessions:
             raise ValueError("Invalid replay offset")
         async with s.lock:
             start = s.ring[0][0] if s.ring else s.offset
-            if after is None or after < start or after > s.offset:
+            if after is None or after > s.offset:
+                after = start
+            s.subscribers[peer] = self._viewer(peer, after)
+            if after < start:
+                # Older than the ring (or a fresh view): announce a reset at the point we replay from.
                 after = start
                 await self._safe_send(peer, {"type": "terminal.reset", "id": s.id,
                                             "offset": start, "trimmed": start > 0,
                                             "cols": s.ring[0][2] if s.ring else s.cols, "rows": s.ring[0][3] if s.ring else s.rows})
-            replay_size = None
-            for offset, chunk, cols, rows in s.ring:
-                end = offset + len(chunk)
-                if end > after:
-                    if replay_size != (cols, rows):
-                        await self._safe_send(peer, {"type": "terminal.geometry", "id": s.id,
-                                                    "cols": cols, "rows": rows, "activeView": s.active_view,
-                                                    "viewers": list(s.viewers.values())})
-                        replay_size = (cols, rows)
-                    begin = max(after, offset)
-                    await self._safe_send(peer, {"type": "terminal.output", "id": s.id,
-                                                "offset": begin, "data": b64(chunk[begin - offset:])})
+            await self._send_from(peer, s, after, limit=min(CATCHUP, s.subscribers[peer].window))
             await self._safe_send(peer, {"type": "terminal.geometry", "id": s.id,
                                         "cols": s.cols, "rows": s.rows, "activeView": s.active_view,
                                         "viewers": list(s.viewers.values())})
-            s.subscribers.add(peer)
         return s.info()
 
     async def write(self, sid: str, data: bytes) -> None:
@@ -481,8 +598,9 @@ class Sessions:
         return s.info()
 
     def detach(self, peer: str) -> None:
+        self.peer_window.pop(peer, None)
         for s in self.items.values():
-            s.subscribers.discard(peer)
+            s.subscribers.pop(peer, None)
             s.viewers.pop(peer, None)
             if s.active_view == peer:
                 s.active_view = ""

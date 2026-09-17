@@ -6,7 +6,7 @@
 
 jaunt connects the devices you carry to the machines you work on. Install a small host on each Linux or macOS machine, pair your phone, laptop or desktop once, and every one of them shows the same workspace: real shells in real PTYs, the files next to them, and the sessions you left running. Open, rename, split, reorder, close or terminate shells on any host from any device; with *shared open sessions* on, the same tabs, panes and active shell follow you from screen to screen. Claude Code and Codex run there like any other program, and when both are installed on a host, one switch lets their sessions on the same project know about each other and exchange messages. Clients: a browser (also installable as a PWA), a native Android app and a native desktop app; all three ship the same interface. Connections go host-out through a relay, end-to-end encrypted, with no open port, no VPN and no account.
 
-**Host: 0.1.0-beta.25 · Desktop: 0.1.0-beta.19 · Android: 0.1.0-beta.17.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
+**Host: 0.1.0-beta.26 · Desktop: 0.1.0-beta.20 · Android: 0.1.0-beta.18.** [Open jaunt](https://moukrea.github.io/jaunt/). Release publication and validation are tracked in the validation report. The protocol has **not received an independent security audit**. See the [latest validation report](docs/SEAMLESS_WORKSPACE_VALIDATION.md) for observed test results and unvalidated limitations.
 
 ## Install the host
 
@@ -16,7 +16,7 @@ bash -o pipefail -c 'curl -qfL --connect-timeout 10 --max-time 120 https://moukr
 
 Supports Linux, macOS, and WSL. Requires `curl`. The installer uses a compatible Python 3.11–3.14 runtime or installs a private Python runtime through uv. The host installs without administrator privileges. On Ubuntu with restricted user namespaces, the optional desktop app uses the system package installer and may request an administrator password to configure its sandbox. It verifies the release SHA-256, creates a private environment, and starts a user service when available. Automatic updates are enabled. Compatible hosts retain their shell processes during runtime replacement and wait for transfers to finish.
 
-On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.17/jaunt-android-v0.1.0-beta.17.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
+On Android, [install the signed APK](https://github.com/moukrea/jaunt/releases/download/android-v0.1.0-beta.18/jaunt-android-v0.1.0-beta.18.apk), then scan the QR code displayed by the host. On a desktop or in a browser, open **https://moukrea.github.io/jaunt/**. You can also paste the `jaunt1.…` pairing string. The QR code expires after ten minutes and can be used only once. Each remembered device then uses its own key, so switching Wi-Fi or mobile networks does not require pairing again. Keep the tab open for automatic reconnection; reopen the app if the mobile OS suspends or kills it.
 
 ```sh
 jaunt gui                        # Open/install the native desktop workspace
@@ -99,7 +99,7 @@ Existing installations need the release containing their updater before that upd
 
 A network interruption has one persistent connection banner with a retry action. jaunt reconnects using the saved device key; it does not replay unsent terminal input. Revocation and failed host verification stop the connection and explain the next step. Errors in a dialog stay in that dialog; other action errors remain visible until dismissed. Short confirmation toasts are deduplicated and limited to two.
 
-Latency is measured continuously with small round trips (more often while the link is degraded, and a probe that has not come back yet already counts). From 2 s the latency figure in the top bar turns the accent colour with **High latency, expect slowness** in bold, on desktop and mobile, so a slow link is not mistaken for a bug. From 15 s a waiting overlay covers the terminals until the link settles (under 10 s); **Use anyway** lifts it for the current spike. Both tiers use hysteresis to avoid flickering.
+Each device receives only the output of the terminals it displays: hidden tabs, other hosts' tabs and a backgrounded app cost nothing on the link, and a terminal shown again catches up with a bounded tail (full-screen programs redraw). Output is acknowledged as rendered and the host keeps a bounded amount in flight per viewer, so a phone on a poor link is never buried under a backlog and its round trips stay short. Notifications are detected on the host for every terminal, displayed or not. Latency is measured continuously with small round trips (more often while the link is degraded, and a probe that has not come back yet already counts). From 2 s the latency figure in the top bar turns the accent colour with **High latency, expect slowness** in bold, on desktop and mobile, so a slow link is not mistaken for a bug. From 15 s a waiting overlay covers the terminals until the link settles (under 10 s); **Use anyway** lifts it for the current spike. Both tiers use hysteresis to avoid flickering.
 
 Uploads, downloads, service installation and update checks show progress and a final result in the Activity strip, which is tinted by the state of its most important operation (running, needs attention, failed, done), shows one operation at a time unless you open the history, and only lists the selected host's operations; other hosts carry a badge in the sidebar when something of theirs needs attention. The top bar shows the host with a monitor (local) or globe (remote) icon coloured by its connection state, and clicking the host name switches to another paired host. Network pauses are explicit, transfer cancellation is available, and completed history can be expanded. Available updates provide a direct action instead of an expiring toast.
 
@@ -109,7 +109,7 @@ Enable notifications in **Settings** and use its test action. Program notificati
 
 ## Known limitations
 
-- Up to 16 active shells, 32 retained views, 2 MiB of raw replay per PTY, and 10,000 xterm scrollback lines. Copy-all covers retained history, not an unlimited log.
+- Up to 16 active shells, 32 retained views, 2 MiB of retained output per PTY, and 10,000 xterm scrollback lines. Copy-all covers retained history, not an unlimited log. A device only receives the output of the terminals it displays; a tab shown again catches up with the last 128 KiB at most, and a viewer on a slow link or a slow device is fed the freshest output in bounded slices rather than every byte, so its scrollback can have gaps that the host itself does not have.
 - Host file limit: 512 MiB. In-memory downloads are limited to 128 MiB in browsers without direct file writing; previews are limited to 16 MiB. Up to eight simultaneous uploads and 1 GiB of declared total size.
 - Uploads resume after network interruptions while the host and page retain the transfer. Restart the upload after a host restart or full page reload; jaunt does not obtain unauthorized persistent access to the phone's local files.
 - Ordinary shells survive disconnection and compatible runtime updates, **not an explicit daemon stop/restart or machine reboot**. tmux can survive a daemon restart, but not an OS reboot.
@@ -146,6 +146,7 @@ python tests/client_update_e2e.py    # Browser-driven host self-update, pushed p
 python tests/bridge_e2e.py           # Real Claude Code and Codex sessions discover and message each other through the bridge (uses your real accounts)
 python tests/workspace_sync_e2e.py   # Shared open sessions between two clients, close-or-terminate choice, displayed-only mode
 python tests/latency_e2e.py          # High and extreme latency tiers (top bar warning, waiting overlay, "use anyway")
+python tests/flow_control_e2e.py     # Visible-only subscriptions, bounded per-viewer backlog on a throttled link, catch-up, notifications from hidden tabs
 ```
 
 Set `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.
