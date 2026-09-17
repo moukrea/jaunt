@@ -161,3 +161,15 @@ def test_policy_rules_pre_approve_commands(tmp_path):
     for i in range(49):policy.add_rule(k,f'cmd{i}')
     with pytest.raises(ValueError):policy.add_rule(k,'one-too-many')
     with pytest.raises(ValueError):policy.add_rule('nobody','ls')
+
+
+def test_policy_features_migrate_and_switch(tmp_path):
+    """The single switch of earlier versions becomes the three shell capabilities; messages stay off."""
+    state=State(tmp_path/'state.json');state.data['agents']={'enabled':True,'requesters':{},'log':[]};state.save()
+    policy=Policy(state);assert policy.features()=={'exec':True,'typeLocal':True,'typeRemote':True,'messages':False} and policy.enabled
+    for f in ('exec','typeLocal','typeRemote'):policy.set_feature(f,False)
+    assert not policy.enabled and not state.data['agents']['enabled']
+    policy.set_feature('messages',True);assert policy.enabled and policy.feature('messages') and not policy.feature('exec')
+    with pytest.raises(ValueError):policy.set_feature('nope',True)
+    with pytest.raises(ValueError):policy.set_feature('exec','yes')
+    fresh=Policy(State(tmp_path/'fresh.json'));assert not fresh.enabled and fresh.features()['messages'] is False

@@ -7,6 +7,10 @@ from browser_e2e import Harness,ROOT,until
 from agents_e2e import Mcp
 def ctl(h,method,params=None):
     return json.loads(subprocess.check_output([sys.executable,'-c','import json,sys;sys.path.insert(0,sys.argv[1]);from jaunt.cli import control;print(json.dumps(control(sys.argv[2],json.loads(sys.argv[3]))))',str(ROOT/'host'),method,json.dumps(params or {})],env=h.env))
+async def enable(p):
+ # The capabilities this run needs: commands on linked machines (requester and target) and typing across machines.
+ for label in ('Commands and background shells on linked machines','Typing into shells across machines'):
+  await p.get_by_label(label).check();await expect(p.get_by_label(label)).to_be_enabled(timeout=30000)
 async def main():
  A=Harness(name='laptop');B=Harness(name='homelab');mcp=None
  try:
@@ -21,18 +25,18 @@ async def main():
    await pa.locator('#settings-button').click();await pa.get_by_label('Friendly host name').fill('my-laptop');await pa.get_by_label('Friendly host name').press('Enter')
    await pa.locator('#add-machine').click();await pa.locator('#modal textarea').fill(B.pair()['code']);await pa.locator('#modal').get_by_role('button',name='Pair machine',exact=True).click()
    await expect(pa.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
-   await pa.locator('#settings-button').click();await pa.get_by_label('Agents and machines').check();await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
+   await pa.locator('#settings-button').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
    await expect(pa.locator('.agents-link').filter(has_text='laptop')).to_contain_text('link online',timeout=30000)
    await expect(pa.locator('.agents-link').filter(has_text='laptop')).not_to_contain_text('Remove')
    await expect(pa.locator('.agents-fallback')).to_be_visible()
    assert not await pa.locator('input[placeholder*="Pairing code"]').is_visible(),'the code field stays a folded fallback'
    # B is the machine selected now on page A; go back to A (the first machine) and switch the feature on there.
    await pa.locator('#host-switch').click();await pa.locator('.host-menu').get_by_text('my-laptop').click()
-   await pa.locator('#settings-button').click();await pa.get_by_label('Agents and machines').check();await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
+   await pa.locator('#settings-button').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
    await expect(pa.locator('.agents-link').filter(has_text='homelab')).to_contain_text('link online',timeout=30000)
    assert [l['label'] for l in ctl(B,'agents.status')['links']]==['my-laptop'] and ctl(A,'agents.status')['links'][0]['label']=='homelab'
    print('PASS pairing a second host on the device links the hosts both ways by itself, with no code to copy',flush=True)
-   await pb.locator('#settings-button').click();await pb.get_by_label('Agents and machines').check();await expect(pb.locator('.agents-list').first).to_be_visible(timeout=15000)
+   await pb.locator('#settings-button').click();await enable(pb);await expect(pb.locator('.agents-list').first).to_be_visible(timeout=15000)
    mcp=Mcp(A,sid);box={}
    def run(cmd):
     def go():box['r']=mcp.tool('jaunt_run',{'host':'homelab','command':cmd})

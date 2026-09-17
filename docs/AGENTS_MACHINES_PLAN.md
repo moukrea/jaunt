@@ -31,5 +31,11 @@ Docs: [x] `docs/AGENTS.md`, [x] README section, [x] PROTOCOL, [x] release notes.
 ## Phase 3 — writing into existing shells (remote and local)
 - [x] Right 2: `agent.sessions`, `agent.type`, `agent.output` (host peers) and `agents.sessions/type/output` on the control socket (host omitted = local); `Policy.grant/allowed_shell/cut/forget_session`; session `agents` marks broadcast with the session list; badge on the tab + cut (`agents.cut`, `jaunt agents cut`); local requester row `local:<runtime>`; MCP `jaunt_sessions`, `jaunt_type`, `jaunt_output`; unit test + e2e (host 5 checks, UI 2 checks).
 
+## Phase 5 — messages between sessions across machines
+- [x] Switch `messages` (hooks + MCP), `agent.peers` / `agent.message` RPCs (host peers), `bridge.peers` / `bridge.send` on the control socket extended (`to` = `<machine>/<id>`), remote sender as a `Participant` with `machine`, envelope names the machine, replies routed to the waiter over the other link, journal on both hosts, `forget_remote` / `disable_now` on switch off; MCP `jaunt_peers` / `jaunt_send` descriptions; e2e with stand-in runtimes (4 checks).
+
+## Per-capability switches
+- [x] `Policy.features` {exec, typeLocal, typeRemote, messages} with migration from the single switch; gates on every RPC and gateway method; `apply_agent_integrations`; four switches in Settings; CLI `agents features|enable|disable`.
+
 ## Phase 4 — allow-lists
 - [x] Pre-authorised command patterns on "ask" requesters: `Policy.rules/add_rule/remove_rule/matches` (fnmatch on the normalized command, 50 × 200 chars, never `*`), `_authorize` short-circuit for kind `run`, approval decision `rule`, RPC `agents.rule {requester, pattern, remove?}`, rows carry `rules`, `agent.rights.rules` → `jaunt_hosts`; modal button, Settings rules dialog, CLI `agents rules|rule`, `allow --trust rule`; unit + e2e (host 2, UI 2).

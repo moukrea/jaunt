@@ -1443,9 +1443,20 @@ function approvalPrompt(a, item) {
 }
 function agentsSettings(a) {
   const info = a.info?.agents; if (!info) return [];
-  const toggle = el('input', {type: 'checkbox', checked: !!info.enabled, 'aria-label': tr('Agents and machines')});
-  toggle.onchange = async () => { toggle.disabled = true; try { a.agents = await a.link.request('agents.configure', {enabled: toggle.checked}, 120000); a.info.agents = {enabled: a.agents.enabled, links: (a.agents.links || []).map(l => l.room)}; syncLinks(); } catch (error) { toggle.checked = !toggle.checked; report(error); } finally { toggle.disabled = false; renderSettings(); } };
-  const rows = [settingsRow(tr('Agents and machines'), info.enabled ? tr('On. Claude Code and Codex sessions, here or on linked machines, may ask to run commands or to type into your shells here; every requester has its own rights below. Sessions here can reach linked machines.') : tr('Off. Turn on to let AI sessions on linked machines run commands here under your rules, and to let sessions here reach linked machines.'), toggle)];
+  // One switch per capability; each is decided and enforced on this host.
+  const FEATURES = [
+    ['exec', tr('Commands and background shells on linked machines'), tr('Sessions here may run one-shot commands or open leased background shells on linked machines, and sessions of linked machines may ask the same here, each requester under the rights you give it below.')],
+    ['typeLocal', tr('Typing into shells of this host'), tr('A Claude Code or Codex session running here may type into another shell of this host and read it, once you allow it for that shell.')],
+    ['typeRemote', tr('Typing into shells across machines'), tr('Sessions of linked machines may type into shells here, and sessions here into shells of linked machines, once the owner allows it for that shell.')],
+    ['messages', tr('Messages between sessions across machines'), tr('Claude Code and Codex sessions here and on linked machines can list each other and exchange messages, whatever their runtime. Sessions register through the same integration as the local bridge; nothing is injected into their context.')],
+  ];
+  const features = info.features || {};
+  const rows = [];
+  for (const [name, title, description] of FEATURES) {
+    const toggle = el('input', {type: 'checkbox', checked: !!features[name], 'aria-label': title});
+    toggle.onchange = async () => { toggle.disabled = true; try { a.agents = await a.link.request('agents.configure', {feature: name, enabled: toggle.checked}, 120000); a.info.agents = {enabled: a.agents.enabled, features: a.agents.features, links: (a.agents.links || []).map(l => l.room)}; syncLinks(); } catch (error) { toggle.checked = !toggle.checked; report(error); } finally { toggle.disabled = false; renderSettings(); } };
+    rows.push(settingsRow(title, description, toggle));
+  }
   if (!info.enabled) return rows;
   if (!a.agents) { refreshAgents(a); rows.push(settingsRow(tr('Loading…'), '', el('span'))); return rows; }
   const st = a.agents;

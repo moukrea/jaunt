@@ -116,10 +116,10 @@ def hook_main(runtime: str) -> int:
 
 TOOLS = [
     {"name": "jaunt_peers",
-     "description": "List the sessions of the OTHER runtime (Codex for a Claude Code caller, Claude Code for a Codex caller) working on the same project through jaunt, with their ids and availability. Sessions of your own runtime are never listed here: on Claude Code use ListAgents / SendMessage for those.",
+     "description": "List the AI sessions reachable through jaunt: on this machine, the sessions of the OTHER runtime working on the same project (Codex for a Claude Code caller, Claude Code for a Codex caller; for your own runtime here use its native tools, e.g. ListAgents / SendMessage on Claude Code); and, when the host allows messages across machines, every Claude Code or Codex session open in a jaunt shell on a linked machine (ids of the form <machine>/<id>), whatever its runtime.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "jaunt_send",
-     "description": "Send a message to another AI session listed by jaunt_peers. It arrives in that session's own conversation, attributed to you through the jaunt bridge. Use in_reply_to when answering a bridge message. Replies always arrive later as bridge messages, so leave wait_seconds unset unless you cannot continue without the answer (then up to 600); never wait for a greeting or a notice that needs no reply.",
+     "description": "Send a message to another AI session listed by jaunt_peers, on this machine or on a linked one (to=\"<machine>/<id>\"). It arrives in that session's own conversation, attributed to you through the jaunt bridge. Use in_reply_to when answering a bridge message. Replies always arrive later as bridge messages, so leave wait_seconds unset unless you cannot continue without the answer (then up to 600); never wait for a greeting or a notice that needs no reply.",
      "inputSchema": {"type": "object", "required": ["to", "text"], "additionalProperties": False,
                      "properties": {"to": {"type": "string", "description": "Peer id from jaunt_peers or from a bridge message"},
                                     "text": {"type": "string", "description": "The message"},
@@ -169,11 +169,20 @@ AGENT_TOOLS = [
 ]
 
 
-def agents_enabled() -> bool:
+def agent_features() -> dict:
     try:
-        return bool(control("agents.status", {}, timeout=5).get("enabled"))
+        return dict(control("agents.status", {}, timeout=5).get("features") or {})
     except Exception:
-        return False
+        return {}
+
+
+def agent_tools(features: dict) -> list:
+    tools = []
+    if features.get("exec"):
+        tools += [t for t in AGENT_TOOLS if t["name"] in ("jaunt_hosts", "jaunt_run", "jaunt_shell", "jaunt_read")]
+    if features.get("typeLocal") or features.get("typeRemote"):
+        tools += [t for t in AGENT_TOOLS if t["name"] in ("jaunt_sessions", "jaunt_type", "jaunt_output")]
+    return tools
 
 
 def _identity(runtime: str) -> dict:
@@ -188,15 +197,29 @@ def _tool(runtime: str, name: str, args: dict) -> str:
     identity = _identity(runtime)
     try:
         if name == "jaunt_peers":
-            result = control("bridge.peers", identity)
-            if not result.get("enabled"):
-                return result.get("note", "The jaunt bridge is turned off on this host.")
-            peers = result.get("peers", [])
-            lines = [f"- {p['runtime']} session in terminal \"{p['terminal']}\" (id {p['id']}), cwd {p['cwd']}, {p['state']}" for p in peers]
-            lines += [f"- {p['runtime']} session open in terminal \"{p['terminal']}\" (cwd {p['cwd']}) but not reachable yet: it joins the bridge after its first prompt"
-                      for p in result.get("present", [])]
-            if not lines:
-                return "No other AI session of the other runtime is working on this project through jaunt right now."
+            result = control("bridge.peers", identity, timeout=30)
+            lines = []
+            if result.get("enabled"):
+                peers = result.get("peers", [])
+                lines += [f"- {p['runtime']} session in terminal \"{p['terminal']}\" (id {p['id']}), cwd {p['cwd']}, {p['state']}" for p in peers]
+                lines += [f"- {p['runtime']} session open in terminal \"{p['terminal']}\" (cwd {p['cwd']}) but not reachable yet: it joins the bridge after its first prompt"
+                          for p in result.get("present", [])]
+                if not lines:
+                    lines.append("No other AI session of the other runtime is working on this project through jaunt on this machine right now.")
+            else:
+                lines.append(result.get("note", "The jaunt bridge is turned off on this host.") + (" (this machine)" if result.get("messages") else ""))
+            if result.get("messages"):
+                remote = result.get("remote") or []
+                if not remote:
+                    lines.append("No linked machine is online right now.")
+                for host in remote:
+                    if host.get("error"):
+                        lines.append(f"- On machine {host['host']}: {host['error']}")
+                        continue
+                    if not host.get("sessions"):
+                        lines.append(f"- On machine {host['host']}: no AI session open in a jaunt shell right now.")
+                    for s in host["sessions"]:
+                        lines.append(f"- On machine {host['host']}: {s['runtime']} session in terminal \"{s['terminal']}\" (id {host['host']}/{s['id']}), cwd {s['cwd']}, {s['state']}. Reachable with jaunt_send(to=\"{host['host']}/{s['id']}\").")
             return "\n".join(lines)
         if name == "jaunt_send":
             result = control("bridge.send", {**identity, "to": args.get("to", ""), "text": args.get("text", ""),
@@ -303,7 +326,7 @@ def mcp_main(runtime: str) -> int:
         elif method == "ping":
             reply(rid, {})
         elif method == "tools/list":
-            reply(rid, {"tools": TOOLS + (AGENT_TOOLS if agents_enabled() else [])})
+            reply(rid, {"tools": TOOLS + agent_tools(agent_features())})
         elif method == "tools/call":
             text = _tool(runtime, str(params.get("name", "")), params.get("arguments") or {})
             reply(rid, {"content": [{"type": "text", "text": text}], "isError": text.startswith("jaunt bridge: ")})

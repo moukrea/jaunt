@@ -223,7 +223,7 @@ def main() -> None:
     unlink = sub.add_parser("unlink", help=tr('Remove a linked host'))
     unlink.add_argument("room")
     agents = sub.add_parser("agents", help=tr('Agents and machines: pending requests, decisions, trust, log'))
-    agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log", "shells", "kill", "cut", "rules", "rule"])
+    agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log", "shells", "kill", "cut", "rules", "rule", "features", "enable", "disable"])
     agents.add_argument("target", nargs="?", default="")
     agents.add_argument("--right", choices=["exec", "type"], default="exec")
     agents.add_argument("--trust", choices=["1h", "24h", "always", "rule"], default="", help=tr("allow: trust for a while, or 'rule' to always allow this exact command"))
@@ -343,6 +343,12 @@ def main() -> None:
         elif args.command == "agents":
             if args.action == "status":
                 print(json.dumps(control("agents.status"), indent=2))
+            elif args.action == "features":
+                print(json.dumps(control("agents.status")["features"], indent=2))
+            elif args.action in ("enable", "disable"):
+                if args.target not in ("exec", "typeLocal", "typeRemote", "messages"):
+                    raise SystemExit(tr("capability: exec, typeLocal, typeRemote or messages"))
+                print(json.dumps(control("agents.configure", {"feature": args.target, "enabled": args.action == "enable"})["features"], indent=2))
             elif args.action == "pending":
                 print(json.dumps(control("agents.status")["pending"], indent=2))
             elif args.action in ("allow", "deny"):

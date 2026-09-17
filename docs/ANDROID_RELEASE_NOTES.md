@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.28 (versionCode 28)
+
+- Bundles the beta.36 interface (four capability switches under Agents and machines).
+
 # jaunt Android 0.1.0-beta.27 (versionCode 27)
 
 - Bundles the beta.35 interface (allow-list rules: modal button and rules dialog).
