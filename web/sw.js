@@ -1,6 +1,6 @@
 // precache:begin
-const CACHE = 'jaunt-static-0d9cedc0ac0ffde6';
-const STATIC = ["./","./assets/app-icon-192.png","./assets/app-icon-512.png","./assets/favicon.png","./assets/jaunt.png","./index.html","./js/activity.mjs","./js/app.mjs","./js/crypto.mjs","./js/desktop.mjs","./js/i18n.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/touch-scroll.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./js/workspace.mjs","./locales/de.json","./locales/en.json","./locales/es.json","./locales/fr.json","./locales/it.json","./locales/pt.json","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/lucide.mjs","./vendor/meteor.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
+const CACHE = 'jaunt-static-df15f6f1c965c38b';
+const STATIC = ["./","./assets/app-icon-192.png","./assets/app-icon-512.png","./assets/favicon.png","./assets/jaunt.png","./index.html","./js/activity.mjs","./js/app.mjs","./js/crypto.mjs","./js/desktop.mjs","./js/i18n.mjs","./js/icons.mjs","./js/link.mjs","./js/native.mjs","./js/push.mjs","./js/qr.mjs","./js/sha256.mjs","./js/touch-scroll.mjs","./js/transfers.mjs","./js/ui.mjs","./js/vault.mjs","./js/workspace.mjs","./locales/de.json","./locales/en.json","./locales/es.json","./locales/fr.json","./locales/it.json","./locales/pt.json","./manifest.webmanifest","./style.css","./vendor/jsqr.mjs","./vendor/lucide-all.mjs","./vendor/lucide.mjs","./vendor/meteor.mjs","./vendor/xterm.css","./vendor/xterm.mjs"];
 // precache:end
 const base = new URL('./', self.location.href);
 const resources = new Set(STATIC.map(path => new URL(path, base).href));

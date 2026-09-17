@@ -72,7 +72,12 @@ async def main():
    await page.get_by_label('Friendly host name').press('Tab')
    await expect(page.locator('#machine-title')).to_have_text('machine Y')
    # The host name in the top bar opens a switcher listing the paired hosts; a remote online host shows a green globe.
-   await expect(page.locator('#host-symbol svg')).to_have_attribute('data-icon-name','globe');await expect(page.locator('#host-symbol')).to_have_class(re.compile('online'))
+   await expect(page.locator('#host-symbol svg')).to_have_attribute('data-icon-name','cloud');await expect(page.locator('#host-symbol')).to_have_class(re.compile('online'))
+   # Any icon of the set can be chosen per host; it shows in the sidebar and the top bar, and Default restores the cloud.
+   await page.locator('#settings-button').click();await page.locator('#settings-content').get_by_role('button',name='Choose…',exact=True).click()
+   await page.get_by_label('Search icons').fill('rocket');await page.locator('.icon-grid').get_by_role('button',name='rocket',exact=True).click()
+   await expect(page.locator('#host-symbol svg')).to_have_attribute('data-icon-name','rocket');await expect(page.locator('#machine-list .machine-item.selected svg').first).to_have_attribute('data-icon-name','rocket')
+   await page.locator('#settings-content').get_by_role('button',name='Default',exact=True).click();await expect(page.locator('#host-symbol svg')).to_have_attribute('data-icon-name','cloud')
    await page.locator('#host-switch').click();await expect(page.locator('.host-menu .host-menu-item')).to_have_count(2)
    await page.locator('.host-menu').get_by_role('menuitem',name=re.compile('machine X')).click()
    await expect(page.locator('#machine-title')).to_have_text('machine X');await expect(page.locator('.host-menu')).to_have_count(0)

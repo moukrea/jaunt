@@ -9,7 +9,7 @@ import {Link, parsePairing} from './link.mjs';
 import {Vault} from './vault.mjs';
 import {b64, unb64, random, utf8} from './crypto.mjs';
 import {upload, download, toPNG, saveBlob, quotePath} from './transfers.mjs';
-import {fillIcons, icon, sessionIcon} from './icons.mjs';
+import {fillIcons, icon, sessionIcon, hostIcon, iconFromNodes} from './icons.mjs';
 import {$, el, button, toast, reportError, clearError, clearFeedback, modal, closeModal, field, confirmAction, copyText, size} from './ui.mjs';
 import {scan} from './qr.mjs';
 import * as push from './push.mjs';
@@ -104,7 +104,7 @@ function renderPreview(){
  const host=demo[preview.machine],tab=preview.tab[preview.machine],session=host.tabs[tab];
  $('preview-machines').replaceChildren(...Object.entries(demo).map(([name,m])=>{
   const item=el('button',{class:'machine-item'+(name===preview.machine?' selected':''),'data-preview-machine':name});
-  item.append(icon('monitor',15),el('span',{class:'machine-text'},[el('strong',{text:name}),el('small',{text:m.os})]),el('span',{class:'status-dot online'}));
+  item.append(icon('cloud',15),el('span',{class:'machine-text'},[el('strong',{text:name}),el('small',{text:m.os})]),el('span',{class:'status-dot online'}));
   item.onclick=()=>{preview.machine=name;renderPreview();};return item;
  }));
  $('preview-machine-title').textContent=preview.machine;$('preview-phone-machine').textContent=preview.machine;
@@ -302,7 +302,7 @@ function hostTone(a) { const s = a?.link.state; return s === 'online' ? 'online'
 function renderHostSymbol(a) {
   const symbol = $('host-symbol'), switcher = $('host-switch');
   symbol.hidden = !a; $('host-chevron').hidden = !a || machines.size < 2;
-  if (a) { symbol.replaceChildren(icon(a.machine.local ? 'monitor' : 'globe', 16)); symbol.className = 'host-symbol ' + hostTone(a); symbol.title = a.machine.local ? tr('Local host') : tr('Remote host'); }
+  if (a) { symbol.replaceChildren(hostIcon(a.machine, 16)); symbol.className = 'host-symbol ' + hostTone(a); symbol.title = a.machine.local ? tr('Local host') : tr('Remote host'); }
   switcher.disabled = !a || machines.size < 2;
 }
 function hostMenu() {
@@ -311,7 +311,7 @@ function hostMenu() {
   for (const m of [...machines.values()].sort((x, y) => vault.data.machines.indexOf(x.machine) - vault.data.machines.indexOf(y.machine))) {
     const item = button('', () => { menu.remove(); anchor.setAttribute('aria-expanded', 'false'); selected = m.machine.room; render(); if (m.active) selectSession(m, m.active); if (view === 'files') listFiles(m).catch(report); }, 'host-menu-item' + (selected === m.machine.room ? ' selected' : ''));
     item.setAttribute('role', 'menuitem');
-    item.append(el('span', {class: 'host-symbol ' + hostTone(m)}, icon(m.machine.local ? 'monitor' : 'globe', 15)), el('span', {class: 'host-menu-text'}, el('strong', {text: m.machine.friendlyName || m.machine.name}), el('small', {text: m.info ? `${m.info.user} · ${m.info.platform}` : m.machine.local ? tr('Local host') : tr('Remote host')})));
+    item.append(el('span', {class: 'host-symbol ' + hostTone(m)}, hostIcon(m.machine, 15)), el('span', {class: 'host-menu-text'}, el('strong', {text: m.machine.friendlyName || m.machine.name}), el('small', {text: m.info ? `${m.info.user} · ${m.info.platform}` : m.machine.local ? tr('Local host') : tr('Remote host')})));
     menu.append(item);
   }
   document.body.append(menu); anchor.setAttribute('aria-expanded', 'true');
@@ -323,7 +323,7 @@ function hostMenu() {
 }
 window.addEventListener('jaunt-activity', () => { if (vault.data) renderMachines(); });
 $('host-switch').onclick = () => { if (document.querySelector('.host-menu')) { document.querySelector('.host-menu').remove(); $('host-switch').setAttribute('aria-expanded', 'false'); } else hostMenu(); };
-const hostOf = a => a ? {name: a.machine.friendlyName || a.machine.name, local: !!a.machine.local} : null;
+const hostOf = a => a ? {name: a.machine.friendlyName || a.machine.name, local: !!a.machine.local, machine: a.machine} : null;
 function renderConnection() {
   const a = current(), state = a?.link.state || 'offline';
   const labels = {online: a?.machine.local ? tr('Local connection') : tr('Encrypted'), offline: tr('Not connected'), connecting: tr('Connecting'), authenticating: tr('Verifying host'), waiting: tr('Host offline'), reconnecting: tr('Reconnecting')};
@@ -377,7 +377,7 @@ function renderMachines() {
   const nodes = [...machines.values()].sort((a,b) => vault.data.machines.indexOf(a.machine) - vault.data.machines.indexOf(b.machine)).map(a => {
     const b = button('', () => { selected = a.machine.room; drawer(); render(); if (a.active) selectSession(a, a.active); if (view === 'files') return listFiles(a); }, 'machine-item' + (selected === a.machine.room ? ' selected' : ''));
     b.title=a.machine.friendlyName||a.machine.name;b.setAttribute('aria-label',b.title);
-    b.append(el('span', {class: 'machine-symbol'}, icon(a.machine.local ? 'monitor' : 'globe')), el('span', {class: 'machine-text'}, el('strong', {text: a.machine.friendlyName || a.machine.name}), el('small', {text: a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state})),
+    b.append(el('span', {class: 'machine-symbol'}, hostIcon(a.machine)), el('span', {class: 'machine-text'}, el('strong', {text: a.machine.friendlyName || a.machine.name}), el('small', {text: a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state})),
       el('span', {class: `status-dot ${a.link.state === 'online' ? 'online' : a.link.enabled ? 'working' : ''}`}));
     const badge = badges.get(a.machine.room);
     if (badge) b.append(el('span', {class: 'notif-badge' + (badge.error ? ' error' : ''), text: String(badge.count), title: tr(badge.count === 1 ? '{0} operation needs attention' : '{0} operations need attention', badge.count)}));
@@ -1263,8 +1263,29 @@ function hostPreferences(a) {
     if(to<0||to>=visible.length)return;
     const x=list.indexOf(visible[from]),y=list.indexOf(visible[to]);[list[x],list[y]]=[list[y],list[x]];await persist();renderMachines();
   }));
-  return [settingsRow(tr('Friendly name'),tr('Only changes the name on this device.'),name),settingsRow(tr('Host order'),tr('Choose the order in the sidebar.'),order),
+  const iconChoice=el('span',{class:'host-icon-choice'},hostIcon(a.machine,18),button(tr('Choose…'),()=>iconPicker(a).catch(report),'button'),...(a.machine.icon?[button(tr('Default'),async()=>{delete a.machine.icon;await persist();render();renderSettings();},'text-button')]:[]));
+  return [settingsRow(tr('Friendly name'),tr('Only changes the name on this device.'),name),settingsRow(tr('Icon'),tr('Any icon from the icon set, only on this device.'),iconChoice),settingsRow(tr('Host order'),tr('Choose the order in the sidebar.'),order),
     settingsRow(tr('Open by default'),prefs().defaultHost === a.machine.room ? tr('This host opens when the app starts.') : tr('Choose the first host shown when the app starts.'),button(tr('Use this host'),async()=>{vault.data.preferences.defaultHost=a.machine.room;await persist();renderSettings();}))];
+}
+// Host icon picker: the complete icon set is loaded on demand; the chosen icon's nodes are stored
+// with the machine so every device renders it without loading the set again.
+let allIconsPromise=null;
+async function iconPicker(a) {
+  allIconsPromise ||= import('../vendor/lucide-all.mjs').then(m=>m.icons);
+  const search=el('input',{type:'search',placeholder:tr('Search icons'),'aria-label':tr('Search icons'),autocomplete:'off'});
+  const grid=el('div',{class:'icon-grid'}),hint=el('p',{class:'modal-copy icon-grid-hint'});
+  modal(tr('Choose an icon'),el('div',{},search,hint,grid));search.focus();
+  const icons=await allIconsPromise;
+  const names=Object.keys(icons);
+  const kebab=n=>n.replace(/([a-z0-9])([A-Z])/g,'$1-$2').toLowerCase();
+  const show=()=>{
+    const q=search.value.trim().toLowerCase().replace(/\s+/g,'-');
+    const hits=names.filter(n=>!q||kebab(n).includes(q));
+    const shown=hits.slice(0,300);
+    grid.replaceChildren(...shown.map(n=>{const b=button('',async()=>{a.machine.icon={name:kebab(n),nodes:icons[n]};await persist();closeModal();render();renderSettings();},'icon-cell');b.title=kebab(n);b.setAttribute('aria-label',kebab(n));b.append(iconFromNodes(kebab(n),icons[n],20));return b;}));
+    hint.textContent=hits.length>shown.length?tr('{0} icons match; showing the first {1}. Type to narrow the list.',hits.length,shown.length):tr('{0} icons',hits.length);
+  };
+  search.oninput=show;show();
 }
 function attentionSettings(a) {
   return ['bell','program','exit'].map(key => {
@@ -1542,7 +1563,9 @@ async function lockWorkspace() {
 }
 async function resumeWorkspace() {
   selected = null;
-  if(desktopHostAvailable && !vault.data.machines.some(m=>m.local)){vault.data.machines.unshift({room:'local-host',name:tr('This computer'),local:true});await persist();}
+  if(desktopHostAvailable && !vault.data.machines.some(m=>m.local)){vault.data.machines.unshift({room:'local-host',name:tr('Local'),local:true});await persist();}
+  // The local host is named after the current language; a friendly name set by the user still wins.
+  for(const m of vault.data.machines)if(m.local&&m.name!==tr('Local')){if(m.friendlyName===m.name)m.friendlyName='';m.name=tr('Local');}
   for (const m of vault.data.machines) if(!m.local||desktopHostAvailable)makeMachine(m);
   selected = machines.has(deepLink.get('host')) ? deepLink.get('host') : (machines.has(prefs().defaultHost) ? prefs().defaultHost : [...machines.keys()][0]) || null;
   applyTheme();try{const saved=localStorage.getItem('jaunt-sidebar-collapsed');if(saved!==null)vault.data.preferences.sidebarCollapsed=saved==='true';}catch{}document.body.classList.toggle('sidebar-collapsed',!!prefs().sidebarCollapsed);$('sidebar-toggle').setAttribute('aria-expanded',String(!prefs().sidebarCollapsed));$('sidebar-toggle').setAttribute('aria-label',prefs().sidebarCollapsed?tr('Expand sidebar'):tr('Collapse sidebar'));
