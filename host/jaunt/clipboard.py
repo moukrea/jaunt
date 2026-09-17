@@ -50,7 +50,14 @@ class Clipboard:
         if env.get("WAYLAND_DISPLAY") and shutil.which("wl-copy") and shutil.which("wl-paste"):
             return {"text": True, "image": True, "backend": "Wayland"}
         if env.get("DISPLAY") and shutil.which("xclip"):
-            return {"text": True, "image": True, "backend": "X11"}
+            result = {"text": True, "image": True, "backend": "X11"}
+            if env.get("WAYLAND_DISPLAY"):
+                # Xwayland bridges selections, but Wayland-native readers (Claude Code uses wl-paste
+                # when WAYLAND_DISPLAY is set) only see the Wayland clipboard reliably with wl-clipboard.
+                result["hint"] = "Wayland session without wl-clipboard: install it (wl-copy/wl-paste) so programs reading the Wayland clipboard see pasted images."
+            return result
+        if env.get("WAYLAND_DISPLAY") or env.get("DISPLAY"):
+            return {"text": False, "image": False, "backend": "jaunt buffer (headless)", "hint": "A display is available but no clipboard tool: install wl-clipboard (Wayland) or xclip (X11) for native image paste."}
         return {"text": False, "image": False, "backend": "jaunt buffer (headless)"}
 
     async def run(self, args: list[str], data: bytes | None = None) -> bytes:

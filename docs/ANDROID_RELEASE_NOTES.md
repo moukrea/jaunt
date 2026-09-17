@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.22 (versionCode 22)
+
+- Bundles the beta.30 client (secure channel re-keys on a desynchronised frame instead of stopping).
+
 # jaunt Android 0.1.0-beta.21 (versionCode 21)
 
 - Checks the published version at every launch and asks Update / Ignore (later foregrounds keep the six-hour throttle).

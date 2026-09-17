@@ -1127,7 +1127,7 @@ async function attachFiles(a, t, files) {
     const native = button(tr('Native image paste'), () => doUpload(true), 'button', 'paste');
     native.disabled = !a.info?.clipboard?.image; actions.append(native);
     body.append(el('p', {class: 'modal-copy', text: a.info?.clipboard?.image
-      ? tr("Desktop clipboard: {0}. The CLI must support image pasting; jaunt cannot force an arbitrary terminal program to interpret an image.",a.info.clipboard.backend)
+      ? tr("Desktop clipboard: {0}. The CLI must support image pasting; jaunt cannot force an arbitrary terminal program to interpret an image.",a.info.clipboard.backend)+(a.info.clipboard.hint?' '+tr(a.info.clipboard.hint):'')
       : tr('This host is headless or has no supported image clipboard. Use Upload & insert path. No image will be silently converted into terminal text.')}));
   }
   body.append(actions); modal(image ? tr('Send image to terminal') : tr('Attach to terminal'), body, () => { if (previewURL) URL.revokeObjectURL(previewURL); });
@@ -1559,7 +1559,7 @@ function renderSettings() {
         settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
         ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
       ...workspaceSettings(a),
-      settingsRow(tr('Host clipboard'), a.info?.clipboard?.backend || tr('Unknown until connected'), button(tr('Open'), () => showClipboard(a))),
+      settingsRow(tr('Host clipboard'), (a.info?.clipboard?.backend || tr('Unknown until connected')) + (a.info?.clipboard?.hint ? ' · ' + tr(a.info.clipboard.hint) : ''), button(tr('Open'), () => showClipboard(a))),
       settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
       ...(!a.machine.local ? [settingsRow(tr('Forget this machine'), tr('Removes its saved key from this browser. Revoke it on the host first when possible.'), button(tr('Forget'), () => forgetMachine(a), 'button danger'))] : [])));
     if(a.info?.bridge?.visible)groups.push(settingsGroup(tr('AI SESSIONS'),...bridgeSettings(a)));

@@ -297,7 +297,11 @@ class Sessions:
             else:
                 command = ["tmux", "attach-session", "-t", "=" + tmux]
         fd, slave = pty.openpty()
-        env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
+        from .clipboard import Clipboard
+        display = {k: v for k, v in Clipboard.display_env().items() if k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY")}
+        # A host started by systemd has no display variables; programs in jaunt shells (Claude Code's
+        # own clipboard read, GUI tools) need them just like in a desktop terminal.
+        env = {**display, **os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
                "SHELL": shell, "jaunt_SESSION_ID": sid, "jaunt_STATE": str(self.root)}
         # Old installed CLIs inside the shell keep working during a rolling upgrade.
         for key in ("jaunt_SESSION_ID", "jaunt_STATE"):

@@ -61,7 +61,7 @@ async function install(plan){
           }
         }
       }
-    }finally{await fs.rm(stage,{recursive:true,force:true});}
+    }finally{try{await fs.rm(stage,{recursive:true,force:true,maxRetries:5,retryDelay:100});}catch{}} // a leftover staging directory must never fail an installed update
   }
   return binary;
 }

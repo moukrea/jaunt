@@ -103,7 +103,14 @@ export class Link extends EventTarget {
       }).catch(error => {
         if (generation !== this.generation) return;
         if(error.code==='connection' || ws.readyState!==WebSocket.OPEN){ws.close();return;}
-        this.stop(tr('Secure channel could not be verified.'));
+        if(error.code==='desync'){
+          // The frame is rejected (never decrypted). A gap can only come from a frame lost between the
+          // host and us; a fresh handshake re-keys both sides. Give up after repeated desyncs.
+          this.desyncs=(this.desyncs||0)+1;
+          console.warn('[jaunt] channel desynchronised, re-keying:', error.message);
+          if(this.desyncs<=3){this.status('reconnecting', tr('Secure channel out of sync; reconnecting…'));this.reconnect();return;}
+        }
+        this.stop(tr('Secure channel could not be verified.')+' '+error.message);
         this.emit('error', error.message);
       });
     };
@@ -180,7 +187,7 @@ export class Link extends EventTarget {
       delete this.machine.pairSecret; delete this.machine.pairId;
       await this.persist();
       if(generation!==this.generation || secure!==this.channel || !this.enabled)return;
-      this.status('online'); this.emit('welcome', value);
+      this.desyncs=0; this.status('online'); this.emit('welcome', value);
       this.probe();
     } else if (value.type === 'reply') {
       const pending = this.pending.get(value.id);
