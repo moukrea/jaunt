@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.31 (versionCode 31)
+
+- Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
+
 # jaunt Android 0.1.0-beta.30 (versionCode 30)
 
 - Bundles the beta.40 interface (per-machine settings behind the gear, kept notifications; the key row stays on Android).
