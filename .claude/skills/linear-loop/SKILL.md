@@ -8,6 +8,19 @@ description: Start, stop or inspect the autonomous jaunt Linear loop — launche
 The on/off switch. Invoking this skill is what starts the loop — nothing watches
 the board until someone asks for it.
 
+## On a fresh clone
+
+The scripts and skills are versioned; the credentials are not, and never will be.
+Two things do not come with the clone:
+
+1. The `jaunt-linear` launcher — a symlink outside the repo. Create it with the
+   repair procedure below.
+2. `.dev-state/linear-credentials.json` — copy
+   `scripts/linear-credentials.example.json` there and fill in the client secret
+   from Linear > Settings > API > Applications. `linear_agent.mjs` refuses to
+   mint a token while the placeholder is still in place, so a half-done setup
+   fails loudly instead of silently acting as the wrong identity.
+
 `jaunt-linear` is on the PATH and resolves the checkout itself. Keep it that way:
 no checkout path belongs in a skill or any other file. If the launcher is missing
 or dangling (fresh machine, repo moved), repair it with this — and only this:
