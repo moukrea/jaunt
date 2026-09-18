@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.33
+
+- Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
+
 # jaunt desktop 0.1.0-beta.32
 
 - Bundles the beta.40 interface (per-machine settings behind the gear, kept notifications, no key row with a real keyboard).

@@ -1,3 +1,9 @@
+# jaunt 0.1.0-beta.41
+
+**Settings that stay inside their section, and a requester's level within reach.** Each settings section now holds its own list instead of letting it spill under the separator into the next one, so what you read belongs to the heading above it. *Reachable machines* folds, and its pairing-code field moves into a modal opened on demand: machines paired on your device link by themselves, so the code is the exception, not the default path. In the requester table, the level badge of a right opens the choice directly — ask, trust for a while or always, block — and each row carries its own revoke, without going through the multi-select. Client only: the host is unchanged apart from its version.
+
+The protocol has not undergone an independent security audit.
+
 # jaunt 0.1.0-beta.40
 
 **Each machine has its own settings, and the activity strip forgets what no longer matters.** The bar of the machine you are looking at now carries a gear: what that machine does and allows lives there — connection, version and updates, workspace, clipboard, authorized devices, AI sessions, agents and machines, the notifications it sends. The app settings keep what belongs to this device: security, terminal, and a *Your machines* group to name, re-icon, reorder your machines and choose which one opens at start. Next to the gear, a bell: an operation that ends without needing you leaves the activity strip after a minute, while a failure or something waiting for an answer is kept there with a badge, which also counts into the machine's badge in the sidebar. The terminal key row (Esc, Tab, Ctrl…) now appears only where there is no real keyboard: phone-width browsers and the Android app. The sidebar drops its decorative *Private by design* note.
