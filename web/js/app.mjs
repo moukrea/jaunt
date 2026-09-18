@@ -1377,6 +1377,28 @@ function hostVersionText(a) {
 function settingsRow(title, description, control) {
   return el('div', {class: 'settings-row'}, el('div', {class: 'settings-label'}, el('strong', {text: title}), el('p', {text: description})), control);
 }
+// renderSettings() rebuilds the whole panel on every change, so a folded section cannot keep its
+// state in the DOM. Keyed by host room so folding a section here does not fold it on another host.
+const foldedSections = new Set();
+// A section is its header AND the list it introduces. settingsRow() alone carries the separator
+// border, so a list pushed as its sibling falls under the line, reading as part of the next
+// section. Wrapping both moves the border to the wrapper and the list stays where it belongs.
+// The header stays a real .settings-row with label and control as DIRECT children: the switch
+// styling, the label flex basis and the input width are all `.settings-row > …` rules.
+function settingsSection(title, description, content, options = {}) {
+  const {control = el('span'), collapsible = false, key = ''} = options;
+  if (!collapsible) return el('div', {class: 'settings-section'}, settingsRow(title, description, control), content);
+  const folded = foldedSections.has(key);
+  const toggle = button('', () => {
+    if (folded) foldedSections.delete(key); else foldedSections.add(key);
+    renderSettings();
+  }, 'icon-button', folded ? 'chevron' : 'down');
+  toggle.setAttribute('aria-label', folded ? tr('Expand {0}', title) : tr('Collapse {0}', title));
+  toggle.setAttribute('aria-expanded', folded ? 'false' : 'true');
+  return el('div', {class: 'settings-section'},
+    settingsRow(title, description, el('div', {class: 'settings-section-actions'}, control, toggle)),
+    folded ? null : content);
+}
 function settingsGroup(title, ...rows) { return el('section', {class: 'settings-group'}, el('h3', {text: title}), ...rows); }
 function applyTheme() {
   const mode = themeMode(prefs().theme);
@@ -1518,10 +1540,18 @@ function agentsSettings(a) {
   // Linked machines (this host as a requester on others).
   const links = el('div', {class: 'agents-list'});
   for (const l of st.links || []) links.append(el('div', {class: 'agents-row agents-link'}, el('span', {class: 'host-symbol ' + (l.state === 'online' ? 'online' : l.state === 'refused' ? 'offline' : 'busy')}, hostIcon({icon: l.icon, local: false}, 14)), el('span', {class: 'agents-row-text'}, el('strong', {text: l.label || l.name || l.room}), el('small', {text: (l.platform ? l.platform + ' · ' : '') + (l.state === 'online' ? tr('link online') : l.error || l.state)})), ...(machines.has(l.room) ? [] : [button(tr('Remove'), async () => { try { a.agents = await a.link.request('links.remove', {room: l.room}); } catch (error) { report(error); } renderSettings(); }, 'text-button')])));
-  const code = el('input', {placeholder: tr('Pairing code of a host that is not paired on this device'), 'aria-label': tr('Pairing code'), autocomplete: 'off'});
-  const add = button(tr('Link'), async () => { add.disabled = true; try { a.agents = await a.link.request('links.add', {code: code.value.trim(), selfName: hostName(a)}, 60000); code.value = ''; toast(tr('Machine linked.'), false, null, hostOf(a)); } catch (error) { report(error); } finally { add.disabled = false; renderSettings(); } }, 'button');
-  links.append(el('details', {class: 'agents-fallback'}, el('summary', {text: tr('Reach a machine that is not paired on this device')}), el('div', {class: 'agents-add'}, code, add)));
-  rows.push(settingsRow(tr('Reachable machines'), tr('Every machine paired on this device is reachable from this host as a requester, under the name and icon you use here; nothing to pair again. Each machine still decides what this host\'s sessions may do there.'), el('span')), links);
+  // The code field is the exception, not the default path: pairing on the device links the hosts by
+  // itself. It lives in a modal opened on demand, so nothing but the machines shows in the section.
+  const pair = button(tr('Pair a new machine'), () => {
+    const code = el('input', {placeholder: tr('Pairing code of a host that is not paired on this device'), 'aria-label': tr('Pairing code'), autocomplete: 'off'});
+    const add = button(tr('Link'), async () => { a.agents = await a.link.request('links.add', {code: code.value.trim(), selfName: hostName(a)}, 60000); toast(tr('Machine linked.'), false, null, hostOf(a)); closeModal(); renderSettings(); }, 'button primary');
+    modal(tr('Pair a new machine'), el('div', {},
+      el('p', {class: 'modal-copy', text: tr('Run jaunt pair on that host and paste its code here. A machine already paired on this device needs nothing: it is linked by itself.')}),
+      el('div', {class: 'agents-add'}, code, add)));
+    code.focus();
+  }, 'text-button');
+  rows.push(settingsSection(tr('Reachable machines'), tr('Every machine paired on this device is reachable from this host as a requester, under the name and icon you use here; nothing to pair again. Each machine still decides what this host\'s sessions may do there.'), links,
+    {control: pair, collapsible: true, key: a.machine.room + ':links'}));
   // Requesters table (others acting here).
   const selected = new Set();
   const table = el('table', {class: 'agents-table'}, el('thead', {}, el('tr', {}, el('th', {text: ''}), el('th', {text: tr('Requester')}), el('th', {text: tr('Run commands')}), el('th', {text: tr('Write into a shell')}))));
@@ -1534,20 +1564,20 @@ function agentsSettings(a) {
   const modify = button(tr('Modify selection…'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } trustDialog(a, [...selected]); }, 'button');
   const revoke = button(tr('Revoke selection'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } confirmAction(tr('Revoke these requesters?'), tr('They will ask again at their next request.'), tr('Revoke'), async () => { a.agents = await a.link.request('agents.revoke', {requesters: [...selected]}); renderSettings(); }, true); }, 'button');
   const revokeAll = button(tr('Revoke all'), () => confirmAction(tr('Revoke every requester?'), tr('Every requester will ask again at its next request.'), tr('Revoke all'), async () => { a.agents = await a.link.request('agents.revoke', {all: true}); renderSettings(); }, true), 'text-button');
-  rows.push(settingsRow(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block.'), el('span')), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table), el('div', {class: 'agents-actions'}, modify, revoke, revokeAll)));
+  rows.push(settingsSection(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block.'), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table), el('div', {class: 'agents-actions'}, modify, revoke, revokeAll))));
   // Background agent shells alive on this host (never jaunt sessions), with a kill switch.
   const shells = st.agentShells || [];
   if (shells.length) {
     const list = el('div', {class: 'agents-list'});
     for (const sh of shells) list.append(el('div', {class: 'agents-row'}, el('span', {class: 'agents-row-text'}, el('strong', {text: (sh.requesterName || sh.requester) + ' · ' + sh.cwd}), el('small', {text: tr('opened {0} · lease ends {1} · {2} bytes', new Date(sh.created * 1000).toLocaleTimeString(), new Date(sh.leaseEndsAt * 1000).toLocaleTimeString(), sh.bytes)})), button(tr('Kill'), async () => { try { a.agents = await a.link.request('agents.kill', {shell: sh.id}); } catch (error) { report(error); } renderSettings(); }, 'button danger small')));
-    rows.push(settingsRow(tr('Agent shells'), tr('Background shells opened by requesters. They are not sessions: no tab, no sharing. Each dies when closed, 10 minutes after its last use, when its session ends, or when you revoke the requester.'), el('span')), list);
+    rows.push(settingsSection(tr('Agent shells'), tr('Background shells opened by requesters. They are not sessions: no tab, no sharing. Each dies when closed, 10 minutes after its last use, when its session ends, or when you revoke the requester.'), list));
   }
   // Pending approvals and log.
   const pending = st.pending || [];
   if (pending.length) {
     const list = el('div', {class: 'agents-list'});
     for (const item of pending) list.append(el('div', {class: 'agents-row'}, el('span', {class: 'agents-row-text'}, el('strong', {text: (item.requester?.name || '?') + ' · ' + (item.detail?.summary || item.kind)}), el('small', {text: tr('waiting for your answer')})), button(tr('Answer…'), () => approvalPrompt(a, item), 'button primary small')));
-    rows.push(settingsRow(tr('Pending requests'), tr('Answer here or from any other device; the first answer wins.'), el('span')), list);
+    rows.push(settingsSection(tr('Pending requests'), tr('Answer here or from any other device; the first answer wins.'), list));
   }
   const log = el('div', {class: 'agents-list agents-log'});
   for (const entry of [...(st.log || [])].reverse().slice(0, 30)) {
@@ -1556,7 +1586,7 @@ function agentsSettings(a) {
     log.append(el('div', {class: 'agents-row muted'}, el('small', {text: when + (entry.requester ? ' · ' + (st.requesters?.find(r => r.id === entry.requester)?.name || entry.requester) : '') + (entry.by ? ' · ' + entry.by : '')}), el('span', {class: 'agents-row-text', text: text})));
   }
   if (!(st.log || []).length) log.append(el('div', {class: 'agents-row muted', text: tr('Nothing yet.')}));
-  rows.push(settingsRow(tr('Journal'), tr('The last decisions, commands and refusals on this host.'), button(tr('Refresh'), () => refreshAgents(a), 'text-button')), log);
+  rows.push(settingsSection(tr('Journal'), tr('The last decisions, commands and refusals on this host.'), log, {control: button(tr('Refresh'), () => refreshAgents(a), 'text-button')}));
   return rows;
 }
 // Pairing a host on this device makes it reachable from every other host of the workspace: the device,
@@ -1641,7 +1671,7 @@ function bridgeSettings(a){
     for(const p of participants)list.append(el('div',{class:'bridge-row',text:`${p.runtime==='claude'?'Claude Code':'Codex'} · ${p.terminal} · ${p.project||p.cwd} · ${p.state==='busy'?tr('working'):tr('idle')}`}));
     for(const u of unbridged)list.append(el('div',{class:'bridge-row muted',text:tr("{0} in \"{1}\" has not registered yet: it joins at its next prompt (a session started before the switch needs a restart or /clear first).",u.runtime==='claude'?'Claude Code':'Codex',u.terminal)}));
     if(!participants.length&&!unbridged.length)list.append(el('div',{class:'bridge-row muted',text:tr('No Claude Code or Codex session is running in a jaunt shell right now.')}));
-    rows.push(settingsRow(tr('Bridged sessions'),tr('Real interactive sessions registered through their own hooks. Only sessions of the other runtime on the same project are announced to each other.'),el('span')),list);
+    rows.push(settingsSection(tr('Bridged sessions'),tr('Real interactive sessions registered through their own hooks. Only sessions of the other runtime on the same project are announced to each other.'),list));
   }
   return rows;
 }
