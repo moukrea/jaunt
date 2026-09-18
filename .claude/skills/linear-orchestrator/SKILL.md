@@ -69,7 +69,7 @@ Run the pass now; there is nothing else to wait for.
    ```bash
    jaunt-linear priority <ID> <0-4>
    jaunt-linear relate <A> blocks <B>          # B cannot start until A is done
-   jaunt-linear comment <ID> "<why it sits there>"
+   jaunt-linear comment <ID> "<why it sits there>" --expects none
    jaunt-linear reviewed <ID> "<same reasoning>" --group <root-cause>
    ```
 
@@ -83,6 +83,22 @@ that is several unrelated requests (`jaunt-linear create "<title>" --parent <ID>
 Never delete or cancel a human's ticket.
 
 ## 3. Route the conversation
+
+### How to write on a ticket
+
+The board is read by a human who has to decide something. Long is not thorough,
+it is unusable — a ticket nobody can triage at a glance is a ticket that stalls.
+
+- **Every comment ends by saying what the human owes**, and `comment` appends
+  that line for you: `--expects "<ce que tu attends>"`, or `--expects none` for
+  a comment that asks nothing. If nothing is expected, ask yourself whether the
+  comment should exist at all.
+- **Reply inside the thread**: `--reply <commentId>`, with the id taken from
+  `verdict`'s `messages[].id`. A root comment for every answer is what turns a
+  ticket into an unreadable pile.
+- **Write in the language of the board** (French here), and keep a comment to
+  what changes the reader's next action. Reasoning that only justifies your own
+  work belongs in the plan document, not on the ticket.
 
 A comment on a **claimed** ticket is not yours to answer. The worker holding it
 has the context; you do not.

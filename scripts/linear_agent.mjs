@@ -40,6 +40,19 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 
+// Every agent comment has to end by saying what the human owes in return, so a
+// ticket can be triaged without reading the whole thread. `--expects none` is
+// the explicit way to say "nothing" — silence is not an option, because a
+// comment nobody has to act on is usually a comment that should not exist.
+const EXPECTS_MARKER = '**Attendu de toi :**';
+
+function expectsLine(expects) {
+  if (!expects || expects === 'none' || expects === 'rien') {
+    return '**Rien attendu de toi.** Pour information.';
+  }
+  return `${EXPECTS_MARKER} ${expects}`;
+}
+
 async function loadCredentials() {
   let creds;
   try {
@@ -359,18 +372,38 @@ async function getIssue(identifier) {
   return data.issue;
 }
 
-async function addComment(identifier, body) {
+// `parent` threads the reply under an existing comment instead of starting a new
+// root comment. Without it every answer lands at the bottom of the ticket and the
+// conversation becomes impossible to follow.
+async function addComment(identifier, body, parent) {
   const issue = await getIssue(identifier);
   const data = await graphql(
-    `mutation($issueId: String!, $body: String!) {
-      commentCreate(input: { issueId: $issueId, body: $body }) {
+    `mutation($issueId: String!, $body: String!, $parentId: String) {
+      commentCreate(input: { issueId: $issueId, body: $body, parentId: $parentId }) {
         success comment { id url }
       }
     }`,
-    { issueId: issue.id, body },
+    { issueId: issue.id, body, parentId: parent ?? null },
   );
   if (!data.commentCreate.success) throw new Error('commentCreate failed');
   return data.commentCreate.comment;
+}
+
+// A document holds the long form; the ticket comment holds only the digest. The
+// app token already carries the scope for this — verified against the API, no
+// scope change, so no existing token is revoked.
+async function addDocument(identifier, title, content) {
+  const issue = await getIssue(identifier);
+  const data = await graphql(
+    `mutation($input: DocumentCreateInput!) {
+      documentCreate(input: $input) {
+        success document { id title url }
+      }
+    }`,
+    { input: { title, content, issueId: issue.id } },
+  );
+  if (!data.documentCreate.success) throw new Error('documentCreate failed');
+  return data.documentCreate.document;
 }
 
 async function moveIssue(identifier, stateName) {
@@ -575,7 +608,9 @@ async function claim(identifier, phase = 'planning', session) {
     phase,
     // The worker session UUID — `claude -p --resume <session>` reopens it with
     // its context, which is how a comment reaches the worker that owns a ticket.
-    session: session ?? existing?.session ?? null,
+    // `||`, not `??`: an unset shell variable expands to an empty string, and
+    // that must fall back to the address already on file rather than erase it.
+    session: session || existing?.session || null,
     url: issue.url,
     claimedAt: existing?.claimedAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -794,7 +829,14 @@ async function verdict(identifier) {
     return { verdict: 'pending', issue: issue.identifier, planCommentId: plan.id };
   }
 
-  const messages = replies.map((c) => ({ author: c.user?.name ?? 'user', body: c.body, at: c.createdAt }));
+  // `id` travels with each message so the answer can be threaded under it
+  // (`comment --reply <id>`) instead of starting yet another root comment.
+  const messages = replies.map((c) => ({
+    id: c.id,
+    author: c.user?.name ?? 'user',
+    body: c.body,
+    at: c.createdAt,
+  }));
   const commands = replies.map((c) => c.body.trim().toLowerCase());
   if (commands.some((b) => b.startsWith('/approve'))) {
     return { verdict: 'approved', issue: issue.identifier, via: 'comment', messages };
@@ -854,8 +896,19 @@ const COMMANDS = {
   list: async ([type = 'unstarted']) => (await listIssues([type])).issues,
   show: async ([id]) => getIssue(required(id, 'show <ISSUE-ID>')),
   comment: async ([id, ...rest]) => {
-    const body = rest.join(' ') || (await readStdin());
-    return addComment(required(id, 'comment <ISSUE-ID> <body>'), required(body.trim(), 'comment body'));
+    const { flags, rest: words } = parseFlags(rest);
+    const body = words.join(' ') || (await readStdin());
+    const text = required(body.trim(), 'comment body');
+    // The marker is appended unless the body already carries one, so an agent
+    // that writes it by hand keeps control of the wording.
+    const tail = text.includes(EXPECTS_MARKER) || text.includes('**Rien attendu de toi.**')
+      ? ''
+      : `\n\n${expectsLine(flags.expects)}`;
+    return addComment(
+      required(id, 'comment <ISSUE-ID> [--expects <text>|none] [--reply <commentId>] <body>'),
+      `${text}${tail}`,
+      flags.reply,
+    );
   },
   move: async ([id, ...state]) =>
     moveIssue(required(id, 'move <ISSUE-ID> <state>'), required(state.join(' '), 'target state')),
@@ -896,12 +949,26 @@ const COMMANDS = {
   },
   release: async ([id]) => release(id),
   verdict: async ([id]) => verdict(required(id, 'verdict <ISSUE-ID>')),
+  // The long plan goes into a Linear document; the ticket gets a digest that
+  // states, in one line, what the human has to do. Reading the full plan is
+  // opt-in — a human should be able to answer from the comment alone.
   plan: async ([id, ...rest]) => {
-    const body = rest.join(' ') || (await readStdin());
-    return addComment(
-      required(id, 'plan <ISSUE-ID> <body>'),
-      `${PLAN_MARKER}\n${required(body.trim(), 'plan body')}`,
+    const { flags, rest: words } = parseFlags(rest);
+    const issue = required(id, 'plan <ISSUE-ID> --summary <text> [--expects <text>] [<body>]');
+    const body = words.join(' ') || (await readStdin());
+    const summary = required(flags.summary, '--summary <text> (the digest a human reads)');
+    const expects = flags.expects ?? 'approuver ce plan (👍 sur ce commentaire) ou répondre des corrections';
+
+    const doc = await addDocument(
+      issue,
+      flags.title ?? `Plan — ${issue}`,
+      required(body.trim(), 'plan body'),
     );
+    const comment = await addComment(
+      issue,
+      `${PLAN_MARKER}\n${summary.trim()}\n\n📄 **Plan détaillé :** ${doc.url}\n\n${expectsLine(expects)}`,
+    );
+    return { document: doc, comment };
   },
   'refresh-token': async () => {
     const t = await mintToken();

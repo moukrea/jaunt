@@ -73,11 +73,23 @@ cannot be ruled out" and blocks other tickets from being dispatched at all.
 ## 4. Post the plan and stop
 
 ```bash
-jaunt-linear plan <ID> "$(cat plan.md)"
-jaunt-linear claim <ID> awaiting-approval --session "$CLAUDE_SESSION_ID"
+jaunt-linear plan <ID> --summary "<3-6 lignes, en français>" \
+  --expects "approuver (👍 sur ce commentaire) ou répondre des corrections" \
+  "$(cat plan.md)"
+jaunt-linear claim <ID> awaiting-approval --session "$CLAUDE_CODE_SESSION_ID"
 ```
 
-The plan covers: what the ticket actually asks, the files that change, the
+The long plan goes into a Linear **document**; `--summary` is what the human
+actually reads on the ticket. Write the summary so it can be answered *without*
+opening the document: what changes, what does not, what you need from them. If
+the summary runs past a screen, it is not a summary.
+
+`CLAUDE_CODE_SESSION_ID` — not `CLAUDE_SESSION_ID`, which does not exist. An
+unset variable expands to an empty string and used to erase the claim's session
+address, which is how a human's approval finds you again. Check it landed:
+`jaunt-linear status` must show your UUID, not `""`.
+
+The document covers: what the ticket actually asks, the files that change, the
 approach, what you will *not* do, the risks — and one section that is not
 optional:
 
@@ -136,3 +148,7 @@ orchestrator releases the claim and removes the worktree.
 - Stuck is a fine outcome: comment what you tried and what blocked you, and stop.
   Silence is not.
 - Never close a ticket you did not finish.
+- Every comment you post carries `--expects` (what the human owes) and, when it
+  answers someone, `--reply <commentId>` so it lands inside the thread. Write in
+  the board's language — French here. Long detail goes in the plan document, not
+  in the comment.
