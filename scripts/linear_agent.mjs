@@ -954,7 +954,10 @@ const COMMANDS = {
   // opt-in — a human should be able to answer from the comment alone.
   plan: async ([id, ...rest]) => {
     const { flags, rest: words } = parseFlags(rest);
-    const issue = required(id, 'plan <ISSUE-ID> --summary <text> [--expects <text>] [<body>]');
+    const issue = required(
+      id,
+      'plan <ISSUE-ID> --summary <text> [--expects <text>] [--reply <commentId>] [<body>]',
+    );
     const body = words.join(' ') || (await readStdin());
     const summary = required(flags.summary, '--summary <text> (the digest a human reads)');
     const expects = flags.expects ?? 'approuver ce plan (👍 sur ce commentaire) ou répondre des corrections';
@@ -964,9 +967,13 @@ const COMMANDS = {
       flags.title ?? `Plan — ${issue}`,
       required(body.trim(), 'plan body'),
     );
+    // The digest is the comment a human answers to approve, so it is the one
+    // that most needs to stay inside the thread it belongs to. Without the
+    // parent it lands at the root and the conversation splits in two.
     const comment = await addComment(
       issue,
       `${PLAN_MARKER}\n${summary.trim()}\n\n📄 **Plan détaillé :** ${doc.url}\n\n${expectsLine(expects)}`,
+      flags.reply,
     );
     return { document: doc, comment };
   },

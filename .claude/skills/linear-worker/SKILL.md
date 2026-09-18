@@ -84,6 +84,11 @@ actually reads on the ticket. Write the summary so it can be answered *without*
 opening the document: what changes, what does not, what you need from them. If
 the summary runs past a screen, it is not a summary.
 
+A **re-plan answers someone**, so it takes `--reply <commentId>` — the id of the
+comment that asked for the change, from `verdict`'s `messages`. The digest then
+lands inside that thread instead of starting a third conversation at the root.
+A first plan has nobody to answer and stays at the root.
+
 `CLAUDE_CODE_SESSION_ID` — not `CLAUDE_SESSION_ID`, which does not exist. An
 unset variable expands to an empty string and used to erase the claim's session
 address, which is how a human's approval finds you again. Check it landed:
