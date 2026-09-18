@@ -189,7 +189,11 @@
 .pill{display:inline-block;font-family:ui-monospace,monospace;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--surface);white-space:nowrap}.pill.warn{color:var(--accent);border-color:var(--accent)}.pill.good{color:var(--good);border-color:var(--good)}.pill.danger{color:var(--danger);border-color:var(--danger)}
 .approval-command{font:12px/1.6 ui-monospace,monospace;background:#111515;border:1px solid var(--line);border-radius:7px;padding:12px 14px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 14px;user-select:text}
 .approval-actions{flex-wrap:wrap}
-.agents-fallback summary{font-size:10px;color:var(--faint);cursor:pointer;padding:2px 0}.agents-fallback .agents-add{margin-top:6px}.agents-add select{flex:1;min-width:0;font-size:12px}
+.agents-add select{flex:1;min-width:0;font-size:12px}
+/* A section owns its header and the list under it, so the separator belongs to the section, not to
+   the header row. The top padding is carried by the wrapper: .agents-list is also the rules list in
+   a modal, which must not gain it. */
+.settings-section{border-bottom:1px solid var(--line-soft)}.settings-section:last-child{border-bottom:0}.settings-section>.settings-row{border-bottom:0}.settings-section>.agents-list,.settings-section>.bridge-list{padding-top:2px}.settings-section-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .tab-agent{width:18px;height:18px;padding:0;margin-left:2px;color:var(--accent,#e0a030);opacity:.95;flex:none}.tab-agent svg{width:13px;height:13px}.session-tab .tab-agent:hover{color:var(--danger,#d9534f)}.agent-note{color:var(--accent,#e0a030)}
 .rules-list code{font-size:12px;word-break:break-all}.agents-table .text-button.small{font-size:10px;padding:0 4px}
 

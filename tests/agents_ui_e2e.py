@@ -28,8 +28,21 @@ async def main():
    await pa.locator('#host-settings').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
    await expect(pa.locator('.agents-link').filter(has_text='laptop')).to_contain_text('link online',timeout=30000)
    await expect(pa.locator('.agents-link').filter(has_text='laptop')).not_to_contain_text('Remove')
-   await expect(pa.locator('.agents-fallback')).to_be_visible()
-   assert not await pa.locator('input[placeholder*="Pairing code"]').is_visible(),'the code field stays a folded fallback'
+   # The list belongs to its own header: both sit in one .settings-section, so the separator no
+   # longer falls between them and the list cannot read as part of the next section.
+   section=pa.locator('.settings-section').filter(has_text='Reachable machines')
+   await expect(section.locator('.agents-list')).to_be_visible()
+   # The code field is the exception, not the default path: it is reachable, never shown outright.
+   await expect(pa.get_by_role('button',name='Pair a new machine',exact=True)).to_be_visible()
+   assert not await pa.locator('input[placeholder*="Pairing code"]').is_visible(),'the code field stays behind the pairing modal'
+   await pa.get_by_role('button',name='Pair a new machine',exact=True).click()
+   await expect(pa.locator('#modal input[placeholder*="Pairing code"]')).to_be_visible()
+   await pa.locator('#modal-close').click();await expect(pa.locator('#modal')).not_to_be_visible()
+   # The chevron folds the list away and brings it back; nothing else in the section moves.
+   await section.get_by_role('button',name='Collapse Reachable machines',exact=True).click()
+   await expect(section.locator('.agents-list')).to_have_count(0)
+   await section.get_by_role('button',name='Expand Reachable machines',exact=True).click()
+   await expect(section.locator('.agents-list')).to_be_visible()
    # B is the machine selected now on page A; go back to A (the first machine) and switch the feature on there.
    await pa.locator('#host-switch').click();await pa.locator('.host-menu').get_by_text('my-laptop').click()
    await pa.locator('#host-settings').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
