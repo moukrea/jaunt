@@ -806,15 +806,21 @@ async function verdict(identifier) {
   const held = (await listClaims()).find((c) => c.issue === issue.identifier);
   const claimedAt = held?.claimedAt ? new Date(held.claimedAt) : null;
 
+  // A plan is a comment that *opens* with the marker, not one that merely
+  // contains it somewhere: `plan` always writes the marker as the first bytes
+  // of the body, so a marker further down is a citation — an extract pasted in
+  // a code fence, a quoted comment — and quoting a plan must not create one.
+  // Markdown is no protection here: backticks are just characters to a
+  // substring test, which is how a comment explaining the marker became the
+  // current plan of a claim.
+  const isPlan = (c) => isAgent(c) && c.body.startsWith(PLAN_MARKER);
+
   const plans = comments.filter(
-    (c) =>
-      isAgent(c) &&
-      c.body.includes(PLAN_MARKER) &&
-      (!claimedAt || new Date(c.createdAt) > claimedAt),
+    (c) => isPlan(c) && (!claimedAt || new Date(c.createdAt) > claimedAt),
   );
   const plan = plans[plans.length - 1];
   if (!plan) {
-    const stale = comments.some((c) => isAgent(c) && c.body.includes(PLAN_MARKER));
+    const stale = comments.some(isPlan);
     return {
       verdict: 'no-plan',
       issue: issue.identifier,
