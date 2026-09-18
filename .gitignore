@@ -32,6 +32,9 @@ android/local.properties
 *.apk
 *.aab
 
+# Agent scheduler state (the skills themselves are versioned)
+.claude/scheduled_tasks.json
+
 # Private updater state
 installation.json
 update-status.json
