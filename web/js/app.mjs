@@ -1,5 +1,5 @@
 import {t as tr,languages,language,preference,setLanguage,translateStatic} from './i18n.mjs';
-import {activity,clearActivity,scopeActivity,activityBadges} from './activity.mjs';
+import {activity,clearActivity,scopeActivity,activityBadges,noticesFor,noticeCount,dismissNotice,dismissNotices,activityKeepFor} from './activity.mjs';
 import {ScrollbackCache} from './scrollback.mjs';
 const scrollback = new ScrollbackCache();
 const cacheKey = (a, id) => a.machine.room + ':' + id;
@@ -25,6 +25,8 @@ let settingsMachine, settingsRequest = 0;
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
 const isMobile = () => matchMedia('(max-width: 760px)').matches;
+// Two settings scopes share one page: the app's own (sidebar) and the selected machine's (gear in its bar).
+const settingsOpen = () => view === 'settings' || view === 'host';
 const current = () => machines.get(selected);
 const activeTerm = a => a?.terms.get(a.active);
 const prefs = () => vault.data?.preferences || {};
@@ -147,7 +149,7 @@ function showInstallation(clientOnly){
 function drawer(open = false) { $('sidebar').classList.toggle('open', open); $('drawer-backdrop').hidden = !open; }
 function setView(value) {
   document.querySelectorAll('.terminal-selection-overlay').forEach(n=>n.remove());
-  view = value; drawer(); if (view === 'settings') refreshSettings(); render();
+  view = value; drawer(); if (settingsOpen()) refreshSettings(); render();
   if(view==='transfers')renderTransfers();
   if (view === 'files' && current()?.link.state === 'online') listFiles(current()).catch(report);
 }
@@ -160,7 +162,7 @@ function refreshSettings() {
       if (request !== settingsRequest || a !== current() || view !== 'settings') return;
       a.info.updates = value; renderSettings();
     }).catch(error => {
-      if (request === settingsRequest && a === current() && view === 'settings') reportHost(a, error);
+      if (request === settingsRequest && a === current() && settingsOpen()) reportHost(a, error);
     });
   }
   // Runtime detection is refreshed each time Settings opens, so a runtime installed or
@@ -218,7 +220,7 @@ function makeMachine(machine) {
     if (selected === machine.room) {
       render(); if (a.active) selectSession(a, a.active).catch(error=>reportHost(a,error));
       if (view === 'files') listFiles(a).catch(error=>reportHost(a,error));
-      if (view === 'settings') renderSettings();
+      if (settingsOpen()) renderSettings();
     }
     if (machine.pending === false && machine.push) {
       // Refresh existing browser delivery settings without a permission prompt.
@@ -286,17 +288,17 @@ function handleMessage(a, message) {
     approvalPrompt(a, message);
   } else if (message.type === 'agent.approval.closed') {
     if (openApproval?.id === message.id) { openApproval = null; if ($('modal').open && $('modal-title').textContent === tr('Agent command on {0}', hostName(a))) closeModal(); }
-    if (view === 'settings' && a === current()) refreshAgents(a);
+    if (settingsOpen() && a === current()) refreshAgents(a);
   } else if (message.type === 'workspace.changed') {
     const w = message.workspace; if (a.info) a.info.workspace = w;
-    if (message.from === a.peer) { a.wsSent = workspaceSignature(a); if (view === 'settings' && a === current()) renderSettings(); return; }
+    if (message.from === a.peer) { a.wsSent = workspaceSignature(a); if (settingsOpen() && a === current()) renderSettings(); return; }
     if (w.sync) {
       applyHostWorkspace(a, w).then(() => { render(); if (a === current() && a.active && view === 'terminal') selectSession(a, a.active).catch(error=>reportHost(a,error)); }).catch(error=>reportHost(a,error));
     }
-    if (view === 'settings' && a === current()) renderSettings();
+    if (settingsOpen() && a === current()) renderSettings();
   } else if (message.type === 'bridge.changed') {
     const {type, ...status} = message; if (a.info) a.info.bridge = status;
-    if (view === 'settings' && a === current()) renderSettings();
+    if (settingsOpen() && a === current()) renderSettings();
   } else if (message.type === 'bridge.message') {
     bridgeMessageActivity(a, message);
   } else if (message.type === 'update.progress') {
@@ -335,7 +337,7 @@ function hostMenu() {
   document.addEventListener('keydown', dismiss, true); setTimeout(() => document.addEventListener('pointerdown', dismiss, true), 0);
   (menu.querySelector('.selected') || menu.querySelector('button')).focus();
 }
-window.addEventListener('jaunt-activity', () => { if (vault.data) renderMachines(); });
+window.addEventListener('jaunt-activity', () => { if (vault.data) { renderMachines(); renderHostActions(current()); } });
 $('host-switch').onclick = () => { if (document.querySelector('.host-menu')) { document.querySelector('.host-menu').remove(); $('host-switch').setAttribute('aria-expanded', 'false'); } else hostMenu(); };
 const hostName = a => a.machine.friendlyName || a.machine.name;
 const hostOf = a => a ? {name: a.machine.friendlyName || a.machine.name, local: !!a.machine.local, machine: a.machine} : null;
@@ -383,12 +385,47 @@ if (new URL(location.href).searchParams.has('debug')) window.jauntSimulateLatenc
 };
 if (new URL(location.href).searchParams.has('debug')) {
   // Round trip of a real RPC on the current link, and the visible screen text of the active terminal.
+  // Drive the activity strip from a test: how long a finished operation stays, and one operation of each kind.
+  window.jauntActivityKeep = ms => activityKeepFor(ms);
+  window.jauntActivity = (id, title, kind) => {
+    const job = activity(id, title, current()?.machine.room || null);
+    if (kind === 'fail') job.fail(new Error('simulated failure'));
+    else if (kind === 'wait') job.update({status: 'waiting for you', waiting: true});
+    else job.finish('done');
+  };
   window.jauntPing = async () => { const a = current(), t0 = performance.now(); await a.link.request('session.list'); return Math.round(performance.now() - t0); };
   window.jauntScrollTop = () => { const t = activeTerm(current()); t?.term.scrollToTop(); };
   window.jauntHistoryFetches = () => historyFetches;
   window.jauntCacheStats = () => scrollback.stats();
   window.jauntRendered = () => { const t = activeTerm(current()); return t ? {start: t.renderedStart, offset: t.offset, retained: t.session.retained, lines: t.term.buffer.active.length} : null; };
   window.jauntScreen = () => { const t = activeTerm(current()); if (!t) return ''; const b = t.term.buffer.active, lines = []; for (let i = 0; i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) || ''); return lines.join('\n'); };
+}
+// The bar of the machine you are looking at carries what belongs to that machine: what it kept
+// for you, and its own settings. The sidebar keeps the settings of the app itself.
+function renderHostActions(a) {
+  const bell = $('host-notifications'), gear = $('host-settings'), badge = $('host-notifications-badge');
+  if (!bell || !gear) return;
+  const inWorkspace = !!a;
+  bell.hidden = !inWorkspace; gear.hidden = !inWorkspace;
+  gear.classList.toggle('selected', view === 'host');
+  const count = a ? noticeCount(a.machine.room) : 0;
+  badge.hidden = !count; badge.textContent = String(count);
+  badge.classList.toggle('error', a ? noticesFor(a.machine.room).some(n => n.error) : false);
+  bell.title = count ? tr(count === 1 ? '{0} notification kept on this host' : '{0} notifications kept on this host', count) : tr('Nothing kept on this host');
+  bell.setAttribute('aria-label', bell.title);
+}
+function hostNotifications(a) {
+  const body = el('div', {class: 'notice-list'});
+  const draw = () => {
+    const rows = noticesFor(a.machine.room);
+    body.replaceChildren(...(rows.length ? rows.map(n => el('div', {class: 'notice-row', 'data-state': n.error ? 'error' : 'waiting'},
+      el('span', {class: 'notice-text'}, el('strong', {text: n.title}), el('small', {text: n.status + ' · ' + new Date(n.at).toLocaleTimeString()})),
+      ...(n.action ? [button(n.action.label, () => { n.action.run(); dismissNotice(n.id); draw(); renderHostActions(a); }, 'button small')] : []),
+      button(tr('Dismiss'), () => { dismissNotice(n.id); draw(); renderHostActions(a); }, 'text-button'))) : [el('p', {class: 'modal-copy', text: tr('Nothing kept. Operations that end without needing you leave the activity strip after a minute; what failed or waits for an answer is kept here.')})]));
+  };
+  draw();
+  modal(tr('Notifications · {0}', hostName(a)), el('div', {}, body,
+    el('div', {class: 'modal-actions'}, button(tr('Dismiss all'), () => { dismissNotices(a.machine.room); closeModal(); renderHostActions(a); }, 'button'))));
 }
 function renderMachines() {
   $('machine-count').textContent = machines.size;
@@ -407,15 +444,17 @@ function renderMachines() {
 function render() {
   if (!vault.data) return;
   const a = current(); scopeActivity(a?.machine.room || null); renderMachines(); renderConnection();
-  if (view === 'settings' && settingsMachine !== a) refreshSettings();
+  if (settingsOpen() && settingsMachine !== a) refreshSettings();
+  if (view === 'host' && !a) view = 'settings';
   $('machine-title').textContent = a?.machine.friendlyName || a?.machine.name || tr('Overview');
   $('breadcrumb-prefix').textContent = tr('Workspace');
   renderHostSymbol(a);
   $('welcome').hidden = !!a || view === 'settings'; $('workspace').hidden = !a && view !== 'settings';
+  renderHostActions(a);
   $('lock-button').hidden = !vault.protected;
   for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('selected', b.dataset.view === view);
   $('terminal-view').hidden = !a || (view !== 'terminal' && !(view === 'files' && !isMobile()));
-  for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || view !== v;
+  for (const v of ['files', 'transfers', 'settings']) $(v + '-view').hidden = (v !== 'settings' && !a) || (view !== v && !(v === 'settings' && view === 'host'));
   for (const b of document.querySelectorAll('#new-session-tab, #new-session-empty')) b.disabled = !!a?.creating || a?.link.state !== 'online';
   $('session-count').textContent = a?.sessions.length || '';
   for(const id of ['arrange-panes','split-below']) $(id).disabled = !a?.active || a?.link.state !== 'online';
@@ -1349,7 +1388,20 @@ function applyTheme() {
 }
 setInterval(() => { if (vault.data) applyTheme(); }, 60000);
 matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (vault.data) applyTheme(); });
-function hostPreferences(a) {
+// How a machine is named, pictured and ordered belongs to this device, not to the host: the same
+// machine can be "Home" here and "fedora-server" on a phone. The host's own settings live in its own bar.
+function machinesSettings() {
+  const rows = [];
+  for (const a of [...machines.values()].sort((x,y) => vault.data.machines.indexOf(x.machine) - vault.data.machines.indexOf(y.machine))) {
+    rows.push(el('div', {class: 'settings-row machine-row'},
+      el('div', {class: 'settings-label'}, el('strong', {}, hostIcon(a.machine, 15), el('span', {text: ' ' + hostName(a)})),
+        el('p', {text: (a.machine.local ? tr('Local host') : tr('Remote host')) + ' · ' + (a.info ? `${a.info.user} · ${a.info.platform}` : a.link.state) + (prefs().defaultHost === a.machine.room ? ' · ' + tr('opens at start') : '')})),
+      el('div', {class: 'session-actions'}, ...hostPreferences(a, true))));
+  }
+  if (!rows.length) rows.push(el('p', {class: 'settings-notice', text: tr('Pair a machine to name it, give it an icon and choose its place in the sidebar.')}));
+  return rows;
+}
+function hostPreferences(a, compact = false) {
   const name = el('input', {value:a.machine.friendlyName || a.machine.name, maxlength:80, 'aria-label':tr('Friendly host name')});
   name.onchange = async () => { a.machine.friendlyName = name.value.trim().slice(0,80) || a.machine.name; await persist(); render(); propagateIdentity(a); };
   const order = el('div',{class:'modal-actions'});
@@ -1359,8 +1411,11 @@ function hostPreferences(a) {
     const x=list.indexOf(visible[from]),y=list.indexOf(visible[to]);[list[x],list[y]]=[list[y],list[x]];await persist();renderMachines();
   }));
   const iconChoice=el('span',{class:'host-icon-choice'},hostIcon(a.machine,18),button(tr('Choose…'),()=>iconPicker(a).catch(report),'button'),...(a.machine.icon?[button(tr('Default'),async()=>{delete a.machine.icon;await persist();render();renderSettings();propagateIdentity(a);},'text-button')]:[]));
+  const byDefault = button(prefs().defaultHost === a.machine.room ? tr('Opens at start') : tr('Open at start'), async () => { vault.data.preferences.defaultHost = a.machine.room; await persist(); renderSettings(); });
+  byDefault.disabled = prefs().defaultHost === a.machine.room;
+  if (compact) return [name, iconChoice, order, byDefault];
   return [settingsRow(tr('Friendly name'),tr('Only changes the name on this device.'),name),settingsRow(tr('Icon'),tr('Any icon from the icon set, only on this device.'),iconChoice),settingsRow(tr('Host order'),tr('Choose the order in the sidebar.'),order),
-    settingsRow(tr('Open by default'),prefs().defaultHost === a.machine.room ? tr('This host opens when the app starts.') : tr('Choose the first host shown when the app starts.'),button(tr('Use this host'),async()=>{vault.data.preferences.defaultHost=a.machine.room;await persist();renderSettings();}))];
+    settingsRow(tr('Open by default'),prefs().defaultHost === a.machine.room ? tr('This host opens when the app starts.') : tr('Choose the first host shown when the app starts.'),byDefault)];
 }
 // Host icon picker: the complete icon set is loaded on demand; the chosen icon's nodes are stored
 // with the machine so every device renders it without loading the set again.
@@ -1414,10 +1469,10 @@ function levelPill(entry) {
 function remaining(until) { const s = Math.max(0, until - Date.now() / 1000); return s >= 3600 ? tr('{0} h', Math.round(s / 3600)) : tr('{0} min', Math.max(1, Math.round(s / 60))); }
 async function refreshAgents(a) {
   try { a.agents = await a.link.request('agents.status'); } catch (error) { a.agents = null; report(error); }
-  if (view === 'settings' && a === current()) renderSettings();
+  if (settingsOpen() && a === current()) renderSettings();
 }
 function approvalPrompt(a, item) {
-  if (openApproval || $('modal').open) { toast(tr('An agent asks to run a command; see Settings → Agents and machines.'), false, null, hostOf(a)); if (view === 'settings' && a === current()) refreshAgents(a); return; }
+  if (openApproval || $('modal').open) { toast(tr('An agent asks to run a command; open this host’s settings, Agents and machines.'), false, null, hostOf(a)); if (settingsOpen() && a === current()) refreshAgents(a); return; }
   openApproval = item;
   const d = item.detail || {}, decide = async decision => { openApproval = null; closeModal(); try { await a.link.request('agents.decide', {id: item.id, decision}); } catch (error) { report(error); } };
   const who = item.requester?.name || '?', typing = item.right === 'type';
@@ -1520,7 +1575,7 @@ function syncLinks() {
         const issued = await y.link.request('pair.issue');
         x.agents = await x.link.request('links.add', {code: issued.code, name: hostName(y), icon: y.machine.icon || null, selfName: hostName(x)}, 60000);
         if (!known.includes(y.machine.room)) known.push(y.machine.room);
-        if (view === 'settings' && x === current()) renderSettings();
+        if (settingsOpen() && x === current()) renderSettings();
       })().catch(error => console.warn('link', hostName(x), '→', hostName(y), error)).finally(() => linking.delete(key));
     }
   }
@@ -1614,7 +1669,7 @@ function desktopUpdateStatus(value) {
     else if(value.state==='ready')job.update({done:true,waiting:true,status:value.message+(value.target?' · '+value.target:'')+(value.requiresAuthorization?' System authorization will be requested.':''),action:{label:tr('Install and reopen'),run:()=>desktop.updates('install')}});
     else if(['current','installed'].includes(value.state))job.finish(value.message);
   }
-  if(view==='settings' && changed)renderSettings();
+  if(settingsOpen() && changed)renderSettings();
 }
 async function checkDesktopUpdate(){
   desktopUpdateOperation=activity('desktop-update',tr('Desktop update'));
@@ -1637,7 +1692,7 @@ function hostUpdateProgress(a,status){
   // here too once it starts changing the host, so the coming restart is explained.
   if(!hostUpdateJobs.has(a.machine.room)&&['downloading','verifying','installing'].includes(status.state))followHostUpdate(a,null,status).catch(()=>{});
   hostUpdateJobs.get(a.machine.room)?.observe(status);
-  if(view==='settings'&&a===current())renderSettings();
+  if(settingsOpen()&&a===current())renderSettings();
 }
 function checkHostUpdate(a,allowRestart=false){return followHostUpdate(a,()=>a.link.request('updates.install',{allowRestart}),null,allowRestart);}
 async function followHostUpdate(a,start,initial=null,allowRestart=false) {
@@ -1686,7 +1741,7 @@ async function followHostUpdate(a,start,initial=null,allowRestart=false) {
     if(started.state)tracker.observe(started);
     await settled;
   } catch(error){if(!tracker.settled){tracker.settled=true;job.fail(error);job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});}}
-  finally {clearInterval(poll);clearTimeout(deadline);a.link.removeEventListener('status',onStatus);if(hostUpdateJobs.get(a.machine.room)===tracker)hostUpdateJobs.delete(a.machine.room);if(view==='settings'&&a===current())renderSettings();}
+  finally {clearInterval(poll);clearTimeout(deadline);a.link.removeEventListener('status',onStatus);if(hostUpdateJobs.get(a.machine.room)===tracker)hostUpdateJobs.delete(a.machine.room);if(settingsOpen()&&a===current())renderSettings();}
 }
 function languagePicker(id,detected=false) {
  // The public page shows the language it detected; Settings keeps an explicit "System" entry to return to automatic selection.
@@ -1696,10 +1751,51 @@ function languagePicker(id,detected=false) {
  select.onchange=async()=>{if(isAndroid)await nativeCall('app.language',{language:select.value});if(desktop?.setLanguage)await desktop.setLanguage(select.value);setLanguage(select.value);};
  return select;
 }
+// Everything decided by the machine you are looking at, reachable from the gear in its own bar.
+function hostSettingsGroups(a) {
+  const groups = [settingsGroup(tr('THIS MACHINE'),
+      settingsRow(a.machine.name, `${a.info?.platform || tr('Remote host')} · ${a.info?.version || tr('Connecting')} · ${a.link.state}`, button(tr('Reconnect'), () => { a.link.start(); })),
+      ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
+        settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
+        ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
+      ...workspaceSettings(a),
+      settingsRow(tr('Host clipboard'), (a.info?.clipboard?.backend || tr('Unknown until connected')) + (a.info?.clipboard?.hint ? ' · ' + tr(a.info.clipboard.hint) : ''), button(tr('Open'), () => showClipboard(a))),
+      settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
+      ...(!a.machine.local ? [settingsRow(tr('Forget this machine'), tr('Removes its saved key from this browser. Revoke it on the host first when possible.'), button(tr('Forget'), () => forgetMachine(a), 'button danger'))] : []))];
+    if(a.info?.bridge?.visible)groups.push(settingsGroup(tr('AI SESSIONS'),...bridgeSettings(a)));
+    if(a.info?.agents)groups.push(settingsGroup(tr('AGENTS AND MACHINES'),...agentsSettings(a)));
+    groups.push(settingsGroup(tr('NOTIFICATIONS'),
+      ...(a.info?.sharedViews ? attentionSettings(a) : []),
+      ...(!desktop ? [settingsRow(isAndroid ? tr('Android background notifications') : tr('Background push'), isAndroid ? tr('Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.') : a.machine.push ? tr('Registered for this machine. Delivery depends on browser/OS permissions and the host being online.') : tr('Standard Web Push sent by your host. No ntfy, bot or third-party notification account.'),
+        button(a.machine.push ? tr('Disable') : tr('Enable'), async () => {
+          if (a.machine.push) await push.unsubscribe(vault, a.link); else await push.subscribe(vault, a.link);
+          renderSettings(); toast(tr('Notification preference saved.'), false, null, hostOf(a));
+        }))] : []),
+      settingsRow(tr('Test delivery'), tr('Notifications show the title and message sent by the program.'), button(tr('Send test'), async () => {
+        const result = await a.link.request('notifications.test');
+        toast(desktop ? tr('Test sent. Background the desktop app to see its OS notification.') : isAndroid ? tr('Test sent. Check Android notifications after enabling the background connection.') : result.delivered ? tr('Push sent to the notification provider.') : result.results?.join('; ') || tr('No push subscription delivered; a live in-app notification may still appear.'), !desktop && !isAndroid && !result.delivered, null, hostOf(a));
+      })),
+      el('p', {class: 'settings-notice', text: (isAndroid ? tr('The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. Notification content follows your Android lock-screen privacy settings. ') : '') + tr('From any jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.')})));
+  if (desktop && desktopHostAvailable && a.machine.local) groups.push(settingsGroup(tr('LOCAL HOST ON THIS COMPUTER'),
+    settingsRow(tr('Local host'),tr('Local and remote views share the same shells. Closing this window leaves them running.'),button(tr('Start host'),async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
+    settingsRow(tr('Start automatically'),tr('Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.'),button(tr('Install service'),async()=>{const job=activity('host-service',tr('Automatic host startup'));try{job.update({status:tr('Installing and enabling the user service…')});const result=await desktop.action('service');job.finish(result.message);machines.get('local-host')?.link.start();}catch(error){job.fail(error);}})),
+    settingsRow(tr('Connect another device'),tr('Create a private one-use pairing link for this host.'),button(tr('Pair device'),async()=>{const result=await desktop.action('pair');modal(tr('Pair this computer'),el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:tr('One-use pairing QR code')})]:[]),el('p',{text:tr('Open this one-use link on your other device. It expires after ten minutes. Keep it private.')}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button(tr('Copy pairing link'),()=>copyText(result.url))));}))));
+  return groups;
+}
 function renderSettings() {
   if (!vault.data) return;
   const a = current(), content = $('settings-content');
   settingsMachine = a;
+  if (view === 'host' && a) {
+    $('settings-eyebrow').textContent = tr('ON THIS MACHINE');
+    $('settings-title').textContent = tr('{0} · settings', hostName(a));
+    $('settings-subtitle').textContent = tr('What this machine does and allows: connection, version and updates, AI sessions, notifications it sends. Its name and icon here are in the app settings.');
+    content.replaceChildren(...hostSettingsGroups(a));
+    return;
+  }
+  $('settings-eyebrow').textContent = tr('MAKE YOURSELF AT HOME');
+  $('settings-title').textContent = tr('Settings');
+  $('settings-subtitle').textContent = tr('This device: security, terminal, and how your machines are named and ordered here. Each machine has its own settings, from the gear in its bar.');
   const font = el('select', {'aria-label': tr('Terminal font size')});
   for (const n of [11, 12, 13, 14, 15, 16, 18, 20]) font.append(el('option', {value: n, text: `${n} px`, selected: n === (prefs().fontSize || 14)}));
   font.onchange = async () => {
@@ -1729,34 +1825,10 @@ function renderSettings() {
       el('p', {class: 'settings-notice', text: tr('A six-digit PIN is less resistant to offline guessing than a long passphrase. Clearing browser data loses pairings. No account recovery or secret escrow.')})),
     settingsGroup(tr('TERMINAL'), settingsRow(tr('Text size'), tr('Applies to all terminal tabs on this device.'), font),
       settingsRow(tr('Screen reader support'), tr('Enables xterm’s accessible text layer.'), reader),
-      el('p', {class: 'settings-notice', text: tr('jaunt shells survive disconnections and compatible host updates. Stopping the host or rebooting the computer still ends ordinary shells. The desktop app and connected clients share the same sessions.')}))
+      el('p', {class: 'settings-notice', text: tr('jaunt shells survive disconnections and compatible host updates. Stopping the host or rebooting the computer still ends ordinary shells. The desktop app and connected clients share the same sessions.')})),
+    settingsGroup(tr('YOUR MACHINES'), ...machinesSettings(),
+      el('p', {class: 'settings-notice', text: tr('Names, icons and order are yours and stay on this device; other devices keep their own. What a machine allows — commands, typing, messages, updates, notifications — is decided on the machine itself, from the gear in its bar.')}))
   ];
-  if (a) {
-    groups.push(settingsGroup(tr('SELECTED MACHINE'),
-      ...hostPreferences(a),
-      settingsRow(a.machine.name, `${a.info?.platform || tr('Remote host')} · ${a.info?.version || tr('Connecting')} · ${a.link.state}`, button(tr('Reconnect'), () => { a.link.start(); })),
-      ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
-        settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
-        ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
-      ...workspaceSettings(a),
-      settingsRow(tr('Host clipboard'), (a.info?.clipboard?.backend || tr('Unknown until connected')) + (a.info?.clipboard?.hint ? ' · ' + tr(a.info.clipboard.hint) : ''), button(tr('Open'), () => showClipboard(a))),
-      settingsRow(tr('Authorized devices'), tr('Devices have the same rights as this host user. Revoke a lost phone from here or with jaunt revoke.'), button(tr('Manage'), () => manageDevices(a))),
-      ...(!a.machine.local ? [settingsRow(tr('Forget this machine'), tr('Removes its saved key from this browser. Revoke it on the host first when possible.'), button(tr('Forget'), () => forgetMachine(a), 'button danger'))] : [])));
-    if(a.info?.bridge?.visible)groups.push(settingsGroup(tr('AI SESSIONS'),...bridgeSettings(a)));
-    if(a.info?.agents)groups.push(settingsGroup(tr('AGENTS AND MACHINES'),...agentsSettings(a)));
-    groups.push(settingsGroup(tr('NOTIFICATIONS'),
-      ...(a.info?.sharedViews ? attentionSettings(a) : []),
-      ...(!desktop ? [settingsRow(isAndroid ? tr('Android background notifications') : tr('Background push'), isAndroid ? tr('Keep an encrypted connection using an Android foreground service. A persistent notification lets you stop it. Battery restrictions can delay delivery.') : a.machine.push ? tr('Registered for this machine. Delivery depends on browser/OS permissions and the host being online.') : tr('Standard Web Push sent by your host. No ntfy, bot or third-party notification account.'),
-        button(a.machine.push ? tr('Disable') : tr('Enable'), async () => {
-          if (a.machine.push) await push.unsubscribe(vault, a.link); else await push.subscribe(vault, a.link);
-          renderSettings(); toast(tr('Notification preference saved.'), false, null, hostOf(a));
-        }))] : []),
-      settingsRow(tr('Test delivery'), tr('Notifications show the title and message sent by the program.'), button(tr('Send test'), async () => {
-        const result = await a.link.request('notifications.test');
-        toast(desktop ? tr('Test sent. Background the desktop app to see its OS notification.') : isAndroid ? tr('Test sent. Check Android notifications after enabling the background connection.') : result.delivered ? tr('Push sent to the notification provider.') : result.results?.join('; ') || tr('No push subscription delivered; a live in-app notification may still appear.'), !desktop && !isAndroid && !result.delivered, null, hostOf(a));
-      })),
-      el('p', {class: 'settings-notice', text: (isAndroid ? tr('The Android service reconnects with your saved keys. Force-stop and some battery-saving modes prevent delivery. Notification content follows your Android lock-screen privacy settings. ') : '') + tr('From any jaunt shell: jaunt notify "Need your attention". For command completion: jaunt run -- your-command. Closing/force-stopping the browser or battery restrictions can delay or block push; delivery is not guaranteed by the operating system.')})));
-  }
   if (desktop) {
     const notifications=el('input',{type:'checkbox',checked:!!prefs().desktopNotifications,'aria-label':tr('Desktop notifications')});
     notifications.onchange=async()=>{vault.data.preferences.desktopNotifications=notifications.checked;await persist();};
@@ -1766,10 +1838,6 @@ function renderSettings() {
       settingsRow(tr('Desktop version'),desktopUpdateState?.message || tr('Loading update status…'),button(tr('Check desktop update'),checkDesktopUpdate)),
       settingsRow(tr('Automatic desktop updates'),tr('Downloads and verifies updates automatically. Installs when the app closes; host shells keep running. System packages may require OS authorization.'),autoDesktop),
       settingsRow(tr('Desktop notifications'),tr('Show the program’s notification when this window is in the background.'),notifications)));
-    if (desktopHostAvailable && (!a || a.machine.local)) groups.push(settingsGroup(tr('LOCAL HOST ON THIS COMPUTER'),
-      settingsRow(tr('Local host'),tr('Local and remote views share the same shells. Closing this window leaves them running.'),button(tr('Start host'),async()=>{await desktop.action('start');machines.get('local-host')?.link.start();})),
-      settingsRow(tr('Start automatically'),tr('Install the user service. Active ordinary shells must be closed explicitly before replacing an existing daemon.'),button(tr('Install service'),async()=>{const job=activity('host-service',tr('Automatic host startup'));try{job.update({status:tr('Installing and enabling the user service…')});const result=await desktop.action('service');job.finish(result.message);machines.get('local-host')?.link.start();}catch(error){job.fail(error);}})),
-      settingsRow(tr('Connect another device'),tr('Create a private one-use pairing link for this host.'),button(tr('Pair device'),async()=>{const result=await desktop.action('pair');modal(tr('Pair this computer'),el('div',{},...(result.qr?[el('img',{class:'pair-qr',src:'data:image/svg+xml;base64,'+result.qr,alt:tr('One-use pairing QR code')})]:[]),el('p',{text:tr('Open this one-use link on your other device. It expires after ten minutes. Keep it private.')}),el('textarea',{class:'pair-code',readOnly:true,value:result.url}),button(tr('Copy pairing link'),()=>copyText(result.url))));}))));
   }
   if(!desktop && !isAndroid) groups.push(settingsGroup(tr('DESKTOP APP'),installationChoices()));
   if (androidAPK && !isAndroid) groups.push(settingsGroup(tr('ANDROID APP'), settingsRow(tr('Install the APK'), tr('Native Android clipboard, camera and background notifications. Your browser pairing stays separate.'), el('a', {class: 'button primary', text: tr('Download Android APK'), href: androidAPK}))));
@@ -1870,6 +1938,9 @@ function bindEvents() {
   $('scroll-bottom').onclick = () => activeTerm(current())?.term.scrollToBottom();
   $('sidebar-toggle').onclick=async()=>{vault.data.preferences.sidebarCollapsed=!prefs().sidebarCollapsed;try{localStorage.setItem('jaunt-sidebar-collapsed',String(prefs().sidebarCollapsed));}catch{}document.body.classList.toggle('sidebar-collapsed',prefs().sidebarCollapsed);$('sidebar-toggle').setAttribute('aria-expanded',String(!prefs().sidebarCollapsed));$('sidebar-toggle').setAttribute('aria-label',prefs().sidebarCollapsed?tr('Expand sidebar'):tr('Collapse sidebar'));await persist();fitActive();};
   $('settings-button').onclick = () => setView('settings'); $('lock-button').onclick = () => lockWorkspace().catch(report);
+  $('host-settings').onclick = () => setView('host');
+  $('host-notifications').onclick = () => { const a = current(); if (a) hostNotifications(a); };
+  document.body.classList.toggle('is-android', isAndroid);
   for (const id of ['new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
   $('split-below').onclick = () => {try {arrangePanes('y');} catch(e) {report(e);}};
   $('new-session-folder').onclick = () => browseNewSession().catch(report);
@@ -1958,7 +2029,7 @@ function bindEvents() {
   window.visualViewport?.addEventListener('resize', viewport);
   window.addEventListener('jaunt-insets',viewport);
   new ResizeObserver(fitActive).observe($('terminal-stage'));
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installedPrompt = e; if (view === 'settings') renderSettings(); });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installedPrompt = e; if (settingsOpen()) renderSettings(); });
   document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setView('settings'); }
   });
@@ -1966,7 +2037,7 @@ function bindEvents() {
     if (!isAndroid || !vault.data) return;
     const state = await nativeCall('notifications.status');
     for (const m of vault.data.machines) m.push = !!state.enabled && (state.rooms || []).includes(m.room);
-    if (view === 'settings') renderSettings();
+    if (settingsOpen()) renderSettings();
     const target = await nativeCall('open.pending');
     const a = machines.get(target?.host);
     if (a) openNotification(target.host, target.session);
@@ -2004,7 +2075,7 @@ async function bootstrap() {
     if (!isAndroid && /^android-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(config.androidRelease || '')) {
       androidAPK = `https://github.com/moukrea/jaunt/releases/download/${config.androidRelease}/jaunt-${config.androidRelease}.apk`;
       const apk = el('a', {class: 'button primary', text: tr('Download Android APK'), href: androidAPK});
-      if (view === 'settings') renderSettings();
+      if (settingsOpen()) renderSettings();
       $('welcome').append(el('div', {class: 'android-download'}, apk, el('p', {class: 'modal-copy', text: tr('Installable Android app with native clipboard, camera and background notifications.')})));
     }
     if(!desktop && !isAndroid && /^desktop-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(config.desktopRelease||'')){

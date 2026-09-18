@@ -102,7 +102,7 @@ async def main():
                 assert (t/'update-proof.txt').read_text()=='before'
                 before=json.loads(cli('status'));pointer=(t/'runtime/current').resolve()
                 # 1. Up to date: the published release equals the running one.
-                await page.locator('#settings-button').click()
+                await page.locator('#host-settings').click()
                 await page.get_by_role('button',name='Check for updates',exact=True).click()
                 row=page.locator('#activity .activity-row').first
                 await expect(row.locator('[role=status]')).to_contain_text('Up to date',timeout=30000)
@@ -144,7 +144,7 @@ async def main():
                 assert (t/'update-proof.txt').read_text()=='beforekept'
                 passed(f'client-driven update {tag} → {newer}: progress pushed ({sorted(progress_states)}), runtime replaced in place, same daemon and shell PID, environment kept, command runs after reconnect')
                 # 3. Checking again is idempotent and quick.
-                await page.locator('#settings-button').click()
+                await page.locator('#host-settings').click()
                 await page.get_by_role('button',name='Check for updates',exact=True).click()
                 row=page.locator('#activity .activity-row').first
                 await expect(row.locator('[role=status]')).to_contain_text('Up to date',timeout=30000)

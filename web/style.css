@@ -192,3 +192,12 @@
 .agents-fallback summary{font-size:10px;color:var(--faint);cursor:pointer;padding:2px 0}.agents-fallback .agents-add{margin-top:6px}.agents-add select{flex:1;min-width:0;font-size:12px}
 .tab-agent{width:18px;height:18px;padding:0;margin-left:2px;color:var(--accent,#e0a030);opacity:.95;flex:none}.tab-agent svg{width:13px;height:13px}.session-tab .tab-agent:hover{color:var(--danger,#d9534f)}.agent-note{color:var(--accent,#e0a030)}
 .rules-list code{font-size:12px;word-break:break-all}.agents-table .text-button.small{font-size:10px;padding:0 4px}
+
+/* Terminal key bar: a touch aid. Hidden where a real keyboard is present (desktop app, wide browser windows). */
+.keybar{display:none}
+@media(max-width:760px){.keybar{display:flex}}
+body.is-android .keybar{display:flex}
+.host-action{position:relative}.topbar-actions .notif-badge{position:absolute;top:-2px;right:-2px}
+.notice-row{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.notice-row:last-child{border-bottom:0}.notice-row .notice-text{flex:1;min-width:0}.notice-row .notice-text small{display:block;color:var(--muted);margin-top:3px;word-break:break-word}
+.notice-row[data-state=error] strong{color:var(--danger,#d9534f)}

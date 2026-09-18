@@ -48,7 +48,7 @@ async def main():
    stats=await B.evaluate('window.jauntCacheStats()');assert stats['bytes']>=total-1000,stats
    print(f'PASS after a reload the local cache serves the whole history without any host request ({stats["bytes"]} bytes cached)')
    # Disk history off: files are deleted; the in-memory ring still serves recent output.
-   await A.locator('#settings-button').click();await A.get_by_label('Keep terminal history on disk').uncheck()
+   await A.locator('#host-settings').click();await A.get_by_label('Keep terminal history on disk').uncheck()
    await until(lambda:not (h.state/'scrollback'/sid).exists())
    assert status()['retained']>=0
    await A.get_by_label('Keep terminal history on disk').check();await until(lambda:(h.state/'scrollback'/sid).exists() or True)

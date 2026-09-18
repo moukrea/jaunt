@@ -34,7 +34,7 @@
         <div class="sidebar-rule"></div>
         <button class="nav-item selected" data-preview-view="terminal"><span data-icon="terminal" data-size="14"></span><span>Terminals</span><span id="preview-session-count" class="nav-count">3</span></button>
         <button class="nav-item" data-preview-view="files"><span data-icon="folder" data-size="14"></span><span>Files</span></button>
-        <div class="sidebar-bottom"><div class="nav-item"><span data-icon="settings" data-size="14"></span><span>Settings</span></div><div class="trust-note"><span data-icon="shield" data-size="12"></span><span>Private by design.<br><small>Your keys stay with you.</small></span></div></div>
+        <div class="sidebar-bottom"><div class="nav-item"><span data-icon="settings" data-size="14"></span><span>Settings</span></div></div>
       </aside>
       <div class="preview-main">
         <div class="preview-topbar"><div class="breadcrumb"><span>Workspace</span><span>/</span><strong id="preview-machine-title">workstation</strong></div><span class="preview-connected"><span class="status-dot online"></span><span>Encrypted</span></span><span class="preview-new"><span data-icon="plus" data-size="10"></span><span>New shell</span></span></div>
@@ -78,14 +78,14 @@
     <div class="sidebar-bottom">
       <button id="settings-button" aria-label="Settings" class="nav-item"><span data-icon="settings"></span><span class="nav-label">Settings</span><span class="shortcut">⌘ ,</span></button>
       <button id="lock-button" aria-label="Lock this device" class="nav-item" hidden><span data-icon="lock"></span><span class="nav-label">Lock this device</span></button>
-      <div class="trust-note"><span data-icon="shield" data-size="16"></span><span>Private by design.<br><small>Your keys stay with you.</small></span></div>
+      
     </div>
   </aside>
   <main class="main">
     <header id="topbar" class="topbar">
       <button class="icon-button mobile-only" id="menu-button" aria-label="Open machines"><span data-icon="menu"></span></button>
       <div class="breadcrumb"><span id="breadcrumb-prefix">Workspace</span><span class="breadcrumb-separator">/</span><button id="host-switch" class="host-switch" aria-haspopup="menu" aria-expanded="false"><span id="host-symbol" class="host-symbol" data-icon="monitor" data-size="16"></span><strong id="machine-title">Overview</strong><span id="host-chevron" data-icon="down" data-size="14" hidden></span></button></div>
-      <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection sr-only"><i></i><span>Not connected</span></span></div>
+      <div class="topbar-actions"><span id="latency" class="latency" hidden></span><span id="connection" class="connection sr-only"><i></i><span>Not connected</span></span><button id="host-notifications" class="icon-button host-action" aria-label="Notifications from this host" title="Notifications" hidden><span data-icon="bell" data-size="17"></span><span id="host-notifications-badge" class="notif-badge" hidden></span></button><button id="host-settings" class="icon-button host-action" aria-label="Settings for this host" title="Host settings" hidden><span data-icon="settings" data-size="17"></span></button></div>
     </header>
     <div id="connection-banner" class="connection-banner" role="status" hidden></div>
     <section id="feedback" class="feedback" aria-label="Action errors" hidden></section>
@@ -145,7 +145,7 @@
         <div class="wide-view-heading"><div class="eyebrow">BETWEEN DEVICES</div><h2>Transfer activity</h2><p>Progress and interrupted transfers for this browser tab. Downloads are saved by your browser.</p><button data-view="files" class="button small">Back to files</button></div><div id="transfer-list" class="transfer-list"></div>
       </section>
       <section id="settings-view" class="wide-view" hidden>
-        <div class="wide-view-heading"><div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>Settings</h2><p>Device security, terminal preferences, and notifications.</p></div><div id="settings-content"></div>
+        <div class="wide-view-heading"><div class="eyebrow" id="settings-eyebrow">MAKE YOURSELF AT HOME</div><h2 id="settings-title">Settings</h2><p id="settings-subtitle">Device security, terminal preferences, and how your machines are named here.</p></div><div id="settings-content"></div>
       </section>
     </section>
     <nav id="mobile-nav" class="mobile-nav" aria-label="Views"><button data-view="terminal" class="selected"><span data-icon="terminal"></span><span>Shell</span></button><button data-view="files"><span data-icon="folder"></span><span>Files</span></button><button data-view="settings"><span data-icon="settings"></span><span>Settings</span></button></nav>

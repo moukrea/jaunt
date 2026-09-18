@@ -1,3 +1,7 @@
+# jaunt Android 0.1.0-beta.30 (versionCode 30)
+
+- Bundles the beta.40 interface (per-machine settings behind the gear, kept notifications; the key row stays on Android).
+
 # jaunt Android 0.1.0-beta.29 (versionCode 29)
 
 - Bundles the beta.38 interface (reworded note for unregistered AI sessions).

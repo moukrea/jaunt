@@ -22,21 +22,21 @@ async def main():
    pb=await (await b.new_context(viewport={'width':1300,'height':900})).new_page();await pb.goto(B.pair()['url']);await expect(pb.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
    # Page A pairs the second host too (the device now holds both pairings) and names the first one; with the
    # feature on, the hosts get linked by themselves, with no code to copy, under the names used on this device.
-   await pa.locator('#settings-button').click();await pa.get_by_label('Friendly host name').fill('my-laptop');await pa.get_by_label('Friendly host name').press('Enter')
+   await pa.locator('#settings-button').click();row=pa.locator('.machine-row').filter(has_text='laptop');await row.get_by_label('Friendly host name').fill('my-laptop');await row.get_by_label('Friendly host name').press('Enter')
    await pa.locator('#add-machine').click();await pa.locator('#modal textarea').fill(B.pair()['code']);await pa.locator('#modal').get_by_role('button',name='Pair machine',exact=True).click()
    await expect(pa.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
-   await pa.locator('#settings-button').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
+   await pa.locator('#host-settings').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
    await expect(pa.locator('.agents-link').filter(has_text='laptop')).to_contain_text('link online',timeout=30000)
    await expect(pa.locator('.agents-link').filter(has_text='laptop')).not_to_contain_text('Remove')
    await expect(pa.locator('.agents-fallback')).to_be_visible()
    assert not await pa.locator('input[placeholder*="Pairing code"]').is_visible(),'the code field stays a folded fallback'
    # B is the machine selected now on page A; go back to A (the first machine) and switch the feature on there.
    await pa.locator('#host-switch').click();await pa.locator('.host-menu').get_by_text('my-laptop').click()
-   await pa.locator('#settings-button').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
+   await pa.locator('#host-settings').click();await enable(pa);await expect(pa.locator('.agents-list').first).to_be_visible(timeout=15000)
    await expect(pa.locator('.agents-link').filter(has_text='homelab')).to_contain_text('link online',timeout=30000)
    assert [l['label'] for l in ctl(B,'agents.status')['links']]==['my-laptop'] and ctl(A,'agents.status')['links'][0]['label']=='homelab'
    print('PASS pairing a second host on the device links the hosts both ways by itself, with no code to copy',flush=True)
-   await pb.locator('#settings-button').click();await enable(pb);await expect(pb.locator('.agents-list').first).to_be_visible(timeout=15000)
+   await pb.locator('#host-settings').click();await enable(pb);await expect(pb.locator('.agents-list').first).to_be_visible(timeout=15000)
    mcp=Mcp(A,sid);box={}
    def run(cmd):
     def go():box['r']=mcp.tool('jaunt_run',{'host':'homelab','command':cmd})
@@ -53,14 +53,14 @@ async def main():
    t=run('echo rule-me');await expect(pb.locator('#modal')).to_be_visible(timeout=20000);await pb.get_by_role('button',name='Always allow this command',exact=True).click();t.join(30);assert 'rule-me' in box['r'],box['r']
    t=run('echo rule-me');t.join(30);assert 'rule-me' in box['r'] and not ctl(B,'agents.status')['pending'],box['r']
    print('PASS "always allow this command" makes the same command run again without a prompt',flush=True)
-   await pb.locator('#settings-button').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
+   await pb.locator('#host-settings').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
    await pb.locator('.agents-table').get_by_role('button',name='1 rule(s)',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('echo rule-me')
    await pb.locator('#modal .rules-list').get_by_role('button',name='Remove',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('No rule yet',timeout=15000)
    await pb.locator('#modal input[aria-label="Rule"]').fill('echo pat-*');await pb.locator('#modal').get_by_role('button',name='Add',exact=True).click();await expect(pb.locator('#modal .rules-list')).to_contain_text('echo pat-*',timeout=15000)
    t=run('echo pat-ok');t.join(30);assert 'pat-ok' in box['r'] and not ctl(B,'agents.status')['pending'],box['r']
    await pb.locator('#modal-close').click();await expect(pb.locator('#modal')).to_be_hidden(timeout=15000)
    print('PASS rules are listed, removed and added from the requester table, and a * pattern pre-approves matching commands',flush=True)
-   await pb.locator('#settings-button').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
+   await pb.locator('#host-settings').click();await pb.get_by_role('button',name='Refresh',exact=True).click()
    row=pb.locator('.agents-table tbody tr').filter(has_text='host: my-laptop · Claude Code');await expect(row).to_be_visible(timeout=15000)
    await expect(row.locator('td').nth(2)).to_contain_text('asks');await expect(row.locator('td').nth(3)).to_contain_text('asks')
    await row.locator('input[type=checkbox]').check();await pb.get_by_role('button',name='Modify selection…',exact=True).click()
@@ -91,7 +91,7 @@ async def main():
    await expect(pb.locator('#tabs .tab-agent')).to_have_count(0,timeout=15000);await expect(pb.locator('#modal')).to_be_hidden(timeout=15000)
    t=type_('echo again');await expect(pb.locator('#modal')).to_be_visible(timeout=20000);await pb.get_by_role('button',name='Deny',exact=True).click();t.join(30);assert 'Refused' in box['r']
    print('PASS cutting from the tab removes the badge; the agent must ask again',flush=True)
-   await pb.locator('#settings-button').click()
+   await pb.locator('#host-settings').click()
    await pb.get_by_role('button',name='Revoke all',exact=True).click();await pb.locator('#modal').get_by_role('button',name='Revoke all',exact=True).click()
    await expect(pb.locator('.agents-table tbody')).to_contain_text('No session has asked anything here yet',timeout=15000)
    await expect(pb.locator('.agents-log')).to_contain_text('echo third')
