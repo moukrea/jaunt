@@ -88,3 +88,44 @@ test('desktop updater: a launch check with automatic updates off announces the v
  assert.equal(ready.state,'ready');assert.ok(fetched.some(u=>u.endsWith('.tar.gz')));
  await fs.rm(cache,{recursive:true,force:true});
 });
+
+const {surfaceFindings}=await import('../scripts/linear_agent.mjs');
+const surfaceOf=(files,symbols=[])=>({files,symbols});
+// The gate may only answer "independent" on proof. A surface missing on EITHER
+// side is missing evidence, so it has to surface as `unknown` — the asymmetry
+// this pins used to let an undeclared candidate read as "nothing opposes it".
+test('a missing change surface is unknown whichever side it is missing on',()=>{
+ const theirs=new Map([['JAU-28',surfaceOf(['scripts/linear_agent.mjs'])]]);
+ const mineOnly=new Map([['JAU-14',surfaceOf(['scripts/linear_agent.mjs'])]]);
+ const candidateBlind=surfaceFindings('JAU-14',['JAU-28'],theirs);
+ assert.deepEqual(candidateBlind.reasons,[],'nothing was demonstrated, so nothing may be claimed as a refusal');
+ assert.equal(candidateBlind.unknowns.length,1);
+ assert.match(candidateBlind.unknowns[0],/^JAU-14 has declared no change surface/);
+ const claimBlind=surfaceFindings('JAU-14',['JAU-28'],mineOnly);
+ assert.deepEqual(claimBlind.reasons,[]);
+ assert.equal(claimBlind.unknowns.length,1);
+ assert.match(claimBlind.unknowns[0],/^JAU-28 has declared no change surface/);
+ const blind=surfaceFindings('JAU-14',['JAU-28'],new Map());
+ assert.equal(blind.unknowns.length,2,'neither absence may be swallowed by the other');
+});
+test('two declared surfaces are compared, and only a real collision is a refusal',()=>{
+ const collide=new Map([
+  ['JAU-14',surfaceOf(['scripts/linear_agent.mjs'],['independent'])],
+  ['JAU-28',surfaceOf(['scripts/linear_agent.mjs','web/style.css'],['verdict'])],
+ ]);
+ const hit=surfaceFindings('JAU-14',['JAU-28'],collide);
+ assert.deepEqual(hit.unknowns,[]);
+ assert.deepEqual(hit.reasons,['JAU-14 and JAU-28 both change scripts/linear_agent.mjs']);
+ const apart=new Map([
+  ['JAU-14',surfaceOf(['scripts/linear_agent.mjs'],['independent'])],
+  ['JAU-28',surfaceOf(['web/style.css'],['.settings-row'])],
+ ]);
+ const clear=surfaceFindings('JAU-14',['JAU-28'],apart);
+ assert.deepEqual(clear.reasons,[]);
+ assert.deepEqual(clear.unknowns,[],'both surfaces are declared and disjoint: that is a proof, not an absence');
+});
+test('nothing claimed leaves the candidate free without a surface',()=>{
+ const none=surfaceFindings('JAU-14',[],new Map());
+ assert.deepEqual(none.reasons,[]);
+ assert.deepEqual(none.unknowns,[],'no claim means nobody to collide with — the first dispatch never deadlocks');
+});

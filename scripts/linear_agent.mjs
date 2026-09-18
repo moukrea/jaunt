@@ -9,7 +9,7 @@
 
 import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = join(ROOT, '.dev-state');
@@ -708,6 +708,12 @@ async function setLoop(enabled) {
 // default: an indeterminate answer is a refusal, because the cost of serialising
 // wrongly is a wait, and the cost of parallelising wrongly is two workers
 // rewriting the same code and a board that says both succeeded.
+//
+// So `independent: true` is a claim of PROOF, and the three answers are kept
+// apart: `blocked` (a conflict was demonstrated), `unknown` (the evidence to
+// decide is missing), `independent` (checked, and nothing opposes it). Folding
+// `unknown` into `independent` is what made this gate lie — a caller reading
+// an empty `reasons` cannot tell "nothing opposes it" from "I know nothing".
 
 // Blocking is transitive. A blocks B, B blocks C means C must not run with A,
 // which a direct-relation check would happily allow.
@@ -729,6 +735,35 @@ function blockingClosure(tickets) {
   return closure;
 }
 
+// Test 4 — no overlapping change surface. Pure, and exported, so the symmetry
+// below is pinned by tests: a surface is evidence, and a missing one is missing
+// evidence whichever side it is missing on. Both absences land in `unknowns`,
+// never in `reasons` (nothing was demonstrated) and never in silence (which is
+// how a missing candidate surface used to read as a clean comparison).
+export function surfaceFindings(identifier, against, surfaces) {
+  const reasons = [];
+  const unknowns = [];
+  const mine = surfaces.get(identifier);
+  if (!mine && against.length) {
+    unknowns.push(
+      `${identifier} has declared no change surface — overlap with ${against.join(', ')} cannot be ruled out`,
+    );
+  }
+  for (const other of against) {
+    const theirs = surfaces.get(other);
+    if (!theirs) {
+      unknowns.push(`${other} has declared no change surface — overlap with ${identifier} cannot be ruled out`);
+      continue;
+    }
+    if (!mine) continue;
+    const files = mine.files.filter((f) => theirs.files.includes(f));
+    const symbols = mine.symbols.filter((s) => theirs.symbols.includes(s));
+    if (files.length) reasons.push(`${identifier} and ${other} both change ${files.join(', ')}`);
+    if (symbols.length) reasons.push(`${identifier} and ${other} both touch ${symbols.join(', ')}`);
+  }
+  return { reasons, unknowns };
+}
+
 async function independent(identifier) {
   const state = await board();
   const claims = (await listClaims()).filter((c) => c.issue !== identifier);
@@ -737,6 +772,7 @@ async function independent(identifier) {
 
   const against = claims.map((c) => c.issue);
   const reasons = [];
+  const unknowns = [];
 
   // Test 1 — analysed in its current version.
   if (ticket.review.state !== 'reviewed') {
@@ -746,7 +782,6 @@ async function independent(identifier) {
   if (against.length > 0) {
     const closure = blockingClosure(state.tickets);
     const mine = closure.get(identifier) ?? new Set();
-    const mySurface = await readSurface(identifier);
 
     for (const other of against) {
       // Test 2 — no blocking path, in either direction.
@@ -761,25 +796,29 @@ async function independent(identifier) {
       if (myGroup && theirGroup && myGroup === theirGroup) {
         reasons.push(`${identifier} and ${other} share root-cause group "${myGroup}"`);
       }
-
-      // Test 4 — no overlapping change surface.
-      const theirSurface = await readSurface(other);
-      if (!theirSurface) {
-        reasons.push(`${other} has declared no change surface — overlap with ${identifier} cannot be ruled out`);
-      } else if (mySurface) {
-        const files = mySurface.files.filter((f) => theirSurface.files.includes(f));
-        const symbols = mySurface.symbols.filter((s) => theirSurface.symbols.includes(s));
-        if (files.length) reasons.push(`${identifier} and ${other} both change ${files.join(', ')}`);
-        if (symbols.length) reasons.push(`${identifier} and ${other} both touch ${symbols.join(', ')}`);
-      }
     }
+
+    const surfaces = new Map();
+    for (const id of [identifier, ...against]) {
+      const surface = await readSurface(id);
+      if (surface) surfaces.set(id, surface);
+    }
+    const overlap = surfaceFindings(identifier, against, surfaces);
+    reasons.push(...overlap.reasons);
+    unknowns.push(...overlap.unknowns);
   }
+
+  // A demonstrated conflict outranks an unanswered question: `blocked` is final,
+  // `unknown` is the caller's cue to go get the missing surface and ask again.
+  const gate = reasons.length ? 'blocked' : unknowns.length ? 'unknown' : 'independent';
 
   return {
     ticket: identifier,
-    independent: reasons.length === 0,
+    independent: gate === 'independent',
+    gate,
     against: against.length ? against : '(nothing claimed)',
     reasons,
+    unknowns,
   };
 }
 
@@ -1023,18 +1062,22 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const [command, ...args] = process.argv.slice(2);
-const handler = COMMANDS[command];
-if (!handler) {
-  console.error(`usage: linear_agent.mjs <${Object.keys(COMMANDS).join('|')}>`);
-  process.exit(2);
-}
+// Guarded so a test can import the pure helpers above: without it, importing
+// this file runs the CLI, prints a usage line and exits the test runner.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [command, ...args] = process.argv.slice(2);
+  const handler = COMMANDS[command];
+  if (!handler) {
+    console.error(`usage: linear_agent.mjs <${Object.keys(COMMANDS).join('|')}>`);
+    process.exit(2);
+  }
 
-try {
-  const result = await handler(args);
-  // Plain strings print raw so they can be used directly in shell substitution.
-  console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
-} catch (error) {
-  console.error(`error: ${error.message}`);
-  process.exit(1);
+  try {
+    const result = await handler(args);
+    // Plain strings print raw so they can be used directly in shell substitution.
+    console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(`error: ${error.message}`);
+    process.exit(1);
+  }
 }
