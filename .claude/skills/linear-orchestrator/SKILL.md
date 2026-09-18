@@ -1,6 +1,6 @@
 ---
 name: linear-orchestrator
-description: Handle one wake-up of the jaunt Linear loop — reconcile state, keep the dependency graph current, dispatch tickets to worker sessions, route human comments to the worker that holds the ticket. Use when the watcher wakes the session, for "traite le réveil", "avance le board", and as the orchestrator half of linear-loop.
+description: Handle one wake-up of the jaunt Linear loop — reconcile state, keep the dependency graph current, dispatch tickets to worker sessions, route human comments to the worker that holds the ticket, and clean up after a merge. Use when the watcher wakes the session, for "traite le réveil", "avance le board", and as the orchestrator half of linear-loop.
 ---
 
 # linear-orchestrator
@@ -14,6 +14,29 @@ a session tempted to rush the ordering to get to the coding.
 (`jaunt-linear repo` prints it). Every Linear write goes through it, as the
 **jaunt Agent** app.
 
+## Who owns the ticket's state
+
+Linear's GitHub integration moves tickets on git events, and it was doing it
+before the loop existed:
+
+| git event | ticket |
+|---|---|
+| a branch whose name contains the identifier is pushed | → *In Progress* |
+| its PR is merged | → *Done* |
+
+Measured on three tickets: JAU-3, JAU-12 and JAU-4 each went *Done* one second
+after PR #58, #59 and #61 merged, with nobody calling `move`. The counter-proof
+landed in the same minute — `chore/linear-loop` (#57) merged and moved nothing,
+because its name carries no identifier, and its five tickets had to be moved by
+hand.
+
+So the rule is: **git owns *In Progress* and *Done*; the loop owns only what git
+cannot see** — a ticket parked in *Backlog*, and anything waiting on a human
+(JAU-18). Calling `move` for a transition git already performs puts two
+authorities on one field with no arbitration, and the loop loses as often as it
+wins. **Every branch the loop creates carries the ticket identifier**; that
+string is the entire wiring between the board and the code.
+
 ## What woke you
 
 The watcher exits when the board moves, and the harness hands you its output
@@ -24,11 +47,11 @@ file. Read it: it names events, not state.
 | `comment` | someone wrote on a ticket — §3 |
 | `ticket-created` | a new ticket must be compared against the whole board — §2 |
 | `ticket-edited` | it returns to the analysis pass — §2 |
-| `state-changed` | usually a worker moving its own ticket — §4 |
+| `state-changed` | git moved it — a push made it *In Progress*, a merge made it *Done* — or a human did; a ticket newly *Done* is §5 |
 | `interval-elapsed` | nothing moved; reconcile (§1) and go back to sleep |
 | `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work |
 
-Always finish by restarting the watcher (§5). A wake-up that does not re-arm the
+Always finish by restarting the watcher (§6). A wake-up that does not re-arm the
 watcher ends the loop silently.
 
 ## 1. Reconcile before acting
@@ -136,7 +159,6 @@ When the gate passes:
 SID=$(uuidgen)
 git worktree add ../wt-<ID> -b agent/<ID>
 jaunt-linear claim <ID> planning --session "$SID"
-jaunt-linear move <ID> "In Progress"
 
 UNSET=$(env | grep -oE '^(CLAUDECODE|CLAUDE_CODE_[A-Z_]*)' | sort -u | sed 's/^/-u /' | tr '\n' ' ')
 cd ../wt-<ID> && env $UNSET claude -p --session-id "$SID" --permission-mode bypassPermissions \
@@ -146,6 +168,15 @@ cd ../wt-<ID> && env $UNSET claude -p --session-id "$SID" --permission-mode bypa
 Purging `CLAUDECODE` and `CLAUDE_CODE_*` is not optional: without it the spawned
 session is treated as an ephemeral child, persists no transcript, and cannot be
 resumed — which breaks routing and resumption both.
+
+Two things about that block are load-bearing and easy to "tidy" away:
+
+- **`-b agent/<ID>`.** The identifier in the branch name is what will move the
+  ticket, twice, and link the PR to the board. Name the branch anything else and
+  the whole ticket runs invisibly.
+- **No `move "In Progress"`.** The push does it. Dispatch is not a state change:
+  at this point nothing has been written, and claiming otherwise is how the
+  board came to say *In Progress* about tickets where no code existed.
 
 **Stopping a worker.** When new evidence invalidates a claim in flight, ask for a
 clean wrap-up, do not kill the process:
@@ -159,10 +190,52 @@ A message reaches a working session but drains only at its next tool round — i
 never interrupts work already in flight. The flag is what makes the stop
 reliable; the message is what makes it understandable.
 
-When a worker reports finished: verify its ticket and branch, `jaunt-linear
-release <ID>`, remove the worktree, and re-examine what was waiting on it.
+## 5. After a merge, clear the way
 
-## 5. Restart the watcher
+The worker lands its own ticket — rebase, push, PR, CI, `gh pr merge --squash
+--delete-branch` (its §7). You do not push and you do not merge. You do the three
+things it cannot do from inside its own worktree.
+
+**Verify, then release.** Take the report seriously enough to check it:
+
+```bash
+gh pr view <n> --json state --jq .state    # MERGED
+jaunt-linear show <ID>                     # state.name must be Done
+jaunt-linear release <ID>
+git worktree remove ../wt-<ID>
+```
+
+A merged PR whose ticket is still not *Done* a minute later means the branch name
+carried no identifier. Move it by hand and name the miss in your pass — it is the
+one failure mode that looks exactly like success, and the only sign is a ticket
+sitting quietly in the wrong column.
+
+**Rebase what was stacked, while it is still free.** A squash merge rewrites the
+parent's work as one new commit, so every branch built on the old parent is now
+built on commits that are not in `main`. As long as a child has **no commit of
+its own**, the rebase is free and you do it here:
+
+```bash
+git fetch origin
+git -C ../wt-<CHILD> rebase --onto origin/main <old-base> agent/<CHILD>
+```
+
+Once the child has its own commits, stop. Replaying them over a squashed parent
+is where the semantic conflicts live — a helper renamed on both sides rebases
+without a single textual conflict and breaks at runtime — and resolving that
+means knowing what both changes meant. Reopen the worker and ask it (§3). This is
+JAU-25's point: the cost of the rebase is set by *when* you do it, not by how
+large the diff is.
+
+**Merge one PR at a time.** `main`'s required checks are strict, so every merge
+makes every other open PR out of date and sends it back through CI. Serialising
+merges is not politeness, it is what stops the second worker paying ten minutes
+for the first one's timing. If two workers are green at once, tell one to wait.
+
+Then re-examine what was waiting on the ticket: the gate may now pass for
+something you refused earlier.
+
+## 6. Restart the watcher
 
 Last thing, every time, unless the loop is off:
 
@@ -179,4 +252,6 @@ in between.
 Nobody watches a wake-up happen. If the watcher failed, say the loop is blind
 rather than reporting a quiet board. If a pass was skipped, say which. Never
 report a ticket as advanced because a worker was launched — a launch is not a
-result.
+result, and neither is an open PR. Nothing is landed until a merge you checked,
+and a ticket that went *Done* on its own is the proof, not your memory of
+dispatching it.
