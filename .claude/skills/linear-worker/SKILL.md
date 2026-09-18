@@ -214,6 +214,19 @@ looking, and a green PR you walk away from simply stays open. If the merge is
 refused because `main` moved while your CI ran, rebase onto `origin/main`,
 `git push --force-with-lease`, and watch again.
 
+`--delete-branch` will then print `fatal: 'main' is already used by worktree at
+…` and exit non-zero. **The merge already happened.** That error comes from the
+local half of the command, which tries to check `main` out in your worktree, and
+`main` is checked out in the main clone. Read the state instead of re-running the
+merge on the strength of an exit code:
+
+```bash
+gh pr view <n> --json state --jq .state     # MERGED — you are done
+```
+
+The remote branch is deleted anyway, by the repository's own
+`delete_branch_on_merge`.
+
 The merge is what makes the ticket *Done*. Check that it did, rather than
 assuming — the integration takes a second or two, but it runs on the branch name,
 and you are the one who chose it.
