@@ -26,6 +26,7 @@ def port():
 
 class Harness:
     def __init__(self, name="jaunt workstation", relay_url=None, extra_env=None):
+        self.name=name
         self.tmp=tempfile.TemporaryDirectory(prefix='jaunt-browser-');self.root=Path(self.tmp.name)
         self.state=self.root/'state';self.work=self.root/'workspace';self.work.mkdir();(self.root/'home').mkdir()
         self.rport=port();self.env={**os.environ,'jaunt_CLIPBOARD':'headless','PYTHONPATH':str(ROOT/'host'),'jaunt_STATE':str(self.state),'HOME':str(self.root/'home'),'XDG_CONFIG_HOME':str(self.root/'home/.config'),'XDG_DATA_HOME':str(self.root/'home/.local/share'),'XDG_CACHE_HOME':str(self.root/'home/.cache')}

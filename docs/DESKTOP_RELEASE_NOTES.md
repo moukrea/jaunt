@@ -1,3 +1,7 @@
+# jaunt desktop 0.1.0-beta.32
+
+- Bundles the beta.40 interface (per-machine settings behind the gear, kept notifications, no key row with a real keyboard).
+
 # jaunt desktop 0.1.0-beta.31
 
 - Bundles the beta.38 interface (reworded note for unregistered AI sessions).

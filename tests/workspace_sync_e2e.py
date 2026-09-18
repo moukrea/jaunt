@@ -18,7 +18,7 @@ async def main():
    await expect(A.locator('#tabs')).to_contain_text('Shared one')
    await B.locator('#list-sessions').click();await expect(B.locator('#modal')).to_contain_text('Shared one');await B.keyboard.press('Escape')
    # Sharing on from A: B adopts A's tabs.
-   await A.locator('#settings-button').click();await A.get_by_label('Share open sessions with this host').check()
+   await A.locator('#host-settings').click();await A.get_by_label('Share open sessions with this host').check()
    await expect(B.locator('#tabs')).to_contain_text('Shared one',timeout=15000)
    print('PASS turning on shared open sessions makes the other client show the same tab')
    # B opens a second shell: A follows.
@@ -42,7 +42,7 @@ async def main():
    assert all(s['alive'] for s in json.loads(h.cli('status'))['sessions'])
    print('PASS × offers close or terminate; a closed view keeps the shell and the other client follows')
    # Only displayed sessions exist: × terminates without a menu and the Sessions list disappears.
-   await B.locator('#settings-button').click();await B.get_by_label('Only displayed sessions exist').check()
+   await B.locator('#host-settings').click();await B.get_by_label('Only displayed sessions exist').check()
    await expect(A.locator('#list-sessions')).to_be_hidden(timeout=15000)
    await A.locator('.session-tab .tab-close').first.click()
    await expect(A.locator('.close-menu')).to_have_count(0)
