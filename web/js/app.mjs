@@ -1482,11 +1482,63 @@ function bridgeMessageActivity(a,m){
 // touches the session-to-session bridge above it.
 let openApproval = null;
 const RUNTIME_LABEL = {claude: 'Claude Code', codex: 'Codex'};
-function levelPill(entry) {
+// The two rights a requester holds here, in the order their columns appear.
+const AGENT_RIGHTS = [['exec', () => tr('Run commands')], ['type', () => tr('Write into a shell')]];
+// What the menu offers for one right: the level, and the duration when the level is a trust.
+const AGENT_LEVELS = [['ask', 'ask', () => tr('Ask every time')], ['trust', '1h', () => tr('Trust for 1 hour')],
+  ['trust', '24h', () => tr('Trust for 24 hours')], ['trust', 'always', () => tr('Trust permanently')], ['block', undefined, () => tr('Block')]];
+const levelTone = entry => ({trust: 'good', block: 'danger'})[entry?.level] || 'warn';
+function levelText(entry) {
   const level = entry?.level || 'ask';
-  if (level === 'trust') return el('span', {class: 'pill good', text: entry.until ? tr('trusted · {0} left', remaining(entry.until)) : tr('trusted always')});
-  if (level === 'block') return el('span', {class: 'pill danger', text: tr('blocked')});
-  return el('span', {class: 'pill warn', text: tr('asks')});
+  if (level === 'trust') return entry.until ? tr('trusted · {0} left', remaining(entry.until)) : tr('trusted always');
+  return level === 'block' ? tr('blocked') : tr('asks');
+}
+// The badge is the control: it shows the level of one right and opens the menu that sets it. No
+// selection step, no separate dialog — what you click is what you change.
+function levelPill(a, r, right, label) {
+  const entry = r[right], pill = button(levelText(entry), event => {
+    const node = event.currentTarget;
+    if (node.getAttribute('aria-expanded') === 'true') { closeLevelMenu(); return; }
+    levelMenu(node, a, r, right);
+  }, 'pill pill-button ' + levelTone(entry));
+  pill.setAttribute('aria-haspopup', 'menu');
+  pill.setAttribute('aria-expanded', 'false');
+  // The badge text alone ("asks") names neither the requester nor the right; the accessible name does.
+  pill.prepend(el('span', {class: 'sr-only', text: tr('Level of {0} for {1}', label, r.name) + ' '}));
+  return pill;
+}
+// One menu at a time, and its listeners die with it: picking a level closes the menu too, so leaving
+// them registered would let a stale handler shut the next menu on its first click.
+let levelDismiss = null;
+function closeLevelMenu() {
+  if (levelDismiss) { document.removeEventListener('pointerdown', levelDismiss, true); document.removeEventListener('keydown', levelDismiss, true); levelDismiss = null; }
+  document.querySelectorAll('.level-menu').forEach(n => n.remove());
+  document.querySelectorAll('.pill-button[aria-expanded=true]').forEach(n => n.setAttribute('aria-expanded', 'false'));
+}
+function levelMenu(anchor, a, r, right) {
+  closeLevelMenu();
+  const entry = r[right], menu = el('div', {class: 'level-menu', role: 'menu', 'aria-label': tr('Level of {0} for {1}', AGENT_RIGHTS.find(([name]) => name === right)[1](), r.name)});
+  for (const [level, duration, label] of AGENT_LEVELS) {
+    // A trust that runs out cannot say which duration it was given: only an unlimited one matches an entry.
+    const current = entry?.level === level && (level !== 'trust' ? true : duration === 'always' && !entry.until);
+    const item = button(label(), async () => {
+      closeLevelMenu();
+      try { a.agents = await a.link.request('agents.trust', {requester: r.id, right, level, duration}); } catch (error) { report(error); }
+      renderSettings();
+    }, 'level-item' + (current ? ' selected' : ''));
+    item.setAttribute('role', 'menuitem');
+    if (current) item.prepend(icon('check', 14));
+    menu.append(item);
+  }
+  document.body.append(menu); anchor.setAttribute('aria-expanded', 'true');
+  // Fixed placement, because the table scrolls inside .tablewrap and would clip a menu in the flow.
+  const r0 = anchor.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(r0.left, window.innerWidth - width - 8)) + 'px';
+  menu.style.top = (r0.bottom + height + 8 < window.innerHeight ? r0.bottom + 6 : Math.max(8, r0.top - height - 6)) + 'px';
+  // The anchor is excluded so a second click on the badge toggles the menu instead of reopening it.
+  const dismiss = levelDismiss = e => { if (e.type === 'keydown' && e.key !== 'Escape') return; if (e.type === 'pointerdown' && (menu.contains(e.target) || anchor.contains(e.target))) return; closeLevelMenu(); };
+  document.addEventListener('keydown', dismiss, true); setTimeout(() => { if (levelDismiss === dismiss) document.addEventListener('pointerdown', dismiss, true); }, 0);
+  (menu.querySelector('.selected') || menu.querySelector('button')).focus();
 }
 function remaining(until) { const s = Math.max(0, until - Date.now() / 1000); return s >= 3600 ? tr('{0} h', Math.round(s / 3600)) : tr('{0} min', Math.max(1, Math.round(s / 60))); }
 async function refreshAgents(a) {
@@ -1552,19 +1604,20 @@ function agentsSettings(a) {
   }, 'text-button');
   rows.push(settingsSection(tr('Reachable machines'), tr('Every machine paired on this device is reachable from this host as a requester, under the name and icon you use here; nothing to pair again. Each machine still decides what this host\'s sessions may do there.'), links,
     {control: pair, collapsible: true, key: a.machine.room + ':links'}));
-  // Requesters table (others acting here).
-  const selected = new Set();
-  const table = el('table', {class: 'agents-table'}, el('thead', {}, el('tr', {}, el('th', {text: ''}), el('th', {text: tr('Requester')}), el('th', {text: tr('Run commands')}), el('th', {text: tr('Write into a shell')}))));
+  // Requesters table (others acting here). Each right is set on its own badge, so the table needs no
+  // selection: the last column carries the one action that is not a level, revoking the whole row.
+  const table = el('table', {class: 'agents-table'}, el('thead', {}, el('tr', {}, el('th', {text: tr('Requester')}), ...AGENT_RIGHTS.map(([, label]) => el('th', {text: label()})), el('th', {text: ''}))));
   const tbody = el('tbody'); table.append(tbody);
   for (const r of st.requesters || []) {
-    const box = el('input', {type: 'checkbox', 'aria-label': r.name}); box.onchange = () => { if (box.checked) selected.add(r.id); else selected.delete(r.id); };
-    tbody.append(el('tr', {}, el('td', {}, box), el('td', {}, el('strong', {text: r.name}), el('small', {text: ' · ' + (r.local ? tr('this host') : r.host)})), el('td', {}, levelPill(r.exec), ' ', button((r.rules || []).length ? tr('{0} rule(s)', r.rules.length) : tr('Rules…'), () => rulesDialog(a, r), 'text-button small')), el('td', {}, levelPill(r.type))));
+    const forget = button('', () => confirmAction(tr('Revoke {0}?', r.name), tr('Its rights and its rules are dropped. It asks again at its next request.'), tr('Revoke'), async () => { a.agents = await a.link.request('agents.revoke', {requesters: [r.id]}); renderSettings(); }, true), 'icon-button row-action', 'trash');
+    forget.setAttribute('aria-label', tr('Revoke {0}', r.name));
+    tbody.append(el('tr', {}, el('td', {}, el('strong', {text: r.name})),
+      ...AGENT_RIGHTS.map(([right, label]) => el('td', {}, levelPill(a, r, right, label()),
+        ...(right === 'exec' ? [' ', button((r.rules || []).length ? tr('{0} rule(s)', r.rules.length) : tr('Rules…'), () => rulesDialog(a, r), 'text-button small')] : []))),
+      el('td', {class: 'row-actions'}, forget)));
   }
   if (!(st.requesters || []).length) tbody.append(el('tr', {}, el('td', {colspan: 4, class: 'muted', text: tr('No session has asked anything here yet. A requester appears at its first request.')})));
-  const modify = button(tr('Modify selection…'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } trustDialog(a, [...selected]); }, 'button');
-  const revoke = button(tr('Revoke selection'), () => { if (!selected.size) { toast(tr('Select at least one requester.')); return; } confirmAction(tr('Revoke these requesters?'), tr('They will ask again at their next request.'), tr('Revoke'), async () => { a.agents = await a.link.request('agents.revoke', {requesters: [...selected]}); renderSettings(); }, true); }, 'button');
-  const revokeAll = button(tr('Revoke all'), () => confirmAction(tr('Revoke every requester?'), tr('Every requester will ask again at its next request.'), tr('Revoke all'), async () => { a.agents = await a.link.request('agents.revoke', {all: true}); renderSettings(); }, true), 'text-button');
-  rows.push(settingsSection(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block.'), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table), el('div', {class: 'agents-actions'}, modify, revoke, revokeAll))));
+  rows.push(settingsSection(tr('Requesters'), tr('Sessions of linked machines (host × runtime) that acted here, with the level you gave each right: ask every time, trust for a while or always, or block. Click a badge to set it.'), el('div', {class: 'agents-list'}, el('div', {class: 'tablewrap'}, table))));
   // Background agent shells alive on this host (never jaunt sessions), with a kill switch.
   const shells = st.agentShells || [];
   if (shells.length) {
@@ -1629,19 +1682,6 @@ function rulesDialog(a, r) {
   const add = button(tr('Add'), async () => { const pattern = input.value.trim(); if (!pattern) return; add.disabled = true; try { a.agents = await a.link.request('agents.rule', {requester: r.id, pattern}); input.value = ''; render(a.agents.requesters.find(x => x.id === r.id)?.rules || []); renderSettings(); } catch (error) { report(error); } finally { add.disabled = false; } }, 'button primary');
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add.click(); } };
   modal(tr('Pre-approved commands for {0}', r.name), el('div', {}, el('p', {class: 'modal-copy', text: tr('While this requester asks before each command, these run at once: a whole command, or a pattern where * stands for anything and ? for one character. They never apply to background shells or typing.')}), list, el('div', {class: 'agents-add'}, input, add)));
-}
-function trustDialog(a, requesters) {
-  const right = el('select', {'aria-label': tr('Right')}, el('option', {value: 'exec', text: tr('Run commands')}), el('option', {value: 'type', text: tr('Write into a shell')}));
-  const level = el('select', {'aria-label': tr('Level')}, el('option', {value: 'ask', text: tr('Ask every time')}), el('option', {value: '1h', text: tr('Trust for 1 hour')}), el('option', {value: '24h', text: tr('Trust for 24 hours')}), el('option', {value: 'always', text: tr('Trust always')}), el('option', {value: 'block', text: tr('Block')}));
-  const apply = async () => {
-    try {
-      for (const id of requesters) {
-        const v = level.value; a.agents = await a.link.request('agents.trust', {requester: id, right: right.value, level: v === 'block' ? 'block' : v === 'ask' ? 'ask' : 'trust', duration: ['1h', '24h', 'always'].includes(v) ? v : undefined});
-      }
-      closeModal(); renderSettings();
-    } catch (error) { reportError(error, 'modal'); }
-  };
-  modal(tr('Modify {0} requester(s)', requesters.length), el('div', {}, field(tr('Right'), right), field(tr('Level'), level), el('div', {class: 'modal-actions'}, button(tr('Cancel'), closeModal), button(tr('Apply'), apply, 'button primary'))));
 }
 function bridgeSettings(a){
   const b=a.info?.bridge;
