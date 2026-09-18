@@ -1,6 +1,6 @@
 ---
 name: linear-worker
-description: Carry one jaunt Linear ticket from plan to branch inside a dedicated worker session — survey, post a plan for approval, declare the change surface, implement on the worktree branch. Use when a spawned session is told to work a ticket, or for "travaille JAU-x".
+description: Carry one jaunt Linear ticket from plan to merged PR inside a dedicated worker session — survey, post a plan for approval, declare the change surface, implement on the worktree branch, then push, open the PR, watch the CI and squash-merge it. Use when a spawned session is told to work a ticket, or for "travaille JAU-x".
 ---
 
 # linear-worker
@@ -122,7 +122,7 @@ jaunt-linear verdict <ID>
 
 | verdict | what to do |
 |---|---|
-| `approved` | implement (§6) |
+| `approved` | implement (§6), then land it (§7) |
 | `feedback` | the human is steering: fold it in, retract the superseded plan with `jaunt-linear uncomment <COMMENT-ID>`, post a new one, stop again |
 | `declined` | comment that it is parked, `jaunt-linear move <ID> "Backlog"`, tell the orchestrator you are done |
 | `pending` | nothing was answered — stop; you will be reopened |
@@ -130,26 +130,120 @@ jaunt-linear verdict <ID>
 
 ## 6. Implement
 
-On your worktree branch. **Never push** — the branch stays local.
+On your worktree branch, and nowhere else.
 
 Follow the repo's conventions (`AGENTS.md`, `START_HERE.md`) and Conventional
-Commits. Run `npm test` before calling it done. If your change strays outside the
-surface you declared, re-declare it before continuing, so the orchestrator can
-re-check overlap.
+Commits: subject in the imperative, **72 characters or fewer**, and `git commit`
+**alone in its command** — the hook fails on a compound one. Run `npm test`
+before calling it done. If your change strays outside the surface you declared,
+re-declare it before continuing, so the orchestrator can re-check overlap.
 
-Then hand over:
+Committed is not delivered. Go to §7.
+
+## 7. Land it
+
+A branch on your disk is not a result. You carry the ticket all the way to
+**merged**, yourself: reading a red CI means knowing what the change was trying
+to do, and you are the only session that knows.
+
+### The branch name is the wiring
 
 ```bash
-jaunt-linear comment <ID> "<what changed, which branch, test results, what is left>"
+git branch --show-current      # must contain <ID>
 ```
 
-Write it for someone who did not watch the run. Then finish your turn — the
-orchestrator releases the claim and removes the worktree.
+Linear's GitHub integration reads the ticket identifier out of the branch name,
+and it has been doing so all along: pushing the branch moves the ticket to *In
+Progress*, merging its PR moves it to *Done*. **Never call `move` for either** —
+`move` is for what git cannot see. A branch without the identifier lands its work
+and leaves the board untouched: `chore/linear-loop` merged that way and its five
+tickets had to be moved by hand afterwards.
+
+### Rebase before you push, not after
+
+`main` is protected and its required checks are **strict** — a branch behind
+`main` cannot merge however green it is. Rebasing first costs one CI round
+instead of two.
+
+```bash
+git fetch origin
+git rebase origin/main
+npm test                       # a rebase that applies is not a rebase that works
+```
+
+### Push, open the PR, watch the checks
+
+```bash
+git push -u origin "$(git branch --show-current)"
+gh pr create --fill --base main
+gh pr checks <n> --watch
+```
+
+The required contexts are `lint` and `test`. `test` runs no test of its own: it
+fails unless `host`, `browser-and-relay` and `installer-fedora` all succeed, so
+`test` being red only tells you to look at the job underneath it. No human review
+is required — green is the entire gate.
+
+### A red CI: read it before you name it
+
+```bash
+gh run view <run-id> --log-failed
+```
+
+Then, and only then, choose:
+
+| what the log shows | what to do |
+|---|---|
+| your change broke it | fix, `git commit`, push, watch again |
+| a known flake — JAU-29: `browser_e2e` asserting on `proof.txt` against a list that is still empty | `gh run rerun <run-id> --failed` |
+
+The two mistakes cost the same. Patching a flake fixes nothing and burns an
+hour; rerunning a real failure hides a regression until someone else finds it.
+The rule is not "rerun the e2e failures" — it is **read the log, then decide**,
+and a failure you cannot recognise in the log is a real one until proven
+otherwise.
+
+### Merge
+
+```bash
+gh pr merge <n> --squash --delete-branch
+```
+
+Auto-merge is disabled on this repository: nothing merges while you are not
+looking, and a green PR you walk away from simply stays open. If the merge is
+refused because `main` moved while your CI ran, rebase onto `origin/main`,
+`git push --force-with-lease`, and watch again.
+
+The merge is what makes the ticket *Done*. Check that it did, rather than
+assuming — the integration takes a second or two, but it runs on the branch name,
+and you are the one who chose it.
+
+### Hand over
+
+```bash
+jaunt-linear comment <ID> "<la PR, ce qui a été testé, comment l'essayer, ce qui reste>"
+```
+
+Write it for someone who did not watch the run, and give them something to
+**try**, not only to read. A PR touching `web/**`, `desktop/**`, `package*.json`
+or `scripts/prepare_web.mjs` builds installable `desktop-Linux` and
+`desktop-macOS` packages — link those artifacts. Otherwise give the command that
+runs the branch. Reading a diff is not testing a change (JAU-24).
+
+Say it too if your branch was based on another ticket's, so the orchestrator
+knows what is now stacked on a squashed commit.
+
+Then finish your turn — the orchestrator releases the claim, removes the
+worktree, and clears the way for whatever was waiting behind you.
 
 ## Honesty
 
 - Tests failing goes in the Linear comment, with the output. Never move a ticket
   to a done-ish state on work that does not pass.
+- Merging is what marks the ticket *Done*, so merge only what you would defend.
+  A PR left open on a red or unread CI is a perfectly good outcome — say so, and
+  name the run. An open PR nobody mentions is work that reads as landed and is
+  not.
 - Stuck is a fine outcome: comment what you tried and what blocked you, and stop.
   Silence is not.
 - Never close a ticket you did not finish.

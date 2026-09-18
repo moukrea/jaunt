@@ -91,7 +91,23 @@ Two consequences worth keeping straight:
 - The wake-up carries no payload. The harness hands over the watcher's **output
   file**; the orchestrator reads it for the event list.
 - Each pass must relaunch the watcher, or the loop ends silently after one
-  wake-up. That is `linear-orchestrator` §5.
+  wake-up. That is `linear-orchestrator` §6.
+
+## Where the work ends up
+
+The loop merges to `main`. A worker carries its ticket to a pushed branch, a
+green PR and a squash merge on its own (`linear-worker` §7); the orchestrator
+only cleans up behind it. Nothing waits on a human except the plan approval — no
+review is required on `main`.
+
+Two consequences for the switch:
+
+- **Branch names always carry the ticket identifier.** That is what makes
+  Linear's GitHub integration move the ticket: push to *In Progress*, merge to
+  *Done*. A branch named without it lands its work and leaves the board saying
+  nothing happened. The loop must never `move` for those two transitions.
+- **`status` does not show the landing.** A claim says a ticket is held, not
+  whether its PR is open, red, or already merged.
 
 ## Stop
 
@@ -107,16 +123,25 @@ Stopping does **not** touch claims. A ticket in flight stays claimed, its worker
 session keeps its transcript, and restarting resumes exactly there — say so when
 you stop, naming what is held.
 
+It does not touch **open PRs** either, and auto-merge is disabled on this
+repository, so nothing merges while the loop is off. A PR left green and
+unmerged stays that way indefinitely, and goes stale as soon as someone else
+merges. List the open PRs when you stop (`gh pr list --state open`) and name
+them alongside the claims — a stopped loop with work sitting in review is not
+the same thing as a stopped loop with nothing outstanding.
+
 ## Status
 
 ```bash
-jaunt-linear status     # loop flag + every claim, with its worker session UUID
-jaunt-linear board      # priorities, blockers, needsPass
+jaunt-linear status         # loop flag + every claim, with its worker session UUID
+jaunt-linear board          # priorities, blockers, needsPass
+gh pr list --state open     # what is landing, and what is stuck landing
 ```
 
 A loop flagged on with no watcher process is stalled, not running, and that
 distinction is the whole point of checking — `pgrep -f linear_watch.mjs` settles
-it. Report both together.
+it. Report all three together: the flag says whether it watches, the claims say
+what is held, the PR list says what has actually left the machine.
 
 ## The caveat to state every time
 
