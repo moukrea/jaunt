@@ -352,6 +352,9 @@ async function board() {
   };
 }
 
+// `comments.nodes` comes back newest-first, whatever `orderBy` is asked for, so
+// nothing downstream may read it as a chronology: sort by `createdAt` before
+// treating the first or the last node as "the recent one".
 async function getIssue(identifier) {
   const data = await graphql(
     `query($id: String!) {
@@ -788,7 +791,13 @@ async function verdict(identifier) {
   const issue = await getIssue(identifier);
   const me = await agentUser();
   const isAgent = (c) => c.user?.id === me.id;
-  const comments = issue.comments.nodes;
+  // Normalised once, here: the API hands back the newest comment first, so
+  // reading the raw order picked the *oldest* plan of the claim — and with it a
+  // 👍 left on a plan that has since been superseded. Everything below may now
+  // say "the last one" and mean the most recent.
+  const comments = [...issue.comments.nodes].sort(
+    (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+  );
 
   // Only a plan posted during the current claim counts. A plan left on the
   // ticket by an earlier cycle is stale, and treating it as live would let an
@@ -822,9 +831,7 @@ async function verdict(identifier) {
     return { verdict: 'declined', issue: issue.identifier, via: 'reaction', messages: [] };
   }
 
-  const replies = comments
-    .filter((c) => !isAgent(c) && new Date(c.createdAt) > planAt)
-    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const replies = comments.filter((c) => !isAgent(c) && new Date(c.createdAt) > planAt);
   if (replies.length === 0) {
     return { verdict: 'pending', issue: issue.identifier, planCommentId: plan.id };
   }
