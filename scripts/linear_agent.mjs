@@ -8,6 +8,7 @@
 // re-mints on its own whenever it is missing, stale, or rejected with a 401.
 
 import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -1062,9 +1063,23 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+// Resolving may fail on an argv[1] that no longer exists; the raw path is then
+// the best answer available and the comparison simply does not match.
+export function entryPath(argv1) {
+  try {
+    return realpathSync(argv1);
+  } catch {
+    return argv1;
+  }
+}
+
 // Guarded so a test can import the pure helpers above: without it, importing
 // this file runs the CLI, prints a usage line and exits the test runner.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// `argv[1]` is resolved through its symlinks first: the documented entry point
+// is `jaunt-linear`, a link in the PATH pointing here, so comparing the link
+// itself to `import.meta.url` (which Node already resolves) never matched and
+// the CLI exited silently with status 0 — every command answering nothing.
+if (process.argv[1] && import.meta.url === pathToFileURL(entryPath(process.argv[1])).href) {
   const [command, ...args] = process.argv.slice(2);
   const handler = COMMANDS[command];
   if (!handler) {
