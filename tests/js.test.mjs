@@ -129,3 +129,17 @@ test('nothing claimed leaves the candidate free without a surface',()=>{
  assert.deepEqual(none.reasons,[]);
  assert.deepEqual(none.unknowns,[],'no claim means nobody to collide with — the first dispatch never deadlocks');
 });
+const {entryPath}=await import('../scripts/linear_agent.mjs');
+test('the CLI entry point is recognised through a symlink',async()=>{
+ const {mkdtemp,symlink,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');
+ const {join}=await import('node:path');const {pathToFileURL,fileURLToPath}=await import('node:url');
+ const real=new URL('../scripts/linear_agent.mjs',import.meta.url);
+ const dir=await mkdtemp(join(tmpdir(),'jaunt-entry-'));const link=join(dir,'jaunt-linear');
+ try{
+  await symlink(fileURLToPath(real),link);
+  // `jaunt-linear` in the PATH is a symlink to this file. Comparing argv[1] raw
+  // made the guard false, so every command exited 0 printing nothing.
+  assert.equal(pathToFileURL(entryPath(link)).href,real.href,'a symlinked argv[1] must resolve to the module itself');
+ }finally{await rm(dir,{recursive:true,force:true});}
+ assert.equal(entryPath('/nope/does/not/exist'),'/nope/does/not/exist','an unresolvable path is returned untouched');
+});
