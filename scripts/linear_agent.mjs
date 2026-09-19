@@ -24,8 +24,24 @@ const SURFACES_DIR = join(STATE_DIR, 'surfaces');
 // Marks a comment as the agent's plan, so the verdict lookup knows which
 // comment the human's answer applies to.
 const PLAN_MARKER = '<!-- jaunt-agent:plan -->';
+// Marks the one-line receipt posted when an approval is read. Its own marker,
+// because the acknowledgement has to be recognisable later: posting it twice is
+// how a ticket ends up saying "approbation reçue" three times and meaning none.
+const ACK_MARKER = '<!-- jaunt-agent:ack -->';
 const APPROVE_EMOJI = new Set(['+1', 'thumbsup', 'white_check_mark', 'rocket', 'tada']);
 const DECLINE_EMOJI = new Set(['-1', 'thumbsdown', 'x', 'no_entry']);
+
+// The column that means "this ticket is waiting on a human". *In Progress* used
+// to cover three situations the human could not tell apart — the agent is
+// planning, the agent is waiting for an answer, the agent is implementing — and
+// the only one where the human had something to do was the only one that did
+// not announce itself (JAU-18).
+export const WAITING_STATE = 'Waiting for human';
+
+// A claim's phase used to be a free-form string nothing ever read, which is how
+// `implementing` came to be a value no code and no skill had ever written. A
+// closed list turns a drifting field into one that fails loudly.
+export const PHASES = ['planning', 'awaiting-approval', 'implementing', 'landing'];
 
 const TOKEN_ENDPOINT = 'https://api.linear.app/oauth/token';
 const GRAPHQL_ENDPOINT = 'https://api.linear.app/graphql';
@@ -340,6 +356,9 @@ async function board() {
   const needsReview = open.filter((t) => t.review.state !== 'reviewed').map((t) => t.identifier);
   return {
     count: tickets.length,
+    // The question "what is waiting on me" answered as a list rather than as a
+    // reading of every comment thread. Empty is the normal state of the board.
+    waitingOnHuman: open.filter((t) => t.state === WAITING_STATE).map((t) => t.identifier),
     // Informational only. This was once the trigger for the analysis pass, which
     // was a bug: it can only ever fire while every ticket is at priority 0, so
     // the first pass turned it off forever and nothing arriving afterwards could
@@ -410,15 +429,27 @@ async function addDocument(identifier, title, content) {
   return data.documentCreate.document;
 }
 
-async function moveIssue(identifier, stateName) {
-  const issue = await getIssue(identifier);
+// Resolve a workflow state by name, case-insensitively. `optional` is what lets
+// the loop keep running on a workspace that has not got the waiting column: a
+// missing state is reported, never thrown, because parking a ticket decorates a
+// claim and must not be able to abort it.
+async function findState(stateName, { optional = false } = {}) {
   const team = await resolveTeam();
   const wanted = stateName.toLowerCase();
   const state = team.states.nodes.find((s) => s.name.toLowerCase() === wanted);
-  if (!state) {
+  if (!state && !optional) {
     const names = team.states.nodes.map((s) => s.name).join(', ');
     throw new Error(`state "${stateName}" not found. Available: ${names}`);
   }
+  return state ?? null;
+}
+
+// Takes the issue rather than its identifier: every caller here already holds
+// one, and re-fetching it would also lose `issue.state.name` — the state we are
+// moving away from, which is exactly what has to be remembered to move back.
+async function setState(issue, stateName, opts) {
+  const state = await findState(stateName, opts);
+  if (!state) return { moved: false, reason: `state "${stateName}" does not exist in this team` };
   const data = await graphql(
     `mutation($id: String!, $stateId: String!) {
       issueUpdate(id: $id, input: { stateId: $stateId }) {
@@ -428,7 +459,56 @@ async function moveIssue(identifier, stateName) {
     { id: issue.id, stateId: state.id },
   );
   if (!data.issueUpdate.success) throw new Error('issueUpdate failed');
-  return data.issueUpdate.issue;
+  return { moved: true, from: issue.state?.name ?? null, ...data.issueUpdate.issue };
+}
+
+async function moveIssue(identifier, stateName) {
+  return setState(await getIssue(identifier), stateName);
+}
+
+// Creating the waiting column, once. `started`, not `unstarted`, and the choice
+// is load-bearing on both sides: `next` only ever picks from unstarted/backlog
+// (so a parked ticket can never be re-dispatched while its worker sleeps), and
+// `board` reads started (so it stays visible instead of vanishing off the top).
+async function ensureWaitingState() {
+  const existing = await findState(WAITING_STATE, { optional: true });
+  if (existing) {
+    return { created: false, note: 'already present', state: existing };
+  }
+  const team = await resolveTeam();
+  const started = team.states.nodes.filter((s) => s.type === 'started').map((s) => s.position);
+  let data;
+  try {
+    data = await graphql(
+      `mutation($input: WorkflowStateCreateInput!) {
+        workflowStateCreate(input: $input) {
+          success workflowState { id name type position }
+        }
+      }`,
+      {
+        input: {
+          teamId: team.id,
+          name: WAITING_STATE,
+          type: 'started',
+          color: '#F2C94C',
+          position: (started.length ? Math.max(...started) : 0) + 1,
+          description: 'The agent posted a plan and cannot continue until a human answers it.',
+        },
+      },
+    );
+  } catch (error) {
+    // Measured, not guessed: the app token carries write scope and Linear still
+    // answers "not allowed to take action" — editing a team's workflow is an
+    // administrator's act, and the app is not one. There is nothing to retry, so
+    // the useful output is the instruction, not the API's wording.
+    return {
+      created: false,
+      reason: error.message,
+      todo: `create a "${WAITING_STATE}" state of type "started" on team ${team.key} by hand: Linear → Team settings → Workflow → add state, position it after "In Progress". Everything else works without it; until then parking is skipped.`,
+    };
+  }
+  if (!data.workflowStateCreate.success) throw new Error('workflowStateCreate failed');
+  return { created: true, state: data.workflowStateCreate.workflowState };
 }
 
 async function setPriority(identifier, priority) {
@@ -603,9 +683,39 @@ async function listClaims() {
   return claims;
 }
 
+// A phase outside the list is a typo, and a typo used to be indistinguishable
+// from an intent: nothing validated the field and nothing read it back.
+export function validatePhase(phase) {
+  if (!PHASES.includes(phase)) {
+    throw new Error(`unknown phase "${phase}". Use one of: ${PHASES.join(', ')}`);
+  }
+  return phase;
+}
+
 async function claim(identifier, phase = 'planning', session) {
+  validatePhase(phase);
   const issue = await getIssue(identifier);
   const existing = await listClaims().then((c) => c.find((x) => x.issue === issue.identifier));
+
+  // Entering `awaiting-approval` is the moment the ticket stops being the
+  // agent's business and becomes the human's, and it is the only transition the
+  // loop is entitled to write — git owns *In Progress* and *Done*, the loop owns
+  // what git cannot see. The claim is already made here on the approval path, so
+  // parking rides along with it rather than being one more step to forget.
+  //
+  // `parkedFrom` is the state to come back to. A re-plan claims
+  // `awaiting-approval` a second time while the ticket is already parked: that
+  // must not overwrite the remembered state with the waiting column itself.
+  let parkedFrom = existing?.parkedFrom ?? null;
+  let parking = null;
+  if (phase === 'awaiting-approval' && issue.state?.name !== WAITING_STATE) {
+    const result = await setState(issue, WAITING_STATE, { optional: true });
+    parking = result.moved
+      ? { parked: true, from: result.from }
+      : { parked: false, reason: result.reason };
+    if (result.moved) parkedFrom = result.from;
+  }
+
   const record = {
     issue: issue.identifier,
     title: issue.title,
@@ -616,11 +726,19 @@ async function claim(identifier, phase = 'planning', session) {
     // that must fall back to the address already on file rather than erase it.
     session: session || existing?.session || null,
     url: issue.url,
+    // Where the ticket was before it was parked, so leaving the waiting column
+    // restores the state it actually had instead of asserting a new one.
+    parkedFrom,
     claimedAt: existing?.claimedAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  await writeClaim(record);
+  return parking ? { ...record, parking } : record;
+}
+
+async function writeClaim(record) {
   await mkdir(CLAIMS_DIR, { recursive: true });
-  await writeFile(claimPath(issue.identifier), JSON.stringify(record, null, 2));
+  await writeFile(claimPath(record.issue), JSON.stringify(record, null, 2));
   return record;
 }
 
@@ -827,7 +945,72 @@ async function independent(identifier) {
 // Reads the thread under the agent's most recent plan comment and decides what
 // the human said: approved, declined, feedback to fold in, or nothing yet.
 
-async function verdict(identifier) {
+// Where a parked ticket goes once the human has answered. The waiting column
+// means "unanswered", so all three real answers leave it — a re-plan puts the
+// ticket back through its own `claim awaiting-approval`, and while the agent is
+// folding feedback in, the ticket is not waiting on anyone.
+//
+// Two guards, both load-bearing. The ticket has to be *currently* parked: a
+// human who moved it on to Done or back to Backlog while it waited has made a
+// decision, and restoring the old state would silently undo it. And
+// `parkedFrom` has to be known: with nothing recorded there is no state to
+// restore, and inventing one would put a second authority on a field git owns.
+export function nextClaimState({ verdict: answer, currentState, parkedFrom }) {
+  if (!['approved', 'declined', 'feedback'].includes(answer)) return null;
+  if (currentState !== WAITING_STATE) return null;
+  if (!parkedFrom || parkedFrom === WAITING_STATE) return null;
+  return parkedFrom;
+}
+
+// The receipt is posted once per plan, not once per read. `verdict` may be run
+// again on the same approval — a second wake-up, a human looking — and each run
+// must find the acknowledgement it already left. An ack older than the current
+// plan belongs to a previous cycle and blocks nothing.
+export function ackNeeded(comments, plan, agentId) {
+  if (!plan) return false;
+  const planAt = new Date(plan.createdAt);
+  return !comments.some(
+    (c) => c.user?.id === agentId && c.body.startsWith(ACK_MARKER) && new Date(c.createdAt) > planAt,
+  );
+}
+
+// Registering the answer is a write, and it lives inside a read on purpose.
+// The approval path runs exactly one command — this one — so it is the only
+// place where "the human answered" can be recorded without depending on a later
+// step nobody is forced to take. Asking the skill to remember was the previous
+// design, and the skill did not (JAU-18). `--peek` is the way to only look.
+async function registerAnswer(issue, answer, held, plan, comments, agentId) {
+  const done = {};
+  if (answer.verdict === 'approved' && ackNeeded(comments, plan, agentId)) {
+    const body = `${ACK_MARKER}\n**Approbation reçue** — j'enchaîne sur l'implémentation.\n\n${expectsLine('none')}`;
+    done.acknowledged = (await addComment(issue.identifier, body, plan.id)).id;
+  }
+
+  // The phase finally says what the session is doing, because something now
+  // writes it: approved means the worker codes, feedback means it plans again.
+  const phase = { approved: 'implementing', feedback: 'planning' }[answer.verdict];
+  if (phase && held.phase !== phase) {
+    await writeClaim({ ...held, phase, updatedAt: new Date().toISOString() });
+    done.phase = phase;
+  }
+
+  const target = nextClaimState({
+    verdict: answer.verdict,
+    currentState: issue.state?.name ?? null,
+    parkedFrom: held.parkedFrom ?? null,
+  });
+  if (target) {
+    const result = await setState(issue, target, { optional: true });
+    done.unparked = result.moved ? target : false;
+    if (result.moved) {
+      const latest = (await listClaims()).find((c) => c.issue === issue.identifier);
+      if (latest) await writeClaim({ ...latest, parkedFrom: null, updatedAt: new Date().toISOString() });
+    }
+  }
+  return done;
+}
+
+async function verdict(identifier, { peek = false } = {}) {
   const issue = await getIssue(identifier);
   const me = await agentUser();
   const isAgent = (c) => c.user?.id === me.id;
@@ -869,6 +1052,18 @@ async function verdict(identifier) {
   }
 
   const planAt = new Date(plan.createdAt);
+  const answer = readAnswer(issue, plan, planAt, comments, isAgent);
+
+  // Only a held claim registers anything: no claim means no worker, so there is
+  // no phase to advance and nobody the receipt would be addressed on behalf of.
+  if (!peek && held) {
+    const registered = await registerAnswer(issue, answer, held, plan, comments, me.id);
+    if (Object.keys(registered).length) return { ...answer, registered };
+  }
+  return answer;
+}
+
+function readAnswer(issue, plan, planAt, comments, isAgent) {
   const reactions = (plan.reactions ?? []).map((r) => r.emoji?.replace(/:/g, ''));
   if (reactions.some((e) => APPROVE_EMOJI.has(e))) {
     return { verdict: 'approved', issue: issue.identifier, via: 'reaction', messages: [] };
@@ -996,12 +1191,26 @@ const COMMANDS = {
   status: async () => ({ ...(await lockStatus()), loop: await loopState() }),
   'loop-on': async () => setLoop(true),
   'loop-off': async () => setLoop(false),
-  claim: async ([id, phase, ...rest]) => {
-    const { flags } = parseFlags(rest);
-    return claim(required(id, 'claim <ISSUE-ID> [phase] [--session <uuid>]'), phase, flags.session);
+  // Flags first, then positionals: `claim <ID> --session <uuid>` used to read
+  // `--session` as the phase, and a phase nothing validated accepted it in
+  // silence. Now it would be refused, so the parse has to be the right one.
+  claim: async (args) => {
+    const { flags, rest } = parseFlags(args);
+    const [id, phase] = rest;
+    // A bare `--session` carries no address: it must fall back to the one on
+    // file, exactly like the empty string an unset variable expands to.
+    const session = typeof flags.session === 'string' ? flags.session : undefined;
+    return claim(required(id, 'claim <ISSUE-ID> [phase] [--session <uuid>]'), phase, session);
   },
   release: async ([id]) => release(id),
-  verdict: async ([id]) => verdict(required(id, 'verdict <ISSUE-ID>')),
+  // Reading a verdict also records it — the receipt, the phase, leaving the
+  // waiting column — because this is the one command the approval path is sure
+  // to run. `--peek` is for looking without answering on the worker's behalf.
+  verdict: async ([id, ...rest]) => {
+    const { flags } = parseFlags(rest);
+    return verdict(required(id, 'verdict <ISSUE-ID> [--peek]'), { peek: Boolean(flags.peek) });
+  },
+  'ensure-waiting-state': async () => ensureWaitingState(),
   // The long plan goes into a Linear document; the ticket gets a digest that
   // states, in one line, what the human has to do. Reading the full plan is
   // opt-in — a human should be able to answer from the comment alone.
@@ -1043,8 +1252,12 @@ function parseFlags(args) {
   const rest = [];
   for (let i = 0; i < args.length; i += 1) {
     if (args[i].startsWith('--')) {
-      flags[args[i].slice(2)] = args[i + 1];
-      i += 1;
+      // A flag with nothing after it, or another flag after it, is a switch:
+      // `--peek` has no value to give and must not swallow the next flag.
+      const next = args[i + 1];
+      const bare = next === undefined || next.startsWith('--');
+      flags[args[i].slice(2)] = bare ? true : next;
+      if (!bare) i += 1;
     } else {
       rest.push(args[i]);
     }

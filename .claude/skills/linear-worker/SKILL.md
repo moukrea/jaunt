@@ -89,6 +89,13 @@ comment that asked for the change, from `verdict`'s `messages`. The digest then
 lands inside that thread instead of starting a third conversation at the root.
 A first plan has nobody to answer and stays at the root.
 
+That `claim` is also what **parks the ticket in *Waiting for human***, the one
+column that says the board is stuck on somebody rather than on an agent. It
+remembers the state it moved the ticket out of (`parkedFrom` in the claim) and
+`verdict` puts it back, so the parking is yours to make and never yours to
+undo. Claim `awaiting-approval` even if you think the ticket is already parked:
+a second claim on a parked ticket is a no-op and keeps `parkedFrom` intact.
+
 `CLAUDE_CODE_SESSION_ID` — not `CLAUDE_SESSION_ID`, which does not exist. An
 unset variable expands to an empty string and used to erase the claim's session
 address, which is how a human's approval finds you again. Check it landed:
@@ -120,6 +127,15 @@ their answer.
 jaunt-linear verdict <ID>
 ```
 
+**Reading the verdict is what records it.** This command is the only one the
+approval path is certain to run, so it does the bookkeeping itself rather than
+leaving you a step to remember: on `approved` it posts the receipt in the plan's
+thread (once, whatever you run it twice) and sets the claim to `implementing`;
+on any real answer it takes the ticket back out of *Waiting for human*. What it
+did comes back under `registered`. Use `--peek` when you only want to look — an
+orchestrator checking on a worker, a human reading the board — because a peek
+must not answer on the worker's behalf.
+
 | verdict | what to do |
 |---|---|
 | `approved` | implement (§6), then land it (§7) |
@@ -131,6 +147,13 @@ jaunt-linear verdict <ID>
 ## 6. Implement
 
 On your worktree branch, and nowhere else.
+
+The claim now reads `implementing` — `verdict` set it. That phase is the answer
+to "is this session waiting on me or working?", so if you ever reach here
+without having read a verdict, say so with
+`jaunt-linear claim <ID> implementing --session "$CLAUDE_CODE_SESSION_ID"`. The
+four phases are `planning`, `awaiting-approval`, `implementing`, `landing`, and
+anything else is refused.
 
 Follow the repo's conventions (`AGENTS.md`, `START_HERE.md`) and Conventional
 Commits: subject in the imperative, **72 characters or fewer**, and `git commit`
@@ -166,6 +189,7 @@ tickets had to be moved by hand afterwards.
 instead of two.
 
 ```bash
+jaunt-linear claim <ID> landing --session "$CLAUDE_CODE_SESSION_ID"
 git fetch origin
 git rebase origin/main
 npm test                       # a rebase that applies is not a rebase that works

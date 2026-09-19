@@ -24,6 +24,22 @@ before the loop existed:
 | a branch whose name contains the identifier is pushed | → *In Progress* |
 | its PR is merged | → *Done* |
 
+git cannot see one thing, and it is the thing the human most needs to see: that
+a ticket is stuck on **them**. *In Progress* covered the worker planning, the
+worker waiting for an answer and the worker coding alike, and the only one of
+the three where the human had something to do was the only one that did not
+announce itself. So there is a column, ***Waiting for human***, and the loop
+owns it end to end:
+
+| loop event | ticket |
+|---|---|
+| a worker claims `awaiting-approval` after posting a plan | → *Waiting for human* |
+| `verdict` reads a real answer — approved, declined, feedback | → back to where it was parked from |
+
+Nobody calls `move` for either: both ride on `claim` and `verdict`, which the
+approval path already runs. `jaunt-linear board` lists them under
+`waitingOnHuman`, and that list is the answer to "what is waiting on me".
+
 Measured on three tickets: JAU-3, JAU-12 and JAU-4 each went *Done* one second
 after PR #58, #59 and #61 merged, with nobody calling `move`. The counter-proof
 landed in the same minute — `chore/linear-loop` (#57) merged and moved nothing,
@@ -31,8 +47,8 @@ because its name carries no identifier, and its five tickets had to be moved by
 hand.
 
 So the rule is: **git owns *In Progress* and *Done*; the loop owns only what git
-cannot see** — a ticket parked in *Backlog*, and anything waiting on a human
-(JAU-18). Calling `move` for a transition git already performs puts two
+cannot see** — a ticket parked in *Backlog*, and the waiting column above.
+Calling `move` for a transition git already performs puts two
 authorities on one field with no arbitration, and the loop loses as often as it
 wins. **Every branch the loop creates carries the ticket identifier**; that
 string is the entire wiring between the board and the code.
@@ -47,7 +63,7 @@ file. Read it: it names events, not state.
 | `comment` | someone wrote on a ticket — §3 |
 | `ticket-created` | a new ticket must be compared against the whole board — §2 |
 | `ticket-edited` | it returns to the analysis pass — §2 |
-| `state-changed` | git moved it — a push made it *In Progress*, a merge made it *Done* — or a human did; a ticket newly *Done* is §5 |
+| `state-changed` | git moved it — a push made it *In Progress*, a merge made it *Done* — or a human did, or the loop parked it in *Waiting for human*; a ticket newly *Done* is §5 |
 | `interval-elapsed` | nothing moved; reconcile (§1) and go back to sleep |
 | `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work |
 
