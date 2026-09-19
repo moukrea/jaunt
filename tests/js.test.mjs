@@ -129,6 +129,47 @@ test('nothing claimed leaves the candidate free without a surface',()=>{
  assert.deepEqual(none.reasons,[]);
  assert.deepEqual(none.unknowns,[],'no claim means nobody to collide with — the first dispatch never deadlocks');
 });
+const {nextClaimState,ackNeeded,validatePhase,PHASES,WAITING_STATE}=await import('../scripts/linear_agent.mjs');
+// The waiting column means "unanswered", so every real answer leaves it — but
+// only from the column itself, and only towards a state that was recorded.
+test('a parked ticket leaves the waiting column for the state it was parked from',()=>{
+ for(const verdict of ['approved','declined','feedback'])
+  assert.equal(nextClaimState({verdict,currentState:WAITING_STATE,parkedFrom:'In Progress'}),'In Progress',`${verdict} is an answer`);
+ assert.equal(nextClaimState({verdict:'pending',currentState:WAITING_STATE,parkedFrom:'In Progress'}),null,'nothing was answered, so nothing moves');
+ assert.equal(nextClaimState({verdict:'no-plan',currentState:WAITING_STATE,parkedFrom:'In Progress'}),null,'no live plan is not a verdict');
+});
+test('a ticket a human moved on is never dragged back',()=>{
+ // Moving it out of the column while it waited IS the answer. Restoring the
+ // remembered state here would silently undo a human's decision.
+ assert.equal(nextClaimState({verdict:'approved',currentState:'Done',parkedFrom:'In Progress'}),null);
+ assert.equal(nextClaimState({verdict:'approved',currentState:'Backlog',parkedFrom:'In Progress'}),null);
+ // Nothing recorded means no state to restore. Guessing one would put a second
+ // authority on a field git already owns.
+ assert.equal(nextClaimState({verdict:'approved',currentState:WAITING_STATE,parkedFrom:null}),null);
+ assert.equal(nextClaimState({verdict:'approved',currentState:WAITING_STATE,parkedFrom:WAITING_STATE}),null,'the column is never its own destination');
+});
+test('the approval receipt is posted once per plan, not once per read',()=>{
+ const me='agent-id',ack='<!-- jaunt-agent:ack -->';
+ const plan={id:'p2',createdAt:'2026-09-19T12:00:00.000Z'};
+ const before={user:{id:me},body:`${ack}\nreçue`,createdAt:'2026-09-19T11:00:00.000Z'};
+ const after={user:{id:me},body:`${ack}\nreçue`,createdAt:'2026-09-19T12:01:00.000Z'};
+ assert.equal(ackNeeded([],plan,me),true,'nothing posted yet');
+ assert.equal(ackNeeded([after],plan,me),false,'a second verdict read must find the receipt it already left');
+ // A receipt from the previous cycle answers the previous plan. Re-planning
+ // and being approved again has to produce a new one.
+ assert.equal(ackNeeded([before],plan,me),true);
+ assert.equal(ackNeeded([{...after,user:{id:'human'}}],plan,me),true,'only the agent writes its own receipts');
+ assert.equal(ackNeeded([{...after,body:`quote: ${ack}`}],plan,me),true,'a quoted marker is a citation, not a receipt');
+ assert.equal(ackNeeded([after],undefined,me),false,'no plan, nothing to acknowledge');
+});
+test('a claim phase outside the vocabulary is refused',()=>{
+ for(const phase of PHASES) assert.equal(validatePhase(phase),phase);
+ // `implementing` was a value no code and no skill ever wrote: a field nothing
+ // validates is a field that drifts in silence.
+ assert.ok(PHASES.includes('implementing'));
+ assert.throws(()=>validatePhase('implementng'),/unknown phase "implementng".*planning, awaiting-approval/s);
+ assert.throws(()=>validatePhase(undefined),/unknown phase/);
+});
 const {entryPath}=await import('../scripts/linear_agent.mjs');
 test('the CLI entry point is recognised through a symlink',async()=>{
  const {mkdtemp,symlink,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');

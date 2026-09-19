@@ -105,9 +105,16 @@ Two consequences for the switch:
 - **Branch names always carry the ticket identifier.** That is what makes
   Linear's GitHub integration move the ticket: push to *In Progress*, merge to
   *Done*. A branch named without it lands its work and leaves the board saying
-  nothing happened. The loop must never `move` for those two transitions.
+  nothing happened. The loop must never `move` for those two transitions — the
+  one state it does own is ***Waiting for human***, which git has no way of
+  knowing about.
 - **`status` does not show the landing.** A claim says a ticket is held, not
-  whether its PR is open, red, or already merged.
+  whether its PR is open, red, or already merged. What it does show is the
+  phase — `planning`, `awaiting-approval`, `implementing`, `landing` — so a
+  session waiting on you is distinguishable from one that is working.
+- **What is waiting on you is a column, not a reading of comment threads.**
+  `jaunt-linear board` lists it under `waitingOnHuman`; empty is the normal
+  state.
 
 ## Stop
 
