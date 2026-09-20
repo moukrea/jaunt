@@ -251,7 +251,7 @@ async function pulse() {
         nodes {
           identifier updatedAt
           state { name }
-          comments(first: 1, orderBy: updatedAt) { nodes { id createdAt } }
+          comments(first: 1, orderBy: updatedAt) { nodes { id createdAt updatedAt } }
         }
       }
     }`,
@@ -263,6 +263,15 @@ async function pulse() {
       u: i.updatedAt,
       s: i.state.name,
       c: i.comments.nodes[0]?.id ?? null,
+      // Reacting to a comment creates no comment and changes no state, so `c`
+      // and `s` cannot see a 👍. It does bump the issue, so the watcher was not
+      // blind — it was worse: it reported every reaction as `ticket-edited` and
+      // sent the ticket through the prioritisation pass instead of re-reading
+      // the answer it had just been given. Measured, by posting one and
+      // watching: the reaction also bumps the *comment* (JAU-29, 10:25:11.592 →
+      // comment updatedAt 10:25:11.617), and this query already sorts by that
+      // field without ever keeping it. Retaining it is what tells the two apart.
+      cu: i.comments.nodes[0]?.updatedAt ?? null,
     };
   }
   return { at: new Date().toISOString(), tickets };
@@ -384,7 +393,7 @@ async function getIssue(identifier) {
           nodes {
             id body createdAt
             user { id name }
-            reactions { emoji }
+            reactions { emoji createdAt user { id name } }
           }
         }
       }
@@ -1044,15 +1053,20 @@ async function verdict(identifier, { peek = false } = {}) {
   const plan = plans[plans.length - 1];
   if (!plan) {
     const stale = comments.some(isPlan);
+    // No plan means no answer to read — but a human may well have reacted
+    // anyway, and this used to be the branch where their 👍 vanished without
+    // anyone, human or agent, ever being told (JAU-36).
+    const unread = unreadReactions(collectReactions(comments, me.id), null);
     return {
       verdict: 'no-plan',
       issue: issue.identifier,
       ...(stale ? { note: 'ticket carries a plan from an earlier claim; ignored as stale' } : {}),
+      ...(unread.length ? { unreadReactions: unread } : {}),
     };
   }
 
   const planAt = new Date(plan.createdAt);
-  const answer = readAnswer(issue, plan, planAt, comments, isAgent);
+  const answer = readAnswer(issue, plan, planAt, comments, me.id);
 
   // Only a held claim registers anything: no claim means no worker, so there is
   // no phase to advance and nobody the receipt would be addressed on behalf of.
@@ -1063,18 +1077,100 @@ async function verdict(identifier, { peek = false } = {}) {
   return answer;
 }
 
-function readAnswer(issue, plan, planAt, comments, isAgent) {
-  const reactions = (plan.reactions ?? []).map((r) => r.emoji?.replace(/:/g, ''));
-  if (reactions.some((e) => APPROVE_EMOJI.has(e))) {
-    return { verdict: 'approved', issue: issue.identifier, via: 'reaction', messages: [] };
+// Every reaction on the ticket, flattened and attributed: which comment carries
+// it, who left it, when, and whether its emoji means anything to us. Reading
+// them all — including the ones no rule can act on — is what lets `verdict`
+// *report* an uninterpretable 👍 instead of dropping it, which is the half of
+// JAU-36 its title names: "et rien ne le dit".
+export function collectReactions(comments, agentId) {
+  const found = [];
+  for (const c of comments ?? []) {
+    for (const r of c.reactions ?? []) {
+      const emoji = r.emoji?.replace(/:/g, '');
+      found.push({
+        emoji,
+        comment: c.id,
+        by: r.user?.name ?? null,
+        // `Reaction.createdAt` is when the human answered; the comment's is when
+        // the agent asked. Falling back to the latter keeps the ordering sane on
+        // a payload that predates the field being requested.
+        at: r.createdAt ?? c.createdAt,
+        commentAt: c.createdAt,
+        // Attribution, not decoration: the agent reacting to its own comment
+        // must never approve the agent's own plan. An absent user is not the
+        // agent, which is the safe way round.
+        mine: Boolean(agentId) && r.user?.id === agentId,
+        onAgentComment: Boolean(agentId) && c.user?.id === agentId,
+        means: APPROVE_EMOJI.has(emoji) ? 'approved' : DECLINE_EMOJI.has(emoji) ? 'declined' : null,
+      });
+    }
   }
-  if (reactions.some((e) => DECLINE_EMOJI.has(e))) {
-    return { verdict: 'declined', issue: issue.identifier, via: 'reaction', messages: [] };
-  }
+  return found;
+}
+
+// The reactions that no rule could turn into an answer, with the reason why, so
+// the caller can say so out loud. `planAt` is null when the ticket carries no
+// live plan at all — then every reaction on an agent comment is unread.
+export function unreadReactions(reactions, planAt) {
+  return reactions
+    .filter((r) => !r.mine && r.onAgentComment)
+    .filter((r) => !(planAt && r.means && new Date(r.commentAt) >= planAt))
+    .map((r) => ({
+      emoji: r.emoji,
+      comment: r.comment,
+      by: r.by,
+      at: r.at,
+      why: !r.means
+        ? 'emoji outside the approve/decline vocabulary'
+        : !planAt
+          ? 'no live plan on this ticket'
+          : 'comment predates the current plan',
+    }));
+}
+
+export function readAnswer(issue, plan, planAt, comments, agentId) {
+  const isAgent = (c) => c.user?.id === agentId;
+  const reactions = collectReactions(comments, agentId);
+
+  // A 👍 counts wherever it lands on the agent's side of the thread, not only on
+  // the plan comment (JAU-36). The human reacts to the message they have just
+  // read; asking them in words to scroll back up to the plan failed twice,
+  // because it asks them to fight the ergonomics of the tool rather than use it.
+  // The plan's own comment is included — `>=`, not `>` — so the case that
+  // already worked keeps working.
+  const answering = reactions.filter(
+    (r) => r.means && r.onAgentComment && !r.mine && new Date(r.commentAt) >= planAt,
+  );
 
   const replies = comments.filter((c) => !isAgent(c) && new Date(c.createdAt) > planAt);
+  const lastReplyAt = replies.length
+    ? new Date(replies[replies.length - 1].createdAt)
+    : null;
+
+  // A reaction older than the human's last message no longer speaks for them.
+  // Without this, widening the scan above would make a single 👍 permanent —
+  // approved once, approved for ever — and every correction written afterwards
+  // would be swallowed in silence. Most recent wins among what is left.
+  const live = answering
+    .filter((r) => !lastReplyAt || new Date(r.at) > lastReplyAt)
+    .sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  const unread = unreadReactions(reactions, planAt);
+  const withUnread = (answer) => (unread.length ? { ...answer, unreadReactions: unread } : answer);
+
+  if (live.length) {
+    return withUnread({
+      verdict: live[0].means,
+      issue: issue.identifier,
+      via: 'reaction',
+      // Which comment carried it: the plan is no longer the only answer.
+      on: live[0].comment,
+      messages: [],
+    });
+  }
+
   if (replies.length === 0) {
-    return { verdict: 'pending', issue: issue.identifier, planCommentId: plan.id };
+    return withUnread({ verdict: 'pending', issue: issue.identifier, planCommentId: plan.id });
   }
 
   // `id` travels with each message so the answer can be threaded under it
@@ -1087,12 +1183,12 @@ function readAnswer(issue, plan, planAt, comments, isAgent) {
   }));
   const commands = replies.map((c) => c.body.trim().toLowerCase());
   if (commands.some((b) => b.startsWith('/approve'))) {
-    return { verdict: 'approved', issue: issue.identifier, via: 'comment', messages };
+    return withUnread({ verdict: 'approved', issue: issue.identifier, via: 'comment', messages });
   }
   if (commands.some((b) => b.startsWith('/decline'))) {
-    return { verdict: 'declined', issue: issue.identifier, via: 'comment', messages };
+    return withUnread({ verdict: 'declined', issue: issue.identifier, via: 'comment', messages });
   }
-  return { verdict: 'feedback', issue: issue.identifier, messages };
+  return withUnread({ verdict: 'feedback', issue: issue.identifier, messages });
 }
 
 async function whoami() {
@@ -1222,7 +1318,12 @@ const COMMANDS = {
     );
     const body = words.join(' ') || (await readStdin());
     const summary = required(flags.summary, '--summary <text> (the digest a human reads)');
-    const expects = flags.expects ?? 'approuver ce plan (👍 sur ce commentaire) ou répondre des corrections';
+    // "sur ce commentaire" was an instruction the code no longer needs and the
+    // human kept failing anyway: a reaction is now read anywhere on the agent's
+    // side of the thread (JAU-36). Asking them to aim taught a rule that was
+    // both unnecessary and, twice, not followed.
+    const expects =
+      flags.expects ?? "approuver ce plan (👍 sur n'importe quel commentaire du fil) ou répondre des corrections";
 
     const doc = await addDocument(
       issue,

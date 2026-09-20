@@ -61,6 +61,7 @@ file. Read it: it names events, not state.
 | event | what it means |
 |---|---|
 | `comment` | someone wrote on a ticket — §3 |
+| `comment-updated` | an existing comment was touched without a new one arriving: almost always a **reaction** — a 👍 answering a plan. Read the ticket (`verdict`), do not run the analysis pass. It can also be a plain edit; the two are indistinguishable from the watcher, and re-reading is right either way |
 | `ticket-created` | a new ticket must be compared against the whole board — §2 |
 | `ticket-edited` | it returns to the analysis pass — §2 |
 | `state-changed` | git moved it — a push made it *In Progress*, a merge made it *Done* — or a human did, or the loop parked it in *Waiting for human*; a ticket newly *Done* is §5 |

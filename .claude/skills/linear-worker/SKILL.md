@@ -74,7 +74,7 @@ cannot be ruled out" and blocks other tickets from being dispatched at all.
 
 ```bash
 jaunt-linear plan <ID> --summary "<3-6 lignes, en français>" \
-  --expects "approuver (👍 sur ce commentaire) ou répondre des corrections" \
+  --expects "approuver (👍 sur n'importe quel commentaire du fil) ou répondre des corrections" \
   "$(cat plan.md)"
 jaunt-linear claim <ID> awaiting-approval --session "$CLAUDE_CODE_SESSION_ID"
 ```
@@ -120,6 +120,13 @@ describing a split in prose for a human to retype is not doing the work.
 Then **stop your turn**. Do not implement. The human answers on the ticket —
 `/approve`, `/decline`, 👍 or free text — and the orchestrator reopens you with
 their answer.
+
+A 👍 counts wherever they put it on your side of the thread, not only on the
+plan comment: the natural gesture is to react to the message you have just read,
+and telling them in words to scroll back up to the plan failed twice before it
+was made true in the code (JAU-36). Do not ask them to aim. What a reaction
+cannot outrank is a message they wrote *after* it — words that came later win,
+so a 👍 followed by "ah, et aussi…" reads as `feedback`.
 
 ## 5. Resume on the verdict
 
