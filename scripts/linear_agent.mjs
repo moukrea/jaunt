@@ -41,7 +41,24 @@ export const WAITING_STATE = 'Waiting for human';
 // A claim's phase used to be a free-form string nothing ever read, which is how
 // `implementing` came to be a value no code and no skill had ever written. A
 // closed list turns a drifting field into one that fails loudly.
-export const PHASES = ['planning', 'awaiting-approval', 'implementing', 'landing'];
+//
+// `queued` means "approved, and not writing yet": the human has answered, so the
+// ticket owes them nothing, but another worker holds a file this one declared.
+// It exists because none of the other four could say that without lying —
+// staying `awaiting-approval` would put *Waiting for human* on a ticket where
+// the human is done (the exact confusion JAU-18 removed), and going straight to
+// `implementing` is the race this phase avoids.
+export const PHASES = ['planning', 'awaiting-approval', 'queued', 'implementing', 'landing'];
+
+// The phases that actually hold the working tree. `planning` reads, greps and
+// surveys; `awaiting-approval` is a session that finished its turn; `queued` is
+// waiting for one of these two to release. None of them can collide with
+// anything, and comparing a candidate against them is how a board with one
+// parked worker refused to dispatch anything else for sixteen hours (JAU-46).
+export const CONTENDING_PHASES = ['implementing', 'landing'];
+
+export const contendingClaims = (claims) =>
+  (claims ?? []).filter((c) => CONTENDING_PHASES.includes(c?.phase));
 
 const TOKEN_ENDPOINT = 'https://api.linear.app/oauth/token';
 const GRAPHQL_ENDPOINT = 'https://api.linear.app/graphql';
@@ -759,6 +776,38 @@ async function release(identifier) {
   return { released: true, was: target };
 }
 
+// Getting a claim out of `queued`. A read that records, like `verdict`: the one
+// command anybody runs to ask "can I start writing?" is also the one that makes
+// it true, so there is no second step to forget. Idempotent — a claim already
+// writing answers yes without touching anything.
+//
+// Called by the orchestrator after a release (a file just came free) and by a
+// worker that finds itself queued.
+async function readyToImplement(identifier) {
+  const held = (await listClaims()).find((c) => c.issue === identifier);
+  if (!held) return { ticket: identifier, ready: false, reason: 'no claim held' };
+  if (CONTENDING_PHASES.includes(held.phase)) {
+    return { ticket: identifier, ready: true, phase: held.phase, note: 'already writing' };
+  }
+  if (held.phase !== 'queued') {
+    // Nothing to promote: the human has not answered yet, so the wait is theirs
+    // and not a file's. Saying "not ready" without saying why is how a worker
+    // ends up polling a question nobody will ever answer here.
+    return {
+      ticket: identifier,
+      ready: false,
+      phase: held.phase,
+      reason: `only a queued claim is promoted here — ${identifier} is ${held.phase}`,
+    };
+  }
+  const decision = await approvalPhase(identifier);
+  if (decision.phase !== 'implementing') {
+    return { ticket: identifier, ready: false, phase: 'queued', queuedBehind: decision.queuedBehind, why: decision.why };
+  }
+  await writeClaim({ ...held, phase: 'implementing', updatedAt: new Date().toISOString() });
+  return { ticket: identifier, ready: true, phase: 'implementing', promoted: true };
+}
+
 // Cooperative stop. SendMessage reaches a worker session but only drains at its
 // next tool round — it never preempts work already in flight. So the stop is a
 // flag the worker is told to check at phase boundaries, and the message is the
@@ -892,6 +941,57 @@ export function surfaceFindings(identifier, against, surfaces) {
   return { reasons, unknowns };
 }
 
+// Narrowing the dispatch gate to the writers opens one hole, and this closes it:
+// a claim parked in `awaiting-approval` wakes straight into `implementing`
+// without passing the gate again, so two workers could reach the same file.
+//
+// The re-check belongs here rather than at dispatch, and it is the exact inverse
+// of the problem JAU-45 describes. At dispatch the candidate *cannot* have a
+// surface — it has not been launched — so there is no evidence and the answer is
+// permanently `unknown`. At wake-up both sides always have one: a worker
+// declares its surface before posting the plan it is now being approved on, and
+// anything already `implementing` came through the same door. So the comparison
+// here is a proof, never an absence.
+//
+// Which is why an `unknown` at this point is not a normal state but a broken
+// protocol (a surface undeclared, or a file that would not read), and queueing on
+// it cannot recreate the freeze: it does not happen in nominal operation.
+// Asked one writer at a time, so `queuedBehind` names the claims that actually
+// hold something rather than everyone who happened to be running. A worker told
+// to wait has to know *whose* release to wait for.
+export function phaseAfterApproval(identifier, contending, surfaces) {
+  const queuedBehind = [];
+  const why = [];
+  for (const other of contending ?? []) {
+    const { reasons, unknowns } = surfaceFindings(identifier, [other], surfaces);
+    if (!reasons.length && !unknowns.length) continue;
+    queuedBehind.push(other);
+    why.push(...reasons, ...unknowns);
+  }
+  if (!queuedBehind.length) return { phase: 'implementing', queuedBehind: [] };
+  return { phase: 'queued', queuedBehind, why };
+}
+
+// The same decision, against what is on disk. Used both when the approval lands
+// and when a queued claim asks again.
+async function approvalPhase(identifier) {
+  const others = (await listClaims()).filter((c) => c.issue !== identifier);
+  const contending = contendingClaims(others).map((c) => c.issue);
+  const surfaces = new Map();
+  for (const id of [identifier, ...contending]) {
+    const surface = await readSurface(id);
+    if (surface) surfaces.set(id, surface);
+  }
+  return phaseAfterApproval(identifier, contending, surfaces);
+}
+
+// The four tests do not ask the same question, and folding them onto one list of
+// claims is what froze the board. "Does this ticket depend on the other's
+// result?" (tests 2 and 3) is true whether or not the other is running — a
+// sleeping blocker still blocks. "Will the two write the same files at once?"
+// (test 4) is only meaningful against a claim that is writing *now*. So the
+// dependency tests keep running against every claim, and only the surface test
+// narrows to the contending ones.
 async function independent(identifier) {
   const state = await board();
   const claims = (await listClaims()).filter((c) => c.issue !== identifier);
@@ -899,6 +999,7 @@ async function independent(identifier) {
   if (!ticket) throw new Error(`${identifier} is not on the open board`);
 
   const against = claims.map((c) => c.issue);
+  const contending = contendingClaims(claims).map((c) => c.issue);
   const reasons = [];
   const unknowns = [];
 
@@ -925,13 +1026,19 @@ async function independent(identifier) {
         reasons.push(`${identifier} and ${other} share root-cause group "${myGroup}"`);
       }
     }
+  }
 
+  // Test 4 — no overlapping change surface, against the writers only. With no
+  // writer there is nobody to collide with, so the candidate's missing surface
+  // asks no question: `surfaceFindings` already answers an empty `against` with
+  // no unknowns, and that is the branch a parked claim now takes.
+  if (contending.length > 0) {
     const surfaces = new Map();
-    for (const id of [identifier, ...against]) {
+    for (const id of [identifier, ...contending]) {
       const surface = await readSurface(id);
       if (surface) surfaces.set(id, surface);
     }
-    const overlap = surfaceFindings(identifier, against, surfaces);
+    const overlap = surfaceFindings(identifier, contending, surfaces);
     reasons.push(...overlap.reasons);
     unknowns.push(...overlap.unknowns);
   }
@@ -945,6 +1052,10 @@ async function independent(identifier) {
     independent: gate === 'independent',
     gate,
     against: against.length ? against : '(nothing claimed)',
+    // What the surface test actually ran on, so a caller can tell "nobody is
+    // writing" from "nobody has claimed anything" — two very different boards
+    // that used to produce the same answer.
+    contending: contending.length ? contending : '(nothing writing)',
     reasons,
     unknowns,
   };
@@ -990,18 +1101,35 @@ export function ackNeeded(comments, plan, agentId) {
 // design, and the skill did not (JAU-18). `--peek` is the way to only look.
 async function registerAnswer(issue, answer, held, plan, comments, agentId) {
   const done = {};
-  if (answer.verdict === 'approved' && ackNeeded(comments, plan, agentId)) {
-    const body = `${ACK_MARKER}\n**Approbation reçue** — j'enchaîne sur l'implémentation.\n\n${expectsLine('none')}`;
-    done.acknowledged = (await addComment(issue.identifier, body, plan.id)).id;
-  }
 
   // The phase finally says what the session is doing, because something now
   // writes it: approved means the worker codes, feedback means it plans again.
-  const phase = { approved: 'implementing', feedback: 'planning' }[answer.verdict];
+  // Approved does not always mean *now*, though — if another worker is writing a
+  // file this one declared, the answer is registered but the code waits. Decided
+  // before the receipt is written, because the receipt has to say which it is.
+  let queued = null;
+  let phase = { approved: 'implementing', feedback: 'planning' }[answer.verdict];
+  if (answer.verdict === 'approved') {
+    const decision = await approvalPhase(issue.identifier);
+    phase = decision.phase;
+    if (decision.phase === 'queued') queued = decision;
+  }
+
+  if (answer.verdict === 'approved' && ackNeeded(comments, plan, agentId)) {
+    const next = queued
+      ? `je démarre dès que ${queued.queuedBehind.join(', ')} aura libéré les fichiers concernés.`
+      : `j'enchaîne sur l'implémentation.`;
+    const body = `${ACK_MARKER}\n**Approbation reçue** — ${next}\n\n${expectsLine('none')}`;
+    done.acknowledged = (await addComment(issue.identifier, body, plan.id)).id;
+  }
+
   if (phase && held.phase !== phase) {
     await writeClaim({ ...held, phase, updatedAt: new Date().toISOString() });
     done.phase = phase;
   }
+  // Reported even when the phase was already `queued`: a second read must still
+  // say what the worker is waiting on rather than going silent.
+  if (queued) done.queuedBehind = queued.queuedBehind;
 
   const target = nextClaimState({
     verdict: answer.verdict,
@@ -1226,6 +1354,9 @@ const COMMANDS = {
   },
   independent: async ([id]) => independent(required(id, 'independent <ISSUE-ID>')),
   claims: async () => listClaims(),
+  // Asking also promotes, on the `verdict` model: the command a worker runs to
+  // find out whether it may start is the command that lets it start.
+  ready: async ([id]) => readyToImplement(required(id, 'ready <ISSUE-ID>')),
   surface: async ([id, ...rest]) => {
     const { flags } = parseFlags(rest);
     return declareSurface(

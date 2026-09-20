@@ -129,6 +129,62 @@ test('nothing claimed leaves the candidate free without a surface',()=>{
  assert.deepEqual(none.reasons,[]);
  assert.deepEqual(none.unknowns,[],'no claim means nobody to collide with — the first dispatch never deadlocks');
 });
+const {contendingClaims,CONTENDING_PHASES,phaseAfterApproval}=await import('../scripts/linear_agent.mjs');
+// Only a claim that holds the working tree can collide with anything. Comparing
+// a candidate against a sleeping one is what made one parked worker freeze the
+// whole board for sixteen hours (JAU-46).
+test('only the phases that write contend for files',()=>{
+ const claims=[
+  {issue:'JAU-18',phase:'awaiting-approval'},
+  {issue:'JAU-29',phase:'planning'},
+  {issue:'JAU-36',phase:'queued'},
+  {issue:'JAU-45',phase:'implementing'},
+  {issue:'JAU-14',phase:'landing'},
+ ];
+ assert.deepEqual(contendingClaims(claims).map((c)=>c.issue),['JAU-45','JAU-14']);
+ assert.deepEqual(CONTENDING_PHASES,['implementing','landing']);
+ // A claim written before the field existed has no phase at all. Unknown is not
+ // "writing": it must not resurrect the freeze this test exists to prevent.
+ assert.deepEqual(contendingClaims([{issue:'JAU-1'}]),[]);
+ assert.deepEqual(contendingClaims(undefined),[],'no claims file is not a busy board');
+});
+const surfaceMap=(entries)=>new Map(entries.map(([id,files])=>[id,{files,symbols:[]}]));
+// The re-check at wake-up is what lets the dispatch gate ignore sleepers safely:
+// a parked claim wakes into `implementing` without passing the gate again.
+test('an approval only starts writing when no writer holds the same file',()=>{
+ const clear=phaseAfterApproval('JAU-46',['JAU-45'],surfaceMap([
+  ['JAU-46',['scripts/linear_agent.mjs']],['JAU-45',['web/style.css']],
+ ]));
+ assert.equal(clear.phase,'implementing');
+ assert.deepEqual(clear.queuedBehind,[]);
+ const collide=phaseAfterApproval('JAU-46',['JAU-45'],surfaceMap([
+  ['JAU-46',['scripts/linear_agent.mjs']],['JAU-45',['scripts/linear_agent.mjs']],
+ ]));
+ assert.equal(collide.phase,'queued');
+ assert.deepEqual(collide.queuedBehind,['JAU-45']);
+ // Nobody writing means nothing to wait for — the ordinary case, and the one
+ // that must never queue.
+ assert.equal(phaseAfterApproval('JAU-46',[],new Map()).phase,'implementing');
+ // Waiting is only useful if you know whose release to wait for: naming every
+ // writer would send the orchestrator after a ticket that holds nothing.
+ const mixed=phaseAfterApproval('JAU-46',['JAU-45','JAU-14'],surfaceMap([
+  ['JAU-46',['scripts/linear_agent.mjs']],
+  ['JAU-45',['web/style.css']],
+  ['JAU-14',['scripts/linear_agent.mjs']],
+ ]));
+ assert.deepEqual(mixed.queuedBehind,['JAU-14']);
+ assert.deepEqual(mixed.why,['JAU-46 and JAU-14 both change scripts/linear_agent.mjs']);
+});
+test('a surface missing at wake-up queues instead of guessing',()=>{
+ // Both sides always have a surface here — declaring one precedes the plan being
+ // approved. So an absence is a broken protocol, not a normal state, and
+ // `unknown` may not read as a green light the way it never does at the gate.
+ const mineOnly=phaseAfterApproval('JAU-46',['JAU-45'],surfaceMap([['JAU-46',['scripts/linear_agent.mjs']]]));
+ assert.equal(mineOnly.phase,'queued');
+ const theirsOnly=phaseAfterApproval('JAU-46',['JAU-45'],surfaceMap([['JAU-45',['scripts/linear_agent.mjs']]]));
+ assert.equal(theirsOnly.phase,'queued');
+ assert.ok(theirsOnly.why.length,'queueing without saying what on is how a worker waits forever');
+});
 const {nextClaimState,ackNeeded,validatePhase,PHASES,WAITING_STATE}=await import('../scripts/linear_agent.mjs');
 // The waiting column means "unanswered", so every real answer leaves it — but
 // only from the column itself, and only towards a state that was recorded.
@@ -167,6 +223,10 @@ test('a claim phase outside the vocabulary is refused',()=>{
  // `implementing` was a value no code and no skill ever wrote: a field nothing
  // validates is a field that drifts in silence.
  assert.ok(PHASES.includes('implementing'));
+ // `queued` says what none of the other four could: approved, and not writing
+ // yet. Keeping `awaiting-approval` there would claim the human still owes an
+ // answer they have already given (JAU-18).
+ assert.ok(PHASES.includes('queued'));
  assert.throws(()=>validatePhase('implementng'),/unknown phase "implementng".*planning, awaiting-approval/s);
  assert.throws(()=>validatePhase(undefined),/unknown phase/);
 });

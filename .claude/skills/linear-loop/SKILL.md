@@ -110,8 +110,10 @@ Two consequences for the switch:
   knowing about.
 - **`status` does not show the landing.** A claim says a ticket is held, not
   whether its PR is open, red, or already merged. What it does show is the
-  phase — `planning`, `awaiting-approval`, `implementing`, `landing` — so a
-  session waiting on you is distinguishable from one that is working.
+  phase — `planning`, `awaiting-approval`, `queued`, `implementing`, `landing` —
+  so a session waiting on you is distinguishable from one that is working.
+  Only the last two hold files: a claim in the first three consumes nothing and
+  no longer stops the loop dispatching anything else.
 - **What is waiting on you is a column, not a reading of comment threads.**
   `jaunt-linear board` lists it under `waitingOnHuman`; empty is the normal
   state.
