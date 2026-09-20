@@ -341,7 +341,61 @@ test('subscribing an existing ticket adds, and only when somebody is missing',()
  assert.deepEqual(subscribersToAdd(['bot'],['her','her']),['her'],'a name asked for twice is added once');
  assert.deepEqual(subscribersToAdd(undefined,undefined),[],'neither side read is not a crash');
 });
-const {diff}=await import('../scripts/linear_watch.mjs');
+const {diff,watcherHealth,shouldFire,superseded,livePid}=await import('../scripts/linear_watch.mjs');
+// `enabled: true` with nothing watching is the failure that looks like calm, and
+// the only detector was `pgrep -f linear_watch.mjs` — which matches the shell
+// running it, so it answered "running" from a machine where nothing was. The
+// verdict now comes from a record the watcher writes, and these are its branches.
+test('liveness is read from the pulse, and a stopped watcher never reads as polling',()=>{
+ const now=Date.parse('2026-09-20T12:00:00Z'),at=(s)=>new Date(now-s*1000).toISOString();
+ const alive=()=>true,gone=()=>false;
+ const health=(record,pidAlive=alive)=>watcherHealth(record,{now,pidAlive});
+ assert.deepEqual(health(null),{alive:false,reason:'never started'},'no record at all is not a running watcher');
+ // Every exit stamps `endedAt`, so the last thing it did is on file and a crash
+ // is no longer indistinguishable from a quiet board.
+ assert.equal(health({pid:7,startedAt:at(90),endedAt:at(1),wake:'board-changed'}).reason,'exited: board-changed');
+ assert.equal(health({pid:7,startedAt:at(90),lastPollAt:at(5),intervalSeconds:30},gone).reason,'process gone');
+ // A live pid is not enough: the number may have been recycled, or the process
+ // may be wedged. A pulse that stopped advancing settles both.
+ assert.equal(health({pid:7,startedAt:at(400),lastPollAt:at(200),intervalSeconds:30}).reason,'heartbeat stale');
+ assert.deepEqual(health({pid:7,startedAt:at(90),lastPollAt:at(10),intervalSeconds:30}).alive,true);
+ // 2.5 intervals, so one missed poll is tolerated and two are not.
+ assert.equal(health({pid:7,startedAt:at(90),lastPollAt:at(70),intervalSeconds:30}).alive,true);
+ assert.equal(health({pid:7,startedAt:at(90),lastPollAt:at(80),intervalSeconds:30}).alive,false);
+ // A fast watcher must not be declared dead between two polls: the floor is 30 s.
+ assert.equal(health({pid:7,startedAt:at(90),lastPollAt:at(25),intervalSeconds:1}).alive,true);
+ assert.equal(livePid(process.pid),true);
+ assert.equal(livePid(undefined),false,'a record with no pid is not a live process');
+});
+// The relauncher cannot be the watcher (it is dead) nor a shell loop that never
+// returns (it would never wake the session). So it is a second background task
+// that fires by EXITING — and the one thing it must not do is cry wolf during an
+// orchestration pass, which legitimately runs with no watcher while it works.
+test('the watchdog fires on a continuous absence, not on a gap between passes',()=>{
+ const now=Date.parse('2026-09-20T12:00:00Z'),ago=(s)=>now-s*1000;
+ const fire=(o)=>shouldFire({now,graceSeconds:600,...o});
+ const dead={alive:false,reason:'process gone'},up={alive:true};
+ assert.deepEqual(fire({enabled:false,health:up,unhealthySince:null}),{fire:true,wake:'loop-off'},'the flag going off ends it, so no pkill is needed');
+ // A watcher that came back resets the clock: the pass relaunched it in time.
+ assert.deepEqual(fire({enabled:true,health:up,unhealthySince:ago(9999)}),{fire:false,unhealthySince:null});
+ assert.equal(fire({enabled:true,health:dead,unhealthySince:ago(599)}).fire,false,'still inside the grace, a pass may simply be running');
+ const lost=fire({enabled:true,health:dead,unhealthySince:ago(601)});
+ assert.deepEqual([lost.fire,lost.wake,lost.why],[true,'watcher-lost','process gone']);
+ // The first tick that sees the absence starts the clock rather than firing on it.
+ assert.deepEqual(fire({enabled:true,health:dead,unhealthySince:null}),{fire:false,unhealthySince:now,forSeconds:0});
+});
+// Each tick rewrites the file with its own pid, so two watchdogs comparing pids
+// would chase each other for ever, each seeing the other and neither yielding.
+test('two watchdogs never both count: the newer wins, the older stands down',()=>{
+ const mine={pid:10,startedAt:'2026-09-20T12:00:00.000Z'};
+ assert.equal(superseded(mine,null),false,'a missing file is this one being first, not a rival');
+ assert.equal(superseded(mine,mine),false,'reading back its own record is not a rival');
+ assert.equal(superseded(mine,{pid:11,startedAt:'2026-09-20T12:00:01.000Z'}),true);
+ assert.equal(superseded(mine,{pid:11,startedAt:'2026-09-20T11:59:59.000Z'}),false,'the older one is the one that leaves');
+ // Same millisecond: the tie still has to break one way, or both would stay.
+ const tie=(a,b)=>superseded({pid:a,startedAt:mine.startedAt},{pid:b,startedAt:mine.startedAt});
+ assert.deepEqual([tie(10,11),tie(11,10)],[true,false]);
+});
 // Reacting creates no comment and changes no state, so the watcher could not see
 // a 👍 at all — and it *does* bump the issue, so what little it saw it called an
 // edit and sent through the prioritisation pass instead of re-reading the thread.

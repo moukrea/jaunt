@@ -11,6 +11,10 @@ import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+// The watcher owns the shape of its own pulse, so the liveness verdict is read
+// from there rather than reimplemented here. Importing it starts nothing: its
+// entry point is guarded on argv[1], which is this file.
+import { WATCH_FILE, WATCHDOG_FILE, watcherHealth, livePid } from './linear_watch.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = join(ROOT, '.dev-state');
@@ -1005,6 +1009,34 @@ async function loopState() {
   }
 }
 
+// Whether the loop is actually being watched, as opposed to flagged on. The two
+// were the same sentence until a watcher died unnoticed for 1 h 40 (JAU-52): the
+// flag is a human's intent from days ago, and only the pulse knows whether
+// anything acted on it since. `stalled` is the gap between the two, and it is
+// the one line worth reading on a board that looks calm.
+async function watcherState() {
+  const now = Date.now();
+  const read = async (path) => {
+    try {
+      return await readJson(path);
+    } catch {
+      return null;
+    }
+  };
+  const loop = await loopState();
+  const watcher = watcherHealth(await read(WATCH_FILE), { now, pidAlive: livePid });
+  const watchdog = watcherHealth(await read(WATCHDOG_FILE), { now, pidAlive: livePid });
+  return {
+    enabled: loop.enabled === true,
+    stalled: loop.enabled === true && !watcher.alive,
+    // A missing watchdog is not a stall — nothing is blind yet — but it is the
+    // guarantee gone, so it is reported next to the thing it guarantees.
+    unguarded: loop.enabled === true && !watchdog.alive,
+    watcher,
+    watchdog,
+  };
+}
+
 async function setLoop(enabled) {
   await mkdir(STATE_DIR, { recursive: true });
   const state = {
@@ -1550,7 +1582,11 @@ const COMMANDS = {
   // Lets callers locate the checkout without hardcoding a path: the script
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
-  status: async () => ({ ...(await lockStatus()), loop: await loopState() }),
+  status: async () => ({ ...(await lockStatus()), loop: { ...(await loopState()), ...(await watcherState()) } }),
+  // Answers "is anything actually watching?" without matching process names: a
+  // `pgrep` typed into a shell matches that shell's own command line, so every
+  // form of it reports a watcher on a machine where none runs (JAU-52).
+  watcher: async () => watcherState(),
   'loop-on': async () => setLoop(true),
   'loop-off': async () => setLoop(false),
   // Flags first, then positionals: `claim <ID> --session <uuid>` used to read

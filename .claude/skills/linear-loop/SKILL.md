@@ -75,17 +75,31 @@ line.
 jaunt-linear loop-on
 ```
 
-Then launch the watcher, with `run_in_background: true`:
+Then launch **both** processes, each as its own Bash call with
+`run_in_background: true`:
 
 ```bash
 node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30 --max-minutes 30
+node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --watchdog --grace 600
+```
+
+**`run_in_background: true` is the whole mechanism, not a preference.** A `&` at
+the end of an ordinary foreground Bash call is not the same thing and has already
+cost an outage: the process dies with the call, and — worse — the harness has no
+background task to notify, so nothing ever wakes the session again. If you catch
+yourself typing `&`, you are writing the bug (JAU-52).
+
+Then confirm it took, rather than assuming:
+
+```bash
+jaunt-linear watcher      # alive: true, stalled: false, unguarded: false
 ```
 
 Then invoke `linear-orchestrator` once immediately, so the board moves now rather
 than at the next change.
 
-Report back: that the watcher is running, what the first pass did, and the caveat
-below.
+Report back: that the watcher is running **with what `jaunt-linear watcher`
+said**, what the first pass did, and the caveat below.
 
 ## How the loop actually runs
 
@@ -100,6 +114,32 @@ Two consequences worth keeping straight:
   file**; the orchestrator reads it for the event list.
 - Each pass must relaunch the watcher, or the loop ends silently after one
   wake-up. That is `linear-orchestrator` §6.
+
+### And the watchdog, which is what makes that last line survivable
+
+An obligation the orchestrator has to remember is an obligation it can miss —
+and it did, for 1 h 40, while the flag said `enabled: true` and a human comment
+went unread. So the guarantee is not discipline, it is a second process:
+
+```bash
+node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --watchdog --grace 600
+```
+
+The watchdog never calls Linear and never calls a model. It reads the watcher's
+pulse every 15 s and **exits when the loop has gone blind** — the same mechanism,
+turned against the failure it used to hide. Its exit is a wake-up that says
+`watcher-lost`, and the orchestrator relaunches everything.
+
+What makes it worth its own process: it **survives the ordinary wake-ups**. A
+`board-changed` kills the watcher and leaves the watchdog counting. So the
+watcher needs relaunching on every pass, and the watchdog only after it has
+fired. The 600 s of grace is longer than any plausible orchestration pass — so a
+pass running with no watcher is silent, not an alarm — and far shorter than the
+1 h 40 it exists to prevent.
+
+It cannot be the watcher itself (dead by the time anyone needs it) nor a shell
+loop that never returns (a process that never ends never wakes the session).
+That is why it is shaped the way it is.
 
 ## Where the work ends up
 
@@ -132,9 +172,12 @@ Two consequences for the switch:
 jaunt-linear loop-off
 ```
 
-Then kill the running watcher (`KillShell` on its background task, or
-`pkill -f linear_watch.mjs`). The flag alone stops the next pass from
-relaunching it; killing it makes the stop immediate.
+That is the whole stop. The watcher and the watchdog both read the flag on every
+tick and exit on their own within one interval — you do not have to kill
+anything, and **you must not reach for `pkill -f linear_watch.mjs`**: it matches
+on a string, so it would also kill the watcher of any other checkout of this repo
+on the machine. `KillShell` on the two background tasks is the legitimate way to
+make it instant.
 
 Stopping does **not** touch claims. A ticket in flight stays claimed, its worker
 session keeps its transcript, and restarting resumes exactly there — say so when
@@ -150,15 +193,31 @@ the same thing as a stopped loop with nothing outstanding.
 ## Status
 
 ```bash
-jaunt-linear status         # loop flag + every claim, with its worker session UUID
+jaunt-linear watcher        # is anything actually watching?
+jaunt-linear status         # the same answer, plus every claim and its session UUID
 jaunt-linear board          # priorities, blockers, needsPass
 gh pr list --state open     # what is landing, and what is stuck landing
 ```
 
-A loop flagged on with no watcher process is stalled, not running, and that
-distinction is the whole point of checking — `pgrep -f linear_watch.mjs` settles
-it. Report all three together: the flag says whether it watches, the claims say
-what is held, the PR list says what has actually left the machine.
+A loop flagged on with no watcher running is **stalled, not running**, and that
+distinction is the whole point of checking. `jaunt-linear watcher` settles it,
+and `status` now carries the same three fields:
+
+| field | means |
+|---|---|
+| `stalled: true` | the flag says on and **nothing is watching** — the board is calm because nobody is looking |
+| `unguarded: true` | a watcher is up but the watchdog is not: the loop runs on the orchestrator remembering, which is what failed |
+| `watcher.reason` | `polling`, `never started`, `process gone`, `heartbeat stale`, or `exited: <wake>` |
+
+**Never settle this with `pgrep`.** Every form of it lies here, including the
+ones that look careful: the shell running the check carries the pattern in its
+own command line, so `pgrep -f linear_watch.mjs` matches itself — and so does
+`pgrep -af "node .*linear_watch"`, which was measured doing exactly that. The
+verdict comes from the pulse the watcher writes, or it is not a verdict.
+
+Report them together: `watcher` says whether anything is looking, the flag says
+whether it is supposed to, the claims say what is held, the PR list says what has
+actually left the machine.
 
 ## The caveat to state every time
 
@@ -166,6 +225,10 @@ The watcher is a background task of this session. **It only runs while a Claude
 Code session is open on this project.** Close the session and the loop pauses
 until one is running again. Never describe it as running unattended on the
 machine; say what it actually is.
+
+That is deliberate, and it is the settled scope: the loop lives exactly as long
+as the session — never less, never more. The watchdog narrows the "never less"
+to a bounded gap; it does not, and must not, make the loop outlive the session.
 
 Nothing is lost during a pause: verdicts are read from the Linear thread, so an
 answer written while nobody was listening is picked up on the next pass.
