@@ -14,9 +14,17 @@
 //
 // The wake-up carries no payload — the harness hands the session the output
 // FILE and it reads it. So what is printed on exit stays short and structured.
+//
+// The same file runs a second, much dumber process:
+//
+//   node scripts/linear_watch.mjs --watchdog --grace 600
+//
+// The watchdog never talks to Linear and never calls a model. It reads the
+// watcher's pulse and exits when the loop has gone blind — which turns the
+// mechanism above against the failure it used to hide. See `watchdog()`.
 
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -34,6 +42,13 @@ const entryPath = (argv1) => {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = join(ROOT, '.dev-state');
 const PULSE_FILE = join(STATE_DIR, 'linear-pulse.json');
+const LOOP_FILE = join(STATE_DIR, 'linear-loop.json');
+// The pulse records what the BOARD last looked like; these two record whether
+// anybody is still looking. Keeping them apart matters: the pulse is only
+// rewritten on a wake, so its mtime is the date of the last event and never a
+// sign of life (JAU-52).
+export const WATCH_FILE = join(STATE_DIR, 'linear-watch.json');
+export const WATCHDOG_FILE = join(STATE_DIR, 'linear-watchdog.json');
 const AGENT = join(ROOT, 'scripts', 'linear_agent.mjs');
 
 const args = process.argv.slice(2);
@@ -41,8 +56,23 @@ const flag = (name, fallback) => {
   const i = args.indexOf(`--${name}`);
   return i === -1 ? fallback : args[i + 1];
 };
-const INTERVAL = Number(flag('interval', 30)) * 1000;
-const MAX_MS = Number(flag('max-minutes', 30)) * 60_000;
+const has = (name) => args.includes(`--${name}`);
+const INTERVAL_SECONDS = Number(flag('interval', 30));
+const INTERVAL = INTERVAL_SECONDS * 1000;
+const MAX_MINUTES = Number(flag('max-minutes', 30));
+const MAX_MS = MAX_MINUTES * 60_000;
+const GRACE_SECONDS = Number(flag('grace', 600));
+// How long the watchdog sleeps between two readings of the pulse. Short, because
+// it costs a file read and no network; the grace period is what decides when it
+// acts. Same `--interval` flag as the watcher, with its own default, so the two
+// roles are configured the same way.
+const WATCHDOG_INTERVAL_SECONDS = Number(flag('interval', 15));
+// A broken API is not a quiet board. Without this the watcher retried for the
+// whole `--max-minutes` and then exited `interval-elapsed`, reporting calm on a
+// board it had never managed to read (JAU-52).
+const MAX_CONSECUTIVE_FAILURES = 3;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function runAgent(command) {
   return new Promise((resolve, reject) => {
@@ -62,12 +92,100 @@ function runAgent(command) {
   });
 }
 
-async function readPrevious() {
+async function readJson(path) {
   try {
-    return JSON.parse(await readFile(PULSE_FILE, 'utf8'));
+    return JSON.parse(await readFile(path, 'utf8'));
   } catch {
     return null;
   }
+}
+
+// Written through a rename so a reader never catches a half-written pulse: the
+// watchdog reads this file every few seconds and decides the loop is dead from
+// it, which is not a decision to hand to a torn read.
+async function writeJson(path, value) {
+  await mkdir(STATE_DIR, { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(value, null, 2));
+  await rename(tmp, path);
+}
+
+async function readPrevious() {
+  return readJson(PULSE_FILE);
+}
+
+// A missing flag file means the loop was never switched on, which is an answer.
+// A file that fails to parse is not: `loop-off` rewrites it, and reading it
+// mid-write must not be mistaken for a human stopping the loop.
+async function loopEnabled(lastKnown) {
+  try {
+    return JSON.parse(await readFile(LOOP_FILE, 'utf8')).enabled === true;
+  } catch (error) {
+    return error.code === 'ENOENT' ? false : lastKnown;
+  }
+}
+
+// --- liveness ---------------------------------------------------------------
+// Whether anybody is actually watching. This used to be answered by
+// `pgrep -f linear_watch.mjs`, which matches the shell running the check — its
+// own command line contains the pattern — so it answered "yes, it is running"
+// from a machine where nothing was. Widening the pattern does not help: any
+// form typed into a shell is a form that shell then matches. So the question is
+// settled from a record the watcher writes itself, and never from process names.
+
+// `EPERM` means a process exists and is not ours to signal, which is still
+// alive. Only `ESRCH` is an answer of "nothing there".
+export const livePid = (pid) => {
+  if (!Number.isInteger(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+};
+
+export function watcherHealth(record, { now, pidAlive }) {
+  if (!record) return { alive: false, reason: 'never started' };
+  const common = { pid: record.pid, startedAt: record.startedAt, lastPollAt: record.lastPollAt };
+  if (record.endedAt) {
+    return { alive: false, reason: `exited: ${record.wake ?? 'unknown'}`, ...common, endedAt: record.endedAt };
+  }
+  if (!pidAlive(record.pid)) return { alive: false, reason: 'process gone', ...common };
+  const ageSeconds = Math.round((now - Date.parse(record.lastPollAt ?? record.startedAt)) / 1000);
+  // Also the answer to a recycled pid: the process at that number is alive, but
+  // it is not the one that wrote this, and it is not updating the record.
+  const limit = Math.max(30, (record.intervalSeconds ?? 30) * 2.5);
+  if (ageSeconds > limit) return { alive: false, reason: 'heartbeat stale', ageSeconds, ...common };
+  return { alive: true, reason: 'polling', ageSeconds, ...common };
+}
+
+// The watchdog's decision, kept pure so the interesting part is testable without
+// waiting ten minutes for a real one.
+//
+// `unhealthySince` is carried by the caller across ticks: the watchdog fires on
+// a CONTINUOUS absence, so a watcher that comes back resets the clock. That is
+// what makes an ordinary orchestration pass — which legitimately runs with no
+// watcher while it works — silent rather than a false alarm.
+export function shouldFire({ enabled, health, unhealthySince, now, graceSeconds }) {
+  if (!enabled) return { fire: true, wake: 'loop-off' };
+  if (health.alive) return { fire: false, unhealthySince: null };
+  const since = unhealthySince ?? now;
+  const forSeconds = Math.round((now - since) / 1000);
+  if (forSeconds >= graceSeconds) {
+    return { fire: true, wake: 'watcher-lost', forSeconds, why: health.reason };
+  }
+  return { fire: false, unhealthySince: since, forSeconds };
+}
+
+// Two watchdogs must not both be counting. The newer one wins and the older
+// steps aside, decided on the start date rather than on pid equality: each tick
+// rewrites the file with its own pid, so comparing pids would have the two
+// chasing each other for ever, each seeing the other and neither yielding.
+export function superseded(mine, onDisk) {
+  if (!onDisk || onDisk.pid === mine.pid) return false;
+  if (onDisk.startedAt !== mine.startedAt) return onDisk.startedAt > mine.startedAt;
+  return onDisk.pid > mine.pid;
 }
 
 // What changed, in the terms the orchestrator acts on. Ticket-level and small:
@@ -110,8 +228,32 @@ export function diff(previous, current) {
   return events;
 }
 
+// Every exit goes through here, so the record on disk can never say "polling"
+// about a process that has stopped. That is the state the old watcher left
+// behind on every single exit, and it is indistinguishable from a crash.
+async function report(file, record, payload) {
+  await writeJson(file, { ...record, endedAt: new Date().toISOString(), wake: payload.wake });
+  console.log(JSON.stringify(payload, null, 2));
+}
+
 async function main() {
-  const startedAt = Date.now();
+  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  const record = {
+    role: 'watcher',
+    pid: process.pid,
+    startedAt,
+    lastPollAt: startedAt,
+    intervalSeconds: INTERVAL_SECONDS,
+    maxMinutes: MAX_MINUTES,
+    endedAt: null,
+    wake: null,
+  };
+  // Written before the first poll, not after: a watcher that dies during its
+  // baseline call would otherwise leave no trace that it ever existed.
+  await writeJson(WATCH_FILE, record);
+
+  let enabled = true;
   let previous = await readPrevious();
 
   // First poll of a fresh state file establishes the baseline rather than
@@ -119,39 +261,115 @@ async function main() {
   // wake the session immediately with a meaningless "everything changed".
   if (!previous) {
     previous = await runAgent('pulse');
-    await mkdir(STATE_DIR, { recursive: true });
-    await writeFile(PULSE_FILE, JSON.stringify(previous, null, 2));
+    await writeJson(PULSE_FILE, previous);
   }
 
+  let failures = 0;
+
   for (;;) {
-    if (Date.now() - startedAt > MAX_MS) {
+    if (Date.now() - startedMs > MAX_MS) {
       // A periodic exit with nothing to report: it lets the orchestrator
       // reconcile its own state (claims, flags, finished workers) even during a
       // long quiet stretch, and keeps the watcher process from ageing forever.
-      console.log(JSON.stringify({ wake: 'interval-elapsed', events: [] }, null, 2));
-      return;
+      return report(WATCH_FILE, record, { wake: 'interval-elapsed', events: [] });
     }
 
-    await new Promise((r) => setTimeout(r, INTERVAL));
+    await sleep(INTERVAL);
+
+    // Checked here rather than left to `pkill -f linear_watch.mjs`, which the
+    // skill used to prescribe: that pattern would also kill the watcher of any
+    // other checkout on the machine, and `loop-off` is the switch that means it.
+    enabled = await loopEnabled(enabled);
+    if (!enabled) return report(WATCH_FILE, record, { wake: 'loop-off', events: [] });
+
+    record.lastPollAt = new Date().toISOString();
+    await writeJson(WATCH_FILE, record);
 
     let current;
     try {
       current = await runAgent('pulse');
     } catch (error) {
-      // A transient API failure is not an event. Keep watching; only give up if
-      // it is still broken on the next poll, since a watcher that dies silently
-      // looks exactly like a quiet board.
-      console.error(`poll failed: ${error.message}`);
+      // A transient API failure is not an event, but an expired token is not
+      // transient. Giving up after a few tries is what turns a silent 30-minute
+      // spin into a `watcher-failed` somebody can read.
+      failures += 1;
+      console.error(`poll failed (${failures}/${MAX_CONSECUTIVE_FAILURES}): ${error.message}`);
+      if (failures >= MAX_CONSECUTIVE_FAILURES) {
+        throw new Error(`${failures} consecutive polls failed: ${error.message}`);
+      }
       continue;
     }
+    failures = 0;
 
     const events = diff(previous, current);
     if (events.length > 0) {
-      await writeFile(PULSE_FILE, JSON.stringify(current, null, 2));
-      console.log(JSON.stringify({ wake: 'board-changed', at: current.at, events }, null, 2));
-      return;
+      await writeJson(PULSE_FILE, current);
+      return report(WATCH_FILE, record, { wake: 'board-changed', at: current.at, events });
     }
     previous = current;
+  }
+}
+
+// The relauncher cannot be the watcher — it is dead by the time anyone needs it
+// relaunched — and it cannot be a shell loop that never returns, because a
+// process that never terminates never wakes the session. So it is a second
+// background task whose whole job is to stay silent, and whose EXIT is the alarm.
+//
+// It survives the ordinary wake-ups: `board-changed` kills the watcher and
+// leaves this one counting. It therefore only needs relaunching after it has
+// fired, where the watcher needs it on every single pass — which is exactly the
+// obligation that was missed for 1 h 40.
+async function watchdog() {
+  const startedAt = new Date().toISOString();
+  const record = {
+    role: 'watchdog',
+    pid: process.pid,
+    startedAt,
+    lastPollAt: startedAt,
+    intervalSeconds: WATCHDOG_INTERVAL_SECONDS,
+    graceSeconds: GRACE_SECONDS,
+    endedAt: null,
+    wake: null,
+  };
+  await writeJson(WATCHDOG_FILE, record);
+
+  const pidAlive = livePid;
+  let enabled = true;
+  let unhealthySince = null;
+
+  for (;;) {
+    await sleep(WATCHDOG_INTERVAL_SECONDS * 1000);
+
+    if (superseded(record, await readJson(WATCHDOG_FILE))) {
+      // Deliberately not writing `endedAt` here: the file now belongs to the
+      // newer watchdog, and stamping this one's exit onto it would report the
+      // live process as finished.
+      console.log(JSON.stringify({ wake: 'watchdog-superseded', pid: process.pid }, null, 2));
+      return;
+    }
+
+    record.lastPollAt = new Date().toISOString();
+    await writeJson(WATCHDOG_FILE, record);
+
+    enabled = await loopEnabled(enabled);
+    const health = watcherHealth(await readJson(WATCH_FILE), { now: Date.now(), pidAlive });
+    const decision = shouldFire({
+      enabled,
+      health,
+      unhealthySince,
+      now: Date.now(),
+      graceSeconds: GRACE_SECONDS,
+    });
+
+    if (decision.fire) {
+      return report(WATCHDOG_FILE, record, {
+        wake: decision.wake,
+        watcher: health,
+        blindForSeconds: decision.forSeconds,
+        events: [],
+      });
+    }
+    unhealthySince = decision.unhealthySince;
   }
 }
 
@@ -160,8 +378,19 @@ async function main() {
 // runner and never returns. `argv[1]` is resolved through its symlinks first,
 // for the same reason it is there.
 if (process.argv[1] && import.meta.url === pathToFileURL(entryPath(process.argv[1])).href) {
-  main().catch((error) => {
-    console.log(JSON.stringify({ wake: 'watcher-failed', error: error.message }, null, 2));
+  const role = has('watchdog') ? watchdog : main;
+  const file = has('watchdog') ? WATCHDOG_FILE : WATCH_FILE;
+  role().catch(async (error) => {
+    const payload = { wake: 'watcher-failed', error: error.message };
+    // Best effort: the failure is already being reported on stdout, and a state
+    // directory that cannot be written is not a reason to swallow it.
+    await writeJson(file, {
+      pid: process.pid,
+      endedAt: new Date().toISOString(),
+      wake: payload.wake,
+      error: error.message,
+    }).catch(() => {});
+    console.log(JSON.stringify(payload, null, 2));
     process.exit(1);
   });
 }

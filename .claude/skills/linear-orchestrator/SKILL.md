@@ -66,7 +66,10 @@ file. Read it: it names events, not state.
 | `ticket-edited` | it returns to the analysis pass — §2 |
 | `state-changed` | git moved it — a push made it *In Progress*, a merge made it *Done* — or a human did, or the loop parked it in *Waiting for human*; a ticket newly *Done* is §5 |
 | `interval-elapsed` | nothing moved; reconcile (§1) and go back to sleep |
-| `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work |
+| `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work. The `error` names what broke — three consecutive polls failed, usually an expired token |
+| `watcher-lost` | **the watchdog fired**: the loop ran with nothing watching for longer than its grace, because a pass did not re-arm it. Relaunch both (§6), then say on the board how long it was blind — `blindForSeconds` — because nobody else saw it |
+| `loop-off` | a human switched the flag off; the watcher ended itself. Do nothing and relaunch nothing |
+| `watchdog-superseded` | two watchdogs were started and the older stood down. Nothing is wrong; check §1 and carry on |
 
 Always finish by restarting the watcher (§6). A wake-up that does not re-arm the
 watcher ends the loop silently.
@@ -74,9 +77,17 @@ watcher ends the loop silently.
 ## 1. Reconcile before acting
 
 ```bash
-jaunt-linear status        # claims + loop flag
+jaunt-linear status        # claims + loop flag + whether anything is actually watching
 jaunt-linear board         # tickets, relations, review state, needsPass
 ```
+
+Read `loop.stalled` before anything else. It is the one field that says the calm
+you are looking at might be nobody looking: the flag is a human's intent from
+days ago, and only the pulse knows whether a watcher acted on it since. If it is
+true, say so out loud in this pass — a stall nobody names is a stall that lasts
+(JAU-52). `loop.unguarded` is the softer version: a watcher is up, but with no
+watchdog behind it the loop is back to running on your memory alone, so relaunch
+it in §6.
 
 Claims are files; workers are sessions on disk. After a restart, a claim whose
 `session` is set is **not** orphaned — reopen it and ask where it stands
@@ -288,14 +299,37 @@ Last thing, every time, unless the loop is off:
 node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30 --max-minutes 30
 ```
 
-Run it with `run_in_background: true`. It stays silent while the board is still
-and exits when something moves — that exit is the next wake-up. Nothing is spent
-in between.
+Run it with `run_in_background: true`, in a Bash call of its own. **Not a `&` on
+the end of a foreground call** — that kills the process when the call returns and
+leaves the harness with no background task to notify, which is how the loop went
+deaf for 1 h 40 (JAU-52).
+
+Then, **only if §1 reported `unguarded: true`**, put the watchdog back up too:
+
+```bash
+node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --watchdog --grace 600
+```
+
+It survives ordinary wake-ups, so most passes will not need this — a live one is
+still counting. Starting a second is not a disaster (the older stands down by
+itself), but it costs a wake-up, so ask before you launch.
+
+Finish by checking it took, rather than assuming:
+
+```bash
+jaunt-linear watcher       # alive: true, stalled: false
+```
+
+The watcher stays silent while the board is still and exits when something moves
+— that exit is the next wake-up. Nothing is spent in between. A pass that ends
+without that check has reported a loop it never looked at.
 
 ## Honesty
 
 Nobody watches a wake-up happen. If the watcher failed, say the loop is blind
-rather than reporting a quiet board. If a pass was skipped, say which. Never
+rather than reporting a quiet board — and never infer that it is up because you
+launched it: `jaunt-linear watcher` is the only thing that knows. If a pass was
+skipped, say which. Never
 report a ticket as advanced because a worker was launched — a launch is not a
 result, and neither is an open PR. Nothing is landed until a merge you checked,
 and a ticket that went *Done* on its own is the proof, not your memory of
