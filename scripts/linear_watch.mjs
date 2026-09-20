@@ -17,8 +17,19 @@
 
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// Same shape as the agent's: resolving may fail on an argv[1] that no longer
+// exists, and the raw path is then the best answer available.
+const entryPath = (argv1) => {
+  try {
+    return realpathSync(argv1);
+  } catch {
+    return argv1;
+  }
+};
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = join(ROOT, '.dev-state');
@@ -61,7 +72,7 @@ async function readPrevious() {
 
 // What changed, in the terms the orchestrator acts on. Ticket-level and small:
 // this is read by a model, so it names events rather than dumping state.
-function diff(previous, current) {
+export function diff(previous, current) {
   const events = [];
   const before = previous?.tickets ?? {};
   const after = current.tickets;
@@ -74,9 +85,22 @@ function diff(previous, current) {
     }
     if (was.c !== now.c) events.push({ type: 'comment', ticket: id });
     if (was.s !== now.s) events.push({ type: 'state-changed', ticket: id, from: was.s, to: now.s });
+    // `was.cu === undefined` is a pulse written before this field existed, not a
+    // comment that changed: comparing against it would report the whole board as
+    // touched on the first poll after an upgrade.
+    const commentTouched = was.cu !== undefined && was.cu !== now.cu;
+    // The newest comment was touched without a new one arriving: someone reacted
+    // to it, or edited it. From the pulse those two are indistinguishable, so the
+    // event is named for what is certain rather than for the likely cause — but
+    // it is how a 👍 reaches the loop at all (JAU-36). Re-read the ticket.
+    if (was.c === now.c && commentTouched) {
+      events.push({ type: 'comment-updated', ticket: id });
+    }
     // An updatedAt bump with no comment and no state change is an edit to the
-    // ticket itself — which sends it back through the analysis pass.
-    if (was.u !== now.u && was.c === now.c && was.s === now.s) {
+    // ticket itself — which sends it back through the analysis pass. Reacting to
+    // a comment bumps the issue too (measured), so without the last clause every
+    // 👍 also ordered a full re-prioritisation of a ticket nobody had edited.
+    if (was.u !== now.u && was.c === now.c && was.s === now.s && !commentTouched) {
       events.push({ type: 'ticket-edited', ticket: id });
     }
   }
@@ -131,7 +155,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.log(JSON.stringify({ wake: 'watcher-failed', error: error.message }, null, 2));
-  process.exit(1);
-});
+// Guarded like the agent's own entry point, so a test can import `diff` above:
+// without it, importing this file starts a polling watcher inside the test
+// runner and never returns. `argv[1]` is resolved through its symlinks first,
+// for the same reason it is there.
+if (process.argv[1] && import.meta.url === pathToFileURL(entryPath(process.argv[1])).href) {
+  main().catch((error) => {
+    console.log(JSON.stringify({ wake: 'watcher-failed', error: error.message }, null, 2));
+    process.exit(1);
+  });
+}

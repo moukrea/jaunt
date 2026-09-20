@@ -184,3 +184,81 @@ test('the CLI entry point is recognised through a symlink',async()=>{
  }finally{await rm(dir,{recursive:true,force:true});}
  assert.equal(entryPath('/nope/does/not/exist'),'/nope/does/not/exist','an unresolvable path is returned untouched');
 });
+const {readAnswer,collectReactions,unreadReactions}=await import('../scripts/linear_agent.mjs');
+// A 👍 used to be read on the plan comment and nowhere else, so the natural
+// gesture — reacting to the message you just read — went to nobody (JAU-36).
+const ME='agent-id',HUMAN='human-id';
+const T=(h,m=0)=>`2026-09-19T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00.000Z`;
+const agent=(id,at,reactions=[])=>({id,createdAt:at,user:{id:ME},body:'…',reactions});
+const human=(id,at,body='des remarques',reactions=[])=>({id,createdAt:at,user:{id:HUMAN,name:'Emeric'},body,reactions});
+const thumb=(at,by=HUMAN)=>({emoji:'+1',createdAt:at,user:{id:by,name:'Emeric'}});
+const issue={identifier:'JAU-36'};
+const read=(comments,plan)=>readAnswer(issue,plan,new Date(plan.createdAt),comments,ME);
+test('a 👍 on any agent comment from the plan onwards approves the plan',()=>{
+ const plan=agent('plan',T(1));
+ // The plan comment itself: the one case that already worked, and must keep working.
+ assert.equal(read([{...plan,reactions:[thumb(T(2))]}],plan).verdict,'approved');
+ // JAU-29 replayed: the 👍 landed on the worker's *answer*, hours after the plan.
+ // `verdict` kept saying feedback and the implementation would never have started.
+ const answer=agent('answer',T(6),[thumb(T(10))]);
+ const jau29=read([plan,answer],plan);
+ assert.equal(jau29.verdict,'approved','a 👍 on a later agent comment is an approval of the live plan');
+ assert.equal(jau29.on,'answer','the answer names which comment carried it — the plan is no longer the only one');
+ assert.equal(jau29.via,'reaction');
+});
+test('a 👍 nobody could have meant as an answer never approves anything',()=>{
+ const plan=agent('plan',T(5));
+ // Before the plan: approving something the current plan had not yet said.
+ const earlier=agent('analysis',T(1),[thumb(T(2))]);
+ const stale=read([earlier,plan],plan);
+ assert.equal(stale.verdict,'pending','a reaction on a comment older than the plan is not an answer to it');
+ assert.deepEqual(stale.unreadReactions.map(r=>r.why),['comment predates the current plan'],'and it is reported, not dropped');
+ // On the human's own comment: they are not answering the agent, they are agreeing with themselves.
+ assert.equal(read([plan,human('h',T(6),'note',[thumb(T(7))])],plan).verdict,'feedback');
+ // The agent reacting to the agent is the loop approving its own plan.
+ assert.equal(read([{...plan,reactions:[thumb(T(2),ME)]}],plan).verdict,'pending','an agent cannot approve itself');
+ // An emoji outside the vocabulary decides nothing — but is now said out loud.
+ const odd=read([{...plan,reactions:[{emoji:'eyes',createdAt:T(2),user:{id:HUMAN}}]}],plan);
+ assert.equal(odd.verdict,'pending');
+ assert.deepEqual(odd.unreadReactions.map(r=>r.why),['emoji outside the approve/decline vocabulary']);
+});
+test('a reaction does not outlive the message that came after it',()=>{
+ const plan=agent('plan',T(1));
+ const reacted=agent('answer',T(6),[thumb(T(10))]);
+ // Widening the scan makes a single 👍 permanent unless dates are compared:
+ // approved once, approved for ever, every later correction swallowed in silence.
+ assert.equal(read([plan,reacted,human('h',T(11),'non, pas comme ça')],plan).verdict,'feedback','the human spoke after reacting; the words win');
+ // The other way round, the reaction is the newer word and still decides.
+ assert.equal(read([plan,human('h',T(8)),agent('a2',T(9),[thumb(T(12))])],plan).verdict,'approved');
+ // 👎 travels the same path as 👍 — one rule, not two.
+ const no=agent('a3',T(6),[{emoji:'-1',createdAt:T(7),user:{id:HUMAN}}]);
+ assert.equal(read([plan,no],plan).verdict,'declined');
+});
+const {diff}=await import('../scripts/linear_watch.mjs');
+// Reacting creates no comment and changes no state, so the watcher could not see
+// a 👍 at all — and it *does* bump the issue, so what little it saw it called an
+// edit and sent through the prioritisation pass instead of re-reading the thread.
+test('a reaction wakes the watcher, and as a comment rather than an edit',()=>{
+ const was={u:'1',s:'Backlog',c:'c1',cu:'10'};
+ const pulse=(t)=>({tickets:{'JAU-36':t}});
+ const types=(now)=>diff(pulse(was),pulse(now)).map(e=>e.type);
+ // Measured on the live API: a reaction moves both the comment and the issue.
+ assert.deepEqual(types({u:'2',s:'Backlog',c:'c1',cu:'11'}),['comment-updated'],'the thread moved, not the ticket');
+ // A real edit of the ticket body still reaches the analysis pass.
+ assert.deepEqual(types({u:'2',s:'Backlog',c:'c1',cu:'10'}),['ticket-edited']);
+ // A new comment is already covered and must not also report as touched.
+ assert.deepEqual(types({u:'2',s:'Backlog',c:'c2',cu:'20'}),['comment']);
+ assert.deepEqual(types({u:'1',s:'Done',c:'c1',cu:'10'}),['state-changed']);
+ // A pulse written before `cu` existed is not a board where everything changed.
+ assert.deepEqual(diff(pulse({u:'1',s:'Backlog',c:'c1'}),pulse({u:'1',s:'Backlog',c:'c1',cu:'10'})).map(e=>e.type),[]);
+ assert.deepEqual(diff(pulse({u:'1',s:'Backlog',c:'c1'}),pulse({u:'2',s:'Backlog',c:'c1',cu:'10'})).map(e=>e.type),['ticket-edited'],'an unknown cu must not swallow a real edit');
+});
+test('reactions are attributed, not just counted',()=>{
+ const found=collectReactions([human('h',T(1),'x',[thumb(T(2))]),agent('a',T(3),[thumb(T(4),ME)])],ME);
+ assert.deepEqual(found.map(r=>[r.onAgentComment,r.mine,r.means]),[[false,false,'approved'],[true,true,'approved']]);
+ // `Reaction.createdAt` is when the human answered; the comment's is when the
+ // agent asked. A payload predating the field must still order sanely.
+ assert.equal(collectReactions([agent('a',T(3),[{emoji:'+1',user:{id:HUMAN}}])],ME)[0].at,T(3));
+ // No plan at all is the branch where a 👍 used to vanish with nobody told.
+ assert.deepEqual(unreadReactions(collectReactions([agent('a',T(3),[thumb(T(4))])],ME),null).map(r=>r.why),['no live plan on this ticket']);
+});
