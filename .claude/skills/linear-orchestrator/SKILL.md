@@ -170,6 +170,19 @@ Parallelism is not a number you pick — it is a property the gate proves. Two
 tickets that share a root cause, or sit on a blocking path, or touch the same
 files, are serialised however idle the machine is.
 
+**A held ticket is not a busy one.** The gate answers two different questions
+against two different lists, and the reply shows both. `against` is every claim,
+and it drives the dependency tests — a blocker still blocks while its worker
+sleeps. `contending` is only the claims in `implementing` or `landing`, the two
+phases that hold the working tree, and it is the only list the change-surface
+test compares against.
+
+So a worker parked in `awaiting-approval` no longer stops you dispatching
+anything: it has finished its turn, its session is at rest, and a human may sit
+on it for sixteen hours (JAU-46). `contending: '(nothing writing)'` with a
+non-empty `against` is the normal shape of a board waiting on a human — dispatch
+into it.
+
 When the gate passes:
 
 ```bash
@@ -251,6 +264,21 @@ for the first one's timing. If two workers are green at once, tell one to wait.
 
 Then re-examine what was waiting on the ticket: the gate may now pass for
 something you refused earlier.
+
+**And wake whatever queued behind it.** A worker approved while another held one
+of its files sits in phase `queued` — the human has answered, the code has not
+started. Releasing a claim is what frees the file, so this sweep belongs here and
+nowhere else:
+
+```bash
+jaunt-linear claims       # anything in phase "queued"?
+jaunt-linear ready <ID>   # promotes it to implementing if the file is now free
+```
+
+`ready` is a read that records, like `verdict`: asking is what makes it true. It
+answers `ready: false` with `queuedBehind` when something still holds the file,
+and promoting is a no-op on a claim that is already writing. When it promotes,
+reopen that worker's session (§3) and tell it to implement — nothing else will.
 
 ## 6. Restart the watcher
 

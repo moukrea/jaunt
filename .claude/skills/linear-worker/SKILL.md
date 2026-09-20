@@ -143,9 +143,17 @@ did comes back under `registered`. Use `--peek` when you only want to look — a
 orchestrator checking on a worker, a human reading the board — because a peek
 must not answer on the worker's behalf.
 
+**Approved does not always mean *now*.** The dispatch gate lets a ticket start
+while you are parked, because a sleeping claim holds no files (JAU-46) — so the
+approval is where overlap gets checked instead. If another worker is writing a
+file you declared, `registered` comes back with `phase: 'queued'` and
+`queuedBehind`. The human is done with you; a file is not. Say so on the ticket,
+name what you are waiting on, and stop. The orchestrator runs `jaunt-linear
+ready <ID>` when that claim releases and reopens you.
+
 | verdict | what to do |
 |---|---|
-| `approved` | implement (§6), then land it (§7) |
+| `approved` | implement (§6), then land it (§7) — unless `registered.phase` is `queued`: comment what holds you, stop |
 | `feedback` | the human is steering: fold it in, retract the superseded plan with `jaunt-linear uncomment <COMMENT-ID>`, post a new one, stop again |
 | `declined` | comment that it is parked, `jaunt-linear move <ID> "Backlog"`, tell the orchestrator you are done |
 | `pending` | nothing was answered — stop; you will be reopened |
@@ -159,8 +167,13 @@ The claim now reads `implementing` — `verdict` set it. That phase is the answe
 to "is this session waiting on me or working?", so if you ever reach here
 without having read a verdict, say so with
 `jaunt-linear claim <ID> implementing --session "$CLAUDE_CODE_SESSION_ID"`. The
-four phases are `planning`, `awaiting-approval`, `implementing`, `landing`, and
-anything else is refused.
+five phases are `planning`, `awaiting-approval`, `queued`, `implementing`,
+`landing`, and anything else is refused.
+
+Only `implementing` and `landing` hold the working tree, and that is what the
+dispatch gate compares against. It is also why reaching here in phase `queued`
+means writing anyway would be the collision the queue exists to prevent: ask
+`jaunt-linear ready <ID>` first, and implement only on `ready: true`.
 
 Follow the repo's conventions (`AGENTS.md`, `START_HERE.md`) and Conventional
 Commits: subject in the imperative, **72 characters or fewer**, and `git commit`
