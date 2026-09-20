@@ -174,6 +174,51 @@ async function agentUser() {
   return agentUserCache;
 }
 
+// Linear notifies subscribers, and nothing else. A ticket the harness opened
+// carried an empty subscriber list, so it announced itself to nobody — eight in
+// a row, including the ones parked waiting for an approval. The single moment
+// the human has to act was the single moment that stayed silent (JAU-44).
+//
+// Who to notify is *derived*, not configured. Measured on this workspace: the
+// app actor is not a member of the team, so a team's members are exactly its
+// humans and a fresh clone needs no extra setup step to be notified. The
+// optional `owner` in linear-credentials.json is the override for a team with
+// more than one human on it.
+const APP_ACTOR_EMAIL = /@oauthapp\.linear\.app$/i;
+
+const namesUser = (member, wanted) =>
+  [member.id, member.email, member.displayName, member.name].some(
+    (v) => typeof v === 'string' && v.toLowerCase() === wanted,
+  );
+
+export function pickOwners(members, owner, agentId = null) {
+  // The agent is never notified of its own writing, however it is designated —
+  // by id, by its @oauthapp address, or by an `owner` line naming it.
+  const candidates = (members ?? []).filter(
+    (m) => m && m.id !== agentId && !APP_ACTOR_EMAIL.test(m.email ?? ''),
+  );
+  if (owner) {
+    const wanted = (Array.isArray(owner) ? owner : [owner])
+      .map((o) => String(o).trim().toLowerCase())
+      .filter(Boolean);
+    // An explicit owner outranks the filters below: naming a guest account is an
+    // odd thing to do, and overruling it in silence would be the worse answer.
+    return candidates.filter((m) => wanted.some((w) => namesUser(m, w)));
+  }
+  // Nobody named: every human on the team. A deactivated account and a guest are
+  // the two that would be notified of work they cannot act on.
+  return candidates.filter((m) => m.active !== false && !m.guest);
+}
+
+// `issueUpdate` *replaces* the subscriber list rather than adding to it, so
+// subscribing an existing issue has to union with what is already there. Writing
+// only when somebody is genuinely missing is the other half: a re-claim that
+// re-asserts the same list posts an activity entry saying nothing changed.
+export function subscribersToAdd(current, wanted) {
+  const have = new Set(current ?? []);
+  return [...new Set(wanted ?? [])].filter((id) => !have.has(id));
+}
+
 async function teamRef() {
   const { team } = await loadCredentials();
   if (!team) throw new Error('no "team" set in linear-credentials.json');
@@ -199,6 +244,55 @@ async function resolveTeam() {
   }
   team.states.nodes.sort((a, b) => a.position - b.position);
   return team;
+}
+
+// Cached like agentUser(): a team's membership does not change inside one run.
+let boardHumansCache = null;
+async function boardHumans() {
+  if (boardHumansCache) return boardHumansCache;
+  const [{ owner }, team, me] = await Promise.all([loadCredentials(), resolveTeam(), agentUser()]);
+  const data = await graphql(
+    `query($id: String!) {
+      team(id: $id) {
+        members(first: 50) { nodes { id name displayName email active guest } }
+      }
+    }`,
+    { id: team.id },
+  );
+  boardHumansCache = pickOwners(data.team?.members?.nodes ?? [], owner, me.id);
+  return boardHumansCache;
+}
+
+// Subscribing an issue that already exists — the parking path. It must never be
+// able to abort what it decorates, which is the rule parking itself already
+// follows, so every caller wraps it and reports the failure instead of throwing.
+async function notifyOwners(issueId) {
+  const humans = await boardHumans();
+  if (!humans.length) return { ok: false, reason: 'no human member found on the team' };
+  const data = await graphql(
+    `query($id: String!) { issue(id: $id) { subscribers { nodes { id name } } } }`,
+    { id: issueId },
+  );
+  const current = data.issue?.subscribers?.nodes ?? [];
+  const missing = subscribersToAdd(
+    current.map((n) => n.id),
+    humans.map((m) => m.id),
+  );
+  if (!missing.length) return { ok: true, added: 0, who: current.map((n) => n.name) };
+  const updated = await graphql(
+    `mutation($id: String!, $ids: [String!]) {
+      issueUpdate(id: $id, input: { subscriberIds: $ids }) {
+        success issue { subscribers { nodes { name } } }
+      }
+    }`,
+    { id: issueId, ids: [...current.map((n) => n.id), ...missing] },
+  );
+  if (!updated.issueUpdate.success) throw new Error('issueUpdate failed (subscribers)');
+  return {
+    ok: true,
+    added: missing.length,
+    who: updated.issueUpdate.issue.subscribers.nodes.map((n) => n.name),
+  };
 }
 
 const ISSUE_FIELDS = `
@@ -600,14 +694,36 @@ async function createIssue({ title, description, parent, priority }) {
   if (description) input.description = description;
   if (priority !== undefined) input.priority = Number(priority);
   if (parent) input.parentId = (await getIssue(parent)).id;
+  // Subscribers go in with the issue rather than being added a call later: there
+  // is then no window in which the ticket exists and notifies nobody, and no
+  // second request that can fail on its own. Looking them up, on the other hand,
+  // must not be able to stop a ticket being opened — a board that cannot say who
+  // to notify still needs its ticket.
+  let humans = [];
+  let lookupFailed = null;
+  try {
+    humans = await boardHumans();
+  } catch (error) {
+    lookupFailed = error.message;
+  }
+  if (humans.length) input.subscriberIds = humans.map((m) => m.id);
   const data = await graphql(
     `mutation($input: IssueCreateInput!) {
-      issueCreate(input: $input) { success issue { identifier title url parent { identifier } } }
+      issueCreate(input: $input) {
+        success issue { identifier title url parent { identifier } subscribers { nodes { name } } }
+      }
     }`,
     { input },
   );
   if (!data.issueCreate.success) throw new Error('issueCreate failed');
-  return data.issueCreate.issue;
+  const { subscribers, ...issue } = data.issueCreate.issue;
+  // Who was notified is part of the result, deliberately: a defect about tickets
+  // nobody hears of does not get fixed by a correction nobody can see either.
+  let notified;
+  if (lookupFailed) notified = { ok: false, reason: lookupFailed };
+  else if (!humans.length) notified = { ok: false, reason: 'no human member found on the team' };
+  else notified = { ok: true, who: subscribers.nodes.map((n) => n.name) };
+  return { ...issue, notified };
 }
 
 // --- attachments ------------------------------------------------------------
@@ -734,12 +850,28 @@ async function claim(identifier, phase = 'planning', session) {
   // must not overwrite the remembered state with the waiting column itself.
   let parkedFrom = existing?.parkedFrom ?? null;
   let parking = null;
-  if (phase === 'awaiting-approval' && issue.state?.name !== WAITING_STATE) {
-    const result = await setState(issue, WAITING_STATE, { optional: true });
-    parking = result.moved
-      ? { parked: true, from: result.from }
-      : { parked: false, reason: result.reason };
-    if (result.moved) parkedFrom = result.from;
+  let notified = null;
+  if (phase === 'awaiting-approval') {
+    // Parking and notifying are the same event seen from two sides, but they are
+    // not conditional on each other, so this sits outside the state guard below
+    // rather than inside it. A workspace whose app cannot create the waiting
+    // column (ensureWaitingState is refused — it is an administrator's act) skips
+    // the parking and still has to tell somebody that a plan is waiting.
+    //
+    // It also catches what creation cannot: a ticket a human opened and the
+    // harness picked up gets its subscriber here, not at birth (JAU-44).
+    try {
+      notified = await notifyOwners(issue.id);
+    } catch (error) {
+      notified = { ok: false, reason: error.message };
+    }
+    if (issue.state?.name !== WAITING_STATE) {
+      const result = await setState(issue, WAITING_STATE, { optional: true });
+      parking = result.moved
+        ? { parked: true, from: result.from }
+        : { parked: false, reason: result.reason };
+      if (result.moved) parkedFrom = result.from;
+    }
   }
 
   const record = {
@@ -759,7 +891,10 @@ async function claim(identifier, phase = 'planning', session) {
     updatedAt: new Date().toISOString(),
   };
   await writeClaim(record);
-  return parking ? { ...record, parking } : record;
+  // Neither belongs in the claim on disk — they describe what this call did, not
+  // what the claim is — but both belong in what the caller gets to read.
+  const extras = { ...(parking ? { parking } : {}), ...(notified ? { notified } : {}) };
+  return Object.keys(extras).length ? { ...record, ...extras } : record;
 }
 
 async function writeClaim(record) {

@@ -294,6 +294,53 @@ test('a reaction does not outlive the message that came after it',()=>{
  const no=agent('a3',T(6),[{emoji:'-1',createdAt:T(7),user:{id:HUMAN}}]);
  assert.equal(read([plan,no],plan).verdict,'declined');
 });
+const {pickOwners,subscribersToAdd}=await import('../scripts/linear_agent.mjs');
+// Linear notifies subscribers and nobody else, so a ticket the harness opened
+// with an empty subscriber list announced itself to no one — including the ones
+// parked waiting for an approval (JAU-44).
+const AGENT='513aa856',member=(o)=>({id:o.id,name:o.name??o.id,displayName:o.dn??o.id,email:o.email??`${o.id}@example.com`,active:o.active??true,guest:o.guest??false});
+const HER=member({id:'her',name:'Emeric Commenge (moukrea)',dn:'moukrea',email:'moukrea@gmail.com'});
+const BOT=member({id:AGENT,name:'jaunt Agent',dn:'jauntagent',email:'805df664@oauthapp.linear.app'});
+const ids=(list)=>list.map(m=>m.id);
+test('with nobody configured, the humans of the team are the humans of the team',()=>{
+ // Measured on this workspace: the app actor is not a team member, so members
+ // are already exactly the humans and a fresh clone needs no setup step.
+ assert.deepEqual(ids(pickOwners([HER],undefined,AGENT)),['her']);
+ // Belt and braces for the day the app *is* added to the team: by id, and by the
+ // @oauthapp address it is issued, because the loop must never notify itself.
+ assert.deepEqual(ids(pickOwners([HER,BOT],undefined,AGENT)),['her'],'by id');
+ assert.deepEqual(ids(pickOwners([HER,BOT],undefined,null)),['her'],'by address, even with no id to compare');
+ // Both would be told about work they cannot act on.
+ assert.deepEqual(ids(pickOwners([HER,member({id:'gone',active:false}),member({id:'guest',guest:true})],undefined,AGENT)),['her']);
+ assert.deepEqual(pickOwners([],undefined,AGENT),[],'an empty team names nobody, and must not invent one');
+ assert.deepEqual(pickOwners(undefined,undefined,AGENT),[],'no members read is not a crash');
+});
+test('a configured owner is matched however the human happens to write it',()=>{
+ for(const w of ['her','moukrea@gmail.com','moukrea','Emeric Commenge (moukrea)','MOUKREA@GMAIL.COM',' moukrea '])
+  assert.deepEqual(ids(pickOwners([HER],w,AGENT)),['her'],`"${w}" names her`);
+ const them=member({id:'them',dn:'colleague'});
+ assert.deepEqual(ids(pickOwners([HER,them],['moukrea','colleague'],AGENT)),['her','them'],'a list subscribes each of them');
+ // A team of several is the whole reason the key exists: the default would
+ // notify everyone, which is how a notification becomes noise and gets muted.
+ assert.deepEqual(ids(pickOwners([HER,them],'colleague',AGENT)),['them'],'naming one excludes the other');
+ assert.deepEqual(pickOwners([HER],'nobody@example.com',AGENT),[],'a name matching no member subscribes no one, rather than falling back to everyone');
+ assert.deepEqual(pickOwners([HER,BOT],'jauntagent',AGENT),[],'the agent is never subscribed to its own writing, even when named');
+ // An explicit owner outranks the heuristics: naming a guest is an odd thing to
+ // do, and overruling it in silence would be the worse answer.
+ assert.deepEqual(ids(pickOwners([member({id:'guest',dn:'visitor',guest:true})],'visitor',AGENT)),['guest']);
+});
+test('subscribing an existing ticket adds, and only when somebody is missing',()=>{
+ // issueUpdate *replaces* the subscriber list, so parking has to union with what
+ // is there — assigning would unsubscribe everyone the write did not mention.
+ assert.deepEqual(subscribersToAdd(['bot'],['her']),['her']);
+ assert.deepEqual(subscribersToAdd([],['her']),['her'],'nothing subscribed yet is the whole bug');
+ // Writing anyway would post an activity entry on every re-claim saying that
+ // nothing changed, which is noise on the one ticket already asking for silence.
+ assert.deepEqual(subscribersToAdd(['bot','her'],['her']),[],'already subscribed, nothing to write');
+ assert.deepEqual(subscribersToAdd(['her'],[]),[],'nobody wanted, nothing to write');
+ assert.deepEqual(subscribersToAdd(['bot'],['her','her']),['her'],'a name asked for twice is added once');
+ assert.deepEqual(subscribersToAdd(undefined,undefined),[],'neither side read is not a crash');
+});
 const {diff}=await import('../scripts/linear_watch.mjs');
 // Reacting creates no comment and changes no state, so the watcher could not see
 // a 👍 at all — and it *does* bump the issue, so what little it saw it called an

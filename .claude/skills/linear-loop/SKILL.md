@@ -21,6 +21,14 @@ Two things do not come with the clone:
    mint a token while the placeholder is still in place, so a half-done setup
    fails loudly instead of silently acting as the wrong identity.
 
+The optional `owner` key in that file says who gets subscribed to the tickets the
+loop opens and parks — Linear notifies subscribers and nobody else, so a ticket
+with none announces itself to no one (JAU-44). Leave it out and every active,
+non-guest member of the team is subscribed, which is what a one-human board
+wants and needs no setup. Set it on a bigger team: an email, a display name, a
+full name or a user id, or a list of them. The app actor is never subscribed to
+its own writing.
+
 `jaunt-linear` is on the PATH and resolves the checkout itself. Keep it that way:
 no checkout path belongs in a skill or any other file. If the launcher is missing
 or dangling (fresh machine, repo moved), repair it with this — and only this:
