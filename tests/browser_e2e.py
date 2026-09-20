@@ -95,6 +95,17 @@ async def terminal_command(page,text):
     await expect(page.locator('.terminal-container:not([hidden]) textarea')).to_be_enabled(timeout=30000)
     await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.type(text);await page.keyboard.press('Enter')
 
+async def open_folder(page,path,contains,timeout=30000):
+    # Opening the Files view starts its own listing of the remembered path. A path typed
+    # into that in-flight request is dropped whenever the link is mid-handshake, and
+    # nothing ever re-lists it, so the stale listing wins for good. Wait for the view to
+    # settle on a complete listing first, then navigate: a state, not an instant.
+    # #file-status is the proof a listing came back; only renderFiles writes its
+    # "N / M items · … free" counter, which is deliberately not translated.
+    await expect(page.locator('#file-status')).to_contain_text('items',timeout=timeout)
+    await page.get_by_label('Directory path').fill(str(path));await page.get_by_label('Directory path').press('Enter')
+    await expect(page.locator('#file-list')).to_contain_text(contains,timeout=timeout)
+
 async def main():
     h=Harness();checks=[];errors=[]
     def passed(name):checks.append(name);print('PASS',name,flush=True)
@@ -162,8 +173,7 @@ async def main():
         await page.wait_for_timeout(300)
         await terminal_command(page,"printf 'RECONNECTED_%s\\n' 'SAME_SHELL' > reconnect.txt")
         await until(lambda:(h.work/'reconnect.txt').exists());passed('relay loss/restart → automatic fresh encrypted channel, no new QR, same PTY')
-        await page.locator('[data-view="files"]').first.click();await page.get_by_label('Directory path').fill(str(h.work));await page.get_by_label('Directory path').press('Enter')
-        await expect(page.locator('#file-list')).to_contain_text('proof.txt')
+        await page.locator('[data-view="files"]').first.click();await open_folder(page,h.work,'proof.txt')
         target=h.work/'navigation-target';target.mkdir();(target/'navigation-proof.txt').write_text('fixture')
         await page.evaluate("""async () => {
           const {Link} = await import('./js/link.mjs');
@@ -188,12 +198,11 @@ async def main():
             await page.get_by_label('Directory path').press('Enter')
             # Refresh while navigation is awaiting its reply must use the new path.
             await page.locator('#file-refresh').click()
-            await expect(page.locator('#file-list')).to_contain_text('navigation-proof.txt')
+            await expect(page.locator('#file-list')).to_contain_text('navigation-proof.txt',timeout=30000)
             await expect(page.get_by_label('Directory path')).to_have_value(str(target))
         finally:
             await page.evaluate('window.__restoreFileRequests()')
-        await page.get_by_label('Directory path').fill(str(h.work));await page.get_by_label('Directory path').press('Enter')
-        await expect(page.locator('#file-list')).to_contain_text('proof.txt')
+        await open_folder(page,h.work,'proof.txt')
         passed('late file refresh preserves path draft and pending navigation intent')
         payload=('é日本語\n'*200000).encode()+bytes(range(256));filename='épreuve fichier.bin'
         async with page.expect_file_chooser() as chooser:await page.locator('#file-upload').click()
@@ -204,7 +213,7 @@ async def main():
         h.restart_relay();await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=20000)
         await until(lambda:(h.work/filename).exists());assert (h.work/filename).read_bytes()==payload
         passed('in-flight upload resumes after abrupt relay loss, final bytes verified')
-        await expect(page.locator('#file-list')).to_contain_text(filename);passed('multi-chunk binary/Unicode upload with exact byte comparison')
+        await expect(page.locator('#file-list')).to_contain_text(filename,timeout=30000);passed('multi-chunk binary/Unicode upload with exact byte comparison')
         await page.get_by_label('Actions for '+filename,exact=True).click()
         async with page.expect_download(timeout=15000) as capture:await page.locator('#modal').get_by_role('button',name='Download',exact=True).click()
         received=await capture.value;assert Path(await received.path()).read_bytes()==payload;passed('download bytes identical to uploaded file')

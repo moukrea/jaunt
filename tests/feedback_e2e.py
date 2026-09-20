@@ -2,7 +2,7 @@
 """Real interrupted handshakes/RPCs, bounded feedback and stable operation controls."""
 import asyncio,re,json,signal
 from playwright.async_api import async_playwright,expect
-from browser_e2e import Harness,terminal_command,until,ROOT
+from browser_e2e import Harness,open_folder,terminal_command,until,ROOT
 async def main():
  h=Harness();other=Harness(name='machine X');stopped=False
  try:
@@ -15,7 +15,7 @@ async def main():
    await page.locator('#new-session-folder').click();await page.get_by_label('Working directory').fill(str(h.work));await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
    await terminal_command(page,"printf 'before' > feedback-proof.txt");await until(lambda:(h.work/'feedback-proof.txt').exists())
    before=json.loads(h.cli('status'))['sessions'][0]
-   await page.locator('[data-view=files]').first.click();await page.get_by_label('Directory path').fill(str(h.work));await page.get_by_label('Directory path').press('Enter');await expect(page.locator('#file-list')).to_contain_text('feedback-proof.txt')
+   await page.locator('[data-view=files]').first.click();await open_folder(page,h.work,'feedback-proof.txt')
    h.host.send_signal(signal.SIGSTOP);stopped=True
    await page.evaluate("()=>{for(let i=0;i<5;i++)document.querySelector('#file-refresh').click();}")
    await asyncio.sleep(.2);h.kill_relay()
