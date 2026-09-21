@@ -234,18 +234,73 @@ report discrepancies rather than inventing progress. Do not call `move` to
 simulate a transition the integration is expected to perform. If a transition
 is missing, inspect the PR link and configured event before naming its cause.
 
-### Rebase before you push, not after
+### Reserve before the final rebase and CI
 
-`main` is protected and its required checks are **strict** — a branch behind
-`main` cannot merge however green it is. Rebasing first costs one CI round
-instead of two.
+Use the installed canonical launcher for every command below. Never run a
+worktree's harness against production state. If the canonical checkout has not
+been upgraded, report that fact to the orchestrator; do not overwrite its local
+changes to activate new commands.
 
 ```bash
-jaunt-linear claim <ID> landing --session "$CODEX_THREAD_ID" --runtime codex
+jaunt-linear landing acquire <ID> --runtime codex --session "$CODEX_THREAD_ID"
+```
+
+This enters `landing` and records the ticket, claim cycle, actual session and
+worktree in a durable FIFO. Only `acquired: true` permits the final rebase,
+prepare, push and CI round. When false, comment the owner on Linear, preserve
+work, and finish the turn. The orchestrator resumes this same worker when it is
+first. This wait is not the surface gate's `queued` phase. A bare `claim ...
+landing` cannot enter without admission; refreshing an existing claim never
+transfers the reservation to another session.
+
+Once acquired, fetch and rebase a branch created from main:
+
+```bash
 git fetch origin
 git rebase origin/main
-npm test                       # a rebase that applies is not a rebase that works
+jaunt-linear landing prepare <ID> --runtime codex --session "$CODEX_THREAD_ID"
+npm test
 ```
+
+`prepare` records the exact local head and current remote main, requiring main
+to be an ancestor and a clean worktree. An unchanged published `plan.md` is
+allowed only with its matching publication receipt. After any commit/rebase,
+prepare again, rerun tests and push the new head. A new main invalidates the
+prepared evidence; retain the turn, fetch, rebase and repeat the final checks.
+
+### Stacked branches and conflicts belong to this worker
+
+New worktrees normally start explicitly at `origin/main`. If the assigned
+worktree deliberately starts on a parent branch, record provenance **before
+its first own commit**, after registering this worker's real session:
+
+```bash
+jaunt-linear stack record <ID> --parent agent/<PARENT> --base <full-parent-SHA> --runtime codex --session "$CODEX_THREAD_ID"
+```
+
+The parent SHA must equal the child's initial head and current parent head.
+The immutable record is bound to this claim cycle, separate from phase changes.
+Prefer opening the child PR only after the parent has merged, with base main.
+When the parent is verified merged, instead of the ordinary rebase above use:
+
+```bash
+jaunt-linear stack rebase <ID> --pr <parent-PR> --runtime codex --session "$CODEX_THREAD_ID"
+```
+
+This validates the recorded base, parent merge, repository, active child branch
+and clean worktree, fetches origin, and returns a Git argv recipe. Execute the
+returned `git rebase --onto origin/main <recorded-base> <child-branch>` in its
+reported cwd, in this worker only. It never rewrites another worker's checkout.
+Do this once for the parent squash, then use ordinary main rebases. Missing or
+ambiguous provenance is a refusal, not permission to guess a merge-base.
+
+On textual conflicts, inspect both changes' intent and resolve them here;
+never discard one side wholesale to make Git succeed. If intent needs a human
+decision, explain the concrete alternatives on the ticket and preserve the
+branch/conflict evidence. After clean rebases too, inspect modified helper
+definitions and callers and run `npm test` plus the surface's focused tests.
+For UI work include syntax checking and the relevant browser e2e. A clean
+textual rebase does not prove semantic compatibility.
 
 ### Push, open the PR, watch the checks
 
@@ -279,33 +334,50 @@ The rule is not "rerun the e2e failures" — it is **read the log, then decide**
 and a failure you cannot recognise in the log is a real one until proven
 otherwise.
 
-### Merge
+### Merge through the reservation
 
 ```bash
-gh pr merge <n> --squash --delete-branch
+jaunt-linear landing merge <ID> --pr <n> --runtime codex --session "$CODEX_THREAD_ID"
 ```
 
-Auto-merge is disabled on this repository: nothing merges while you are not
-looking, and a green PR you walk away from simply stays open. If the merge is
-refused because `main` moved while your CI ran, rebase onto `origin/main`,
-`git push --force-with-lease`, and watch again.
+The command verifies the current owner, stop/loop flag, prepared head and main,
+PR branch/base, and successful lint/test checks. It inventories all open child
+PRs targeting this branch with pagination, persists their heads and original
+bases before editing, retargets them to main, and verifies each before merging.
+A changed/closed child or failed API read blocks the parent. It rechecks for
+new children and changed parent/main before a squash merge with an exact head
+condition. GitHub's strict protection is the final guard against external merges.
+Do not bypass this with a direct `gh pr merge` or change repository settings.
 
-`--delete-branch` will then print `fatal: 'main' is already used by worktree at
-…` and exit non-zero. **The merge already happened.** That error comes from the
-local half of the command, which tries to check `main` out in your worktree, and
-`main` is checked out in the main clone. Read the state instead of re-running the
-merge on the strength of an exit code:
+The command avoids local branch deletion/checkout; GitHub still deletes the
+remote branch after merging. It rereads actual PR state even if the merge
+response was lost, releasing the turn only after verified MERGED evidence.
+If that read also fails, retry the same command: a verified merged PR with the
+recorded head completes without another merge request. An explicit GitHub policy/base/head refusal on a still-open PR records the
+rejection and permits prepare/retest again without surrendering the turn.
+An ambiguous attempt retains its original prepared-head evidence and ownership. Inspect the PR before doing anything else; an
+unresolved attempted merge cannot simply be abandoned while the PR is open.
+Preserve it for reconciliation, or explicitly close that PR after inspection
+before releasing and later reopening/reacquiring for another attempt.
+
+For an explicit abandonment before a merge attempt:
 
 ```bash
-gh pr view <n> --json state --jq .state     # MERGED — you are done
+jaunt-linear landing release <ID> --reason "<why this final CI turn is abandoned>" --runtime codex --session "$CODEX_THREAD_ID"
 ```
 
-The remote branch is deleted anyway, by the repository's own
-`delete_branch_on_merge`.
+This verifies the branch's PR state, keeps its branch/PR and records the reason.
+It also works while the loop is off or stop is set; neither flag automatically
+hands ownership to another worker. A crash, elapsed time or missing process
+never expires a durable turn. An uncertain operation lock, stale cycle or
+changed session needs orchestrator reconciliation of the existing owner and
+remote PR; never delete the reservation to get unstuck. After releasing an
+unmerged turn, acquire and prepare anew before any final CI or merge.
 
-The merge is what makes the ticket *Done*. Check that it did, rather than
-assuming — the integration takes a second or two, but it runs on the branch name,
-and you are the one who chose it.
+Read `landing status` and the actual PR/Linear states. A successful merge should
+move the ticket to Done through the integration; verify it. The next worker may
+then acquire the head of the file. This is local coordination for the canonical
+checkout, not a distributed lock or a GitHub merge queue.
 
 ### Hand over
 

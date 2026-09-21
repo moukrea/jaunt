@@ -10,6 +10,7 @@
 import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { skillStore } from './linear_skills.mjs';
+import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -953,6 +954,7 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
   moveState = setState, unpark = false, onUnpark = () => {} } = {}) {
   const path = join(stateDir, 'claims', `${record.issue}.json`);
   const previous = await optionalJson(path);
+  if (record.phase === 'landing') await assertLandingAdmission(stateDir, record, previous);
   if (previous && previous.claimedAt !== record.claimedAt) throw new Error('claim cycle changed; retry transition');
   const unchanged = async () => {
     if (JSON.stringify(await optionalJson(path)) !== JSON.stringify(previous)) {
@@ -1106,6 +1108,7 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveS
       const p = paths(id), claim = await optionalJson(p.claim);
       if (!claim) return { released: false, reason: 'no claim held' };
       if (!claim.claimedAt || claim.issue !== id) throw new Error('invalid claim; refusing release');
+      await assertLandingReleased(stateDir, id);
       const issue = await readIssue(id);
       if (issue?.identifier !== id || !issue.state?.type) throw new Error('cannot verify origin; preserving claim');
       const inventory = await optionalJson(p.inventory);
@@ -1513,7 +1516,7 @@ export async function registerAnswer(issue, answer, held, plan, comments, agentI
   let queued = null;
   let phase = { approved: 'implementing', feedback: 'planning' }[answer.verdict];
   if (answer.verdict === 'approved') {
-    const decision = await decidePhase(issue.identifier);
+    const decision = held.phase === 'landing' ? { phase: 'landing' } : await decidePhase(issue.identifier);
     phase = decision.phase;
     if (decision.phase === 'queued') queued = decision;
   }
@@ -1811,6 +1814,33 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
+  landing: async ([action, id, ...args]) => {
+    const store = landingStore({ root: ROOT });
+    if (action === 'status' && !id && !args.length) return store.status();
+    const { flags, rest } = parseFlags(args);
+    const allowed = { acquire: ['cwd'], prepare: [], merge: ['pr'], release: ['reason'] }[action];
+    if (!allowed || rest.length || Object.keys(flags).some(k => !['runtime', 'session', ...allowed].includes(k))) throw new Error('unknown landing argument');
+    const who = { runtime: flags.runtime, session: flags.session };
+    if (action === 'acquire') {
+      const result = await store.acquire(id, who, flags.cwd || process.cwd());
+      const held = (await listClaims()).find(c => c.issue === id);
+      await writeClaim({ ...held, phase: 'landing', updatedAt: new Date().toISOString() });
+      return result;
+    }
+    if (action === 'prepare') return store.prepare(id, who);
+    if (action === 'merge') return store.merge(id, who, flags.pr);
+    if (action === 'release') return store.release(id, who, flags.reason);
+    throw new Error('landing acquire|status|prepare|merge|release <ID> --runtime <runtime> --session <actual-id>');
+  },
+  stack: async ([action, id, ...args]) => {
+    const { flags, rest } = parseFlags(args);
+    const allowed = { record: ['cwd', 'parent', 'base'], rebase: ['pr'] }[action];
+    if (!allowed || rest.length || Object.keys(flags).some(k => !['runtime', 'session', ...allowed].includes(k))) throw new Error('unknown stack argument');
+    const who = { runtime: flags.runtime, session: flags.session }, store = landingStore({ root: ROOT });
+    if (action === 'record') return store.stackRecord(id, who, flags.cwd || process.cwd(), flags.parent, flags.base);
+    if (action === 'rebase') return store.stackRebase(id, who, flags.pr);
+    throw new Error('stack record|rebase <ID> --runtime <runtime> --session <actual-id>');
+  },
   cleanup: async ([id, ...args]) => {
     const { flags } = parseFlags(args);
     required(id, 'cleanup <ID> --pr <number>');
@@ -1825,7 +1855,7 @@ const COMMANDS = {
         release: before => closureStore().release(id, undefined, before) });
     });
   },
-  status: async () => ({ workers: await workerReports(STATE_DIR), ...(await lockStatus()), loop: { ...(await loopState()), ...(await watcherState()) } }),
+  status: async () => ({ landing: await landingStore({ root: ROOT }).status(), workers: await workerReports(STATE_DIR), ...(await lockStatus()), loop: { ...(await loopState()), ...(await watcherState()) } }),
   // Answers "is anything actually watching?" without matching process names: a
   // `pgrep` typed into a shell matches that shell's own command line, so every
   // form of it reports a watcher on a machine where none runs (JAU-52).

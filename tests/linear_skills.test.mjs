@@ -101,7 +101,7 @@ test('real watcher checks local instructions before unavailable API and honors l
 for (const runtime of ['codex', 'claude']) test(`${runtime}: CLI legacy read/bind/ack works without credentials`, async t => {
   const { root } = await fixture(t);
   await mkdir(join(root, 'scripts'));
-  for (const name of ['linear_agent.mjs', 'linear_watch.mjs', 'linear_workers.mjs', 'linear_skills.mjs']) {
+  for (const name of ['linear_landing.mjs', 'linear_agent.mjs', 'linear_watch.mjs', 'linear_workers.mjs', 'linear_skills.mjs']) {
     await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
   }
   const run = async (...args) => JSON.parse((await exec(process.execPath, [join(root, 'scripts/linear_agent.mjs'), ...args])).stdout);

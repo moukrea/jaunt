@@ -314,7 +314,8 @@ into it.
 When the gate passes:
 
 ```bash
-git worktree add ../wt-<ID> -b agent/<ID>
+git fetch origin
+git worktree add ../wt-<ID> -b agent/<ID> origin/main
 jaunt-linear claim <ID> planning --runtime codex
 jaunt-linear-codex worker <ID> --cwd ../wt-<ID>
 ```
@@ -352,8 +353,8 @@ reliable; the message is what makes it understandable.
 
 ## 5. After a merge, clear the way
 
-The worker lands its own ticket — rebase, push, PR, CI, `gh pr merge --squash
---delete-branch` (its §7). You do not push and you do not merge. You do the three
+The worker lands its own ticket through `jaunt-linear landing`: reserve,
+rebase, prepare, push, PR, CI and guarded squash merge (its §7). You do not push and you do not merge. You do the three
 things it cannot do from inside its own worktree.
 
 **Verify, then release.** Follow [the follow-up protocol](../../../docs/LINEAR_FOLLOWUPS.md).
@@ -375,27 +376,37 @@ configured integration events before assigning a cause. Report the observed
 mismatch; a missing branch identifier is one possible cause, not the only one.
 Do not release work on an assumed transition.
 
-**Rebase what was stacked, while it is still free.** A squash merge rewrites the
-parent's work as one new commit, so every branch built on the old parent is now
-built on commits that are not in `main`. As long as a child has **no commit of
-its own**, the rebase is free and you do it here:
+**Resume the landing FIFO before the final CI round.** Read `jaunt-linear
+landing status` on every reconciliation, not only after a merge. The first
+entry owns the turn; others are waiting in phase `landing`, not the surface
+queue. If the loop is enabled, the owner is current and not stopped, and its
+worker has finished its turn, resume that exact session and ask it to acquire
+again. Never start a second turn while its process is alive. A release advances
+the queue, but does not launch the next worker; this reconciliation does.
+The worker's acquire is idempotent and it starts final CI only on
+`acquired: true`. Do not write another worker's claim to grant a turn.
 
-```bash
-git fetch origin
-git -C ../wt-<CHILD> rebase --onto origin/main <old-base> agent/<CHILD>
-```
+The reservation survives process exit and has no expiry. Stop or loop-off
+preserves it; the existing owner can explicitly abandon a turn after inspecting
+its PR. If identity, claim cycle, operation-lock evidence or remote state is
+uncertain, preserve it and reconcile with the owning worker. Do not delete state
+to make another ticket proceed. Claim cleanup refuses an outstanding landing
+entry. An unresolved attempted merge on an open PR stays reserved until its
+outcome is verified or the PR is explicitly closed after inspection.
 
-Once the child has its own commits, stop. Replaying them over a squashed parent
-is where the semantic conflicts live — a helper renamed on both sides rebases
-without a single textual conflict and breaks at runtime — and resolving that
-means knowing what both changes meant. Reopen the worker and ask it (§3). This is
-JAU-25's point: the cost of the rebase is set by *when* you do it, not by how
-large the diff is.
+**Stack provenance precedes work.** Prefer the explicit origin/main worktree
+base above. For a necessary stack, pass the parent branch and exact parent SHA
+to the child worker. It registers the provenance with `stack record` after its
+real session is registered and before its first own commit. Never infer a lost
+base after squash. Open new child PRs after parent merge by default. The parent's
+landing command protects existing child PRs by recording and verifying their
+retarget to main before GitHub deletes the parent branch.
 
-**Merge one PR at a time.** `main`'s required checks are strict, so every merge
-makes every other open PR out of date and sends it back through CI. Serialising
-merges is not politeness, it is what stops the second worker paying ten minutes
-for the first one's timing. If two workers are green at once, tell one to wait.
+After a parent merge, wake the child's existing worker with the verified parent
+PR. It calls `stack rebase`, executes the returned --onto recipe, resolves
+conflicts and runs semantic/surface tests. Even a child with no own commits is
+rebased by its worker; the orchestrator never edits an active checkout. A dirty
+worktree or missing base is a refusal to preserve, not a reset instruction.
 
 Then re-examine what was waiting on the ticket: the gate may now pass for
 something you refused earlier.
