@@ -225,3 +225,29 @@ cycle using the newly versioned source, macOS adapter execution, or older CLIs
 without `queue`. No second live loop was started and no canonical launcher was
 reinstalled for these checks. JAU-50 closure and JAU-54 recovery are separate
 dependent work, not delivered by this baseline.
+
+## Worker supervision and recovery — September 21, 2026 (JAU-54)
+
+`npm test`: **98 tests passed**. `python3 scripts/check_project.py`: passed.
+The new offline subprocess fixtures exercised both Codex and Claude launchers:
+failed child, durable watchdog deadline/wake, exact-session resume with the saved
+model, and rejection of a second recovery after normal completion. Fixtures use
+fake CLIs and no provider/Linear API calls. Other checks cover live orphan children,
+PID identity, stale attempt completion, launch exclusion, stop/loop flags, current
+approval and direct-prerequisite refusal, merged-before-retry, persistent retry
+budgets, forward-phase reset, provider cooldown isolation and explicit timezone
+reset parsing (including ambiguous DST rejection).
+
+Temporary Git repositories exercised squash-merge cleanup and refusal of an extra
+local commit. Cleanup tests also covered unpublished/modified drafts, ignored files,
+archive restoration after removal failure, closure validation before removal and
+claim replacement during removal. The existing JAU-50 release checks still pass.
+
+No real provider quota was exhausted, real active worker killed, or real ticket
+recovered during these tests. Process behavior on macOS and unsupported/localized
+quota messages remain unverified; unknown identity defers recovery, and unsupported
+reset text uses bounded backoff. Existing workers without the new generation-bound
+lifecycle records are reported as unknown; their identity is never reconstructed
+from a PID guess. Native transcripts remain the context source. New launches use
+the supervised runtime wrapper. Recovery remains bound to an enabled loop and a
+live owner, and the generic prerequisite traversal defect remains tracked in JAU-56.

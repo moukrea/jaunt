@@ -140,14 +140,14 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    await copyFile(new URL('../scripts/linear_codex.mjs', import.meta.url), join(dir, 'scripts/linear_codex.mjs'));
+    for (const name of ['linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
       import { readFileSync, realpathSync } from 'node:fs';
       export const entryPath = p => realpathSync(p);
       const cmd=process.argv[2];
-      if(cmd==='claims') console.log(JSON.stringify([{issue:'JAU-999',runtime:'codex',session:null}]));
+      if(cmd==='claims') console.log(JSON.stringify([{issue:'JAU-999',runtime:'codex',session:null,claimedAt:'2026-09-21T00:00:00Z',phase:'planning'}]));
       if(cmd==='watcher') {
         const health = role => { try { const r=JSON.parse(readFileSync('.dev-state/'+role+'.json')); process.kill(r.pid,0); return {alive:!r.endedAt}; } catch { return {alive:false}; } };
         const watcher=health('watcher'),watchdog=health('watchdog');

@@ -97,11 +97,11 @@ exactly-once API guarantee is assumed, and no automatic blind retry is performed
 Before final handover, the worker records the current inventory and resolves
 its problems. The handover names follow-up links and discard reasons, plus
 actual tests and how to try the result. The orchestrator reads that inventory
-before release and removes the worktree only after release succeeds:
+before cleanup. For supervised completed work, use:
 
 ```sh
 jaunt-linear closure JAU-50
-jaunt-linear release JAU-50
+jaunt-linear cleanup JAU-50 --pr <verified-merged-PR-number>
 ```
 
 Release requires a current, fully resolved inventory, re-reads referenced issues
@@ -122,3 +122,19 @@ The gate validates explicit declarations and referenced links. It cannot discove
 an omitted finding or judge whether the evidence is persuasive. The worker and
 orchestrator remain responsible for the factual review. It does not scan prose
 for phrases, create tickets from guesses, or change board priorities.
+
+## Supervised worktree cleanup
+
+`cleanup` verifies the completed issue, merged PR head and merge commit, unique
+worktree, stopped worker lifecycle, local commit coverage and every tracked,
+untracked and ignored path. The only automatically archived local file is an
+unchanged `plan.md` with a publication receipt from this claim generation. A plan
+without a receipt or changed since publication remains in the worktree. No force
+option is provided. Legacy lifecycle/publication records are not inferred.
+
+The same release verifier checks the current closure and referenced `related`
+tickets before removal. Only after removal succeeds does it save the release
+receipt and delete claim/stop state. Removal failure preserves the claim and restores
+an archived plan. `release` remains available for verified legacy/unstarted cleanup
+and retains its inventory requirements; it does not delete a worktree. A preserved
+worktree is a reported refusal, not a reason to bypass the checks automatically.

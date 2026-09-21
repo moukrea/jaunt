@@ -17,6 +17,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // entry point is guarded on argv[1], which is this file.
 import { WATCH_FILE, WATCHDOG_FILE, watcherHealth, livePid } from './linear_watch.mjs';
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { workerReports, currentAttempt, cleanupWorktree, withWorkerLock, lifecyclePaths, hash } from './linear_workers.mjs';
+const exec = promisify(execFile);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = join(ROOT, '.dev-state');
 const CREDENTIALS_FILE = join(STATE_DIR, 'linear-credentials.json');
@@ -1064,7 +1068,7 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue } = {}
       await atomicJson(p.inventory, inventory);
       return { ...inventory, problems: closureProblems(inventory, claim) };
     },
-    async release(id, reason) {
+    async release(id, reason, beforeRelease) {
       const p = paths(id), claim = await optionalJson(p.claim);
       if (!claim) return { released: false, reason: 'no claim held' };
       if (!claim.claimedAt || claim.issue !== id) throw new Error('invalid claim; refusing release');
@@ -1090,6 +1094,10 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue } = {}
       // claim or release using an inventory edited while verification ran.
       if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
           JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during verification; retry release');
+      if (beforeRelease) {
+        await beforeRelease();
+        if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) || JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during removal; preserving claim');
+      }
       const receipt = { issue: id, claimedAt: claim.claimedAt, releasedAt: new Date().toISOString(),
         mode: cleanup ? 'unstarted' : 'closure', ...(cleanup ? { reason } : { inventory }) };
       await atomicJson(p.receipt, receipt);
@@ -1770,7 +1778,22 @@ const COMMANDS = {
   // Lets callers locate the checkout without hardcoding a path: the script
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
-  status: async () => ({ ...(await lockStatus()), loop: { ...(await loopState()), ...(await watcherState()) } }),
+  workers: async () => workerReports(STATE_DIR),
+  cleanup: async ([id, ...args]) => {
+    const { flags } = parseFlags(args);
+    required(id, 'cleanup <ID> --pr <number>');
+    if (!/^\d+$/.test(flags.pr || '')) throw new Error('cleanup requires --pr <number>');
+    return withWorkerLock(STATE_DIR, id, async () => {
+      const claim = (await listClaims()).find(c => c.issue === id);
+      if (!claim || (await getIssue(id)).state.type !== 'completed') throw new Error('completed claimed ticket required');
+      const run = async (cmd, args, cwd) => (await exec(cmd, args, { cwd })).stdout;
+      const pr = JSON.parse(await run('gh', ['pr', 'view', flags.pr, '--json', 'state,headRefName,headRefOid,mergeCommit'], ROOT));
+      return cleanupWorktree({ root: ROOT, state: STATE_DIR, claim, pr, record: await currentAttempt(STATE_DIR, claim), run,
+        remove: cwd => run('git', ['worktree', 'remove', cwd], ROOT),
+        release: before => closureStore().release(id, undefined, before) });
+    });
+  },
+  status: async () => ({ workers: await workerReports(STATE_DIR), ...(await lockStatus()), loop: { ...(await loopState()), ...(await watcherState()) } }),
   // Answers "is anything actually watching?" without matching process names: a
   // `pgrep` typed into a shell matches that shell's own command line, so every
   // form of it reports a watcher on a machine where none runs (JAU-52).
@@ -1831,7 +1854,7 @@ const COMMANDS = {
     const doc = await addDocument(
       issue,
       flags.title ?? `Plan — ${issue}`,
-      required(body.trim(), 'plan body'),
+      required(body.trim(), 'plan body') && body,
     );
     // The digest is the comment a human answers to approve, so it is the one
     // that most needs to stay inside the thread it belongs to. Without the
@@ -1841,6 +1864,8 @@ const COMMANDS = {
       `${PLAN_MARKER}\n${summary.trim()}\n\n📄 **Plan détaillé :** ${doc.url}\n\n${expectsLine(expects)}`,
       flags.reply,
     );
+    const held = (await listClaims()).find(c => c.issue === issue);
+    if (held) await atomicJson(join(lifecyclePaths(STATE_DIR, held).dir, 'publication.json'), { claimedAt: held.claimedAt, document: doc.id, hash: hash(body), publishedAt: new Date().toISOString() });
     return { document: doc, comment };
   },
   'refresh-token': async () => {

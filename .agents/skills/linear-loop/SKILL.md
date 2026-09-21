@@ -129,3 +129,17 @@ replies posted while stopped are read on the next pass.
 
 Always state the lifetime caveat: this loop operates only while its owning local
 Codex CLI session stays open. It is not cron or a machine-wide service.
+
+## Worker health
+
+Include `jaunt-linear workers` when reporting status. Lifecycle files under canonical
+`.dev-state/workers/` distinguish running, suspect, unknown, resting, finished,
+suspended and interrupted work. A process heartbeat is not model progress. The
+watchdog also emits `worker-lost` / `worker-recovery-due`; the orchestrator uses the
+runtime-specific `recover` launcher after reconciliation. Retries preserve the
+claim, exact session, worktree and settings. Quota timestamps must be explicit
+ISO timestamps with an offset (structured `retry_at` / `reset_at` / `resets_at`, or
+an ISO timestamp in output), or `resets [Sep 25 at] 7pm (Europe/Paris)` with an
+explicit IANA timezone. Ambiguous/DST or unsupported text uses bounded backoff instead
+of inventing a reset date. Real quota expiry and macOS process behavior are not
+validated by the offline fixtures. Loop-off and owner closure prevent new retries.

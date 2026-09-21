@@ -155,6 +155,39 @@ verified ticket without asking permission, include the four facts and an
 explicit `--expects`, and link it as `related` rather than a child by default.
 Future worker questions and current human decisions are different requests.
 
+## Worker supervision and automatic recovery
+
+Read `jaunt-linear workers` on every wake. `worker-lost` asks for reconciliation;
+`worker-recovery-due` requests an automatic retry, never a new approval. For a
+confirmed interrupted worker with a due budget, run the owning runtime's launcher:
+
+```bash
+jaunt-linear-codex recover <ID>                 # Codex claim
+node "$(jaunt-linear repo)/scripts/linear_claude.mjs" recover <ID>  # Claude claim
+```
+
+Re-read the ticket/comments and PR before retrying. A completed/merged task needs
+closure, a normal finished turn needs phase reconciliation, and new feedback goes
+to its existing worker. Never turn a machine wake into plan approval. The recovery
+command rechecks identity/generation, process evidence, loop/stop flags, current
+approval, prerequisites and overlap under a launch lock. Leave a refused recovery
+intact, report the actual reason and next deadline, and re-arm both watcher roles.
+Do not bypass a refusal with `resume`, `ready`, a new claim or another runtime.
+JAU-56 tracks the separate general dormant-descendant gate defect; this workflow
+does not claim to repair that graph traversal.
+
+`running` means process evidence, not demonstrated model progress. `suspect` or
+`unknown` never authorizes a duplicate. Resting approval/queued claims are normal.
+The watchdog reads local records, persists deadlines and retries delivery after
+five minutes if no new attempt appeared. Known quota deadlines include a 30-second
+margin; unknown reset/crash retries use 1/5/30 minutes, then stop and report the
+exhausted budget. Configuration failures need reconciliation, not repeated launches.
+Counters survive restart; a forward phase transition resets the phase's budget.
+Only one recovery launch per runtime is admitted at a time, and another active
+recovery or known quota cooldown in that runtime defers it. Other runtimes remain
+independent. The owner must stay alive and the loop enabled; reopening an authorized
+loop reconciles pending work. No service is installed outside that lifetime.
+
 ## 3. Route the conversation
 
 ### How to write on a ticket
@@ -186,7 +219,7 @@ For Claude claims, keep the existing procedure:
 
 ```bash
 SID=$(node -e 'console.log(require("./.dev-state/claims/JAU-3.json").session)')
-claude -p --resume "$SID" "Emeric a répondu sur JAU-3 : « <son message> ». Prends-en compte et réponds-lui sur le ticket."
+node "$(jaunt-linear repo)/scripts/linear_claude.mjs" resume JAU-3 --message "Read the human reply and answer in its thread."
 ```
 
 This works even after the worker finished its turn — a session at rest is a
@@ -231,12 +264,10 @@ SID=$(uuidgen)
 git worktree add ../wt-<ID> -b agent/<ID>
 jaunt-linear claim <ID> planning --session "$SID"
 
-UNSET=$(env | grep -oE '^(CLAUDECODE|CLAUDE_CODE_[A-Z_]*)' | sort -u | sed 's/^/-u /' | tr '\n' ' ')
-cd ../wt-<ID> && env $UNSET claude -p --session-id "$SID" --permission-mode bypassPermissions \
-  "Invoke the linear-worker skill for <ID>." &
+node "$(jaunt-linear repo)/scripts/linear_claude.mjs" worker <ID> --cwd ../wt-<ID>
 ```
 
-Purging `CLAUDECODE` and `CLAUDE_CODE_*` is not optional: without it the spawned
+The supervised launcher purges `CLAUDECODE` and `CLAUDE_CODE_*`: without it the spawned
 session is treated as an ephemeral child, persists no transcript, and cannot be
 resumed — which breaks routing and resumption both.
 
@@ -272,15 +303,14 @@ things it cannot do from inside its own worktree.
 Read the worker's closure inventory, verify its four facts, human expectations,
 linked tickets and reasons for discards. Missing evidence is not an empty
 inventory: reopen the same worker to finish it. Never remove the worktree if
-release fails. The command checks the current claim cycle and `related` links
+cleanup fails. The command checks the current claim cycle and `related` links
 before deleting the claim. Take the report seriously enough to check it:
 
 ```bash
 gh pr view <n> --json state --jq .state    # MERGED
 jaunt-linear show <ID>                     # state.name must be Done
 jaunt-linear closure <ID>                  # current inventory, no unresolved items
-jaunt-linear release <ID>                  # must succeed before cleanup
-git worktree remove ../wt-<ID>
+jaunt-linear cleanup <ID> --pr <n>           # verifies closure, preserves unpublished work
 ```
 
 If a merged PR's ticket is still not *Done*, inspect its identifier/link and the
