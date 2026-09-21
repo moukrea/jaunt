@@ -1,5 +1,33 @@
 # jaunt — delivery validated on September 14, 2026
 
+
+## Automatic publication queue — JAU-30 (2026-09-21)
+
+The release coordinator was tested against temporary real Git repositories and
+bare remotes with injected GitHub/publication APIs. **49 focused tests passed**,
+covering component classification, harness-only npm test edits, transitive and
+deleted build helpers, synchronized generated versions, exact source parentage,
+atomic tag/receipt collision refusal, stale receipt writers, unvalidated sources,
+missing selected credentials, partial publication and continuation after another
+merge. Draft-upload interruption tests change the rebuilt bytes deliberately and
+verify that retries retain the original frozen artifacts, including a lost final
+publication response. Asset checks cover checksums, exact inventories, native
+Linux package architecture names and staging path rejection.
+
+The earlier full local run passed 165 pytest tests (before the seven additional
+publication recovery cases), 138 npm tests and both real Miniflare relay tests.
+Actionlint 1.7.7 passed on all six changed workflows and the new coordinator.
+These are local/simulated publication results, not proof of production delivery.
+
+Read-only GitHub inspection found host beta.41, desktop beta.33 and Android
+beta.31 all tagged at `7ab213386519e003a4958436deb5675f9c5f069c`; no application
+source backlog was found through `e15ca88`. The package.json changes in that
+interval only extended the harness test command. The RELEASE_TOKEN secret name
+exists, but its effective permissions have not yet been exercised by the new
+Actions preflight. CLOUDFLARE_API_TOKEN and the relay-production environment were
+absent during inspection. Live activation, generated releases and public delivery
+are not claimed here; the ticket handover must report their actual observations.
+
 ## Linear instruction freshness — JAU-47 (September 21, 2026)
 
 Observed locally: `npm test` passed all **119 tests**, including eight isolated

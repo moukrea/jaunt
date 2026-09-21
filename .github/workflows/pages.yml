@@ -1,6 +1,22 @@
 name: Pages
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      source:
+        required: true
+        type: string
+      host_tag:
+        required: true
+        type: string
+      desktop_tag:
+        required: true
+        type: string
+      android_tag:
+        required: true
+        type: string
 permissions:
   contents: read
   pages: write
@@ -10,13 +26,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: vars.jaunt_RELAY_URL != ''
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -28,10 +45,22 @@ jobs:
         env:
           jaunt_PRODUCTION: '1'
           jaunt_RELAY_URL: ${{ vars.jaunt_RELAY_URL }}
-          jaunt_RELEASE_TAG: ${{ vars.jaunt_RELEASE_TAG }}
-          jaunt_ANDROID_RELEASE_TAG: ${{ vars.jaunt_ANDROID_RELEASE_TAG }}
-          jaunt_DESKTOP_RELEASE_TAG: ${{ vars.jaunt_DESKTOP_RELEASE_TAG }}
+          jaunt_RELEASE_TAG: ${{ inputs.host_tag }}
+          jaunt_ANDROID_RELEASE_TAG: ${{ inputs.android_tag }}
+          jaunt_DESKTOP_RELEASE_TAG: ${{ inputs.desktop_tag }}
           jaunt_PAGE_URL: ${{ vars.jaunt_PAGE_URL }}
+      - name: Bind the public Page to its verified source
+        env:
+          RELEASE_SOURCE: ${{ inputs.source }}
+        run: |
+          python - <<'PYCONFIG'
+          import json,os,pathlib,re
+          source=os.environ['RELEASE_SOURCE']
+          assert re.fullmatch('[0-9a-f]{40}',source)
+          p=pathlib.Path('web/config.json')
+          value=json.loads(p.read_text());value['releaseSource']=source
+          p.write_text(json.dumps(value,indent=2)+'\n')
+          PYCONFIG
       - run: python scripts/check_project.py
       - name: Require published host assets
         env:

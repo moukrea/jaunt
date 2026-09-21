@@ -4,8 +4,14 @@ on:
     paths: ['android/**', 'web/**', 'scripts/prepare_web.mjs', '.github/workflows/android.yml']
   push:
     branches: [main, 'android/**']
-    tags: ['android-v*']
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -16,6 +22,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,7 +37,6 @@ jobs:
       - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - run: npm ci && npm run prepare-web
         env:
-          jaunt_RELEASE_TAG: ${{ vars.jaunt_RELEASE_TAG }}
           jaunt_RELAY_URL: ${{ vars.jaunt_RELAY_URL }}
       - name: Test native protocol, lint and build APK
         run: android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
@@ -40,13 +47,13 @@ jobs:
             android/app/build/reports/tests/testDebugUnitTest/
             android/app/build/reports/lint-results-debug.html
       - name: Sign and publish immutable Android release
-        if: startsWith(github.ref, 'refs/tags/android-v')
+        if: inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           jaunt_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           jaunt_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           export jaunt_ANDROID_KEYSTORE="$RUNNER_TEMP/jaunt-release.jks"
@@ -62,9 +69,18 @@ jobs:
           mkdir -p android-release
           cp android/app/build/outputs/apk/release/app-release.apk "android-release/jaunt-$TAG.apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "android-release/jaunt-$TAG.apk" > android-release/SIGNING-CERTIFICATE.txt
-          (cd android-release && sha256sum *.apk SIGNING-CERTIFICATE.txt > SHA256SUMS)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo 'Refusing to replace an existing Android release.' >&2
-            exit 1
-          fi
-          gh release create "$TAG" android-release/* --verify-tag --prerelease --title "jaunt Android ${TAG#android-v}" --notes-file docs/ANDROID_RELEASE_NOTES.md
+          (cd android-release && sha256sum -- *.apk SIGNING-CERTIFICATE.txt > SHA256SUMS)
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-control
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Publish or resume the frozen draft assets
+        if: inputs.tag != ''
+        run: python release-control/scripts/release_pipeline.py publish --directory android-release --component android --tag "$RELEASE_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}

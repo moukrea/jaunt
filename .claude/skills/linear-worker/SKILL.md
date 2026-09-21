@@ -357,6 +357,22 @@ move the ticket to Done through the integration; verify it. The next worker may
 then acquire the head of the file. This is local coordination for the canonical
 checkout, not a distributed lock or a GitHub merge queue.
 
+### Verify publication separately from merge
+
+For product changes, inspect the `Automatic release` run and its durable
+`jaunt-release-state` receipt for the merged source. `pending`/`failed` means
+publication is not delivered. Only a delivered receipt, verified asset links and
+the public Page's matching `releaseSource` justify reporting delivery. If a later
+source is published already, verify the merged source's delivered history too.
+Report a blocked/failed run precisely and track factual leftovers through the
+follow-up protocol below. A docs/harness-only change needs no new package.
+
+Do not bump versions, create tags or dispatch individual component/Pages
+workflows in a ticket worker. The exclusive coordinator computes versions and
+owns publication; manual retries go through `auto-release.yml` on main. Read
+`docs/DEPLOYMENT.md` for activation, credential checks and recovery. Keep merge
+landing reservations separate from the GitHub production publication lock.
+
 ### Hand over
 
 Before the final handover, follow [the follow-up protocol](../../../docs/LINEAR_FOLLOWUPS.md)

@@ -1,5 +1,15 @@
 # Updates without losing sessions or identities
 
+## Publication evidence
+
+Product merges are queued by `auto-release.yml`. Versions are assigned on an
+immutable publication commit derived from the CI-validated main source. The
+coordinator updates the public channel only after required builds and checksum
+verification. A failed publication retains its receipt for retry; a merge alone
+does not make a version available. The public configuration's `releaseSource`
+identifies the source whose delivery was verified. See [publication and
+recovery](DEPLOYMENT.md#automatic-publication-after-a-product-merge).
+
 ## Host
 
 The public installer configures automatic updates by default. The host checks the release selected by the published Page after startup and every 15 minutes. This keeps it on the owner's validated deployment channel. A source checkout has no automatic installation authority; it must first be installed through the public installer.

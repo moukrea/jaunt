@@ -2,9 +2,14 @@ name: Desktop app
 on:
   pull_request:
     paths: ['desktop/**', 'web/**', 'package*.json', 'scripts/check_desktop_package.mjs', 'scripts/prepare_web.mjs', '.github/workflows/desktop.yml']
-  push:
-    tags: ['desktop-v*']
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -20,6 +25,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -43,13 +50,15 @@ jobs:
             dist/desktop/*.dmg
           if-no-files-found: error
   publish:
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    if: inputs.tag != ''
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
@@ -58,13 +67,21 @@ jobs:
       - name: Publish immutable desktop packages
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           node -e 'if(process.env.TAG!=="desktop-v"+require("./package.json").version)throw Error("Tag/version mismatch")'
-          (cd desktop-release && sha256sum * > SHA256SUMS)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo 'Refusing to replace a desktop release.' >&2
-            exit 1
-          fi
-          gh release create "$TAG" desktop-release/* --verify-tag --prerelease --title "jaunt desktop ${TAG#desktop-v}" --notes-file docs/DESKTOP_RELEASE_NOTES.md
+          (cd desktop-release && sha256sum -- * > SHA256SUMS)
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-control
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Publish or resume the frozen draft assets
+        run: python release-control/scripts/release_pipeline.py publish --directory desktop-release --component desktop --tag "$RELEASE_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
