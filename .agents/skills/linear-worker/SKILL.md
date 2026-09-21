@@ -136,7 +136,7 @@ implements it, any screenshot you could not open: it goes there. An empty "Not
 verified" section is a strong claim — only make it when it is true.
 
 If the ticket asks to be split, split it here, with the analysis in hand:
-`jaunt-linear create "<title>" --parent <ID> --desc -`. That is the deliverable;
+`jaunt-linear create "<title>" --parent <ID> --expects none --desc -`. That is the deliverable;
 describing a split in prose for a human to retype is not doing the work.
 
 Then **stop your turn**. Do not implement. The human answers on the ticket —
@@ -300,8 +300,26 @@ and you are the one who chose it.
 
 ### Hand over
 
+Before the final handover, follow [the follow-up protocol](../../../docs/LINEAR_FOLLOWUPS.md)
+(path from the checkout root: `docs/LINEAR_FOLLOWUPS.md`). Open each factual
+leftover without asking permission, or reuse a verified ticket. Record the four
+facts, explicit human expectation and a `related` link to the origin. Do not use
+sub-issues by default. Unverified intuitions need an explicit discard reason.
+
+Save `jaunt-linear closure <ID> --file <json|->` for the current claim, including
+`{"items":[]}` when nothing remains. Save the returned ticket ID before linking;
+on a retry, finish that link instead of creating another ticket. Read the
+inventory back with `jaunt-linear closure <ID>` and resolve every reported
+problem. The orchestrator verifies related targets before releasing the claim.
+
+Human decisions can be required in Backlog or after delivery as well as in
+Waiting for human. State the action, who owes it and when in descriptions
+(`create --expects`) and handover comments (`comment --expects`). Distinguish
+future worker analysis from an actual question to the human; never infer
+`none` from the issue's column.
+
 ```bash
-jaunt-linear comment <ID> "<la PR, ce qui a été testé, comment l'essayer, ce qui reste>"
+jaunt-linear comment <ID> --expects "<action attendue ou none>" "<la PR, tests, essai, liens des suites et motifs des éléments écartés>"
 ```
 
 Write it for someone who did not watch the run: explain the usable result and

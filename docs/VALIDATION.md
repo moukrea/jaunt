@@ -3,29 +3,32 @@
 
 ## Linear follow-up closure — JAU-50 (2026-09-21)
 
-On the JAU-50 worktree based on `ab7888b`, `npm test` passed **70 tests**.
-The new cases use temporary state and injected issue reads: absent/empty/stale
+After rebasing onto the versioned Codex baseline `c24d5c5` (JAU-39), `npm test`
+passed **84 tests**, including the Codex runtime/session cases. The targeted
+Codex worker and orchestrator changes are now integrated into `.agents/skills/`;
+they retain JAU-39's actual-state checks and user-facing handover requirements.
+
+The closure cases use temporary state and injected issue reads: absent/empty/stale
 inventories, incomplete evidence, reasoned discards, retained follow-up IDs
 across a missing relation, both relation directions, missing targets/API errors,
 claim and stop preservation, explicit unstarted cleanup, work history across
 re-planning, concurrent local changes, and malformed state. Isolated CLI tests
 exercise stdin inventory writes/reads and reject missing/conflicting creation
-expectations before loading credentials. No test tickets were created on Linear.
-`python3 scripts/check_project.py --source`, `node --check scripts/linear_agent.mjs`
-and `git diff --check` passed.
+expectations before loading credentials. `python3 scripts/check_project.py
+--source` and `git diff --check` passed. These checks are the worker's validation,
+not instructions for a human to check out a branch or run the test suite.
 
-Codex compatibility was checked on temporary copies: composing the canonical
-local claim-identity adaptation with this change preserved runtime/session,
-rejected cross-runtime ownership, and retained work history. The raw adaptation
-patch needs context reconciliation near COMMANDS.release; it was not applied to
-the canonical checkout. A targeted two-skill Codex patch passed `git apply --check`
-against copies of the current canonical `.agents` files.
+Observed on the board during diagnosis: PR #76 was correctly linked as a draft,
+while the ticket remained Backlog after its approval verdict restored that state.
+The team's automation had start/review/merge destinations and no draft rule.
+No desktop package was produced for that harness-only change; `browser-evidence`
+was a test-results archive, not a harness installer or functional delivery.
 
-Not validated: live Linear creation/release using the new code, ambiguous network
-creation recovery, or a full Codex loop after integration. The canonical Codex
-skills remain untracked and absent from the committed base; their targeted
-JAU-50 patch is separate, pending independent versioning of that base. This
-section records local checks, not completion of that integration or a merge.
+At this commit, live creation/release with the newly integrated code and runtime
+activation are not yet claimed as validated. The final Linear handover must
+record actual follow-up links, explicit expectations, closure checks and the
+observed PR/ticket states after delivery. Ambiguous network creation recovery
+remains a documented manual verification path, not an exactly-once guarantee.
 
 ## Linear CLI priority names — September 21, 2026 (JAU-55)
 
