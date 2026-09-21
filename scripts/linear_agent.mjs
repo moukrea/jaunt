@@ -7,7 +7,8 @@
 // The client secret never expires; the 30-day app token is a cache this script
 // re-mints on its own whenever it is missing, stale, or rejected with a 401.
 
-import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -102,6 +103,22 @@ function expectsLine(expects) {
     return '**Rien attendu de toi.** Pour information.';
   }
   return `${EXPECTS_MARKER} ${expects}`;
+}
+
+// Creation must distinguish an explicit absence of a request from an omitted
+// decision. Status cannot tell us whether a backlog arbitration or test is due.
+export function issueDescription(description = '', expects) {
+  if (typeof expects !== 'string' || !expects.trim() || /[\r\n]/.test(expects)) {
+    throw new Error('create requires --expects <action|none> on one line');
+  }
+  if (typeof description !== 'string') throw new Error('--desc needs text or -');
+  const line = expectsLine(expects.trim());
+  const lines = description.split(/\r?\n/);
+  const existing = lines.filter((s) => s.includes(EXPECTS_MARKER) || s.includes('**Rien attendu de toi.**'));
+  if (existing.length > 1 || (existing.length === 1 && existing[0].trim() !== line)) {
+    throw new Error('description has a conflicting or duplicate expectation; use --expects');
+  }
+  return existing.length ? description : [description.trim(), line].filter(Boolean).join('\n\n');
 }
 
 async function loadCredentials() {
@@ -705,7 +722,8 @@ async function unrelate(relationId) {
 
 // Splitting a ticket is part of planning, not something to describe in prose and
 // hope a human retypes. `--parent` makes the new issue a sub-issue.
-async function createIssue({ title, description, parent, priority }) {
+async function createIssue({ title, description, parent, priority, expects }) {
+  description = issueDescription(description, expects);
   const team = await resolveTeam();
   const input = { teamId: team.id, title };
   if (description) input.description = description;
@@ -925,17 +943,161 @@ async function claim(identifier, phase = 'planning', session, runtime) {
 }
 
 async function writeClaim(record) {
+  const previous = await optionalJson(claimPath(record.issue));
+  Object.assign(record, preserveWorkHistory(record, previous));
   await mkdir(CLAIMS_DIR, { recursive: true });
   await writeFile(claimPath(record.issue), JSON.stringify(record, null, 2));
   return record;
 }
 
-async function release(identifier) {
+async function release(identifier, reason) {
   const target = identifier ?? (await listClaims())[0]?.issue;
   if (!target) return { released: false, reason: 'no claim held' };
-  await rm(claimPath(target), { force: true });
-  await rm(join(CLAIMS_DIR, `${target}.stop`), { force: true });
-  return { released: true, was: target };
+  return closureStore().release(target, reason);
+}
+
+// Remember actual work across re-planning and queuing, without replacing the
+// runtime/session fields owned by each runtime's claim adapter.
+export function preserveWorkHistory(record, previous) {
+  const sameCycle = previous?.claimedAt === record.claimedAt;
+  const started = record.workStartedAt || (sameCycle && (previous.workStartedAt ||
+    (CONTENDING_PHASES.includes(previous.phase) && previous.updatedAt)));
+  return {
+    ...record,
+    workStartedAt: started || (CONTENDING_PHASES.includes(record.phase) ? record.updatedAt : null),
+  };
+}
+
+async function optionalJson(path) {
+  try { return await readJson(path); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+async function atomicJson(path, value) {
+  await mkdir(dirname(path), { recursive: true });
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' });
+    await rename(temp, path);
+  } finally { await rm(temp, { force: true }); }
+}
+
+const hasText = (value) => typeof value === 'string' && Boolean(value.trim());
+const issueKey = (value) => typeof value === 'string' && /^[A-Z][A-Z0-9]*-\d+$/.test(value);
+
+// Drafts can lack evidence. They cannot accidentally erase known leftovers or
+// lose the issue ID saved between creation and relation creation.
+export function closureInventory(input, previous) {
+  if (!input || !Array.isArray(input.items)) throw new Error('closure needs {"items": [...]} (use [] explicitly when none remain)');
+  const keys = new Set();
+  for (const item of input.items) {
+    if (!item || !hasText(item.key) || keys.has(item.key)) throw new Error('closure entries need unique, stable keys');
+    keys.add(item.key);
+    if (!['pending', 'ticket', 'discarded'].includes(item.disposition)) throw new Error(`${item.key}: disposition must be pending, ticket or discarded`);
+    for (const field of ['observation', 'location', 'excludedBecause', 'decision', 'expects', 'reason', 'ticket']) {
+      if (item[field] !== undefined && typeof item[field] !== 'string') throw new Error(`${item.key}: ${field} must be text`);
+    }
+    if (item.ticket !== undefined && !issueKey(item.ticket)) throw new Error(`${item.key}: invalid ticket identifier`);
+  }
+  for (const old of previous?.items ?? []) {
+    const next = input.items.find((item) => item.key === old.key);
+    if (!next) throw new Error(`${old.key}: keep the entry and explicitly discard it with a reason`);
+    if (old.ticket && next.ticket !== old.ticket) throw new Error(`${old.key}: preserve recorded ticket ${old.ticket}; add a new entry if needed`);
+  }
+  return { items: input.items };
+}
+
+export function closureProblems(inventory, claim) {
+  if (!inventory) return ['no closure inventory'];
+  if (inventory.issue !== claim.issue || inventory.claimedAt !== claim.claimedAt) return ['closure belongs to another claim cycle'];
+  closureInventory(inventory);
+  return inventory.items.flatMap((item) => {
+    const problems = [];
+    if (!hasText(item.observation)) problems.push('observation missing');
+    if (!hasText(item.expects)) problems.push('explicit human expectation missing');
+    if (item.disposition === 'pending') problems.push('unresolved');
+    if (item.disposition === 'discarded') {
+      if (!hasText(item.reason)) problems.push('discard reason missing (include missing evidence for an intuition)');
+    } else {
+      for (const field of ['location', 'excludedBecause', 'decision']) {
+        if (!hasText(item[field])) problems.push(`${field} missing`);
+      }
+      if (item.disposition === 'ticket' && !issueKey(item.ticket)) problems.push('follow-up ticket missing');
+      if (item.ticket === claim.issue) problems.push('follow-up cannot be the origin');
+    }
+    return problems.map((p) => `${item.key}: ${p}`);
+  });
+}
+
+function relatedTo(issue, target) {
+  return (issue.relations?.nodes ?? []).some((r) => r.type === 'related' && r.relatedIssue?.identifier === target) ||
+    (issue.inverseRelations?.nodes ?? []).some((r) => r.type === 'related' && r.issue?.identifier === target);
+}
+
+// Explicit injection keeps tests away from the real board and canonical state.
+// No creation retries live here: workers retain IDs, verify the board after an
+// ambiguous create, and finish the relation before requesting release.
+export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue } = {}) {
+  const paths = (id) => {
+    if (!issueKey(id)) throw new Error('closure/release requires an issue identifier such as JAU-50');
+    return {
+      claim: join(stateDir, 'claims', `${id}.json`),
+      stop: join(stateDir, 'claims', `${id}.stop`),
+      inventory: join(stateDir, 'closures', `${id}.json`),
+      receipt: join(stateDir, 'closures', `${id}.release.json`),
+    };
+  };
+  return {
+    async read(id) {
+      const p = paths(id);
+      const claim = await optionalJson(p.claim);
+      const inventory = await optionalJson(p.inventory);
+      return { issue: id, inventory, current: Boolean(claim && inventory?.claimedAt === claim.claimedAt),
+        problems: claim ? closureProblems(inventory, claim) : ['no claim held'] };
+    },
+    async save(id, input) {
+      const p = paths(id), claim = await optionalJson(p.claim);
+      if (!claim?.claimedAt || claim.issue !== id) throw new Error(`no valid claim held for ${id}`);
+      const previous = await optionalJson(p.inventory);
+      const data = closureInventory(input, previous?.claimedAt === claim.claimedAt ? previous : null);
+      const inventory = { ...data, issue: id, claimedAt: claim.claimedAt, recordedAt: new Date().toISOString() };
+      await atomicJson(p.inventory, inventory);
+      return { ...inventory, problems: closureProblems(inventory, claim) };
+    },
+    async release(id, reason) {
+      const p = paths(id), claim = await optionalJson(p.claim);
+      if (!claim) return { released: false, reason: 'no claim held' };
+      if (!claim.claimedAt || claim.issue !== id) throw new Error('invalid claim; refusing release');
+      const issue = await readIssue(id);
+      if (issue?.identifier !== id || !issue.state?.type) throw new Error('cannot verify origin; preserving claim');
+      const inventory = await optionalJson(p.inventory);
+      const requiresInventory = issue.state.type === 'completed' || Boolean(claim.workStartedAt) || CONTENDING_PHASES.includes(claim.phase);
+      const cleanup = !requiresInventory && hasText(reason);
+      if (reason !== undefined && !cleanup) throw new Error('release --reason is only for claims without completed or started work; record a closure instead');
+      if (cleanup && inventory?.claimedAt === claim.claimedAt && inventory.items?.length) {
+        throw new Error('recorded leftovers require normal closure verification, not unstarted cleanup');
+      }
+      if (!cleanup) {
+        const problems = closureProblems(inventory, claim);
+        if (problems.length) throw new Error(`${problems.join('; ')}. Use jaunt-linear closure ${id} --file <json|->; see docs/LINEAR_FOLLOWUPS.md`);
+        for (const item of inventory.items.filter((i) => i.disposition === 'ticket')) {
+          const target = await readIssue(item.ticket);
+          if (target?.identifier !== item.ticket) throw new Error(`${item.key}: follow-up does not exist`);
+          if (!relatedTo(issue, item.ticket) && !relatedTo(target, id)) throw new Error(`${item.key}: missing related link to ${item.ticket}; preserve its ID and finish the relation`);
+        }
+      }
+      // Re-check local inputs after remote reads; never delete a replacement
+      // claim or release using an inventory edited while verification ran.
+      if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
+          JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during verification; retry release');
+      const receipt = { issue: id, claimedAt: claim.claimedAt, releasedAt: new Date().toISOString(),
+        mode: cleanup ? 'unstarted' : 'closure', ...(cleanup ? { reason } : { inventory }) };
+      await atomicJson(p.receipt, receipt);
+      await rm(p.stop, { force: true });
+      await rm(p.claim);
+      return { released: true, was: id, mode: receipt.mode };
+    },
+  };
 }
 
 // Getting a claim out of `queued`. A read that records, like `verdict`: the one
@@ -1597,8 +1759,9 @@ const COMMANDS = {
     const priority = parsePriority(flags.priority, { optional: true });
     const description = flags.desc === '-' ? await readStdin() : flags.desc;
     return createIssue({
-      title: required(title, `create <TITLE> [--parent <ID>] [--priority <${PRIORITY_USAGE}>] [--desc <text>|-]`),
+      title: required(title, `create <TITLE> --expects <action|none> [--parent <ID>] [--priority <${PRIORITY_USAGE}>] [--desc <text>|-]`),
       description,
+      expects: flags.expects,
       parent: flags.parent,
       priority,
     });
@@ -1626,7 +1789,19 @@ const COMMANDS = {
     if (flags.runtime !== undefined && typeof flags.runtime !== 'string') throw new Error('--runtime needs claude or codex');
     return claim(required(id, 'claim <ISSUE-ID> [phase] [--session <uuid>] [--runtime claude|codex]'), phase, session, flags.runtime);
   },
-  release: async ([id]) => release(id),
+  closure: async ([id, ...rest]) => {
+    const { flags } = parseFlags(rest);
+    required(id, 'closure <ID> [--file <json|->]');
+    if (flags.file === undefined) return closureStore().read(id);
+    if (typeof flags.file !== 'string') throw new Error('--file needs a filename or -');
+    const input = flags.file === '-' ? await readStdin() : await readFile(flags.file, 'utf8');
+    return closureStore().save(id, JSON.parse(input));
+  },
+  release: async ([id, ...rest]) => {
+    const { flags } = parseFlags(rest);
+    if (flags.reason !== undefined && !hasText(flags.reason)) throw new Error('--reason needs an explicit cleanup reason');
+    return release(id, flags.reason);
+  },
   // Reading a verdict also records it — the receipt, the phase, leaving the
   // waiting column — because this is the one command the approval path is sure
   // to run. `--peek` is for looking without answering on the worker's behalf.

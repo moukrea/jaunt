@@ -1,5 +1,32 @@
 # jaunt — delivery validated on September 14, 2026
 
+
+## Linear follow-up closure — JAU-50 (2026-09-21)
+
+On the JAU-50 worktree based on `ab7888b`, `npm test` passed **70 tests**.
+The new cases use temporary state and injected issue reads: absent/empty/stale
+inventories, incomplete evidence, reasoned discards, retained follow-up IDs
+across a missing relation, both relation directions, missing targets/API errors,
+claim and stop preservation, explicit unstarted cleanup, work history across
+re-planning, concurrent local changes, and malformed state. Isolated CLI tests
+exercise stdin inventory writes/reads and reject missing/conflicting creation
+expectations before loading credentials. No test tickets were created on Linear.
+`python3 scripts/check_project.py --source`, `node --check scripts/linear_agent.mjs`
+and `git diff --check` passed.
+
+Codex compatibility was checked on temporary copies: composing the canonical
+local claim-identity adaptation with this change preserved runtime/session,
+rejected cross-runtime ownership, and retained work history. The raw adaptation
+patch needs context reconciliation near COMMANDS.release; it was not applied to
+the canonical checkout. A targeted two-skill Codex patch passed `git apply --check`
+against copies of the current canonical `.agents` files.
+
+Not validated: live Linear creation/release using the new code, ambiguous network
+creation recovery, or a full Codex loop after integration. The canonical Codex
+skills remain untracked and absent from the committed base; their targeted
+JAU-50 patch is separate, pending independent versioning of that base. This
+section records local checks, not completion of that integration or a merge.
+
 ## Linear CLI priority names — September 21, 2026 (JAU-55)
 
 `create --priority` and `priority <ID>` now accept only
