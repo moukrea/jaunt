@@ -219,6 +219,28 @@ test('an approval only starts writing when no writer holds the same file',()=>{
  assert.deepEqual(mixed.queuedBehind,['JAU-14']);
  assert.deepEqual(mixed.why,['JAU-46 and JAU-14 both change scripts/linear_agent.mjs']);
 });
+test('a dispatch forecast can unblock planning but worker refinement still queues',()=>{
+ const candidate='JAU-45', writer='JAU-14';
+ const surfaces=surfaceMap([[writer,['scripts/linear_agent.mjs']]]);
+ const compare=()=>surfaceFindings(candidate,[writer],surfaces);
+ assert.equal(compare().unknowns.length,1,'no candidate evidence means no dispatch proof');
+ surfaces.set(candidate,surfaceOf(['web/style.css']));
+ assert.deepEqual(compare(),{reasons:[],unknowns:[]},'a surveyed disjoint forecast supplies the missing evidence');
+ surfaces.set(candidate,surfaceOf(['scripts/linear_agent.mjs']));
+ assert.deepEqual(compare(),{reasons:[`${candidate} and ${writer} both change scripts/linear_agent.mjs`],unknowns:[]},'an overlapping forecast cannot clear the gate');
+ surfaces.set(candidate,surfaceOf(['web/style.css']));
+ surfaces.delete(writer);
+ assert.equal(compare().unknowns.length,1,'a forecast cannot substitute for missing writer evidence');
+ surfaces.set(writer,surfaceOf(['scripts/linear_agent.mjs']));
+ assert.equal(phaseAfterApproval(candidate,[writer],surfaces).phase,'implementing');
+ // The worker discovers an additional shared file and replaces the forecast.
+ surfaces.set(candidate,surfaceOf(['web/style.css','scripts/linear_agent.mjs']));
+ const approval=phaseAfterApproval(candidate,[writer],surfaces);
+ assert.equal(approval.phase,'queued');
+ assert.deepEqual(approval.queuedBehind,[writer]);
+ assert.deepEqual(approval.why,[`${candidate} and ${writer} both change scripts/linear_agent.mjs`]);
+ assert.equal(phaseAfterApproval(candidate,[],surfaces).phase,'implementing','release allows the approved scope to proceed');
+});
 test('a surface missing at wake-up queues instead of guessing',()=>{
  // Both sides always have a surface here — declaring one precedes the plan being
  // approved. So an absence is a broken protocol, not a normal state, and

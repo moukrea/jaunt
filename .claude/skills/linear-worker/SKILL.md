@@ -60,15 +60,24 @@ Then check, yourself, the specific things your plan will depend on:
 
 ## 3. Declare your change surface
 
-Before posting the plan:
+Before posting the plan, replace any orchestrator forecast with the scope you
+verified in your own survey, even if the file list is unchanged:
 
 ```bash
 jaunt-linear surface <ID> --files web/js/app.mjs,web/style.css --symbols .settings-row,.settings-group
 ```
 
-This is how the orchestrator keeps another worker off your files. Declaring
-nothing is not neutral — the gate treats an undeclared surface as "overlap
-cannot be ruled out" and blocks other tickets from being dispatched at all.
+The forecast enabled dispatch; this declaration describes the actual plan.
+Use explicit repository-relative paths, including tests, and relevant symbols:
+comparisons are exact, not glob or directory-prefix matches. Do not keep a
+narrower forecast when your survey finds more work. Once claimed, you own this
+surface; the orchestrator must not overwrite it.
+
+A missing surface means overlap cannot be ruled out when another worker is
+writing. The approval gate rechecks your verified scope against implementing
+and landing claims; an expanded scope that now overlaps queues you (§5).
+Declaring a surface does not itself authorize implementation or reserve files
+while you are planning or waiting for approval.
 
 ## 4. Post the plan and stop
 

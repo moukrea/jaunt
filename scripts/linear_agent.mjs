@@ -1209,9 +1209,10 @@ async function lockStatus() {
 }
 
 // --- change surfaces --------------------------------------------------------
-// What a plan commits to touching. Declared by the worker, read by the
-// orchestrator: overlap is what turns two "independent" tickets into one merge
-// conflict, and it is only detectable if plans say what they will change.
+// The orchestrator forecasts an unclaimed candidate's scope before dispatch;
+// the worker replaces it with verified plan scope before asking for approval.
+// Both gates compare these declarations. Refresh forecasts before dispatch:
+// records survive claim release and carry no automatic freshness guarantee.
 
 async function declareSurface(identifier, files, symbols) {
   await mkdir(SURFACES_DIR, { recursive: true });
@@ -1350,13 +1351,11 @@ export function surfaceFindings(identifier, against, surfaces) {
 // a claim parked in `awaiting-approval` wakes straight into `implementing`
 // without passing the gate again, so two workers could reach the same file.
 //
-// The re-check belongs here rather than at dispatch, and it is the exact inverse
-// of the problem JAU-45 describes. At dispatch the candidate *cannot* have a
-// surface — it has not been launched — so there is no evidence and the answer is
-// permanently `unknown`. At wake-up both sides always have one: a worker
-// declares its surface before posting the plan it is now being approved on, and
-// anything already `implementing` came through the same door. So the comparison
-// here is a proof, never an absence.
+// Dispatch checks the orchestrator's forecast against current writers. Approval
+// must check again: the worker may have expanded that forecast during its survey,
+// or another writer may have started while the plan awaited a human. The worker
+// declares its verified surface before posting the plan, so both sides should
+// have evidence by this point; missing evidence still queues rather than guesses.
 //
 // Which is why an `unknown` at this point is not a normal state but a broken
 // protocol (a surface undeclared, or a file that would not read), and queueing on
