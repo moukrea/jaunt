@@ -1,5 +1,30 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Linear instruction freshness — JAU-47 (September 21, 2026)
+
+Observed locally: `npm test` passed all **119 tests**, including eight isolated
+freshness cases. `python3 scripts/check_project.py --source` and
+`git diff --check` passed. Fixtures exercised the actual watcher process with
+an unavailable API: it reported `skills-changed` before making an API call,
+deduplicated the next identical notification, and honored loop-off. Isolated
+Codex and Claude CLI fixtures covered migration from an unbound enabled loop,
+read/bind/acknowledge, and rejection of binding while stopped. Content changes,
+reversions, runtime/session isolation, unreadable files, obsolete acknowledgements,
+five-minute retry after simulated lost delivery, and unchanged adapter ownership
+records were checked. The queue test verifies canonical read instructions and
+exact owner targeting; it does not invoke a real model.
+
+Receipts identify an explicit acknowledgement of canonical skill contents, not
+model comprehension or removal of old context. The watcher retries outstanding
+notifications after five minutes when it is running; recovery of a failed runtime
+delivery still depends on existing watchdog/rearm behavior. A watcher already in
+memory needs a normal controlled rearm to load the new detector. No production
+owner, watcher or worker was terminated or transferred for these tests. Live
+Claude/Codex interactive rereading and activation are not claimed by the offline
+fixtures. Owner replacement is separately tracked by JAU-58. Desktop packages do not install this development harness; their build status
+is separate from instruction-refresh validation.
+
+
 
 ## Linear follow-up closure — JAU-50 (2026-09-21)
 

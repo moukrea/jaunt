@@ -7,6 +7,7 @@ import { dirname, join, resolve, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
+import { skillStore } from './linear_skills.mjs';
 import { livePid } from './linear_watch.mjs';
 import { entryPath } from './linear_agent.mjs';
 import { atomicJson, processIdentity, withWorkerLock, beginAttempt, currentAttempt, saveAttempt, lifecyclePaths, workerHealth, classifyFailure, recoveryPreflight, runtimeOf } from './linear_workers.mjs';
@@ -102,7 +103,7 @@ export async function notify(o, event, eventPath, { alive = ownerAlive, deliver 
   if (o.runtime === 'claude') { console.log(JSON.stringify(event)); return; }
   try {
     await deliver('codex', ['queue', '--thread', o.thread, '--message',
-      `Local Linear loop event (not a human approval). Read ${eventPath}, then invoke $linear-orchestrator. Reconcile the shared flag before acting; re-arm with jaunt-linear-codex arm.`,
+      `Local Linear loop event (not a human approval). Read ${eventPath}, then read the canonical ${join(ROOT, '.agents/skills/linear-loop/SKILL.md')} and ${join(ROOT, '.agents/skills/linear-orchestrator/SKILL.md')} from disk before invoking $linear-orchestrator. Check and acknowledge instruction freshness before board actions; preserve the current owner and workers. Reconcile the shared flag before acting; re-arm with jaunt-linear-codex arm.`,
     ], { timeout: 60_000 });
     await write(eventPath, { ...event, delivered: true, at: stamp() });
   } catch (error) {
@@ -160,6 +161,7 @@ async function arm(options) {
       if (active && (r.owner.thread !== o.thread || !ownerAlive(r.owner))) throw new Error(`${role} belongs to another session; stop that loop before takeover`);
       if (!active && health[role].alive) throw new Error(`${role} already belongs to another runtime; stop it before takeover`);
     }
+    await skillStore(ROOT).bind('codex', o.thread);
     const started = [];
     for (const role of ['watcher', 'watchdog']) {
       const record = await read(join(ADAPTER, `${role}.json`));

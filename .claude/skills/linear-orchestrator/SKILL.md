@@ -14,6 +14,47 @@ a session tempted to rush the ordering to get to the coding.
 (`jaunt-linear repo` prints it). Every Linear write goes through it, as the
 **jaunt Agent** app.
 
+
+## Read the current instructions before acting
+
+At startup and on every wake, read the canonical instructions from disk before
+board actions. A cached skill invocation does not prove freshness. Use the actual
+claude session ID ($CLAUDE_SESSION_ID); if it is unavailable, obtain the actual session
+ID from the runtime, never invent one or reuse another session's receipt.
+
+```bash
+jaunt-linear skills-read --runtime claude --session "$CLAUDE_SESSION_ID"
+# Read both returned file contents, then use the exact returned fingerprint:
+jaunt-linear skills-ack --runtime claude --session "$CLAUDE_SESSION_ID" --fingerprint <fingerprint>
+```
+
+For an already enabled legacy Claude loop whose `skills` status says no session
+is registered, bind its actual owner before the read/ack sequence:
+
+```bash
+jaunt-linear skills-bind --runtime claude --session "$CLAUDE_SESSION_ID"
+```
+
+This command refuses a stopped loop and changes instruction metadata only. Use
+it only from the existing owner after checking the loop flag and ownership;
+never bind a worker or another session. Codex `arm` performs the corresponding
+binding after its existing ownership preflight.
+
+Acknowledge only after reading. If acknowledgement reports stale/error, reread
+and resolve it before board actions. The receipt is per runtime and session;
+`loop-on`, status and watcher rearming never acknowledge instructions. `skills`
+in the loop status reports `unknown`, `fresh`, `stale` or `error`. Missing files
+are errors. A `skills-changed` wake carries the paths and reloading instruction;
+follow it before reconciling the board. The local watcher checks even when the
+board is quiet or the API unavailable, with notifications deduplicated for five minutes per outstanding state; a
+lost delivery is retried after that interval. Status retains the alert until
+explicit acknowledgement.
+
+Keep the existing owner session and workers alive. Reading new instructions does
+not erase old context or prove model comprehension. Replacing the owner needs a
+separate supervision handoff; do not kill it to refresh prose. Existing watcher
+processes need their normal controlled rearm to load this new detection code.
+
 ## Who owns the ticket's state
 
 Linear's GitHub integration moves tickets on git events, and it was doing it
