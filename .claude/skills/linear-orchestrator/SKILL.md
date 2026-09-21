@@ -39,7 +39,11 @@ owns it end to end:
 
 Nobody calls `move` for either: both ride on `claim` and `verdict`, which the
 approval path already runs. `jaunt-linear board` lists them under
-`waitingOnHuman`, and that list is the answer to "what is waiting on me".
+`waitingOnHuman`. That list covers parked plans, not every human decision.
+Backlog arbitration, testing and decisions after delivery may also need a human
+answer. Descriptions and comments must name the actual action and when it is
+needed, independently of the column; use `--expects none` only when no human
+action is currently requested.
 
 Measured on three tickets: JAU-3, JAU-12 and JAU-4 each went *Done* one second
 after PR #58, #59 and #61 merged, with nobody calling `move`. The counter-proof
@@ -96,6 +100,12 @@ Claims are files; workers are sessions on disk. After a restart, a claim whose
 be starting or have a recoverable thread ID there. A claim with no session, no
 live/recoverable adapter record and no plan is a leftover: release it and say so.
 
+For a verified unstarted claim only, use `jaunt-linear release <ID> --reason
+"<evidence that no work started>"`. Check the worker, plan and runtime recovery
+record first. This is abandoned startup cleanup, not completed work. A completed
+ticket or a claim that reached implementing/landing requires a closure inventory;
+there is no force bypass. Preserve a stopped worker's findings and branch.
+
 If `loop.enabled` is false, do nothing and do not restart the watcher.
 
 ## 2. Keep the graph true
@@ -136,8 +146,14 @@ Run the pass now; there is nothing else to wait for.
 
 Amend tickets when the evidence says so: fix an unusable title, add the detail
 you established, mark duplicates with `relate <A> duplicate <B>`, split a ticket
-that is several unrelated requests (`jaunt-linear create "<title>" --parent <ID>`).
+that is several unrelated requests (`jaunt-linear create "<title>" --parent <ID> --expects none`).
 Never delete or cancel a human's ticket.
+
+Follow [the follow-up protocol](../../../docs/LINEAR_FOLLOWUPS.md) for factual
+leftovers discovered in this analysis or reported by a worker. Open or reuse a
+verified ticket without asking permission, include the four facts and an
+explicit `--expects`, and link it as `related` rather than a child by default.
+Future worker questions and current human decisions are different requests.
 
 ## 3. Route the conversation
 
@@ -252,12 +268,18 @@ The worker lands its own ticket — rebase, push, PR, CI, `gh pr merge --squash
 --delete-branch` (its §7). You do not push and you do not merge. You do the three
 things it cannot do from inside its own worktree.
 
-**Verify, then release.** Take the report seriously enough to check it:
+**Verify, then release.** Follow [the follow-up protocol](../../../docs/LINEAR_FOLLOWUPS.md).
+Read the worker's closure inventory, verify its four facts, human expectations,
+linked tickets and reasons for discards. Missing evidence is not an empty
+inventory: reopen the same worker to finish it. Never remove the worktree if
+release fails. The command checks the current claim cycle and `related` links
+before deleting the claim. Take the report seriously enough to check it:
 
 ```bash
 gh pr view <n> --json state --jq .state    # MERGED
 jaunt-linear show <ID>                     # state.name must be Done
-jaunt-linear release <ID>
+jaunt-linear closure <ID>                  # current inventory, no unresolved items
+jaunt-linear release <ID>                  # must succeed before cleanup
 git worktree remove ../wt-<ID>
 ```
 

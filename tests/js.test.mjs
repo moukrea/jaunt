@@ -467,3 +467,192 @@ test('reactions are attributed, not just counted',()=>{
  // No plan at all is the branch where a 👍 used to vanish with nobody told.
  assert.deepEqual(unreadReactions(collectReactions([agent('a',T(3),[thumb(T(4))])],ME),null).map(r=>r.why),['no live plan on this ticket']);
 });
+
+// JAU-50: the board is never contacted by these tests. Real temporary claim,
+// stop and inventory files exercise the same persistence used by the CLI.
+const {closureStore,closureInventory,closureProblems,preserveWorkHistory,issueDescription}=await import('../scripts/linear_agent.mjs');
+const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
+async function closureFixture(t,{phase='implementing',state='completed'}={}) {
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-closure-'));
+ t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ await fs.mkdir(path.join(dir,'claims'));
+ const claim={issue:'JAU-50',claimedAt:'2026-09-21T13:00:00Z',updatedAt:'2026-09-21T13:01:00Z',phase,session:'actual-test-session',runtime:'codex'};
+ const putClaim=async(value=claim)=>fs.writeFile(path.join(dir,'claims/JAU-50.json'),JSON.stringify(value));
+ await putClaim();
+ await fs.writeFile(path.join(dir,'claims/JAU-50.stop'),'preserve me');
+ const origin={identifier:'JAU-50',state:{type:state},relations:{nodes:[]},inverseRelations:{nodes:[]}};
+ const target={identifier:'JAU-60',relations:{nodes:[]},inverseRelations:{nodes:[]}};
+ const reads=[];
+ const readIssue=async id=>{reads.push(id);if(id==='JAU-50')return origin;if(id==='JAU-60')return target;throw new Error('missing issue');};
+ const store=closureStore({stateDir:dir,readIssue});
+ const preserved=async()=>{
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir,'claims/JAU-50.json'),'utf8')),claim);
+  assert.equal(await fs.readFile(path.join(dir,'claims/JAU-50.stop'),'utf8'),'preserve me');
+ };
+ return {dir,claim,origin,target,store,reads,putClaim,preserved};
+}
+const leftover=(extra={})=>({key:'reconnect-path',observation:'Path validation fails on reconnect',location:'host/path.py:42',excludedBecause:'Origin fixes test timing only',decision:'Worker: propose a safe retry; no human arbitration yet',expects:'none',disposition:'ticket',ticket:'JAU-60',...extra});
+
+test('issue descriptions require explicit expectations and reject conflicting markers',()=>{
+ for(const expects of [undefined,true,'','  ','test\nlater'])assert.throws(()=>issueDescription('facts',expects),/--expects/);
+ const none=issueDescription('facts','none');
+ assert.match(none,/Rien attendu de toi/);
+ assert.equal(issueDescription(none,'none'),none,'same marker is not duplicated');
+ const action=issueDescription('facts','Emeric : tester après livraison');
+ assert.match(action,/Attendu de toi :.*tester après livraison/,'no dependency on Waiting for human');
+ assert.throws(()=>issueDescription(action,'none'),/conflicting/);
+ assert.throws(()=>issueDescription(none+'\n'+none,'none'),/duplicate/);
+ assert.throws(()=>issueDescription(true,'none'),/--desc/);
+});
+
+test('missing inventory blocks release; an explicit empty inventory permits it and survives',async t=>{
+ const f=await closureFixture(t);
+ await assert.rejects(()=>f.store.release('JAU-50'),/no closure inventory/);await f.preserved();
+ assert.deepEqual((await f.store.save('JAU-50',{items:[]})).problems,[]);
+ assert.deepEqual(await f.store.release('JAU-50'),{released:true,was:'JAU-50',mode:'closure'});
+ await assert.rejects(()=>fs.readFile(path.join(f.dir,'claims/JAU-50.json')),/ENOENT/);
+ await assert.rejects(()=>fs.readFile(path.join(f.dir,'claims/JAU-50.stop')),/ENOENT/);
+ const after=await f.store.read('JAU-50');assert.equal(after.current,false);assert.deepEqual(after.inventory.items,[]);
+ assert.equal(JSON.parse(await fs.readFile(path.join(f.dir,'closures/JAU-50.release.json'))).mode,'closure');
+ assert.equal((await f.store.release('JAU-50')).released,false,'repeat release does not create issues');
+});
+
+test('drafts preserve incomplete evidence but cannot release; intuitions can be explicitly discarded',async t=>{
+ const f=await closureFixture(t);
+ const draft={key:'intuition',disposition:'pending',observation:'Possible missing coverage',expects:'none'};
+ const saved=await f.store.save('JAU-50',{items:[draft]});assert.ok(saved.problems.some(p=>p.includes('location')));
+ await assert.rejects(()=>f.store.release('JAU-50'),/unresolved/);await f.preserved();
+ await f.store.save('JAU-50',{items:[{...draft,disposition:'discarded'}]});
+ await assert.rejects(()=>f.store.release('JAU-50'),/discard reason/);
+ await f.store.save('JAU-50',{items:[{...draft,disposition:'discarded',reason:'No reproduction or code location found; unverified intuition only'}]});
+ assert.equal((await f.store.release('JAU-50')).released,true);
+});
+
+test('ticket dispositions require all four facts and explicit expectation',()=>{
+ const claim={issue:'JAU-50',claimedAt:'cycle'};
+ for(const field of ['observation','location','excludedBecause','decision','expects','ticket']){
+  const entry=leftover();delete entry[field];
+  assert.ok(closureProblems({...claim,items:[entry]},claim).length,field);
+ }
+ assert.ok(closureProblems({...claim,items:[leftover({ticket:'JAU-50'})]},claim).some(p=>p.includes('origin')));
+ assert.throws(()=>closureInventory({items:[leftover(),leftover()]}),/unique/);
+ assert.throws(()=>closureInventory({items:[leftover({ticket:'../../claims'})]}),/identifier/);
+ assert.throws(()=>closureInventory({items:[leftover({decision:false})]}),/text/);
+});
+
+test('creation saved before relation can resume without losing or recreating the follow-up',async t=>{
+ const f=await closureFixture(t);
+ await f.store.save('JAU-50',{items:[leftover()]});
+ await assert.rejects(()=>f.store.release('JAU-50'),/missing related link/);await f.preserved();
+ assert.equal((await f.store.read('JAU-50')).inventory.items[0].ticket,'JAU-60');
+ await assert.rejects(()=>f.store.save('JAU-50',{items:[]}),/explicitly discard/);
+ await assert.rejects(()=>f.store.save('JAU-50',{items:[leftover({ticket:'JAU-61'})]}),/preserve recorded ticket/);
+ f.target.inverseRelations.nodes.push({type:'related',issue:{identifier:'JAU-50'}});
+ assert.equal((await f.store.release('JAU-50')).released,true);
+ assert.deepEqual(f.reads,['JAU-50','JAU-60','JAU-50','JAU-60'],'verification reads only, never creates');
+});
+
+test('related links work in either direction on the origin or existing target',async t=>{
+ for(const holder of ['origin','target'])for(const inverse of [false,true]){
+  const f=await closureFixture(t);
+  const id=holder==='origin'?'JAU-60':'JAU-50';
+  f[holder][inverse?'inverseRelations':'relations'].nodes.push({type:'related',[inverse?'issue':'relatedIssue']:{identifier:id}});
+  await f.store.save('JAU-50',{items:[leftover()]});
+  assert.equal((await f.store.release('JAU-50')).released,true);
+ }
+});
+
+test('missing tickets, wrong relations and API errors preserve claim and stop',async t=>{
+ const f=await closureFixture(t);
+ f.origin.relations.nodes.push({type:'blocks',relatedIssue:{identifier:'JAU-60'}});
+ await f.store.save('JAU-50',{items:[leftover()]});
+ await assert.rejects(()=>f.store.release('JAU-50'),/missing related/);await f.preserved();
+ f.target.identifier='JAU-99';
+ await assert.rejects(()=>f.store.release('JAU-50'),/does not exist/);await f.preserved();
+ const fail=closureStore({stateDir:f.dir,readIssue:async()=>{throw new Error('network failed');}});
+ await assert.rejects(()=>fail.release('JAU-50'),/network failed/);await f.preserved();
+});
+
+test('same claim resumes its inventory; a new claim cannot use the old one',async t=>{
+ const f=await closureFixture(t);
+ await f.store.save('JAU-50',{items:[]});
+ await f.putClaim({...f.claim,session:'resumed-session',phase:'landing'});
+ assert.equal((await f.store.read('JAU-50')).current,true);
+ await f.putClaim({...f.claim,claimedAt:'2026-09-22T13:00:00Z'});
+ assert.equal((await f.store.read('JAU-50')).current,false);
+ await assert.rejects(()=>f.store.release('JAU-50'),/another claim cycle/);
+ await f.store.save('JAU-50',{items:[]});assert.equal((await f.store.release('JAU-50')).released,true);
+});
+
+test('unstarted cleanup needs a reason and never bypasses completed or started work',async t=>{
+ const f=await closureFixture(t,{phase:'planning',state:'backlog'});
+ await assert.rejects(()=>f.store.release('JAU-50'),/no closure/);await f.preserved();
+ assert.equal((await f.store.release('JAU-50','Confirmed no worker, plan or recoverable session')).mode,'unstarted');
+ for(const options of [{phase:'planning',state:'completed'},{phase:'implementing',state:'backlog'},{phase:'landing',state:'canceled'}]){
+  const x=await closureFixture(t,options);
+  await assert.rejects(()=>x.store.release('JAU-50','cleanup'),/only for claims/);await x.preserved();
+ }
+ const history=await closureFixture(t,{phase:'planning',state:'backlog'});
+ await history.putClaim({...history.claim,workStartedAt:'earlier'});
+ await assert.rejects(()=>history.store.release('JAU-50','cleanup'),/only for claims/);
+});
+
+test('work history survives re-planning without altering runtime/session or leaking to a new cycle',()=>{
+ const base={issue:'JAU-50',claimedAt:'cycle',updatedAt:'now',phase:'implementing',runtime:'codex',session:'thread'};
+ const started=preserveWorkHistory(base,null);assert.equal(started.workStartedAt,'now');
+ const replan=preserveWorkHistory({...base,phase:'planning',updatedAt:'later'},started);
+ assert.equal(replan.workStartedAt,'now');assert.equal(replan.runtime,'codex');assert.equal(replan.session,'thread');
+ assert.equal(preserveWorkHistory({...replan,claimedAt:'new',workStartedAt:null},started).workStartedAt,null);
+ assert.equal(preserveWorkHistory({...base,phase:'queued'},base).workStartedAt,'now','legacy active phase is evidence of work');
+});
+
+test('release notices local changes during remote verification',async t=>{
+ const f=await closureFixture(t);await f.store.save('JAU-50',{items:[]});
+ const store=closureStore({stateDir:f.dir,readIssue:async()=>{
+  await f.putClaim({...f.claim,updatedAt:'changed'});return f.origin;
+ }});
+ await assert.rejects(()=>store.release('JAU-50'),/changed during verification/);
+ assert.equal(await fs.readFile(path.join(f.dir,'claims/JAU-50.stop'),'utf8'),'preserve me');
+});
+
+test('malformed inventory and unsafe identifiers fail closed',async t=>{
+ const f=await closureFixture(t);await f.store.save('JAU-50',{items:[]});
+ await fs.writeFile(path.join(f.dir,'closures/JAU-50.json'),'{broken');
+ await assert.rejects(()=>f.store.release('JAU-50'),SyntaxError);await f.preserved();
+ await assert.rejects(()=>f.store.read('../claims/JAU-50'),/identifier/);
+});
+
+test('a cleanup reason cannot discard findings from a planning survey',async t=>{
+ const f=await closureFixture(t,{phase:'planning',state:'backlog'});
+ await f.store.save('JAU-50',{items:[leftover({disposition:'pending'})]});
+ await assert.rejects(()=>f.store.release('JAU-50','never implemented'),/recorded leftovers/);await f.preserved();
+});
+
+test('create rejects missing or conflicting expectations before loading credentials',async t=>{
+ const {execFile}=await import('node:child_process');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-expects-'));
+ t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));
+ for(const name of ['linear_agent.mjs','linear_watch.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const args of [[],['--expects'],['--expects',''],['--expects','none','--desc','**Attendu de toi :** choose now']]){
+  const result=await new Promise(resolve=>execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),'create','Example',...args],
+   {timeout:5000},(error,stdout,stderr)=>resolve({error,stdout,stderr})));
+  assert.equal(result.error?.code,1);assert.match(result.stderr,/requires --expects|conflicting/);
+  assert.doesNotMatch(result.stderr,/credentials|graphql|fetch/);assert.equal(result.stdout,'');
+ }
+});
+
+test('closure CLI saves and reads drafts on stdin without loading credentials',async t=>{
+ const {execFile}=await import('node:child_process');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-closure-cli-'));
+ t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));await fs.mkdir(path.join(dir,'.dev-state/claims'),{recursive:true});
+ for(const name of ['linear_agent.mjs','linear_watch.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ await fs.writeFile(path.join(dir,'.dev-state/claims/JAU-50.json'),JSON.stringify({issue:'JAU-50',claimedAt:'cycle',phase:'planning'}));
+ const run=(args,input)=>new Promise((resolve,reject)=>{
+  const child=execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),...args],{timeout:5000},(error,stdout,stderr)=>{
+   if(error)reject(new Error(stderr));else resolve(JSON.parse(stdout));
+  });child.stdin.end(input);
+ });
+ assert.deepEqual((await run(['closure','JAU-50','--file','-'],'{"items":[]}')).problems,[]);
+ assert.equal((await run(['closure','JAU-50'])).current,true);
+ await assert.rejects(()=>run(['closure','JAU-50','--file']),/needs a filename/);
+});
