@@ -1,0 +1,142 @@
+name: Automatic release
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+# This lock spans prepare, ALL builds, variable promotion and public verification.
+# Pending notifications may be replaced; prepare scans the durable Git queue.
+concurrency:
+  group: jaunt-production-release
+  cancel-in-progress: false
+permissions:
+  contents: write
+  actions: write
+  pages: write
+  id-token: write
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.prepare.outputs.publish }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      source: ${{ steps.prepare.outputs.source }}
+      host: ${{ steps.prepare.outputs.host }}
+      desktop: ${{ steps.prepare.outputs.desktop }}
+      android: ${{ steps.prepare.outputs.android }}
+      relay: ${{ steps.prepare.outputs.relay }}
+      host_tag: ${{ steps.prepare.outputs.host_tag }}
+      desktop_tag: ${{ steps.prepare.outputs.desktop_tag }}
+      android_tag: ${{ steps.prepare.outputs.android_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify publication credentials before touching tags
+        run: python scripts/release_pipeline.py preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      - name: Prepare oldest unpublished source or resume immutable receipt
+        id: prepare
+        run: python scripts/release_pipeline.py prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_AUTO_RELEASE_ENABLED: ${{ vars.JAUNT_AUTO_RELEASE_ENABLED }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  host:
+    needs: prepare
+    if: needs.prepare.outputs.host == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.host_tag }}
+    secrets: inherit
+  desktop:
+    needs: prepare
+    if: needs.prepare.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.desktop_tag }}
+    secrets: inherit
+  android:
+    needs: prepare
+    if: needs.prepare.outputs.android == 'true'
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.android_tag }}
+    secrets: inherit
+  relay:
+    needs: prepare
+    if: needs.prepare.outputs.relay == 'true'
+    uses: ./.github/workflows/relay.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+    secrets: inherit
+  promote:
+    needs: [prepare, host, desktop, android, relay]
+    if: always() && needs.prepare.outputs.publish == 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python scripts/release_pipeline.py promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+  pages:
+    needs: [prepare, promote]
+    if: always() && needs.promote.result == 'success'
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      source: ${{ needs.prepare.outputs.source }}
+      host_tag: ${{ needs.prepare.outputs.host_tag }}
+      desktop_tag: ${{ needs.prepare.outputs.desktop_tag }}
+      android_tag: ${{ needs.prepare.outputs.android_tag }}
+    secrets: inherit
+  receipt:
+    needs: [prepare, host, desktop, android, relay, promote, pages]
+    if: always() && (needs.prepare.outputs.publish == 'true' || needs.prepare.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify delivered Page and acknowledge source
+        if: needs.pages.result == 'success'
+        run: python scripts/release_pipeline.py finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      - name: Retain failed receipt for retry
+        if: failure() || needs.pages.result != 'success'
+        run: python scripts/release_pipeline.py failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: needs.pages.result != 'success'
+        run: exit 1

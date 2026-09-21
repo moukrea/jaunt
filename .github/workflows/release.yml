@@ -1,11 +1,11 @@
 name: Host release
 on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      ref:
+        required: true
+        type: string
       tag:
-        description: Existing version tag to publish
         required: true
         type: string
 permissions:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -29,7 +29,7 @@ jobs:
       - name: Publish verified release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           python - "$TAG" <<'PY'
           import sys,tomllib
@@ -37,10 +37,16 @@ jobs:
           configured=tomllib.load(open('pyproject.toml','rb'))['project']['version']
           assert Version(sys.argv[1].removeprefix('v'))==Version(configured), 'Tag/package version mismatch'
           PY
-          FLAGS=()
-          if [[ "$TAG" == *-* ]]; then FLAGS+=(--prerelease); fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo 'Release already exists; refusing to silently replace immutable artifacts.' >&2
-            exit 1
-          fi
-          gh release create "$TAG" dist/*.whl dist/host-manifest.json dist/SHA256SUMS --verify-tag --title "jaunt $TAG" --notes-file docs/RELEASE_NOTES.md "${FLAGS[@]}"
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-control
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Publish or resume the frozen draft assets
+        run: python release-control/scripts/release_pipeline.py publish --directory dist --component host --tag "$RELEASE_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
