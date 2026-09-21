@@ -1,5 +1,22 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Linear CLI priority names — September 21, 2026 (JAU-55)
+
+`create --priority` and `priority <ID>` now accept only
+`urgent|high|medium|low|none`. Numeric inputs are rejected; `none` maps to Linear
+0, and omitting the create option leaves priority unspecified. Board sorting
+and existing ticket priorities are unchanged.
+
+Observed locally: both targeted priority tests passed, and `npm test` passed
+all 55 tests. Coverage includes the five numeric mappings, optional omission,
+invalid values, and 21 isolated CLI invocations rejecting invalid priorities
+before credentials access or waiting for description stdin. No live Linear
+mutation was used to test this change. Successful API payloads and external
+CLI callers were not exercised; the generic flag parser remains JAU-40 scope.
+
+The separate, uncommitted Codex runtime adaptations in the canonical checkout
+were not incorporated into this change.
+
 Latest: [host update rework validation](HOST_UPDATE_VALIDATION.md). Current delivery: [session controls, client feedback, public release tests and limitations](SESSION_CONTROLS_VALIDATION.md). Earlier host beta.5 / Android beta.3 delivery: [historical consolidated report](PUBLIC_DELIVERY.md). The sections below retain historical observations; later reports supersede their test counts and version-specific status.
 
 **Page: https://moukrea.github.io/jaunt/**

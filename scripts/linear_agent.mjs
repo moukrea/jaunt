@@ -74,6 +74,19 @@ const SCOPES = 'read,write,issues:create,comments:create';
 // Linear priority: 0 = none, 1 = urgent … 4 = low. Sort "none" last.
 const priorityRank = (p) => (p === 0 ? 5 : p);
 
+const PRIORITIES = new Map([['urgent', 1], ['high', 2], ['medium', 3], ['low', 4], ['none', 0]]);
+const PRIORITY_USAGE = 'urgent|high|medium|low|none';
+
+// Omission is allowed only when creating an issue. Numeric CLI values are
+// deliberately rejected: Linear's 0 means no priority, not "P0 urgent".
+export function parsePriority(value, { optional = false } = {}) {
+  if (optional && value === undefined) return undefined;
+  if (!PRIORITIES.has(value)) {
+    throw new Error(`priority must be one of ${PRIORITY_USAGE}; numeric priorities are not accepted (0 means no priority; use none, or urgent for urgency)`);
+  }
+  return PRIORITIES.get(value);
+}
+
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
@@ -696,7 +709,7 @@ async function createIssue({ title, description, parent, priority }) {
   const team = await resolveTeam();
   const input = { teamId: team.id, title };
   if (description) input.description = description;
-  if (priority !== undefined) input.priority = Number(priority);
+  if (priority !== undefined) input.priority = priority;
   if (parent) input.parentId = (await getIssue(parent)).id;
   // Subscribers go in with the issue rather than being added a call later: there
   // is then no window in which the ticket exists and notifies nobody, and no
@@ -1554,7 +1567,8 @@ const COMMANDS = {
   },
   move: async ([id, ...state]) =>
     moveIssue(required(id, 'move <ISSUE-ID> <state>'), required(state.join(' '), 'target state')),
-  priority: async ([id, p]) => setPriority(required(id, 'priority <ISSUE-ID> <0-4>'), Number(p)),
+  priority: async ([id, p]) =>
+    setPriority(required(id, `priority <ISSUE-ID> <${PRIORITY_USAGE}>`), parsePriority(p)),
   relate: async ([from, type, to]) =>
     relate(
       required(from, 'relate <ISSUE-A> <blocks|duplicate|related|similar> <ISSUE-B>'),
@@ -1570,12 +1584,13 @@ const COMMANDS = {
   create: async (args) => {
     const { flags, rest } = parseFlags(args);
     const title = rest.join(' ') || flags.title;
+    const priority = parsePriority(flags.priority, { optional: true });
     const description = flags.desc === '-' ? await readStdin() : flags.desc;
     return createIssue({
-      title: required(title, 'create <TITLE> [--parent <ID>] [--priority <0-4>] [--desc <text>|-]'),
+      title: required(title, `create <TITLE> [--parent <ID>] [--priority <${PRIORITY_USAGE}>] [--desc <text>|-]`),
       description,
       parent: flags.parent,
-      priority: flags.priority,
+      priority,
     });
   },
   feedback: async ([since]) => humanFeedback(since),
