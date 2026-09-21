@@ -53,6 +53,9 @@ and lost merge/read responses without a duplicate merge. Unknown merge errors
 retain attempted-head evidence; they are not classified as safe refusals.
 
 The actual `gh pr view` JSON fields were read successfully on merged PR #81.
+Editing PR #82 with the installed `gh pr edit` failed on the deprecated Projects
+classic GraphQL field. A REST PATCH updated its description successfully; child
+retargeting therefore uses REST PATCH too, followed by a fresh PR read.
 No production child PR was retargeted and no real network failure was induced.
 This is local canonical-checkout coordination, not a distributed lock or a
 GitHub merge queue. External writers can still advance main or introduce a

@@ -11,6 +11,8 @@ import { atomicJson, hash } from '../scripts/linear_workers.mjs';
 import { writeClaim, registerAnswer } from '../scripts/linear_agent.mjs';
 const exec = promisify(execFile);
 const run = async (cmd, args, cwd) => (await exec(cmd, args, { cwd })).stdout;
+const retarget = args => args[0] === 'api' && args.includes('PATCH') && args.some(a => /\/pulls\/\d+$/.test(a));
+const retargetNumber = args => Number(args.find(a => /\/pulls\/\d+$/.test(a)).split('/').at(-1));
 const green = () => ['lint', 'test'].map(name => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'jaunt-landing-')); t.after(() => rm(dir, { recursive: true, force: true }));
@@ -35,12 +37,12 @@ async function fixture(t) {
       });
       return JSON.stringify([current.slice(0, 1), current.slice(1)]);
     }
-    const p = f.prs.get(Number(args[2]));
+    const p = f.prs.get(retarget(args) ? retargetNumber(args) : Number(args[2]));
     if (args[0] === 'pr' && args[1] === 'view') {
       if (f.mergeReadFailure && p?.state === 'MERGED') throw Error('lost read response');
       if (!p) throw Error('missing PR'); return JSON.stringify(p);
     }
-    if (args[1] === 'edit') {
+    if (retarget(args)) {
       if (f.failEdit === p.number) throw Error('retarget refused'); p.baseRefName = 'main'; return '';
     }
     if (args[1] === 'merge') {
@@ -148,7 +150,7 @@ test('paginated child PR retargets persist before mutation and survive a partial
   assert.equal(f.calls.some(args => args[1] === 'merge'), false);
   f.failEdit = null; const result = await f.store.merge(a.c.issue, a.who, 10);
   assert.equal(result.merged, 10); assert.equal(f.prs.get(12).baseRefName, 'main');
-  assert.equal(f.calls.filter(args => args[1] === 'edit' && args[2] === '11').length, 1);
+  assert.equal(f.calls.filter(args => retarget(args) && retargetNumber(args) === 11).length, 1);
   assert.equal((await f.store.status()).queue.length, 0);
   assert.equal((await landingState(f.stateDir)).history[0].children.length, 2);
 });
@@ -255,7 +257,7 @@ test('changed children and a stop during retargeting prevent the parent merge', 
   const runner = f.runner;
   f.store = landingStore({ root: f.root, stateDir: f.stateDir, run: async (cmd, args, cwd) => {
     const result = await runner(cmd, args, cwd);
-    if (cmd === 'gh' && args[1] === 'edit') await atomicJson(join(f.stateDir, 'claims', 'JAU-1.stop'), { reason: 'changed dependency' });
+    if (cmd === 'gh' && retarget(args)) await atomicJson(join(f.stateDir, 'claims', 'JAU-1.stop'), { reason: 'changed dependency' });
     return result;
   } });
   await assert.rejects(f.store.merge(a.c.issue, a.who, 10), /stop requested/);

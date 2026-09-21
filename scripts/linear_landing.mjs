@@ -179,7 +179,7 @@ export function landingStore({ root, stateDir = join(root, '.dev-state'), run = 
           let current = await pr(child.number);
           if (current.state !== 'OPEN' || current.headRefName !== child.branch || current.headRefOid !== child.head || current.isCrossRepository !== false) throw new Error('child PR changed; preserve inventory and inspect');
           if (current.baseRefName === entry.branch) {
-            await run('gh', ['pr', 'edit', String(child.number), '--base', 'main'], root);
+            await run('gh', ['api', '--method', 'PATCH', `repos/{owner}/{repo}/pulls/${child.number}`, '-f', 'base=main'], root);
             current = await pr(child.number);
           }
           if (current.state !== 'OPEN' || current.baseRefName !== 'main' || current.headRefOid !== child.head) throw new Error('child retarget not verified; parent cannot merge');
