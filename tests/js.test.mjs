@@ -111,7 +111,7 @@ test('Linear CLI rejects invalid priorities before credentials or waiting for st
  try{
   await mkdir(join(dir,'scripts'));
   // An isolated CLI has no credentials. No real Linear mutation is possible.
-  for(const file of ['linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])
+  for(const file of ['linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])
    await copyFile(new URL(`../scripts/${file}`,import.meta.url),join(dir,'scripts',file));
   const cases=[
    ['priority','JAU-55'],['create','Example','--priority'],
@@ -653,7 +653,7 @@ test('create rejects missing or conflicting expectations before loading credenti
  const {execFile}=await import('node:child_process');
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-expects-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));
- for(const name of ['linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const name of ['linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  for(const args of [[],['--expects'],['--expects',''],['--expects','none','--desc','**Attendu de toi :** choose now']]){
   const result=await new Promise(resolve=>execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),'create','Example',...args],
    {timeout:5000},(error,stdout,stderr)=>resolve({error,stdout,stderr})));
@@ -666,7 +666,7 @@ test('closure CLI saves and reads drafts on stdin without loading credentials',a
  const {execFile}=await import('node:child_process');
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-closure-cli-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));await fs.mkdir(path.join(dir,'.dev-state/claims'),{recursive:true});
- for(const name of ['linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const name of ['linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  await fs.writeFile(path.join(dir,'.dev-state/claims/JAU-50.json'),JSON.stringify({issue:'JAU-50',claimedAt:'cycle',phase:'planning'}));
  const run=(args,input)=>new Promise((resolve,reject)=>{
   const child=execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),...args],{timeout:5000},(error,stdout,stderr)=>{
@@ -692,6 +692,7 @@ async function parkingFixture(t) {
 test('every exit from awaiting restores before persisting phase, preserving identity/history',async t=>{
  for(const phase of ['planning','queued','implementing','landing']){
   const f=await parkingFixture(t);
+  if(phase==='landing')await fs.writeFile(path.join(f.dir,'landing.json'),JSON.stringify({version:1,queue:[{...f.claim,branch:'agent/JAU-50',cwd:f.dir}],history:[]}));
   const result=await writeClaim({...f.claim,phase},f.options);
   assert.deepEqual(f.moves,['Backlog']);assert.equal(result.parkedFrom,null);
   assert.equal((await f.readClaim()).phase,phase);

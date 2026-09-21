@@ -26,6 +26,44 @@ is separate from instruction-refresh validation.
 
 
 
+## Linear landing coordination — JAU-25 (2026-09-21)
+
+Observed locally on the rebased JAU-47/JAU-45 baseline: `npm test` passed
+**137 tests**, including 17 landing/stack scenarios. `python3
+scripts/check_project.py --source`, JavaScript syntax checks and
+`git diff --check` passed.
+
+Two real Node processes requested the same canonical test store concurrently:
+one acquired the turn, both persisted in FIFO order. Isolated CLI execution
+recorded the landing phase without changing another claim. Tests cover exact
+session/cycle ownership, stop and loop-off, uncertain locks, invalid JSON values,
+claim-admission/release guards, repeated approval reads and published-plan hashes.
+
+Temporary Git repositories exercised multi-commit parent squash merges, children
+with and without their own commits, immutable original-base records, dirty and
+missing-base refusals, a textual conflict, and a clean rebase whose functional
+check detects a removed export. The last case intentionally demonstrates that
+textual success alone cannot establish semantic compatibility.
+
+Injected GitHub responses exercised paginated child inventories, partial
+retarget failure and retry, changed children, stop during retargeting, required
+checks, moved heads/main, explicit policy refusal followed by same-owner retry,
+and lost merge/read responses without a duplicate merge. Unknown merge errors
+retain attempted-head evidence; they are not classified as safe refusals.
+
+The actual `gh pr view` JSON fields were read successfully on merged PR #81.
+No production child PR was retargeted and no real network failure was induced.
+This is local canonical-checkout coordination, not a distributed lock or a
+GitHub merge queue. External writers can still advance main or introduce a
+child PR after the final inventory; GitHub strict checks protect the merge head,
+while external child creation is outside the cooperative protocol.
+
+The canonical checkout was explicitly left at its existing dirty version during
+this implementation. These commands become active only when the orchestrator
+updates that checkout while preserving its local work and reloads its skill
+receipt. The worker has not claimed live activation or a multi-worker production
+exercise. This harness-only change produces no installable desktop package.
+
 ## Linear follow-up closure — JAU-50 (2026-09-21)
 
 After rebasing onto the versioned Codex baseline `c24d5c5` (JAU-39), `npm test`

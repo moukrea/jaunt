@@ -9,7 +9,7 @@
   "scripts": {
     "prepare-web": "node scripts/prepare_web.mjs",
     "test:relay": "node --test tests/relay.miniflare.mjs",
-    "test": "node --test tests/linear_skills.test.mjs tests/relay.test.mjs tests/js.test.mjs tests/desktop_updates.test.cjs tests/host_errors.test.cjs tests/linear_codex.test.mjs tests/linear_workers.test.mjs",
+    "test": "node --test tests/linear_landing.test.mjs tests/linear_skills.test.mjs tests/relay.test.mjs tests/js.test.mjs tests/desktop_updates.test.cjs tests/host_errors.test.cjs tests/linear_codex.test.mjs tests/linear_workers.test.mjs",
     "desktop": "electron .",
     "build:desktop": "electron-builder --linux tar.gz deb --publish never"
   },
