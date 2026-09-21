@@ -807,3 +807,103 @@ test('answer registration restores all real answers, preserves queuing and does 
   }
  }
 });
+
+// JAU-40: validate before dispatch, including commands with no options.
+const {COMMAND_FLAGS,parseCommandArgs}=await import('../scripts/linear_agent.mjs');
+test('Linear CLI declares every command and rejects unknown command-specific options',async()=>{
+ const source=await fs.readFile(new URL('../scripts/linear_agent.mjs',import.meta.url),'utf8');
+ const handlers=[...source.slice(source.indexOf('const COMMANDS = {'),source.indexOf('export const COMMAND_FLAGS')).matchAll(/^  (?:'([^']+)'|(\w+)): async/gm)].map(m=>m[1]||m[2]);
+ assert.deepEqual(Object.keys(COMMAND_FLAGS).sort(),handlers.sort());
+ for(const [command,schema] of Object.entries(COMMAND_FLAGS)){
+  for(const [action,options] of Array.isArray(schema)?[[null,schema]]:Object.entries(schema)){
+   const prefix=action?[action]:[];
+   for(const bad of ['--typo','--__proto__','--constructor']){
+    assert.throws(()=>parseCommandArgs(command,[...prefix,bad]),error=>
+     error.message.includes(command)&&error.message.includes(bad)&&error.message.includes('accepted options:'));
+   }
+   for(const option of options){
+    const {flags}=parseCommandArgs(command,[...prefix,`--${option}`,...(option==='peek'?[]:['value'])]);
+    assert.equal(flags[option==='description'?'desc':option],option==='peek'?true:'value');
+   }
+  }
+ }
+ assert.throws(()=>parseCommandArgs('show',['JAU-40','--desc','text']),/accepted options: \(none\)/);
+ assert.throws(()=>parseCommandArgs('landing',['prepare','JAU-40','--pr','83']),/landing prepare.*--pr/);
+ assert.throws(()=>parseCommandArgs('stack',['rebase','JAU-40','--base','abc']),/stack rebase.*--base/);
+ assert.throws(()=>parseCommandArgs('constructor',[]),/unknown command/);
+ assert.throws(()=>parseCommandArgs('landing',['constructor']),/requires one of/);
+});
+test('Linear CLI preserves literal text, switches, session flags and description aliases',()=>{
+ assert.deepEqual(parseCommandArgs('comment',['JAU-40','--expects','none','--','--literal','words','--reply']),
+  {flags:{expects:'none'},rest:['JAU-40','--literal','words','--reply']});
+ assert.deepEqual(parseCommandArgs('move',['JAU-40','Waiting','for','human']).rest,['JAU-40','Waiting','for','human']);
+ assert.deepEqual(parseCommandArgs('verdict',['--peek','JAU-40']),{flags:{peek:true},rest:['JAU-40']});
+ assert.deepEqual(parseCommandArgs('claim',['JAU-40','implementing','--session','actual-thread','--runtime','codex']),
+  {flags:{session:'actual-thread',runtime:'codex'},rest:['JAU-40','implementing']});
+ assert.equal(parseCommandArgs('claim',['JAU-40','--session']).flags.session,true);
+ for(const value of ['text','-',''])assert.deepEqual(parseCommandArgs('create',['Example','--description',value]),parseCommandArgs('create',['Example','--desc',value]));
+ for(const args of [['--desc','a','--description','b'],['--description','a','--desc','b']])
+  assert.throws(()=>parseCommandArgs('create',args),/use only one/);
+});
+
+async function flagCliFixture(t){
+ const {execFile}=await import('node:child_process');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-flags-'));
+ t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ await fs.mkdir(path.join(dir,'scripts'));
+ for(const name of ['linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs'])
+  await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ const run=(args,input,preload)=>new Promise(resolve=>{
+  const child=execFile(process.execPath,[...(preload?['--import',preload]:[]),path.join(dir,'scripts/linear_agent.mjs'),...args],
+   {timeout:5000},(error,stdout,stderr)=>resolve({error,stdout,stderr}));
+  // Omitted input intentionally keeps stdin open to detect blocking reads.
+  if(input!==undefined)child.stdin.end(input);
+ });
+ return {dir,run};
+}
+test('unknown flags fail before stdin, file reads, credentials or local mutations',async t=>{
+ const {dir,run}=await flagCliFixture(t);
+ for(const args of [
+  ['create','Example','--desc','-','--typo'],['comment','JAU-40','--typo'],
+  ['plan','JAU-40','--summary','Summary','--typo'],['loop-on','--typo'],['loop-off','--typo'],
+  ['show','JAU-40','--desc','ignored'],['closure','JAU-40','--file','missing','--typo'],
+  ['claim','JAU-40','--sesion','wrong'],['landing','acquire','JAU-40','--typo'],
+ ]){
+  const result=await run(args);
+  assert.equal(result.error?.code,1,JSON.stringify(args));assert.equal(result.stdout,'');
+  assert.match(result.stderr,/unknown option .*accepted options:/);
+  assert.doesNotMatch(result.stderr,/credentials|client secret|ENOENT|graphql/);
+ }
+ await assert.rejects(()=>fs.stat(path.join(dir,'.dev-state')), {code:'ENOENT'});
+ const literal=await run(['repo','--','--literal']);
+ assert.equal(literal.error,null);assert.equal(literal.stdout.trim(),dir);
+});
+test('create sends both description spellings and stdin content to the same mocked API payload',async t=>{
+ const {dir,run}=await flagCliFixture(t);
+ await fs.mkdir(path.join(dir,'.dev-state'));
+ await fs.writeFile(path.join(dir,'.dev-state/linear-credentials.json'),JSON.stringify({team:'TEST',clientSecret:'offline-fixture'}));
+ await fs.writeFile(path.join(dir,'.dev-state/linear-token.json'),JSON.stringify({access_token:'offline-fixture',expires_at:Date.now()+60000}));
+ const preload=path.join(dir,'mock-fetch.mjs');
+ await fs.writeFile(preload,`
+  import {writeFile} from 'node:fs/promises';
+  globalThis.fetch=async (_url,options)=>{
+   const {query,variables}=JSON.parse(options.body);
+   let data;
+   if(query.includes('issueCreate')){
+    await writeFile(new URL('./payload.json',import.meta.url),JSON.stringify(variables.input));
+    data={issueCreate:{success:true,issue:{identifier:'TEST-1',title:variables.input.title,url:'https://example.invalid/TEST-1',subscribers:{nodes:[]}}}};
+   }else if(query.includes('teams(first:'))data={teams:{nodes:[{id:'team',key:'TEST',name:'Test',states:{nodes:[]}}]}};
+   else throw new Error('offline notification lookup');
+   return new Response(JSON.stringify({data}),{status:200});
+  };
+ `);
+ const body='Description complète\n--literal line';
+ for(const spelling of ['--desc','--description'])for(const stdin of [false,true]){
+  const result=await run(['create','Multiword','title','--expects','none',spelling,stdin?'-':body],stdin?body:'',preload);
+  assert.equal(result.error,null,result.stderr);
+  const payload=JSON.parse(await fs.readFile(path.join(dir,'payload.json'),'utf8'));
+  assert.equal(payload.title,'Multiword title');assert.equal(payload.description,issueDescription(body,'none'));
+ }
+ const conflict=await run(['create','Example','--desc','-','--description','other']);
+ assert.equal(conflict.error?.code,1);assert.match(conflict.stderr,/use only one/);
+});
