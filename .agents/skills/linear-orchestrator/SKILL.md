@@ -157,6 +157,39 @@ verified ticket without asking permission, include the four facts and an
 explicit `--expects`, and link it as `related` rather than a child by default.
 Future worker questions and current human decisions are different requests.
 
+## Worker supervision and automatic recovery
+
+Read `jaunt-linear workers` on every wake. `worker-lost` asks for reconciliation;
+`worker-recovery-due` requests an automatic retry, never a new approval. For a
+confirmed interrupted worker with a due budget, run the owning runtime's launcher:
+
+```bash
+jaunt-linear-codex recover <ID>                 # Codex claim
+node "$(jaunt-linear repo)/scripts/linear_claude.mjs" recover <ID>  # Claude claim
+```
+
+Re-read the ticket/comments and PR before retrying. A completed/merged task needs
+closure, a normal finished turn needs phase reconciliation, and new feedback goes
+to its existing worker. Never turn a machine wake into plan approval. The recovery
+command rechecks identity/generation, process evidence, loop/stop flags, current
+approval, prerequisites and overlap under a launch lock. Leave a refused recovery
+intact, report the actual reason and next deadline, and re-arm both watcher roles.
+Do not bypass a refusal with `resume`, `ready`, a new claim or another runtime.
+JAU-56 tracks the separate general dormant-descendant gate defect; this workflow
+does not claim to repair that graph traversal.
+
+`running` means process evidence, not demonstrated model progress. `suspect` or
+`unknown` never authorizes a duplicate. Resting approval/queued claims are normal.
+The watchdog reads local records, persists deadlines and retries delivery after
+five minutes if no new attempt appeared. Known quota deadlines include a 30-second
+margin; unknown reset/crash retries use 1/5/30 minutes, then stop and report the
+exhausted budget. Configuration failures need reconciliation, not repeated launches.
+Counters survive restart; a forward phase transition resets the phase's budget.
+Only one recovery launch per runtime is admitted at a time, and another active
+recovery or known quota cooldown in that runtime defers it. Other runtimes remain
+independent. The owner must stay alive and the loop enabled; reopening an authorized
+loop reconciles pending work. No service is installed outside that lifetime.
+
 ## 3. Route the conversation
 
 ### How to write on a ticket
@@ -183,8 +216,9 @@ jaunt-linear-codex resume <ID> --message "Read the latest human reply on <ID>, i
 ```
 
 Read `runtime` on the claim first. A missing runtime means **Claude**, preserving
-existing claims. Resume those with `claude -p --resume <exact-session>` in the
-original worktree, following the Claude skill's environment cleanup. Never pass
+existing claims. Resume those with the canonical `scripts/linear_claude.mjs resume <ID>`
+launcher in the original worktree. It preserves the recorded Claude UUID and cleans
+the child environment. Never pass
 a Claude UUID to Codex. Codex workers are addressed only with their recorded
 thread ID; never `--last`. A live Codex worker must not be resumed concurrently:
 leave the reply on Linear for it to read and retry after `worker-finished`.
@@ -273,15 +307,14 @@ things it cannot do from inside its own worktree.
 Read the worker's closure inventory, verify its four facts, human expectations,
 linked tickets and reasons for discards. Missing evidence is not an empty
 inventory: reopen the same worker to finish it. Never remove the worktree if
-release fails. The command checks the current claim cycle and `related` links
+cleanup fails. The command checks the current claim cycle and `related` links
 before deleting the claim. Take the report seriously enough to check it:
 
 ```bash
 gh pr view <n> --json state --jq .state    # MERGED
 jaunt-linear show <ID>                     # state.name must be Done
 jaunt-linear closure <ID>                  # current inventory, no unresolved items
-jaunt-linear release <ID>                  # must succeed before cleanup
-git worktree remove ../wt-<ID>
+jaunt-linear cleanup <ID> --pr <n>           # verifies closure, preserves unpublished work
 ```
 
 If a merged PR's ticket is still not *Done*, inspect its identifier/link and the

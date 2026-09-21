@@ -238,3 +238,17 @@ to a bounded gap; it does not, and must not, make the loop outlive the session.
 
 Nothing is lost during a pause: verdicts are read from the Linear thread, so an
 answer written while nobody was listening is picked up on the next pass.
+
+## Worker health
+
+Include `jaunt-linear workers` when reporting status. Lifecycle files under canonical
+`.dev-state/workers/` distinguish running, suspect, unknown, resting, finished,
+suspended and interrupted work. A process heartbeat is not model progress. The
+watchdog also emits `worker-lost` / `worker-recovery-due`; the orchestrator uses the
+runtime-specific `recover` launcher after reconciliation. Retries preserve the
+claim, exact session, worktree and settings. Quota timestamps must be explicit
+ISO timestamps with an offset (structured `retry_at` / `reset_at` / `resets_at`, or
+an ISO timestamp in output), or `resets [Sep 25 at] 7pm (Europe/Paris)` with an
+explicit IANA timezone. Ambiguous/DST or unsupported text uses bounded backoff instead
+of inventing a reset date. Real quota expiry and macOS process behavior are not
+validated by the offline fixtures. Loop-off and owner closure prevent new retries.

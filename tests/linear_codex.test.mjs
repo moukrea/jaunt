@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claimIdentity } from '../scripts/linear_agent.mjs';
-import { parseArgs, workerArgs, workerEnvironment, supervise, notify } from '../scripts/linear_codex.mjs';
+import { parseArgs, workerArgs, workerEnvironment, workerSettings, claudeArgs, supervise, notify } from '../scripts/linear_codex.mjs';
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
@@ -140,14 +140,14 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    await copyFile(new URL('../scripts/linear_codex.mjs', import.meta.url), join(dir, 'scripts/linear_codex.mjs'));
+    for (const name of ['linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
       import { readFileSync, realpathSync } from 'node:fs';
       export const entryPath = p => realpathSync(p);
       const cmd=process.argv[2];
-      if(cmd==='claims') console.log(JSON.stringify([{issue:'JAU-999',runtime:'codex',session:null}]));
+      if(cmd==='claims') console.log(JSON.stringify([{issue:'JAU-999',runtime:'codex',session:null,claimedAt:'2026-09-21T00:00:00Z',phase:'planning'}]));
       if(cmd==='watcher') {
         const health = role => { try { const r=JSON.parse(readFileSync('.dev-state/'+role+'.json')); process.kill(r.pid,0); return {alive:!r.endedAt}; } catch { return {alive:false}; } };
         const watcher=health('watcher'),watchdog=health('watchdog');
@@ -193,7 +193,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
       const second=await call('arm');
       assert.deepEqual(first.adapter.map(x=>x.pid),second.adapter.map(x=>x.pid));
       await call('worker','JAU-999','--cwd',process.cwd(),'--model','fixture-model','--effort','high');
-      await until(async()=>(await read('JAU-999-event')).delivered);
+      await until(async()=>JSON.parse(await readFile((await read('JAU-999')).eventPath)).delivered);
       assert.equal((await read('JAU-999')).session,'recorded-thread-id');
       await call('resume','JAU-999','--message','literal $(not a shell command)');
       await until(async()=>JSON.parse((await readFile('exec.jsonl','utf8')).trim().split('\\n').at(-1))[1]==='resume' && (await read('JAU-999')).endedAt);
@@ -215,4 +215,15 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await pause(1200);
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test('runtime settings never leak Codex model defaults into Claude and recovery preserves explicit nulls', () => {
+  const env = { JAUNT_CODEX_MODEL: 'codex-model', JAUNT_CODEX_EFFORT: 'high', JAUNT_CODEX_SANDBOX: 'read-only' };
+  assert.deepEqual(workerSettings('claude', null, {}, env), { model: null, effort: null, sandbox: 'danger-full-access' });
+  const saved = { model: null, effort: null, sandbox: 'workspace-write' };
+  assert.deepEqual(workerSettings('codex', saved, {}, env, true), saved);
+  assert.equal(workerSettings('codex', null, {}, env).model, 'codex-model');
+  assert.throws(() => workerSettings('claude', null, { sandbox: 'read-only' }, env), /does not implement/);
+  assert.ok(claudeArgs({ session: 'exact', resume: true, effort: 'high', prompt: 'continue' }).args.includes('--effort'));
 });

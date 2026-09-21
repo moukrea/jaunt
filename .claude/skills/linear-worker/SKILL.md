@@ -330,3 +330,15 @@ worktree, and clears the way for whatever was waiting behind you.
   answers someone, `--reply <commentId>` so it lands inside the thread. Write in
   the board's language — French here. Long detail goes in the plan document, not
   in the comment.
+
+## Supervised recovery
+
+The canonical runtime launcher records process identity, heartbeat, exact session,
+exit and bounded failure classification independently of claims. Do not write those
+records yourself. After recovery, read current comments, stop flag, phase, approval
+and PR state before continuing. A recovery event grants no approval. Preserve drafts
+and transcripts. A stale heartbeat is not proof that another worker may start.
+The orchestrator uses `cleanup <ID> --pr <n>` after verified completion and closure;
+it refuses unknown/live workers, unpublished commits and modified/unpublished drafts.
+Legacy workers/plans without lifecycle/publication evidence require explicit evidence
+review; never manufacture that evidence to get past a refusal.

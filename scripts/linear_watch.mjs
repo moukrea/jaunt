@@ -23,6 +23,7 @@
 // watcher's pulse and exits when the loop has gone blind — which turns the
 // mechanism above against the failure it used to hide. See `watchdog()`.
 
+import { workerWake } from './linear_workers.mjs';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
@@ -352,6 +353,8 @@ async function watchdog() {
     await writeJson(WATCHDOG_FILE, record);
 
     enabled = await loopEnabled(enabled);
+    const workerEvent = enabled ? await workerWake(STATE_DIR) : null;
+    if (workerEvent) return report(WATCHDOG_FILE, record, workerEvent);
     const health = watcherHealth(await readJson(WATCH_FILE), { now: Date.now(), pidAlive });
     const decision = shouldFire({
       enabled,
