@@ -29,8 +29,11 @@ export async function landingState(stateDir) {
 // Called at the common claim writer, including direct `claim ... landing`.
 export async function assertLandingAdmission(stateDir, claim, previous) {
   const state = await landingState(stateDir);
-  const completed = previous?.phase === 'landing' && same(previous, claim) && state.history.some(item => same(item, claim));
-  if (!completed && !state.queue.some(item => same(item, claim))) throw new Error('request jaunt-linear landing acquire before entering landing');
+  // A pre-upgrade landing worker must be able to register its unchanged
+  // session before acquiring. This grants no merge right: owner() requires
+  // the durable queue. Never refresh across a conflicting reservation.
+  const resume = previous?.phase === 'landing' && same(previous, claim) && !state.queue.some(item => item.issue === claim.issue);
+  if (!resume && !state.queue.some(item => same(item, claim))) throw new Error('request jaunt-linear landing acquire before entering landing');
 }
 export async function assertLandingReleased(stateDir, id) {
   if ((await landingState(stateDir)).queue.some(item => item.issue === id)) throw new Error('release the landing reservation before releasing the claim');

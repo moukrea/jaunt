@@ -306,3 +306,13 @@ test('explicit GitHub refusal after main moves permits same-owner rebase and pre
   await a.git('rebase', 'main'); const prepared = await store.prepare(a.c.issue, a.who); p.headRefOid = prepared.head;
   reject = false; assert.equal((await store.merge(a.c.issue, a.who, 10)).merged, 10);
 });
+
+test('pre-upgrade landing phase can refresh its exact session but cannot merge before acquisition', async t => {
+  const f = await fixture(t), a = await f.worker('JAU-1');
+  const legacy = { ...a.c, phase: 'landing' };
+  await atomicJson(join(f.stateDir, 'claims', 'JAU-1.json'), legacy);
+  await writeClaim({ ...legacy, updatedAt: 'resumed' }, { stateDir: f.stateDir });
+  await assert.rejects(writeClaim({ ...legacy, session: 'other' }, { stateDir: f.stateDir }), /landing acquire/);
+  f.pr(10, a); await assert.rejects(f.store.merge(a.c.issue, a.who, 10), /held by nobody/);
+  assert.equal((await reserve(f, a)).acquired, true);
+});

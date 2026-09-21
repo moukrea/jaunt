@@ -29,7 +29,7 @@ is separate from instruction-refresh validation.
 ## Linear landing coordination — JAU-25 (2026-09-21)
 
 Observed locally on the rebased JAU-47/JAU-45 baseline: `npm test` passed
-**137 tests**, including 17 landing/stack scenarios. `python3
+**138 tests**, including 18 landing/stack scenarios. `python3
 scripts/check_project.py --source`, JavaScript syntax checks and
 `git diff --check` passed.
 
@@ -37,7 +37,8 @@ Two real Node processes requested the same canonical test store concurrently:
 one acquired the turn, both persisted in FIFO order. Isolated CLI execution
 recorded the landing phase without changing another claim. Tests cover exact
 session/cycle ownership, stop and loop-off, uncertain locks, invalid JSON values,
-claim-admission/release guards, repeated approval reads and published-plan hashes.
+claim-admission/release guards, repeated approval reads, pre-upgrade landing
+session refresh without merge admission, and published-plan hashes.
 
 Temporary Git repositories exercised multi-commit parent squash merges, children
 with and without their own commits, immutable original-base records, dirty and
