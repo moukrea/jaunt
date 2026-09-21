@@ -21,8 +21,8 @@ delivery still depends on existing watchdog/rearm behavior. A watcher already in
 memory needs a normal controlled rearm to load the new detector. No production
 owner, watcher or worker was terminated or transferred for these tests. Live
 Claude/Codex interactive rereading and activation are not claimed by the offline
-fixtures. Owner replacement is separately tracked by JAU-58. This harness change
-produces no installable desktop package.
+fixtures. Owner replacement is separately tracked by JAU-58. Desktop packages do not install this development harness; their build status
+is separate from instruction-refresh validation.
 
 
 
