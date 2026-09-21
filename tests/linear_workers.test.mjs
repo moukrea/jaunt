@@ -262,3 +262,30 @@ test('closure mutation during removal preserves replacement claim and its stop f
   assert.equal((await readJson(join(state, 'claims/JAU-999.json'))).claimedAt, 'replacement');
   assert.deepEqual(await readJson(join(state, 'claims/JAU-999.stop')), {});
 }));
+
+
+test('release retries restoration/removal without dropping supervision or closure evidence', async () => temporary(async state => {
+  const held = { ...claim, phase: 'awaiting-approval', parkedFrom: 'Backlog' };
+  await atomicJson(join(state, 'claims', 'JAU-999.json'), held);
+  await atomicJson(join(state, 'claims', 'JAU-999.stop'), { reason: 'keep until released' });
+  const issue = { identifier: held.issue, state: { name: 'Waiting for human', type: 'unstarted' } };
+  let moves = 0, removed = 0, offline = true;
+  const store = closureStore({ stateDir: state, readIssue: async () => issue,
+    moveState: async () => {
+      if (offline) throw new Error('offline');
+      moves++; issue.state = { name: 'Backlog', type: 'backlog' }; return { moved: true };
+    } });
+  await store.save(held.issue, { items: [] });
+  const remove = async () => { removed++; throw new Error('removal failed'); };
+  await assert.rejects(store.release(held.issue, undefined, remove), /offline/);
+  assert.equal(removed, 0);
+  offline = false;
+  await assert.rejects(store.release(held.issue, undefined, remove), /removal failed/);
+  assert.equal(moves, 1);
+  assert.deepEqual(await readJson(join(state, 'claims', 'JAU-999.json')), held);
+  assert.equal((await store.read(held.issue)).current, true);
+  assert.ok(await readJson(join(state, 'claims', 'JAU-999.stop')));
+  await store.release(held.issue, undefined, async () => { removed++; });
+  assert.equal(moves, 1); assert.equal(removed, 2);
+  assert.equal(await readJson(join(state, 'claims', 'JAU-999.json')), null);
+}));

@@ -251,3 +251,28 @@ lifecycle records are reported as unknown; their identity is never reconstructed
 from a PID guess. Native transcripts remain the context source. New launches use
 the supervised runtime wrapper. Recovery remains bound to an enabled loop and a
 live owner, and the generic prerequisite traversal defect remains tracked in JAU-56.
+
+## Leaving human approval waiting — September 21, 2026 (JAU-43)
+
+`npm test`: **111 tests passed**. `python3 scripts/check_project.py`: passed.
+Offline fixtures exercise the shared claim writer for all four exits from
+`awaiting-approval`, repeated waiting, queued approvals, feedback and refusal,
+repeated answer registration, pending/no-plan reads, manual board moves, and
+legacy restoration debt. They use temporary state and injected board operations;
+no fixture contacts Linear. Session/runtime, claim generation and work history
+are retained. Missing destinations, deleted states and network failures preserve
+the claim, while a remote success followed by interruption retries without a
+second board move. Concurrent replacement claims are preserved.
+
+Release fixtures verify closure validation before restoration, restoration before
+worktree removal, both closure and unstarted-release paths, and preservation of
+claim/stop/inventory on restoration or removal failure. Existing supervision,
+cleanup and closure checks also passed. A retry after successful restoration and
+failed removal does not repeat the board mutation.
+
+The real canonical launcher registered JAU-43's human approval, moved its claim
+to `implementing` and restored `Backlog` using the pre-existing verdict path.
+The new direct-claim/release paths were not installed or exercised against the
+live board during validation. Canonical local edits were left untouched.
+A simultaneous human board move and API mutation is not an atomic transaction;
+local generation checks and remote rereads do not provide remote compare-and-set.

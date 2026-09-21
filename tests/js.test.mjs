@@ -235,8 +235,7 @@ const {nextClaimState,ackNeeded,validatePhase,PHASES,WAITING_STATE}=await import
 test('a parked ticket leaves the waiting column for the state it was parked from',()=>{
  for(const verdict of ['approved','declined','feedback'])
   assert.equal(nextClaimState({verdict,currentState:WAITING_STATE,parkedFrom:'In Progress'}),'In Progress',`${verdict} is an answer`);
- assert.equal(nextClaimState({verdict:'pending',currentState:WAITING_STATE,parkedFrom:'In Progress'}),null,'nothing was answered, so nothing moves');
- assert.equal(nextClaimState({verdict:'no-plan',currentState:WAITING_STATE,parkedFrom:'In Progress'}),null,'no live plan is not a verdict');
+
 });
 test('a ticket a human moved on is never dragged back',()=>{
  // Moving it out of the column while it waited IS the answer. Restoring the
@@ -655,4 +654,133 @@ test('closure CLI saves and reads drafts on stdin without loading credentials',a
  assert.deepEqual((await run(['closure','JAU-50','--file','-'],'{"items":[]}')).problems,[]);
  assert.equal((await run(['closure','JAU-50'])).current,true);
  await assert.rejects(()=>run(['closure','JAU-50','--file']),/needs a filename/);
+});
+
+// JAU-43: exercise the real persistence boundary with offline board mutations.
+const {writeClaim,restoreClaimState,registerAnswer}=await import('../scripts/linear_agent.mjs');
+async function parkingFixture(t) {
+ const f=await closureFixture(t,{phase:'awaiting-approval',state:'unstarted'});
+ f.claim.parkedFrom='Backlog';await f.putClaim();
+ f.origin.state.name=WAITING_STATE;
+ const moves=[];
+ const moveState=async(issue,target)=>{moves.push(target);issue.state={name:target,type:'backlog'};return {moved:true};};
+ const options={stateDir:f.dir,readIssue:async()=>f.origin,moveState};
+ return {...f,moves,options,store:closureStore(options),readClaim:async()=>JSON.parse(await fs.readFile(path.join(f.dir,'claims/JAU-50.json'),'utf8'))};
+}
+test('every exit from awaiting restores before persisting phase, preserving identity/history',async t=>{
+ for(const phase of ['planning','queued','implementing','landing']){
+  const f=await parkingFixture(t);
+  const result=await writeClaim({...f.claim,phase},f.options);
+  assert.deepEqual(f.moves,['Backlog']);assert.equal(result.parkedFrom,null);
+  assert.equal((await f.readClaim()).phase,phase);
+  for(const key of ['session','runtime','claimedAt'])assert.equal(result[key],f.claim[key]);
+  if(['implementing','landing'].includes(phase))assert.equal(result.workStartedAt,f.claim.updatedAt);
+  await writeClaim(result,f.options);assert.equal(f.moves.length,1);
+ }
+});
+test('repeated waiting keeps original destination; explicit refusal restores without phase change',async t=>{
+ const f=await parkingFixture(t);
+ await writeClaim({...f.claim},f.options);assert.deepEqual(f.moves,[]);
+ assert.equal((await f.readClaim()).parkedFrom,'Backlog');
+ await writeClaim({...f.claim},{...f.options,unpark:true});
+ assert.deepEqual(f.moves,['Backlog']);assert.equal((await f.readClaim()).phase,'awaiting-approval');
+});
+test('manual moves are respected and old restoration debt is cleared',async t=>{
+ for(const name of ['Done','Backlog']){
+  const f=await parkingFixture(t);f.origin.state.name=name;
+  await writeClaim({...f.claim,phase:'implementing'},f.options);
+  assert.deepEqual(f.moves,[]);assert.equal((await f.readClaim()).parkedFrom,null);
+ }
+});
+test('failed phase restoration retains evidence and can retry, including legacy phase debt',async t=>{
+ for(const parkedFrom of [null,WAITING_STATE,'Backlog']){
+  const f=await parkingFixture(t);f.claim.parkedFrom=parkedFrom;await f.putClaim();
+  const options={...f.options,moveState:async()=>({moved:false,reason:'target deleted'})};
+  await assert.rejects(writeClaim({...f.claim,phase:'implementing'},options),/cannot restore/);
+  await f.preserved();
+ }
+ const f=await parkingFixture(t);f.claim.phase='implementing';await f.putClaim();
+ await assert.rejects(writeClaim({...f.claim},{...f.options,moveState:async()=>{throw new Error('offline');}}),/offline/);
+ await f.preserved();await writeClaim({...f.claim},f.options);assert.deepEqual(f.moves,['Backlog']);
+});
+test('remote success followed by interruption retries without another board move',async t=>{
+ const f=await parkingFixture(t);
+ await assert.rejects(writeClaim({...f.claim,phase:'planning'},{...f.options,onUnpark:()=>{throw new Error('interrupted');}}),/interrupted/);
+ await f.preserved();assert.deepEqual(f.moves,['Backlog']);
+ await writeClaim({...f.claim,phase:'planning'},f.options);assert.deepEqual(f.moves,['Backlog']);
+ assert.equal((await f.readClaim()).parkedFrom,null);
+});
+test('phase restoration preserves a concurrently replaced claim',async t=>{
+ for(const during of ['read','move']){
+  const f=await parkingFixture(t);const replacement={...f.claim,claimedAt:'new-cycle'};
+  const options={...f.options};
+  if(during==='read')options.readIssue=async()=>{await f.putClaim(replacement);return f.origin;};
+  else options.moveState=async()=>{await f.putClaim(replacement);return {moved:true};};
+  await assert.rejects(writeClaim({...f.claim,phase:'planning'},options),/claim changed/);
+  assert.deepEqual(await f.readClaim(),replacement);
+ }
+});
+test('release restores after closure validation and before cleanup, including unstarted release',async t=>{
+ for(const cleanup of [false,true]){
+  const f=await parkingFixture(t);
+  if(!cleanup){
+   await assert.rejects(f.store.release(f.claim.issue),/no closure/);assert.deepEqual(f.moves,[]);
+   await f.store.save(f.claim.issue,{items:[]});
+  }
+  let removed=false;
+  await f.store.release(f.claim.issue,cleanup?'unstarted abandoned plan':undefined,async()=>{
+   assert.deepEqual(f.moves,['Backlog']);assert.equal((await f.readClaim()).parkedFrom,'Backlog');removed=true;
+  });
+  assert.equal(removed,true);await assert.rejects(f.readClaim(),/ENOENT/);
+ }
+});
+test('release restoration errors preserve claim and stop and never remove worktree',async t=>{
+ for(const failure of ['missing','deleted','network']){
+  const f=await parkingFixture(t);await f.store.save(f.claim.issue,{items:[]});
+  if(failure==='missing'){f.claim.parkedFrom=null;await f.putClaim();}
+  const store=closureStore({...f.options,moveState:async()=>{
+   if(failure==='network')throw new Error('offline');return {moved:false,reason:'target deleted'};
+  }});
+  await assert.rejects(store.release(f.claim.issue,undefined,async()=>assert.fail('must not remove')),/cannot restore|offline/);
+  await f.preserved();
+ }
+});
+test('release rechecks remote state and protects replacement claims during restoration',async t=>{
+ const f=await parkingFixture(t);await f.store.save(f.claim.issue,{items:[]});
+ let reads=0;
+ const store=closureStore({...f.options,readIssue:async()=>{
+  if(++reads===2)f.origin.state={name:'Done',type:'completed'};return f.origin;
+ }});
+ await store.release(f.claim.issue);assert.deepEqual(f.moves,[]);
+ const g=await parkingFixture(t);await g.store.save(g.claim.issue,{items:[]});
+ const replacement={...g.claim,claimedAt:'replacement'};
+ const changed=closureStore({...g.options,moveState:async()=>{await g.putClaim(replacement);return {moved:true};}});
+ await assert.rejects(changed.release(g.claim.issue,undefined,async()=>assert.fail('must not remove')),/changed during restoration/);
+ assert.deepEqual(await g.readClaim(),replacement);
+});
+test('restoration rejects unreadable board identity instead of clearing recovery data',async()=>{
+ await assert.rejects(restoreClaimState({identifier:'wrong',state:{name:'Backlog'}},{issue:'JAU-50'}),/cannot verify/);
+});
+
+test('answer registration restores all real answers, preserves queuing and does not mutate pending reads',async t=>{
+ for(const answer of ['approved','feedback','declined','pending','no-plan']){
+  for(const queued of (answer==='approved'?[false,true]:[false])){
+   const f=await parkingFixture(t);let receipts=0;
+   const plan={id:'plan',createdAt:'2026-09-21T13:01:00Z'};
+   const comments=[];
+   const deps={
+    persistClaim:(record,options)=>writeClaim(record,{...f.options,...options}),
+    decidePhase:async()=>queued?{phase:'queued',queuedBehind:['JAU-45']}:{phase:'implementing'},
+    comment:async(id,body,parent)=>{assert.equal(parent,'plan');receipts++;comments.push({user:{id:'agent'},body,createdAt:'2026-09-21T14:00:00Z'});return {id:'ack'};},
+   };
+   const done=await registerAnswer(f.origin,{verdict:answer},f.claim,plan,comments,'agent',deps);
+   if(['pending','no-plan'].includes(answer)){assert.deepEqual(done,{});await f.preserved();assert.deepEqual(f.moves,[]);continue;}
+   assert.equal(done.unparked,'Backlog');assert.deepEqual(f.moves,['Backlog']);
+   const phase=answer==='approved'?(queued?'queued':'implementing'):answer==='feedback'?'planning':'awaiting-approval';
+   assert.equal((await f.readClaim()).phase,phase);
+   if(queued)assert.deepEqual(done.queuedBehind,['JAU-45']);
+   await registerAnswer(f.origin,{verdict:answer},await f.readClaim(),plan,comments,'agent',deps);
+   assert.equal(receipts,answer==='approved'?1:0);assert.deepEqual(f.moves,['Backlog']);
+  }
+ }
 });
