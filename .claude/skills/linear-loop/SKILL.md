@@ -8,6 +8,35 @@ description: Start, stop or inspect the autonomous jaunt Linear loop — launche
 The on/off switch. Invoking this skill is what starts the loop — nothing watches
 the board until someone asks for it.
 
+
+## Read the current instructions before acting
+
+At startup and on every wake, read the canonical instructions from disk before
+board actions. A cached skill invocation does not prove freshness. Use the actual
+claude session ID ($CLAUDE_SESSION_ID); if it is unavailable, obtain the actual session
+ID from the runtime, never invent one or reuse another session's receipt.
+
+```bash
+jaunt-linear skills-read --runtime claude --session "$CLAUDE_SESSION_ID"
+# Read both returned file contents, then use the exact returned fingerprint:
+jaunt-linear skills-ack --runtime claude --session "$CLAUDE_SESSION_ID" --fingerprint <fingerprint>
+```
+
+Acknowledge only after reading. If acknowledgement reports stale/error, reread
+and resolve it before board actions. The receipt is per runtime and session;
+`loop-on`, status and watcher rearming never acknowledge instructions. `skills`
+in the loop status reports `unknown`, `fresh`, `stale` or `error`. Missing files
+are errors. A `skills-changed` wake carries the paths and reloading instruction;
+follow it before reconciling the board. The local watcher checks even when the
+board is quiet or the API unavailable, with notifications deduplicated for five minutes per outstanding state; a
+lost delivery is retried after that interval. Status retains the alert until
+explicit acknowledgement.
+
+Keep the existing owner session and workers alive. Reading new instructions does
+not erase old context or prove model comprehension. Replacing the owner needs a
+separate supervision handoff; do not kill it to refresh prose. Existing watcher
+processes need their normal controlled rearm to load this new detection code.
+
 ## On a fresh clone
 
 The scripts and skills are versioned; the credentials are not, and never will be.
@@ -78,8 +107,12 @@ Claims, approvals and transcripts are shared; their `runtime` selects how to
 resume them (missing runtime means Claude).
 
 ```bash
-jaunt-linear loop-on
+jaunt-linear loop-on --runtime claude --session "$CLAUDE_SESSION_ID"
 ```
+
+For an already enabled legacy loop with no registered instruction owner, run
+the same `loop-on --runtime claude --session` command from its actual owner;
+this binds only instruction metadata, never worker supervision.
 
 Then launch **both** processes, each as its own Bash call with
 `run_in_background: true`:

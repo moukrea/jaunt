@@ -9,6 +9,7 @@
 
 import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { skillStore } from './linear_skills.mjs';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -1270,6 +1271,7 @@ async function watcherState() {
     unguarded: loop.enabled === true && !watchdog.alive,
     watcher,
     watchdog,
+    skills: await skillStore(ROOT).status(),
   };
 }
 
@@ -1829,7 +1831,24 @@ const COMMANDS = {
   // `pgrep` typed into a shell matches that shell's own command line, so every
   // form of it reports a watcher on a machine where none runs (JAU-52).
   watcher: async () => watcherState(),
-  'loop-on': async () => setLoop(true),
+  'loop-on': async args => {
+    const { flags } = parseFlags(args);
+    if (flags.runtime || flags.session) await skillStore(ROOT).bind(flags.runtime, flags.session);
+    return setLoop(true);
+  },
+  'skills-bind': async args => {
+    if (!(await loopState()).enabled) throw new Error('loop is off; do not register an instruction owner');
+    const { flags } = parseFlags(args);
+    return skillStore(ROOT).bind(flags.runtime, flags.session);
+  },
+  'skills-read': async args => {
+    const { flags } = parseFlags(args);
+    return skillStore(ROOT).read(flags.runtime, flags.session);
+  },
+  'skills-ack': async args => {
+    const { flags } = parseFlags(args);
+    return skillStore(ROOT).acknowledge(flags.runtime, flags.session, flags.fingerprint);
+  },
   'loop-off': async () => setLoop(false),
   // Flags first, then positionals: `claim <ID> --session <uuid>` used to read
   // `--session` as the phase, and a phase nothing validated accepted it in

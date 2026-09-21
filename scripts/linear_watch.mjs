@@ -23,6 +23,7 @@
 // watcher's pulse and exits when the loop has gone blind — which turns the
 // mechanism above against the failure it used to hide. See `watchdog()`.
 
+import { skillStore } from './linear_skills.mjs';
 import { workerWake } from './linear_workers.mjs';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -256,15 +257,8 @@ async function main() {
 
   let enabled = true;
   let previous = await readPrevious();
-
-  // First poll of a fresh state file establishes the baseline rather than
-  // reporting every ticket as new — otherwise starting the watcher would always
-  // wake the session immediately with a meaningless "everything changed".
-  if (!previous) {
-    previous = await runAgent('pulse');
-    await writeJson(PULSE_FILE, previous);
-  }
-
+  enabled = await loopEnabled(enabled);
+  if (!enabled) return report(WATCH_FILE, record, { wake: 'loop-off', events: [] });
   let failures = 0;
 
   for (;;) {
@@ -286,6 +280,9 @@ async function main() {
     record.lastPollAt = new Date().toISOString();
     await writeJson(WATCH_FILE, record);
 
+    const changedSkills = await skillStore(ROOT).wake();
+    if (changedSkills) return report(WATCH_FILE, record, changedSkills);
+
     let current;
     try {
       current = await runAgent('pulse');
@@ -302,6 +299,11 @@ async function main() {
     }
     failures = 0;
 
+    if (!previous) {
+      previous = current;
+      await writeJson(PULSE_FILE, previous);
+      continue;
+    }
     const events = diff(previous, current);
     if (events.length > 0) {
       await writeJson(PULSE_FILE, current);

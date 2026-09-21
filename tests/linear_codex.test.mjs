@@ -112,6 +112,8 @@ test('wake-up is durable before queue delivery and targets only its owner', asyn
         assert.equal(cmd, 'codex');
         assert.deepEqual(args.slice(0, 3), ['queue', '--thread', 'owner-thread']);
         assert.ok(args.at(-1).includes(path));
+        assert.match(args.at(-1), /read the canonical .*linear-loop\/SKILL.md.*linear-orchestrator\/SKILL.md.*from disk/);
+        assert.match(args.at(-1), /preserve the current owner and workers/);
       },
     });
     assert.equal(calls, 1);
@@ -140,7 +142,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    for (const name of ['linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
