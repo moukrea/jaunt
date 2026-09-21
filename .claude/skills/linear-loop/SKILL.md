@@ -71,6 +71,12 @@ line.
 
 ## Start
 
+Before starting, check `jaunt-linear-codex status` if installed. If an active
+Codex adapter owns this checkout, do not start a second orchestrator. Stop that
+loop and wait for its watcher/watchdog to exit before an explicit takeover.
+Claims, approvals and transcripts are shared; their `runtime` selects how to
+resume them (missing runtime means Claude).
+
 ```bash
 jaunt-linear loop-on
 ```

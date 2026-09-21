@@ -851,10 +851,20 @@ export function validatePhase(phase) {
   return phase;
 }
 
-async function claim(identifier, phase = 'planning', session) {
+export function claimIdentity(existing, session, runtime) {
+  const owner = runtime || existing?.runtime || 'claude';
+  if (!['claude', 'codex'].includes(owner)) throw new Error(`unknown runtime "${owner}"`);
+  if (existing && owner !== (existing.runtime || 'claude')) {
+    throw new Error('claim belongs to another runtime; resume its owner rather than replacing it');
+  }
+  return { session: session || existing?.session || null, runtime: owner };
+}
+
+async function claim(identifier, phase = 'planning', session, runtime) {
   validatePhase(phase);
   const issue = await getIssue(identifier);
   const existing = await listClaims().then((c) => c.find((x) => x.issue === issue.identifier));
+  const identity = claimIdentity(existing, session, runtime);
 
   // Entering `awaiting-approval` is the moment the ticket stops being the
   // agent's business and becomes the human's, and it is the only transition the
@@ -895,11 +905,11 @@ async function claim(identifier, phase = 'planning', session) {
     issue: issue.identifier,
     title: issue.title,
     phase,
-    // The worker session UUID — `claude -p --resume <session>` reopens it with
-    // its context, which is how a comment reaches the worker that owns a ticket.
+    // The exact worker session address; runtime selects the CLI used to resume
+    // its context when a comment reaches the worker that owns this ticket.
     // `||`, not `??`: an unset shell variable expands to an empty string, and
     // that must fall back to the address already on file rather than erase it.
-    session: session || existing?.session || null,
+    ...identity,
     url: issue.url,
     // Where the ticket was before it was parked, so leaving the waiting column
     // restores the state it actually had instead of asserting a new one.
@@ -1613,7 +1623,8 @@ const COMMANDS = {
     // A bare `--session` carries no address: it must fall back to the one on
     // file, exactly like the empty string an unset variable expands to.
     const session = typeof flags.session === 'string' ? flags.session : undefined;
-    return claim(required(id, 'claim <ISSUE-ID> [phase] [--session <uuid>]'), phase, session);
+    if (flags.runtime !== undefined && typeof flags.runtime !== 'string') throw new Error('--runtime needs claude or codex');
+    return claim(required(id, 'claim <ISSUE-ID> [phase] [--session <uuid>] [--runtime claude|codex]'), phase, session, flags.runtime);
   },
   release: async ([id]) => release(id),
   // Reading a verdict also records it — the receipt, the phase, leaving the
