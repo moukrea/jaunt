@@ -90,6 +90,50 @@ test('desktop updater: a launch check with automatic updates off announces the v
 });
 
 const {surfaceFindings}=await import('../scripts/linear_agent.mjs');
+const {parsePriority}=await import('../scripts/linear_agent.mjs');
+test('Linear priorities require explicit names and preserve optional omission',()=>{
+ for(const [name,value] of [['urgent',1],['high',2],['medium',3],['low',4],['none',0]]){
+  assert.equal(parsePriority(name),value);
+  assert.equal(parsePriority(name,{optional:true}),value);
+ }
+ assert.equal(parsePriority(undefined,{optional:true}),undefined);
+ const invalid=[undefined,null,true,false,'',' ','Urgent','P0','unknown','toString','__proto__',-1,0,1,2,3,4,5,NaN,'-1','0','1','2','3','4','5','1.5','1e0'];
+ for(const value of invalid){
+  assert.throws(()=>parsePriority(value),/priority must be one of urgent\|high\|medium\|low\|none/);
+  if(value!==undefined) assert.throws(()=>parsePriority(value,{optional:true}),/0 means no priority/);
+ }
+});
+test('Linear CLI rejects invalid priorities before credentials or waiting for stdin',async()=>{
+ const {mkdtemp,mkdir,copyFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const {execFile}=await import('node:child_process');
+ const dir=await mkdtemp(join(tmpdir(),'jaunt-priority-'));
+ try{
+  await mkdir(join(dir,'scripts'));
+  // An isolated CLI has no credentials. No real Linear mutation is possible.
+  for(const file of ['linear_agent.mjs','linear_watch.mjs'])
+   await copyFile(new URL(`../scripts/${file}`,import.meta.url),join(dir,'scripts',file));
+  const cases=[
+   ['priority','JAU-55'],['create','Example','--priority'],
+   ['create','Example','--priority','--desc','-'],
+  ];
+  for(const value of ['0','1','2','3','4','5','1.5','','unknown']){
+   cases.push(['priority','JAU-55',value]);
+   cases.push(['create','Example','--priority',value,'--desc','-']);
+  }
+  for(const args of cases){
+   // Keep stdin open: validation must finish without waiting for --desc -.
+   const result=await new Promise(resolve=>{
+    execFile(process.execPath,[join(dir,'scripts','linear_agent.mjs'),...args],
+     {timeout:5000},(error,stdout,stderr)=>resolve({error,stdout,stderr}));
+   });
+   assert.equal(result.error?.code,1,JSON.stringify(args));
+   assert.equal(result.stdout,'');
+   assert.match(result.stderr,/^error: priority must be one of urgent\|high\|medium\|low\|none;/);
+   assert.doesNotMatch(result.stderr,/credentials|client secret|graphql/);
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 const surfaceOf=(files,symbols=[])=>({files,symbols});
 // The gate may only answer "independent" on proof. A surface missing on EITHER
 // side is missing evidence, so it has to surface as `unknown` — the asymmetry

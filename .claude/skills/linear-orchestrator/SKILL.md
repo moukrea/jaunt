@@ -118,11 +118,15 @@ Run the pass now; there is nothing else to wait for.
 5. **Write the conclusions down** — all four, each doing a different job:
 
    ```bash
-   jaunt-linear priority <ID> <0-4>
+   jaunt-linear priority <ID> <urgent|high|medium|low|none>
    jaunt-linear relate <A> blocks <B>          # B cannot start until A is done
    jaunt-linear comment <ID> "<why it sits there>" --expects none
    jaunt-linear reviewed <ID> "<same reasoning>" --group <root-cause>
    ```
+
+   Use the same names with `create --priority`. Numeric priorities are rejected:
+   `urgent` means Linear priority 1; `none` removes the priority (Linear 0) and
+   sorts after `low`. Omitting `--priority` on `create` leaves it unspecified.
 
    `--group` is what stops two faces of one defect being worked in parallel.
    Give the same group to every ticket sharing a root cause; leave it off when a
