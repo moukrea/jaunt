@@ -175,6 +175,21 @@ Run the pass now; there is nothing else to wait for.
    Give the same group to every ticket sharing a root cause; leave it off when a
    ticket stands alone.
 
+6. **Declare a forecast surface for unclaimed dispatch candidates.** Reuse the
+   code survey, then personally verify likely files and relevant symbol call
+   sites. Record a conservative scope with the canonical launcher:
+
+   ```bash
+   jaunt-linear surface <ID> --files web/js/app.mjs,web/style.css --symbols .settings-row,.settings-group
+   ```
+
+   Use explicit repository-relative paths, including likely tests; comparisons
+   match exact paths and symbols, not directory prefixes or globs. Never invent
+   a narrow or empty surface to pass the gate. If evidence is insufficient, keep
+   the candidate undispatched and explain what is missing. Only forecast
+   unclaimed tickets: a claimed ticket's surface belongs to its worker,
+   including while it is waiting for approval or queued.
+
 Amend tickets when the evidence says so: fix an unusable title, add the detail
 you established, mark duplicates with `relate <A> duplicate <B>`, split a ticket
 that is several unrelated requests (`jaunt-linear create "<title>" --parent <ID> --expects none`).
@@ -261,14 +276,23 @@ nobody has claimed.
 
 ## 4. Dispatch, and only when it is safe
 
-**Never claim a ticket without asking the gate.**
+**Never claim a ticket without asking the gate.** Before each new dispatch,
+re-read the candidate's scope/comments and current code, verify it is still
+unclaimed, and refresh its forecast from §2 with `jaunt-linear surface`.
+Surface records survive claim release: an existing record alone is not evidence
+that its scope is current. Then ask the gate:
 
 ```bash
 jaunt-linear independent <ID>
 ```
 
-`independent: false` means it must wait: comment on the ticket saying what holds
-it, and stop there. The refusal reasons are written for that comment.
+Only `independent: true` permits dispatch. For `gate: unknown`, inspect
+`unknowns`: establish missing candidate evidence through the read-only survey,
+refresh its surface, and ask again. If a claimed worker's surface is missing,
+route the request to that worker; never overwrite its declaration to clear the
+gate. If evidence remains unavailable, leave the candidate undispatched and
+comment what is missing. For `gate: blocked`, report the demonstrated conflict
+in `reasons` and wait. Neither refusal permits a claim or worker launch.
 
 Parallelism is not a number you pick — it is a property the gate proves. Two
 tickets that share a root cause, or sit on a blocking path, or touch the same
