@@ -844,7 +844,6 @@ async function humanFeedback(sinceIso) {
 // worker session that holds it, which is a durable address: the session lives on
 // disk, so a claim whose orchestrator died is resumable, never orphaned.
 
-const claimPath = (identifier) => join(CLAIMS_DIR, `${identifier}.json`);
 
 async function listClaims() {
   let files = [];
@@ -946,12 +945,46 @@ async function claim(identifier, phase = 'planning', session, runtime) {
   return Object.keys(extras).length ? { ...record, ...extras } : record;
 }
 
-async function writeClaim(record) {
-  const previous = await optionalJson(claimPath(record.issue));
+// All phase writers use this boundary, including direct claims and queue promotion.
+// Restore remotely before committing the local phase; a failed restore leaves the
+// old claim available for retry. Dependencies keep persistence tests off the board.
+export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = getIssue,
+  moveState = setState, unpark = false, onUnpark = () => {} } = {}) {
+  const path = join(stateDir, 'claims', `${record.issue}.json`);
+  const previous = await optionalJson(path);
+  if (previous && previous.claimedAt !== record.claimedAt) throw new Error('claim cycle changed; retry transition');
+  const unchanged = async () => {
+    if (JSON.stringify(await optionalJson(path)) !== JSON.stringify(previous)) {
+      throw new Error('claim changed during restoration; retry transition');
+    }
+  };
+  if (previous && previous.claimedAt === record.claimedAt &&
+      (unpark || (record.phase !== 'awaiting-approval' &&
+        (previous.phase === 'awaiting-approval' || previous.parkedFrom)))) {
+    const issue = await readIssue(record.issue);
+    await unchanged();
+    const result = await restoreClaimState(issue, previous, { moveState });
+    await unchanged();
+    record.parkedFrom = null;
+    onUnpark(result);
+  }
   Object.assign(record, preserveWorkHistory(record, previous));
-  await mkdir(CLAIMS_DIR, { recursive: true });
-  await writeFile(claimPath(record.issue), JSON.stringify(record, null, 2));
+  await atomicJson(path, record);
   return record;
+}
+
+// No guessed fallback: losing the destination while still waiting requires repair,
+// not deletion of the only surviving claim. Already moved issues are left alone.
+export async function restoreClaimState(issue, held, { moveState = setState } = {}) {
+  if (issue?.identifier !== held.issue || !issue.state?.name) {
+    throw new Error('cannot verify current state; preserving claim');
+  }
+  if (issue.state.name !== WAITING_STATE) return null;
+  const target = nextClaimState({ currentState: issue.state.name, parkedFrom: held.parkedFrom });
+  if (!target) throw new Error('cannot restore waiting ticket without parkedFrom; preserving claim');
+  const result = await moveState(issue, target, { optional: true });
+  if (!result.moved) throw new Error(`cannot restore waiting ticket: ${result.reason}; preserving claim`);
+  return target;
 }
 
 async function release(identifier, reason) {
@@ -1041,7 +1074,7 @@ function relatedTo(issue, target) {
 // Explicit injection keeps tests away from the real board and canonical state.
 // No creation retries live here: workers retain IDs, verify the board after an
 // ambiguous create, and finish the relation before requesting release.
-export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue } = {}) {
+export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveState = setState } = {}) {
   const paths = (id) => {
     if (!issueKey(id)) throw new Error('closure/release requires an issue identifier such as JAU-50');
     return {
@@ -1094,6 +1127,16 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue } = {}
       // claim or release using an inventory edited while verification ran.
       if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
           JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during verification; retry release');
+      // Restore before destructive cleanup, after all closure checks. Re-read the
+      // board so a human move during verification is not overwritten.
+      if (claim.phase === 'awaiting-approval' || claim.parkedFrom || issue.state.name === WAITING_STATE) {
+        const current = await readIssue(id);
+        if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
+            JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
+        await restoreClaimState(current, claim, { moveState });
+        if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
+            JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
+      }
       if (beforeRelease) {
         await beforeRelease();
         if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) || JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during removal; preserving claim');
@@ -1425,18 +1468,15 @@ async function independent(identifier) {
 // Reads the thread under the agent's most recent plan comment and decides what
 // the human said: approved, declined, feedback to fold in, or nothing yet.
 
-// Where a parked ticket goes once the human has answered. The waiting column
-// means "unanswered", so all three real answers leave it — a re-plan puts the
-// ticket back through its own `claim awaiting-approval`, and while the agent is
-// folding feedback in, the ticket is not waiting on anyone.
+// Where a ticket goes when its human wait ends, whether through a phase
+// transition, an answer, or release. Callers decide when restoration is due.
 //
 // Two guards, both load-bearing. The ticket has to be *currently* parked: a
 // human who moved it on to Done or back to Backlog while it waited has made a
 // decision, and restoring the old state would silently undo it. And
 // `parkedFrom` has to be known: with nothing recorded there is no state to
 // restore, and inventing one would put a second authority on a field git owns.
-export function nextClaimState({ verdict: answer, currentState, parkedFrom }) {
-  if (!['approved', 'declined', 'feedback'].includes(answer)) return null;
+export function nextClaimState({ currentState, parkedFrom }) {
   if (currentState !== WAITING_STATE) return null;
   if (!parkedFrom || parkedFrom === WAITING_STATE) return null;
   return parkedFrom;
@@ -1459,7 +1499,9 @@ export function ackNeeded(comments, plan, agentId) {
 // place where "the human answered" can be recorded without depending on a later
 // step nobody is forced to take. Asking the skill to remember was the previous
 // design, and the skill did not (JAU-18). `--peek` is the way to only look.
-async function registerAnswer(issue, answer, held, plan, comments, agentId) {
+export async function registerAnswer(issue, answer, held, plan, comments, agentId, {
+  persistClaim = writeClaim, decidePhase = approvalPhase, comment = addComment,
+} = {}) {
   const done = {};
 
   // The phase finally says what the session is doing, because something now
@@ -1470,7 +1512,7 @@ async function registerAnswer(issue, answer, held, plan, comments, agentId) {
   let queued = null;
   let phase = { approved: 'implementing', feedback: 'planning' }[answer.verdict];
   if (answer.verdict === 'approved') {
-    const decision = await approvalPhase(issue.identifier);
+    const decision = await decidePhase(issue.identifier);
     phase = decision.phase;
     if (decision.phase === 'queued') queued = decision;
   }
@@ -1480,30 +1522,19 @@ async function registerAnswer(issue, answer, held, plan, comments, agentId) {
       ? `je démarre dès que ${queued.queuedBehind.join(', ')} aura libéré les fichiers concernés.`
       : `j'enchaîne sur l'implémentation.`;
     const body = `${ACK_MARKER}\n**Approbation reçue** — ${next}\n\n${expectsLine('none')}`;
-    done.acknowledged = (await addComment(issue.identifier, body, plan.id)).id;
+    done.acknowledged = (await comment(issue.identifier, body, plan.id)).id;
   }
 
-  if (phase && held.phase !== phase) {
-    await writeClaim({ ...held, phase, updatedAt: new Date().toISOString() });
-    done.phase = phase;
+  if (['approved', 'feedback', 'declined'].includes(answer.verdict)) {
+    await persistClaim({ ...held, ...(phase ? { phase } : {}), updatedAt: new Date().toISOString() }, {
+      unpark: true,
+      onUnpark: (target) => { if (target) done.unparked = target; },
+    });
+    if (phase && held.phase !== phase) done.phase = phase;
   }
-  // Reported even when the phase was already `queued`: a second read must still
-  // say what the worker is waiting on rather than going silent.
+  // Repeated reads still report what blocks an approved worker.
   if (queued) done.queuedBehind = queued.queuedBehind;
 
-  const target = nextClaimState({
-    verdict: answer.verdict,
-    currentState: issue.state?.name ?? null,
-    parkedFrom: held.parkedFrom ?? null,
-  });
-  if (target) {
-    const result = await setState(issue, target, { optional: true });
-    done.unparked = result.moved ? target : false;
-    if (result.moved) {
-      const latest = (await listClaims()).find((c) => c.issue === issue.identifier);
-      if (latest) await writeClaim({ ...latest, parkedFrom: null, updatedAt: new Date().toISOString() });
-    }
-  }
   return done;
 }
 
