@@ -276,6 +276,9 @@ async function execute(name, runtime = 'codex') {
   if (!record || !ownerAlive(record.owner)) throw new Error('owner is gone');
   record.pid = process.pid;
   record.wrapper = processIdentity(process.pid);
+  record.eventPath = record.role === 'worker'
+    ? join(lifecyclePaths(STATE, record).dir, `${record.attempt}-event.json`)
+    : join(dir, `${name}-event.json`);
   let persistence = Promise.resolve();
   const persist = () => (persistence = persistence.then(async () => {
     record.heartbeatAt = stamp();
@@ -338,7 +341,7 @@ async function execute(name, runtime = 'codex') {
       : JSON.parse(output);
     if (!['loop-off', 'watchdog-superseded'].includes(event.wake)) {
       notifying = true;
-      await notify(record.owner, event, join(dir, `${name}-event.json`));
+      await notify(record.owner, event, record.eventPath);
     }
   } catch (error) {
     // A queued wake may already have resumed this worker/re-armed this role.
@@ -347,7 +350,7 @@ async function execute(name, runtime = 'codex') {
       record = { ...record, endedAt: stamp(), ...(notifying ? {} : { failure: record.failure || classifyFailure(error.message) }), spawnFailed: !record.child && Boolean(error.syscall?.startsWith('spawn')) };
       await persist();
     }
-    if (!notifying) await notify(record.owner, { wake: 'adapter-failed', role: record.role, issue: record.issue, error: classifyFailure(error.message).kind }, join(dir, `${name}-event.json`)).catch(() => {});
+    if (!notifying) await notify(record.owner, { wake: 'adapter-failed', role: record.role, issue: record.issue, error: classifyFailure(error.message).kind }, record.eventPath).catch(() => {});
     throw error;
   }
 }

@@ -193,7 +193,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
       const second=await call('arm');
       assert.deepEqual(first.adapter.map(x=>x.pid),second.adapter.map(x=>x.pid));
       await call('worker','JAU-999','--cwd',process.cwd(),'--model','fixture-model','--effort','high');
-      await until(async()=>(await read('JAU-999-event')).delivered);
+      await until(async()=>JSON.parse(await readFile((await read('JAU-999')).eventPath)).delivered);
       assert.equal((await read('JAU-999')).session,'recorded-thread-id');
       await call('resume','JAU-999','--message','literal $(not a shell command)');
       await until(async()=>JSON.parse((await readFile('exec.jsonl','utf8')).trim().split('\\n').at(-1))[1]==='resume' && (await read('JAU-999')).endedAt);
