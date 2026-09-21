@@ -66,7 +66,7 @@ The canonical checkout was explicitly left at its existing dirty version during
 this implementation. These commands become active only when the orchestrator
 updates that checkout while preserving its local work and reloads its skill
 receipt. The worker has not claimed live activation or a multi-worker production
-exercise. This harness-only change produces no installable desktop package.
+exercise. Desktop packages do not install these development-harness commands.
 
 ## Linear follow-up closure — JAU-50 (2026-09-21)
 
