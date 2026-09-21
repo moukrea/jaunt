@@ -1,6 +1,6 @@
 ---
 name: linear-worker
-description: Carry one jaunt Linear ticket from plan to merged PR inside a dedicated worker session — survey, post a plan for approval, declare the change surface, implement on the worktree branch, then push, open the PR, watch the CI and squash-merge it. Use when a spawned session is told to work a ticket, or for "travaille JAU-x".
+description: Carry one jaunt Linear ticket from plan to merged PR inside a persistent Codex worker session — survey, post a plan for approval, declare the change surface, implement on the worktree branch, then push, open the PR, watch the CI and squash-merge it. Use when a spawned session is told to work a ticket, or for "travaille JAU-x".
 ---
 
 # linear-worker
@@ -11,6 +11,26 @@ owns that, and it is writing relations while you work.
 
 `jaunt-linear` is on the PATH. Every Linear write goes through it, as the
 **jaunt Agent** app — never by another route.
+
+## Codex session and checkout
+
+This is the Codex port of `.claude/skills/linear-worker/SKILL.md`. The ticket
+protocol and landing rules below are identical. Use the installed canonical
+`jaunt-linear` launcher, never a worktree's private copy: credentials, claims,
+surfaces and approval receipts belong to the main checkout. The runner provides
+`JAUNT_LINEAR_ROOT` for recovery if PATH is missing.
+
+Before any work, read `jaunt-linear claims` and register the actual
+`CODEX_THREAD_ID` with `jaunt-linear claim <ID> <current-phase> --session
+"$CODEX_THREAD_ID" --runtime codex`. Preserve the phase; a resumed worker must
+not reset approval or queued state. Refuse claims owned by Claude (including
+legacy claims with no runtime). `codex exec resume <exact-id>` restores context;
+subagents are for surveys, never a replacement for the durable ticket session.
+
+An explicit invocation of this worker authorizes the ticket comments and the
+approved implementation/PR/merge workflow below. It does not approve a new plan.
+Read the stop flag and loop status before landing; if the loop is off, preserve
+the branch/PR and finish without merging. The orchestrator resumes you later.
 
 ## Check the stop flag first, and between phases
 
@@ -32,7 +52,7 @@ and the message as the explanation.
 
 ```bash
 jaunt-linear show <ID>
-jaunt-linear attachments <ID>     # downloads screenshots — open them with Read
+jaunt-linear attachments <ID>     # downloads screenshots — open them with view_image
 ```
 
 **Read the comments, not just the description.** Scope, corrections and
@@ -44,8 +64,10 @@ describing a symptom you never saw.
 
 ## 2. Survey, then verify
 
-Send an **Explore** subagent at the areas the ticket names — you have the `Agent`
-tool, use it. Its report is a survey, not a verification.
+Use `spawn_agent` for a read-only survey of the areas the ticket names.
+Inherit the worker model unless the user selected another Codex model. Wait for
+the report with `wait_agent`; if native delegation is unavailable, survey the
+code yourself and say so. Its report is a survey, not a verification.
 
 Then check, yourself, the specific things your plan will depend on:
 
@@ -76,7 +98,7 @@ cannot be ruled out" and blocks other tickets from being dispatched at all.
 jaunt-linear plan <ID> --summary "<3-6 lignes, en français>" \
   --expects "approuver (👍 sur n'importe quel commentaire du fil) ou répondre des corrections" \
   "$(cat plan.md)"
-jaunt-linear claim <ID> awaiting-approval --session "$CLAUDE_CODE_SESSION_ID"
+jaunt-linear claim <ID> awaiting-approval --session "$CODEX_THREAD_ID" --runtime codex
 ```
 
 The long plan goes into a Linear **document**; `--summary` is what the human
@@ -96,10 +118,10 @@ remembers the state it moved the ticket out of (`parkedFrom` in the claim) and
 undo. Claim `awaiting-approval` even if you think the ticket is already parked:
 a second claim on a parked ticket is a no-op and keeps `parkedFrom` intact.
 
-`CLAUDE_CODE_SESSION_ID` — not `CLAUDE_SESSION_ID`, which does not exist. An
-unset variable expands to an empty string and used to erase the claim's session
-address, which is how a human's approval finds you again. Check it landed:
-`jaunt-linear status` must show your UUID, not `""`.
+`CODEX_THREAD_ID` is the durable Codex address. Require a nonempty value;
+never substitute an invented UUID or `--last`. Check `jaunt-linear status`:
+the claim must carry that session and `runtime: "codex"`. The adapter also saves
+`thread.started.thread_id` in `.dev-state/codex/<ID>.json` for crash recovery.
 
 The document covers: what the ticket actually asks, the files that change, the
 approach, what you will *not* do, the risks — and one section that is not
@@ -166,7 +188,7 @@ On your worktree branch, and nowhere else.
 The claim now reads `implementing` — `verdict` set it. That phase is the answer
 to "is this session waiting on me or working?", so if you ever reach here
 without having read a verdict, say so with
-`jaunt-linear claim <ID> implementing --session "$CLAUDE_CODE_SESSION_ID"`. The
+`jaunt-linear claim <ID> implementing --session "$CODEX_THREAD_ID" --runtime codex`. The
 five phases are `planning`, `awaiting-approval`, `queued`, `implementing`,
 `landing`, and anything else is refused.
 
@@ -210,7 +232,7 @@ is missing, inspect the PR link and configured event before naming its cause.
 instead of two.
 
 ```bash
-jaunt-linear claim <ID> landing --session "$CLAUDE_CODE_SESSION_ID"
+jaunt-linear claim <ID> landing --session "$CODEX_THREAD_ID" --runtime codex
 git fetch origin
 git rebase origin/main
 npm test                       # a rebase that applies is not a rebase that works

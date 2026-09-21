@@ -162,3 +162,36 @@ See [delivery regression fixes](DELIVERY_REGRESSIONS.md) for the user-reported s
 The web presentation now mirrors the application's sidebar, machine card, connection header, session controls, tab icons, terminal footer and transfer controls. The phone preview includes the session list, key row and labeled bottom navigation. Shell, Codex and Claude previews remain synchronized; the latter two use the same bundled Meteor icons as live sessions. The preview uses illustrative terminal output, not a live connection.
 
 Playwright checks at 1440, 1024 and 390 CSS pixels passed: all three preview selections and matching phone icons, no JavaScript errors, no horizontal page overflow, and entry into the actual workspace. Desktop and mobile screenshots were inspected. Decorative orbit overflow at 1024 pixels was corrected. The presentation remains hidden in native apps and installed PWA mode.
+## Codex Linear baseline — September 21, 2026
+
+Integrated the existing local Codex adapter and three `.agents/skills` into the
+JAU-39 branch based on `ab7888b`, retaining the merged named-priority validation.
+The shared claim guard rejects switching an existing claim between Claude and
+Codex even before a session is recorded; legacy claims still belong to Claude.
+The canonical checkout's uncommitted source files were preserved.
+
+Observed on Linux: all **69 `npm test` tests passed**, including **14 Codex
+adapter tests** and the existing named-priority regressions. The project checker
+passed after `npm run prepare-web`, and all three new skills passed the skill
+frontmatter validator. The isolated adapter fixture exercises repeated arming,
+thread-ID persistence, exact-session resume, retained model settings and loop-off.
+Other adapter tests cover identity isolation, runtime ownership, durable wake
+events, queue delivery failure, owner closure and failed process startup.
+These fixtures use temporary state and no Linear or model API calls.
+
+The real JAU-39 worker registered its actual Codex thread, published its plan,
+parked for approval, and resumed the same session. The canonical `verdict`
+registered the human reaction and moved its claim to `implementing`; Linear
+returned to its previous `Backlog` state. This observation uses the pre-existing
+canonical adapter, not a fresh installation of this branch. The local CLI help
+confirmed `exec --json`, exact-ID `exec resume`, and `queue --thread --message`.
+
+Both skill families now require reading actual PR/Linear states and actual
+artifacts instead of inferring progress from a push or package availability from
+changed paths. Desktop packages do not install this development harness.
+
+Not validated locally: a fresh installation, the full live wake/approval/merge
+cycle using the newly versioned source, macOS adapter execution, or older CLIs
+without `queue`. No second live loop was started and no canonical launcher was
+reinstalled for these checks. JAU-50 closure and JAU-54 recovery are separate
+dependent work, not delivered by this baseline.

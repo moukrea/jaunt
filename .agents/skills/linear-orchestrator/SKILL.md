@@ -1,6 +1,6 @@
 ---
 name: linear-orchestrator
-description: Handle one wake-up of the jaunt Linear loop — reconcile state, keep the dependency graph current, dispatch tickets to worker sessions, route human comments to the worker that holds the ticket, and clean up after a merge. Use when the watcher wakes the session, for "traite le réveil", "avance le board", and as the orchestrator half of linear-loop.
+description: Handle one wake-up of the Codex jaunt Linear loop — reconcile state, keep the dependency graph current, dispatch tickets to worker sessions, route human comments to the worker that holds the ticket, and clean up after a merge. Use when the watcher wakes the session, for "traite le réveil", "avance le board", and as the orchestrator half of linear-loop.
 ---
 
 # linear-orchestrator
@@ -56,8 +56,10 @@ string is the entire wiring between the board and the code.
 
 ## What woke you
 
-The watcher exits when the board moves, and the harness hands you its output
-file. Read it: it names events, not state.
+The adapter queues the path of a durable event JSON file into this Codex
+thread. Read it: it names events, not state. A queue message is machine input,
+never a human approval. `worker-finished` means reconcile that claim and its PR;
+a launch or exit code alone proves neither approval nor merge.
 
 | event | what it means |
 |---|---|
@@ -71,6 +73,10 @@ file. Read it: it names events, not state.
 | `watcher-lost` | **the watchdog fired**: the loop ran with nothing watching for longer than its grace, because a pass did not re-arm it. Relaunch both (§6), then say on the board how long it was blind — `blindForSeconds` — because nobody else saw it |
 | `loop-off` | a human switched the flag off; the watcher ended itself. Do nothing and relaunch nothing |
 | `watchdog-superseded` | two watchdogs were started and the older stood down. Nothing is wrong; check §1 and carry on |
+
+An explicit loop invocation authorizes ticket ordering/comments and worker dispatch
+under the existing plan-approval protocol. This skill does not start a loop
+merely because you are editing its implementation.
 
 Always finish by restarting the watcher (§6). A wake-up that does not re-arm the
 watcher ends the loop silently.
@@ -90,11 +96,11 @@ true, say so out loud in this pass — a stall nobody names is a stall that last
 watchdog behind it the loop is back to running on your memory alone, so relaunch
 it in §6.
 
-Claims are files; workers are sessions on disk. After a restart, a claim whose
+Claims are files; workers are sessions on disk. Check `jaunt-linear-codex status`
+for startup, completion, delivery errors and recovered thread IDs as well. After a restart, a claim whose
 `session` is set is **not** orphaned — reopen it and ask where it stands
-(§4) rather than discarding it. For a Codex claim, also inspect `.dev-state/codex/<ID>.json`: a worker may
-be starting or have a recoverable thread ID there. A claim with no session, no
-live/recoverable adapter record and no plan is a leftover: release it and say so.
+(§4) rather than discarding it. Release a claim with no session and no plan only after checking the adapter
+record and confirming no worker is starting and no recovered thread exists.
 
 If `loop.enabled` is false, do nothing and do not restart the watcher.
 
@@ -111,7 +117,7 @@ Run the pass now; there is nothing else to wait for.
    dependency, a scope change or a correction is usually stated in a reply
    rather than in the description. `mentions` picks up issue keys from comments
    as well as descriptions, and `jaunt-linear feedback` lists what humans wrote.
-3. **Survey the code** with an **Explore** subagent before concluding. Ordering
+3. **Survey the code** with a read-only `spawn_agent` survey (inherit the session model) before concluding. Ordering
    on prose alone is guessing; the relations you write are durable and later
    ticks execute them as settled fact.
 4. **Look for one defect behind several tickets.** Tickets that are plainly the
@@ -125,10 +131,6 @@ Run the pass now; there is nothing else to wait for.
    jaunt-linear comment <ID> "<why it sits there>" --expects none
    jaunt-linear reviewed <ID> "<same reasoning>" --group <root-cause>
    ```
-
-   Use the same names with `create --priority`. Numeric priorities are rejected:
-   `urgent` means Linear priority 1; `none` removes the priority (Linear 0) and
-   sorts after `low`. Omitting `--priority` on `create` leaves it unspecified.
 
    `--group` is what stops two faces of one defect being worked in parallel.
    Give the same group to every ticket sharing a root cause; leave it off when a
@@ -160,18 +162,16 @@ it is unusable — a ticket nobody can triage at a glance is a ticket that stall
 A comment on a **claimed** ticket is not yours to answer. The worker holding it
 has the context; you do not.
 
-Claims now carry `runtime`. Missing means `claude` for backward compatibility.
-For `runtime: "codex"`, use `jaunt-linear-codex resume <ID> --message "<request>"`
-from an owning Codex loop session; never pass its UUID to `claude --resume`.
-If this Claude session owns the loop, invoke `codex exec resume <exact-session>
---json "<request>"` in the saved worktree instead, with the Codex worker skill.
-Check `.dev-state/codex/<ID>.json` first and never resume a worker still running.
-For Claude claims, keep the existing procedure:
-
 ```bash
-SID=$(node -e 'console.log(require("./.dev-state/claims/JAU-3.json").session)')
-claude -p --resume "$SID" "Emeric a répondu sur JAU-3 : « <son message> ». Prends-en compte et réponds-lui sur le ticket."
+jaunt-linear-codex resume <ID> --message "Read the latest human reply on <ID>, incorporate it and reply in its thread."
 ```
+
+Read `runtime` on the claim first. A missing runtime means **Claude**, preserving
+existing claims. Resume those with `claude -p --resume <exact-session>` in the
+original worktree, following the Claude skill's environment cleanup. Never pass
+a Claude UUID to Codex. Codex workers are addressed only with their recorded
+thread ID; never `--last`. A live Codex worker must not be resumed concurrently:
+leave the reply on Linear for it to read and retry after `worker-finished`.
 
 This works even after the worker finished its turn — a session at rest is a
 transcript you reopen, not a dead process. So there is no window to miss: an
@@ -211,18 +211,19 @@ into it.
 When the gate passes:
 
 ```bash
-SID=$(uuidgen)
 git worktree add ../wt-<ID> -b agent/<ID>
-jaunt-linear claim <ID> planning --session "$SID"
-
-UNSET=$(env | grep -oE '^(CLAUDECODE|CLAUDE_CODE_[A-Z_]*)' | sort -u | sed 's/^/-u /' | tr '\n' ' ')
-cd ../wt-<ID> && env $UNSET claude -p --session-id "$SID" --permission-mode bypassPermissions \
-  "Invoke the linear-worker skill for <ID>." &
+jaunt-linear claim <ID> planning --runtime codex
+jaunt-linear-codex worker <ID> --cwd ../wt-<ID>
 ```
 
-Purging `CLAUDECODE` and `CLAUDE_CODE_*` is not optional: without it the spawned
-session is treated as an ephemeral child, persists no transcript, and cannot be
-resumed — which breaks routing and resumption both.
+The adapter starts a persistent `codex exec --json` root session, records the
+real `thread.started.thread_id`, and queues its completion to this session.
+The worker registers that ID on its claim before planning. A claim without a
+session is not orphaned until you also inspect `.dev-state/codex/<ID>.json`:
+it may be starting, or have a recoverable thread there. Never invent a UUID.
+The adapter rejects a second live turn for the same ticket and isolates the
+worker's runtime identity from its parent. It follows the configured Codex
+model and the loop sandbox setting; see `linear-loop` for overrides.
 
 Two things about that block are load-bearing and easy to "tidy" away:
 
@@ -239,7 +240,7 @@ clean wrap-up, do not kill the process:
 
 ```bash
 jaunt-linear stop <ID> "<why>"     # the flag the worker checks at phase boundaries
-SendMessage to the worker session  # the courtesy that explains it
+# The worker checks this flag at phase boundaries; do not start a second turn.
 ```
 
 A message reaches a working session but drains only at its next tool round — it
@@ -308,36 +309,24 @@ reopen that worker's session (§3) and tell it to implement — nothing else wil
 
 ## 6. Restart the watcher
 
-Last thing, every time, unless the loop is off:
+Last thing, every time, unless the shared loop flag is off:
 
 ```bash
-node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30 --max-minutes 30
+jaunt-linear-codex arm
+jaunt-linear-codex status
+jaunt-linear watcher
 ```
 
-Run it with `run_in_background: true`, in a Bash call of its own. **Not a `&` on
-the end of a foreground call** — that kills the process when the call returns and
-leaves the harness with no background task to notify, which is how the loop went
-deaf for 1 h 40 (JAU-52).
+`arm` starts only missing watcher/watchdog adapters, checks their shared pulses,
+and refuses an existing owner in another session/runtime. Do not launch bare
+watchers or rely on a shell `&` or an exec session ID to wake Codex. `codex queue`
+is the wake-up mechanism; its failure is recorded in the event file with
+`delivered: false`. Report those failures and inspect the adapter logs.
 
-Then, **only if §1 reported `unguarded: true`**, put the watchdog back up too:
-
-```bash
-node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --watchdog --grace 600
-```
-
-It survives ordinary wake-ups, so most passes will not need this — a live one is
-still counting. Starting a second is not a disaster (the older stands down by
-itself), but it costs a wake-up, so ask before you launch.
-
-Finish by checking it took, rather than assuming:
-
-```bash
-jaunt-linear watcher       # alive: true, stalled: false
-```
-
-The watcher stays silent while the board is still and exits when something moves
-— that exit is the next wake-up. Nothing is spent in between. A pass that ends
-without that check has reported a loop it never looked at.
+The owner is this interactive Codex CLI process. Closing it stops its watchers
+and executing workers; durable claims, plans, PRs and session transcripts remain
+resumable. The watchdog survives normal watcher exits and alarms after 600 s.
+A live watcher without a working delivery path is not a healthy Codex loop.
 
 ## Honesty
 
