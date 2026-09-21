@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claimIdentity } from '../scripts/linear_agent.mjs';
-import { parseArgs, workerArgs, workerEnvironment, supervise, notify } from '../scripts/linear_codex.mjs';
+import { parseArgs, workerArgs, workerEnvironment, workerSettings, claudeArgs, supervise, notify } from '../scripts/linear_codex.mjs';
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
@@ -215,4 +215,15 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await pause(1200);
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+test('runtime settings never leak Codex model defaults into Claude and recovery preserves explicit nulls', () => {
+  const env = { JAUNT_CODEX_MODEL: 'codex-model', JAUNT_CODEX_EFFORT: 'high', JAUNT_CODEX_SANDBOX: 'read-only' };
+  assert.deepEqual(workerSettings('claude', null, {}, env), { model: null, effort: null, sandbox: 'danger-full-access' });
+  const saved = { model: null, effort: null, sandbox: 'workspace-write' };
+  assert.deepEqual(workerSettings('codex', saved, {}, env, true), saved);
+  assert.equal(workerSettings('codex', null, {}, env).model, 'codex-model');
+  assert.throws(() => workerSettings('claude', null, { sandbox: 'read-only' }, env), /does not implement/);
+  assert.ok(claudeArgs({ session: 'exact', resume: true, effort: 'high', prompt: 'continue' }).args.includes('--effort'));
 });

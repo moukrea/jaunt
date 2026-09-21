@@ -183,11 +183,22 @@ function ticket(id) {
   if (!/^[A-Z][A-Z0-9]*-\d+$/.test(id || '')) throw new Error('a ticket identifier is required');
   return id;
 }
+export function workerSettings(runtime, previous, options, env, recover = false) {
+  if (runtime === 'claude' && options.sandbox && options.sandbox !== 'danger-full-access') throw new Error('Claude launcher does not implement Codex sandbox modes');
+  if (recover) return { model: previous.model, effort: previous.effort, sandbox: previous.sandbox };
+  const prefix = runtime === 'claude' ? 'JAUNT_CLAUDE' : 'JAUNT_CODEX';
+  return {
+    model: options.model || previous?.model || env[`${prefix}_MODEL`] || null,
+    effort: options.effort || previous?.effort || env[`${prefix}_EFFORT`] || null,
+    sandbox: runtime === 'claude' ? 'danger-full-access' : options.sandbox || previous?.sandbox || env.JAUNT_CODEX_SANDBOX || 'danger-full-access',
+  };
+}
 export function claudeArgs(record) {
   if (!record.session) throw new Error('Claude requires its recorded session ID');
   const args = ['-p', record.resume ? '--resume' : '--session-id', record.session,
     '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions'];
   if (record.model) args.push('--model', record.model);
+  if (record.effort) args.push('--effort', record.effort);
   args.push(record.prompt);
   return { args };
 }
@@ -228,9 +239,7 @@ async function worker(id, options, resume, runtime = 'codex', recover = false) {
     }
     const record = await beginAttempt(STATE, held, {
       role: 'worker', cwd, session: resume || runtime === 'claude' ? session : null, owner: o, resume,
-      model: options.model || prior?.model || process.env.JAUNT_CODEX_MODEL || null,
-      effort: options.effort || prior?.effort || process.env.JAUNT_CODEX_EFFORT || null,
-      sandbox: options.sandbox || prior?.sandbox || process.env.JAUNT_CODEX_SANDBOX || 'danger-full-access',
+      ...workerSettings(runtime, prior, options, process.env, recover),
       prompt: options.message || `Invoke the linear-worker skill for ${id}. Read latest comments, stop flag, approval and PR state before continuing the current phase. Recovery is not approval.`,
     });
     if (decision) await atomicJson(lifecyclePaths(STATE, held).schedule, { ...decision, claimedAt: held.claimedAt, attempt: record.attempt });

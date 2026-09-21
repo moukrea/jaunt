@@ -228,7 +228,7 @@ dependent work, not delivered by this baseline.
 
 ## Worker supervision and recovery — September 21, 2026 (JAU-54)
 
-`npm test`: **98 tests passed**. `python3 scripts/check_project.py`: passed.
+`npm test`: **99 tests passed**. `python3 scripts/check_project.py`: passed.
 The new offline subprocess fixtures exercised both Codex and Claude launchers:
 failed child, durable watchdog deadline/wake, exact-session resume with the saved
 model, and rejection of a second recovery after normal completion. Fixtures use
