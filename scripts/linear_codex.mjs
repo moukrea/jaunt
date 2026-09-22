@@ -7,6 +7,7 @@ import { dirname, join, resolve, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
+import { settingSources, observeTelemetry } from './linear_telemetry.mjs';
 import { skillStore } from './linear_skills.mjs';
 import { livePid } from './linear_watch.mjs';
 import { entryPath } from './linear_agent.mjs';
@@ -35,7 +36,7 @@ export function parseArgs(args) {
     if (!args[i].startsWith('--')) { positional.push(args[i]); continue; }
     const key = args[i].slice(2), value = args[++i];
     if (!value || value.startsWith('--')) throw new Error(`--${key} requires a value`);
-    if (!['thread', 'owner-pid', 'cwd', 'message', 'model', 'effort', 'sandbox', 'runtime', 'event'].includes(key)) throw new Error(`unknown option --${key}`);
+    if (!['thread', 'owner-pid', 'cwd', 'message', 'model', 'effort', 'sandbox', 'runtime', 'event', 'rationale'].includes(key)) throw new Error(`unknown option --${key}`);
     options[key] = value;
   }
   return { options, positional };
@@ -249,7 +250,10 @@ async function worker(id, options, resume, runtime = 'codex', recover = false, r
     }
     const begin = async () => {
       const record = await beginAttempt(STATE, held, {
-        role: 'worker', cwd, session: resume || runtime === 'claude' ? session : null, owner: o, resume,
+        role: 'worker', cwd,
+        launchMode: recover ? 'recovery' : routed ? 'routed-resume' : resume ? 'resume' : 'start',
+        settingSources: settingSources(runtime, prior, options, process.env, recover ? 'recovery' : routed ? 'routed-resume' : null),
+        session: resume || runtime === 'claude' ? session : null, owner: o, resume,
         ...workerSettings(runtime, prior, options, process.env, recover || Boolean(routed)),
         ...(routed ? { routeKey: routed.route.key } : {}),
         prompt: options.message || `Invoke the linear-worker skill for ${id}. Read latest comments, stop flag, approval and PR state before continuing the current phase. Recovery is not approval.`,
@@ -364,6 +368,7 @@ async function execute(name, runtime = 'codex') {
         }
         if (event.type === 'turn.failed' || event.type === 'error' || event.is_error) record.failure = classifyFailure(event.error || event);
         if (runtime === 'claude' && event.session_id && event.session_id !== record.session) throw new Error('Claude emitted a different session');
+        observeTelemetry(record, event);
         await persist();
       },
     });

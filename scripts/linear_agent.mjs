@@ -9,6 +9,7 @@
 
 import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { phaseHistory, archiveClaim, telemetryArchivePath, telemetryReport } from './linear_telemetry.mjs';
 import { skillStore } from './linear_skills.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
@@ -1054,6 +1055,7 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
     onUnpark(result);
   }
   Object.assign(record, preserveWorkHistory(record, previous));
+  record.telemetryHistory = phaseHistory(record, previous);
   await atomicJson(path, record);
   return record;
 }
@@ -1231,6 +1233,10 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveS
         }
         const receipt = { issue: id, claimedAt: claim.claimedAt, releasedAt: new Date().toISOString(),
           mode: cleanup ? 'unstarted' : 'closure', ...(cleanup ? { reason } : { inventory }) };
+        const archivePath = telemetryArchivePath(stateDir, claim);
+        const archived = await optionalJson(archivePath);
+        if (archived && (archived.version !== 1 || archived.claimedAt !== claim.claimedAt || archived.issue !== claim.issue)) throw Error('invalid telemetry archive; preserving claim');
+        await atomicJson(archivePath, archiveClaim(claim, receipt, issue));
         await atomicJson(p.receipt, receipt);
         await rm(p.stop, { force: true });
         await rm(p.claim);
@@ -1906,6 +1912,7 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
+  telemetry: async ([id]) => telemetryReport(STATE_DIR, id),
   wait: async ([action, id, ...rest], flags) => {
     if (rest.length) throw new Error('unexpected wait argument');
     const store = await externalWaits();
@@ -2062,7 +2069,7 @@ export const COMMAND_FLAGS = {
   comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],
   attachments: ['out'], uncomment: [],
   create: ['title', 'parent', 'priority', 'expects', 'desc', 'description'],
-  feedback: [], repo: [], workers: [], 'routing-thread': [],
+  feedback: [], repo: [], workers: [], telemetry: [], 'routing-thread': [],
   landing: {
     status: [], acquire: ['runtime', 'session', 'cwd'],
     prepare: ['runtime', 'session'], merge: ['runtime', 'session', 'pr'],

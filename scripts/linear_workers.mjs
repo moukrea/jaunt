@@ -1,4 +1,5 @@
 // Local worker evidence and recovery policy. Importing this module starts nothing.
+import { startTelemetry } from './linear_telemetry.mjs';
 import { readFile, writeFile, mkdir, rename, readdir, open, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -156,6 +157,8 @@ export async function currentAttempt(state, claim) {
 export async function beginAttempt(state, claim, details) {
   const p = lifecyclePaths(state, claim);
   const record = { ...details, issue: claim.issue, claimedAt: claim.claimedAt, runtime: runtimeOf(claim), attempt: randomUUID(), startedAt: new Date().toISOString(), session: details.session || claim.session || null };
+  record.phaseAtStart = claim.phase;
+  record.telemetry = startTelemetry(record);
   await saveAttempt(state, record);
   await atomicJson(p.current, { attempt: record.attempt });
   return record;

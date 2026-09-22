@@ -186,7 +186,7 @@ test('real watcher synchronizes before pulse and reports sync failures without a
   const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
   const exec=promisify(execFile),f=await fixture(t),root=f.dir;
   await mkdir(join(root,'scripts'));await mkdir(join(root,'.dev-state'));
-  for(const name of ['linear_watch.mjs','linear_workers.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
+  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
   await writeFile(join(root,'.dev-state/linear-loop.json'),JSON.stringify({enabled:true}));
   await writeFile(join(root,'.dev-state/linear-pulse.json'),JSON.stringify({tickets:{}}));
   const {skillStore}=await import('../scripts/linear_skills.mjs');
