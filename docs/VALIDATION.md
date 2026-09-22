@@ -1,6 +1,36 @@
 # jaunt — delivery validated on September 14, 2026
 
 
+## Durable worker telemetry — JAU-38 (2026-09-22)
+
+`npm test` passed 224 tests after rebasing on main through JAU-34, JAU-63 and
+JAU-65. `python3 scripts/check_project.py --source` and `git diff --check` passed.
+The offline Codex and Claude adapters persist structured usage, preserve their
+exact sessions across a failed attempt and recovery, and avoid counting repeated
+terminal events twice. CLI tests read retained attempts without credentials or
+an active claim and verify that provider prompt text is absent from the report.
+
+Accounting cases cover unknown versus zero, requested/observed model mismatch,
+Claude input snapshots versus final results, placeholder output exclusion,
+crash-zero preservation, old invocation estimates versus recent restored session
+estimates, and unavailable attribution without a safe prior baseline. Persistence
+cases cover repeated phase registration, legacy gaps, multi-phase allocation,
+release and reopening, late attempt finalization, archive write failure,
+corruption and phase identity when legacy transitions share a timestamp. Existing approval, external-wait, routing, recovery and landing tests
+remain green.
+
+Runtime schema checks used the official Codex event types and Claude cost-tracking
+documentation, plus the installed Claude 2.1.278 init version field. These are not
+live provider accounting measurements. Claude USD values are client estimates;
+Codex monetary cost and unsupported effective settings remain unavailable. See
+[the telemetry contract](LINEAR_TELEMETRY.md) for exact coverage and limitations.
+
+No production runtime was replaced, restarted or redirected to this worktree.
+The dirty canonical checkout was preserved. Harness activation remains separate
+(JAU-67/JAU-71); wake deduplication remains JAU-62. No desktop package is claimed
+as delivery of this development-harness change.
+
+
 ## Deterministic worker routing — JAU-65 (2026-09-22)
 
 After rebasing on JAU-34 and JAU-63 (`de1e52d`), **212 npm tests passed**.

@@ -142,7 +142,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
@@ -237,7 +237,7 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
   const exec = promisify(execFile), dir = await mkdtemp(join(tmpdir(), 'jaunt-route-cli-'));
   try {
     await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin')); await mkdir(join(dir, '.dev-state/claims'), { recursive: true });
-    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_waits.mjs', 'linear_skills.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_waits.mjs', 'linear_skills.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     for (const skill of ['linear-loop', 'linear-orchestrator']) {
       await mkdir(join(dir, '.agents/skills', skill), { recursive: true });

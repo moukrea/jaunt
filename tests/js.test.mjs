@@ -111,7 +111,7 @@ test('Linear CLI rejects invalid priorities before credentials or waiting for st
  try{
   await mkdir(join(dir,'scripts'));
   // An isolated CLI has no credentials. No real Linear mutation is possible.
-  for(const file of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_activity.mjs'])
+  for(const file of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs','linear_activity.mjs'])
    await copyFile(new URL(`../scripts/${file}`,import.meta.url),join(dir,'scripts',file));
   const cases=[
    ['priority','JAU-55'],['create','Example','--priority'],
@@ -653,7 +653,7 @@ test('create rejects missing or conflicting expectations before loading credenti
  const {execFile}=await import('node:child_process');
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-expects-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));
- for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_activity.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs','linear_activity.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  for(const args of [[],['--expects'],['--expects',''],['--expects','none','--desc','**Attendu de toi :** choose now']]){
   const result=await new Promise(resolve=>execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),'create','Example',...args],
    {timeout:5000},(error,stdout,stderr)=>resolve({error,stdout,stderr})));
@@ -666,7 +666,7 @@ test('closure CLI saves and reads drafts on stdin without loading credentials',a
  const {execFile}=await import('node:child_process');
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-closure-cli-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));await fs.mkdir(path.join(dir,'.dev-state/claims'),{recursive:true});
- for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_activity.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs','linear_activity.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  await fs.writeFile(path.join(dir,'.dev-state/claims/JAU-50.json'),JSON.stringify({issue:'JAU-50',claimedAt:'cycle',phase:'planning'}));
  const run=(args,input)=>new Promise((resolve,reject)=>{
   const child=execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),...args],{timeout:5000},(error,stdout,stderr)=>{
@@ -851,7 +851,7 @@ async function flagCliFixture(t){
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-flags-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  await fs.mkdir(path.join(dir,'scripts'));
- for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_activity.mjs'])
+ for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs','linear_activity.mjs'])
   await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  const run=(args,input,preload)=>new Promise(resolve=>{
   const child=execFile(process.execPath,[...(preload?['--import',preload]:[]),path.join(dir,'scripts/linear_agent.mjs'),...args],
@@ -907,4 +907,22 @@ test('create sends both description spellings and stdin content to the same mock
  }
  const conflict=await run(['create','Example','--desc','-','--description','other']);
  assert.equal(conflict.error?.code,1);assert.match(conflict.stderr,/use only one/);
+});
+
+test('telemetry CLI reads released generations offline without a claim, credentials or provider output',async(t)=>{
+ const f=await flagCliFixture(t);
+ const {beginAttempt,saveAttempt}=await import('../scripts/linear_workers.mjs');
+ const {observeTelemetry}=await import('../scripts/linear_telemetry.mjs');
+ const c={issue:'JAU-38',runtime:'claude',claimedAt:'2026-09-22T00:00:00Z',phase:'implementing'};
+ const r=await beginAttempt(path.join(f.dir,'.dev-state'),c,{model:'requested-model',prompt:'PRIVATE PROMPT',launchMode:'start'});
+ observeTelemetry(r,{type:'result',total_cost_usd:0,usage:{input_tokens:2,output_tokens:1}});
+ await saveAttempt(path.join(f.dir,'.dev-state'),{...r,code:0,childExited:true,endedAt:'2026-09-22T00:01:00Z'});
+ const result=await f.run(['telemetry','JAU-38']);
+ assert.equal(result.error,null,result.stderr);
+ const report=JSON.parse(result.stdout);
+ assert.equal(report.knownUsageSubtotal.costUsd.value,0);
+ assert.equal(report.counts.attempts,1);
+ assert.ok(!result.stdout.includes('PRIVATE PROMPT'));
+ const bad=await f.run(['telemetry','../bad']);assert.match(bad.stderr,/identifier/);
+ const missing=await f.run(['telemetry','JAU-999']);assert.equal(JSON.parse(missing.stdout).knownUsageSubtotal.costUsd.value,null);
 });
