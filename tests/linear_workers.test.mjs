@@ -503,3 +503,20 @@ test('Claude session cost without a normal consecutive baseline is not attribute
     assert.equal(last.reportedCost.kind, 'estimated');
   });
 });
+
+test('legacy transition phases sharing a timestamp do not double-allocate usage', async () => temporary(async state => {
+  const at = '2026-09-22T00:00:00.000Z';
+  const c = { ...claim, phase: 'planning', updatedAt: at };
+  await atomicJson(join(state, 'claims', `${c.issue}.json`), c);
+  await writeClaim({ ...c, phase: 'implementing' }, { stateDir: state });
+  const r = await beginAttempt(state, { ...c, phase: 'implementing' }, { launchMode: 'start' });
+  r.startedAt = '2026-09-22T00:00:01.000Z';
+  observeTelemetry(r, { type: 'turn.started' });
+  observeTelemetry(r, { type: 'turn.completed', usage: { input_tokens: 4, output_tokens: 2 } });
+  await saveAttempt(state, { ...r, childExited: true, code: 0, endedAt: '2026-09-22T00:01:00.000Z' });
+  const report = await telemetryReport(state, c.issue, '2026-09-22T00:02:00.000Z');
+  const phases = report.generations[0].phases;
+  assert.equal(phases[0].at, phases[1].at);
+  assert.equal(phases[0].knownUsageSubtotal.inputTokens.value, null);
+  assert.equal(phases[1].knownUsageSubtotal.inputTokens.value, 4);
+}));

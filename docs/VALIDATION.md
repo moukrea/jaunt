@@ -3,7 +3,7 @@
 
 ## Durable worker telemetry — JAU-38 (2026-09-22)
 
-`npm test` passed 223 tests after rebasing on main through JAU-34, JAU-63 and
+`npm test` passed 224 tests after rebasing on main through JAU-34, JAU-63 and
 JAU-65. `python3 scripts/check_project.py --source` and `git diff --check` passed.
 The offline Codex and Claude adapters persist structured usage, preserve their
 exact sessions across a failed attempt and recovery, and avoid counting repeated
@@ -15,8 +15,8 @@ Claude input snapshots versus final results, placeholder output exclusion,
 crash-zero preservation, old invocation estimates versus recent restored session
 estimates, and unavailable attribution without a safe prior baseline. Persistence
 cases cover repeated phase registration, legacy gaps, multi-phase allocation,
-release and reopening, late attempt finalization, archive write failure and
-corruption. Existing approval, external-wait, routing, recovery and landing tests
+release and reopening, late attempt finalization, archive write failure,
+corruption and phase identity when legacy transitions share a timestamp. Existing approval, external-wait, routing, recovery and landing tests
 remain green.
 
 Runtime schema checks used the official Codex event types and Claude cost-tracking

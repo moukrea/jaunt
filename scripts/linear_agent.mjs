@@ -1912,7 +1912,10 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
-  telemetry: async ([id]) => telemetryReport(STATE_DIR, id),
+  telemetry: async ([id, ...rest]) => {
+    if (rest.length) throw Error('telemetry accepts one issue identifier');
+    return telemetryReport(STATE_DIR, id);
+  },
   wait: async ([action, id, ...rest], flags) => {
     if (rest.length) throw new Error('unexpected wait argument');
     const store = await externalWaits();

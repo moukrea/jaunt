@@ -185,7 +185,7 @@ export async function telemetryReport(state, id, now = new Date().toISOString())
     const release = current ? null : archived?.release || null;
     const phases = (history?.transitions || []).map((p, i, transitions) => {
       const end = transitions[i + 1]?.at || release?.at || (current ? now : null);
-      return { ...p, until: end, elapsedMs: duration(p.at, end),
+      return { ...p, sequence: i, until: end, elapsedMs: duration(p.at, end),
         attempts: attempts.filter(a => ms(a.startedAt) !== null && ms(end) !== null && ms(a.startedAt) <= ms(end) &&
           (!a.endedAt || ms(a.endedAt) >= ms(p.at))).map(a => a.attempt) };
     });
@@ -193,10 +193,10 @@ export async function telemetryReport(state, id, now = new Date().toISOString())
       const containing = phases.filter(p => duration(attempt.startedAt, attempt.endedAt) !== null &&
         ms(p.at) !== null && ms(p.until) !== null && ms(attempt.startedAt) >= ms(p.at) && ms(attempt.endedAt) <= ms(p.until));
       if (containing.length === 1) attempt.phaseAllocation = { kind: 'measured', phase: containing[0].phase,
-        at: containing[0].at, source: 'attempt interval entirely inside one observed phase interval' };
+        at: containing[0].at, sequence: containing[0].sequence, source: 'attempt interval entirely inside one observed phase interval' };
     }
     for (const phase of phases) {
-      const allocated = attempts.filter(a => a.phaseAllocation.kind === 'measured' && a.phaseAllocation.at === phase.at);
+      const allocated = attempts.filter(a => a.phaseAllocation.kind === 'measured' && a.phaseAllocation.sequence === phase.sequence);
       phase.allocatedAttempts = allocated.map(a => a.attempt);
       phase.knownUsageSubtotal = Object.fromEntries(fields.map(key => [key, subtotal(allocated, key)]));
       phase.unallocatedAttempts = phase.attempts.filter(id => !phase.allocatedAttempts.includes(id));
