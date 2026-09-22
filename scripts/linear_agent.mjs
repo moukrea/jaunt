@@ -1739,8 +1739,7 @@ const COMMANDS = {
   next: async () => nextIssue(),
   board: async () => board(),
   pulse: async () => pulse(),
-  reviewed: async ([id, ...rest]) => {
-    const { flags, rest: words } = parseFlags(rest);
+  reviewed: async ([id, ...words], flags) => {
     return markReviewed(
       required(id, 'reviewed <ISSUE-ID> <why it sits where it sits> [--group <root-cause>]'),
       words.join(' '),
@@ -1752,8 +1751,7 @@ const COMMANDS = {
   // Asking also promotes, on the `verdict` model: the command a worker runs to
   // find out whether it may start is the command that lets it start.
   ready: async ([id]) => readyToImplement(required(id, 'ready <ISSUE-ID>')),
-  surface: async ([id, ...rest]) => {
-    const { flags } = parseFlags(rest);
+  surface: async ([id], flags) => {
     return declareSurface(
       required(id, 'surface <ISSUE-ID> --files a,b --symbols x,y'),
       required(flags.files, '--files'),
@@ -1765,8 +1763,7 @@ const COMMANDS = {
   'stop-requested': async ([id]) => stopRequested(required(id, 'stop-requested <ISSUE-ID>')),
   list: async ([type = 'unstarted']) => (await listIssues([type])).issues,
   show: async ([id]) => getIssue(required(id, 'show <ISSUE-ID>')),
-  comment: async ([id, ...rest]) => {
-    const { flags, rest: words } = parseFlags(rest);
+  comment: async ([id, ...words], flags) => {
     const body = words.join(' ') || (await readStdin());
     const text = required(body.trim(), 'comment body');
     // The marker is appended unless the body already carries one, so an agent
@@ -1791,18 +1788,16 @@ const COMMANDS = {
       required(to, 'target issue'),
     ),
   unrelate: async ([id]) => unrelate(required(id, 'unrelate <RELATION-ID> (from show/board)')),
-  attachments: async ([id, ...rest]) => {
-    const { flags } = parseFlags(rest);
+  attachments: async ([id], flags) => {
     return attachments(required(id, 'attachments <ISSUE-ID> [--out <dir>]'), flags.out);
   },
   uncomment: async ([id]) => uncomment(required(id, 'uncomment <COMMENT-ID> (agent-authored only)')),
-  create: async (args) => {
-    const { flags, rest } = parseFlags(args);
+  create: async (rest, flags) => {
     const title = rest.join(' ') || flags.title;
     const priority = parsePriority(flags.priority, { optional: true });
     const description = flags.desc === '-' ? await readStdin() : flags.desc;
     return createIssue({
-      title: required(title, `create <TITLE> --expects <action|none> [--parent <ID>] [--priority <${PRIORITY_USAGE}>] [--desc <text>|-]`),
+      title: required(title, `create <TITLE> --expects <action|none> [--parent <ID>] [--priority <${PRIORITY_USAGE}>] [--desc|--description <text>|-]`),
       description,
       expects: flags.expects,
       parent: flags.parent,
@@ -1814,12 +1809,10 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
-  landing: async ([action, id, ...args]) => {
+  landing: async ([action, id, ...rest], flags) => {
     const store = landingStore({ root: ROOT });
-    if (action === 'status' && !id && !args.length) return store.status();
-    const { flags, rest } = parseFlags(args);
-    const allowed = { acquire: ['cwd'], prepare: [], merge: ['pr'], release: ['reason'] }[action];
-    if (!allowed || rest.length || Object.keys(flags).some(k => !['runtime', 'session', ...allowed].includes(k))) throw new Error('unknown landing argument');
+    if (action === 'status' && !id && !rest.length) return store.status();
+    if (rest.length) throw new Error('unknown landing argument');
     const who = { runtime: flags.runtime, session: flags.session };
     if (action === 'acquire') {
       const result = await store.acquire(id, who, flags.cwd || process.cwd());
@@ -1832,17 +1825,14 @@ const COMMANDS = {
     if (action === 'release') return store.release(id, who, flags.reason);
     throw new Error('landing acquire|status|prepare|merge|release <ID> --runtime <runtime> --session <actual-id>');
   },
-  stack: async ([action, id, ...args]) => {
-    const { flags, rest } = parseFlags(args);
-    const allowed = { record: ['cwd', 'parent', 'base'], rebase: ['pr'] }[action];
-    if (!allowed || rest.length || Object.keys(flags).some(k => !['runtime', 'session', ...allowed].includes(k))) throw new Error('unknown stack argument');
+  stack: async ([action, id, ...rest], flags) => {
+    if (rest.length) throw new Error('unknown stack argument');
     const who = { runtime: flags.runtime, session: flags.session }, store = landingStore({ root: ROOT });
     if (action === 'record') return store.stackRecord(id, who, flags.cwd || process.cwd(), flags.parent, flags.base);
     if (action === 'rebase') return store.stackRebase(id, who, flags.pr);
     throw new Error('stack record|rebase <ID> --runtime <runtime> --session <actual-id>');
   },
-  cleanup: async ([id, ...args]) => {
-    const { flags } = parseFlags(args);
+  cleanup: async ([id], flags) => {
     required(id, 'cleanup <ID> --pr <number>');
     if (!/^\d+$/.test(flags.pr || '')) throw new Error('cleanup requires --pr <number>');
     return withWorkerLock(STATE_DIR, id, async () => {
@@ -1860,30 +1850,25 @@ const COMMANDS = {
   // `pgrep` typed into a shell matches that shell's own command line, so every
   // form of it reports a watcher on a machine where none runs (JAU-52).
   watcher: async () => watcherState(),
-  'loop-on': async args => {
-    const { flags } = parseFlags(args);
+  'loop-on': async (_args, flags) => {
     if (flags.runtime || flags.session) await skillStore(ROOT).bind(flags.runtime, flags.session);
     return setLoop(true);
   },
-  'skills-bind': async args => {
+  'skills-bind': async (_args, flags) => {
     if (!(await loopState()).enabled) throw new Error('loop is off; do not register an instruction owner');
-    const { flags } = parseFlags(args);
     return skillStore(ROOT).bind(flags.runtime, flags.session);
   },
-  'skills-read': async args => {
-    const { flags } = parseFlags(args);
+  'skills-read': async (_args, flags) => {
     return skillStore(ROOT).read(flags.runtime, flags.session);
   },
-  'skills-ack': async args => {
-    const { flags } = parseFlags(args);
+  'skills-ack': async (_args, flags) => {
     return skillStore(ROOT).acknowledge(flags.runtime, flags.session, flags.fingerprint);
   },
   'loop-off': async () => setLoop(false),
   // Flags first, then positionals: `claim <ID> --session <uuid>` used to read
   // `--session` as the phase, and a phase nothing validated accepted it in
   // silence. Now it would be refused, so the parse has to be the right one.
-  claim: async (args) => {
-    const { flags, rest } = parseFlags(args);
+  claim: async (rest, flags) => {
     const [id, phase] = rest;
     // A bare `--session` carries no address: it must fall back to the one on
     // file, exactly like the empty string an unset variable expands to.
@@ -1891,32 +1876,28 @@ const COMMANDS = {
     if (flags.runtime !== undefined && typeof flags.runtime !== 'string') throw new Error('--runtime needs claude or codex');
     return claim(required(id, 'claim <ISSUE-ID> [phase] [--session <uuid>] [--runtime claude|codex]'), phase, session, flags.runtime);
   },
-  closure: async ([id, ...rest]) => {
-    const { flags } = parseFlags(rest);
+  closure: async ([id], flags) => {
     required(id, 'closure <ID> [--file <json|->]');
     if (flags.file === undefined) return closureStore().read(id);
     if (typeof flags.file !== 'string') throw new Error('--file needs a filename or -');
     const input = flags.file === '-' ? await readStdin() : await readFile(flags.file, 'utf8');
     return closureStore().save(id, JSON.parse(input));
   },
-  release: async ([id, ...rest]) => {
-    const { flags } = parseFlags(rest);
+  release: async ([id], flags) => {
     if (flags.reason !== undefined && !hasText(flags.reason)) throw new Error('--reason needs an explicit cleanup reason');
     return release(id, flags.reason);
   },
   // Reading a verdict also records it — the receipt, the phase, leaving the
   // waiting column — because this is the one command the approval path is sure
   // to run. `--peek` is for looking without answering on the worker's behalf.
-  verdict: async ([id, ...rest]) => {
-    const { flags } = parseFlags(rest);
+  verdict: async ([id], flags) => {
     return verdict(required(id, 'verdict <ISSUE-ID> [--peek]'), { peek: Boolean(flags.peek) });
   },
   'ensure-waiting-state': async () => ensureWaitingState(),
   // The long plan goes into a Linear document; the ticket gets a digest that
   // states, in one line, what the human has to do. Reading the full plan is
   // opt-in — a human should be able to answer from the comment alone.
-  plan: async ([id, ...rest]) => {
-    const { flags, rest: words } = parseFlags(rest);
+  plan: async ([id, ...words], flags) => {
     const issue = required(
       id,
       'plan <ISSUE-ID> --summary <text> [--expects <text>] [--reply <commentId>] [<body>]',
@@ -1953,22 +1934,75 @@ const COMMANDS = {
   },
 };
 
-// Splits `--flag value` pairs out of an argument list, leaving the positional
-// words in `rest`.
-function parseFlags(args) {
+// Declare options even for commands that accept none. Subcommands have their
+// own sets: prepare must not silently accept merge's --pr, for example.
+export const COMMAND_FLAGS = {
+  whoami: [], team: [], next: [], board: [], pulse: [],
+  reviewed: ['group'], independent: [], claims: [], ready: [],
+  surface: ['files', 'symbols'], stop: [], 'stop-requested': [], list: [], show: [],
+  comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],
+  attachments: ['out'], uncomment: [],
+  create: ['title', 'parent', 'priority', 'expects', 'desc', 'description'],
+  feedback: [], repo: [], workers: [],
+  landing: {
+    status: [], acquire: ['runtime', 'session', 'cwd'],
+    prepare: ['runtime', 'session'], merge: ['runtime', 'session', 'pr'],
+    release: ['runtime', 'session', 'reason'],
+  },
+  stack: {
+    record: ['runtime', 'session', 'cwd', 'parent', 'base'],
+    rebase: ['runtime', 'session', 'pr'],
+  },
+  cleanup: ['pr'], status: [], watcher: [],
+  'loop-on': ['runtime', 'session'], 'loop-off': [],
+  'skills-bind': ['runtime', 'session'], 'skills-read': ['runtime', 'session'],
+  'skills-ack': ['runtime', 'session', 'fingerprint'],
+  claim: ['session', 'runtime'], closure: ['file'], release: ['reason'],
+  verdict: ['peek'], 'ensure-waiting-state': [],
+  plan: ['summary', 'expects', 'reply', 'title'], 'refresh-token': [],
+};
+
+// Parse once, before invoking a handler (stdin, credentials and writes included).
+export function parseCommandArgs(command, args) {
+  if (!Object.hasOwn(COMMAND_FLAGS, command)) throw new Error(`unknown command: ${command}`);
+  let options = COMMAND_FLAGS[command];
+  let label = command;
+  if (!Array.isArray(options)) {
+    const action = args[0];
+    if (!Object.hasOwn(options, action)) {
+      throw new Error(`${command} requires one of: ${Object.keys(options).join(', ')}`);
+    }
+    options = options[action];
+    label += ` ${action}`;
+  }
+  const allowed = new Set(options);
   const flags = {};
   const rest = [];
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i].startsWith('--')) {
-      // A flag with nothing after it, or another flag after it, is a switch:
-      // `--peek` has no value to give and must not swallow the next flag.
+    const arg = args[i];
+    if (arg === '--') {
+      rest.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('--')) {
+      const name = arg.slice(2);
+      if (!allowed.has(name)) {
+        throw new Error(`${label}: unknown option ${arg}; accepted options: ${options.map(k => `--${k}`).join(', ') || '(none)'}`);
+      }
       const next = args[i + 1];
-      const bare = next === undefined || next.startsWith('--');
-      flags[args[i].slice(2)] = bare ? true : next;
+      // --peek is a switch even before a positional. Preserve the existing
+      // bare-value representation, including claim's bare --session fallback.
+      const bare = name === 'peek' || next === undefined || next.startsWith('--');
+      flags[name] = bare ? true : next;
       if (!bare) i += 1;
     } else {
-      rest.push(args[i]);
+      rest.push(arg);
     }
+  }
+  if (command === 'create' && Object.hasOwn(flags, 'description')) {
+    if (Object.hasOwn(flags, 'desc')) throw new Error('create: use only one of --desc and --description');
+    flags.desc = flags.description;
+    delete flags.description;
   }
   return { flags, rest };
 }
@@ -2002,14 +2036,15 @@ export function entryPath(argv1) {
 // the CLI exited silently with status 0 — every command answering nothing.
 if (process.argv[1] && import.meta.url === pathToFileURL(entryPath(process.argv[1])).href) {
   const [command, ...args] = process.argv.slice(2);
-  const handler = COMMANDS[command];
+  const handler = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : undefined;
   if (!handler) {
     console.error(`usage: linear_agent.mjs <${Object.keys(COMMANDS).join('|')}>`);
     process.exit(2);
   }
 
   try {
-    const result = await handler(args);
+    const { rest, flags } = parseCommandArgs(command, args);
+    const result = await handler(rest, flags);
     // Plain strings print raw so they can be used directly in shell substitution.
     console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
   } catch (error) {

@@ -279,7 +279,7 @@ test('canonical CLI acquire persists landing and status without touching another
   assert.deepEqual(JSON.parse(await readFile(join(f.stateDir, 'claims', 'JAU-2.json'))), b.c);
   assert.equal((await cli('landing', 'status')).owner.issue, a.c.issue);
   await assert.rejects(cli('landing', 'acquire', a.c.issue, '--runtime', 'claude', '--session', a.c.session), /exact claim/);
-  await assert.rejects(cli('landing', 'acquire', a.c.issue, '--unknown', 'x'), /unknown landing argument/);
+  await assert.rejects(cli('landing', 'acquire', a.c.issue, '--unknown', 'x'), /landing acquire: unknown option --unknown; accepted options: --runtime, --session, --cwd/);
 });
 
 test('valid JSON corruption cannot erase a durable owner', async t => {
