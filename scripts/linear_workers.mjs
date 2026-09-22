@@ -53,7 +53,15 @@ export async function withWorkerLock(state, id, action) {
     if (e.code !== 'EEXIST') throw e;
     const guard = await open(reap, 'wx', 0o600);
     try {
-      const old = await readJson(path);
+      let old;
+      try { old = await readJson(path); }
+      catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        // open('wx') publishes the file before its owner identity is written.
+        // A contender may see those incomplete bytes; it must neither steal
+        // the lock nor expose a parse error as an unrelated permanent failure.
+        throw new Error(`${id} launch/cleanup already in progress or uncertain`, { cause: error });
+      }
       if (identityState(old) !== 'gone') throw new Error(`${id} launch/cleanup already in progress or uncertain`);
       await rm(path);
     } finally { await guard.close(); await rm(reap); }

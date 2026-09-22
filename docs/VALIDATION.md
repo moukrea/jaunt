@@ -3,7 +3,7 @@
 
 ## Deterministic worker routing — JAU-65 (2026-09-22)
 
-After rebasing on JAU-34 and JAU-63 (`de1e52d`), **211 npm tests passed**.
+After rebasing on JAU-34 and JAU-63 (`de1e52d`), **212 npm tests passed**.
 The 30 routing tests cover complete paginated attribution, edited human replies,
 reaction replacement, approval/decline/feedback forwarding without registering a
 verdict, deferred replies drained on a quiet poll, changed claims, stop/loop-off,
@@ -20,7 +20,13 @@ the orchestrator without invoking ordinary routing. A legacy watcher regression
 found in the first full run was fixed: without a verified owner handoff, the old
 wake path is preserved, including quiet periodic exits.
 
-JavaScript syntax checks passed for all four changed runtime modules, and
+The first PR CI run exposed an existing lock-publication race in
+`withWorkerLock`: a contender parsed the exclusive lock between file creation
+and identity write. Partial JSON now reports the existing busy/uncertain outcome
+without deleting the lock; a deterministic empty/truncated-file regression test
+checks preservation and eventual admission after release.
+
+JavaScript syntax checks passed for all five changed runtime modules, and
 `python3 scripts/check_project.py --source` passed. No application transport or UI
 code changed. The source check omits the optional generated QR vendor asset.
 

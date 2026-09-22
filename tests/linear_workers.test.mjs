@@ -289,3 +289,21 @@ test('release retries restoration/removal without dropping supervision or closur
   assert.equal(moves, 1); assert.equal(removed, 2);
   assert.equal(await readJson(join(state, 'claims', 'JAU-999.json')), null);
 }));
+
+
+test('an incompletely published worker lock stays busy without being stolen', async () => temporary(async state => {
+  const path = join(state, 'workers', `${claim.issue}.lock`);
+  await mkdir(join(state, 'workers'));
+  for (const bytes of ['', '{"pid":']) {
+    await writeFile(path, bytes);
+    await assert.rejects(withWorkerLock(state, claim.issue, () => assert.fail('uncertain lock stolen')), /already in progress or uncertain/);
+    assert.equal(await readFile(path, 'utf8'), bytes);
+    await assert.rejects(readFile(`${path}.reap`), { code: 'ENOENT' });
+  }
+  await writeFile(path, JSON.stringify(processIdentity(process.pid)));
+  await assert.rejects(withWorkerLock(state, claim.issue, () => assert.fail('live lock stolen')), /already in progress/);
+  await rm(path);
+  let entered = false;
+  await withWorkerLock(state, claim.issue, async () => { entered = true; });
+  assert.equal(entered, true);
+}));
