@@ -634,7 +634,7 @@ class Host:
 
     # ---- shared workspace (open sessions, layouts) -------------------------------
     # ---- agents and machines ---------------------------------------------------------
-    RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+    RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "resetdeck": "ResetDeck"}
 
     def agents_status(self) -> dict:
         return {"enabled": self.policy.enabled, "features": self.policy.features(), "requesters": self.policy.table(), "links": self.links.list(),
@@ -847,6 +847,13 @@ class Host:
     async def agent_run(self, peer, p: dict) -> dict:
         key, name = self._requester_of(peer, p)
         command, cwd = str(p.get("command", "")), p.get("cwd")
+        if p.get("runtime") == "resetdeck":
+            import shlex
+            args = shlex.split(command)
+            if (len(args) != 4 or not Path(args[0]).is_absolute() or not Path(args[1]).is_absolute()
+                    or args[2] != "exchange" or not re.fullmatch(r"[A-Za-z0-9+/=]+", args[3])
+                    or len(args[3]) > 200_000 or shlex.join(args) != command):
+                raise ValueError("ResetDeck only accepts an encoded collector exchange")
         timeout = p.get("timeoutSec")
         detail = {"summary": command[:120], "command": command[:2000], "cwd": cwd or "", "timeout": timeout or 60}
         await self._authorize(key, name, "exec", "run", detail)
@@ -894,6 +901,10 @@ class Host:
         runtime = str(p.get("runtime", ""))
         if runtime not in self.RUNTIME_NAMES:
             raise ValueError("Unknown runtime")
+        if runtime == "resetdeck":
+            if p.get("service") != "resetdeck":
+                raise ValueError("ResetDeck service identity required")
+            return "service:resetdeck", runtime
         sid = self.bridge.session_for_pid(int(p.get("pid") or 0))
         if not sid and p.get("session") in self.sessions.items:
             sid = str(p["session"])
@@ -905,6 +916,8 @@ class Host:
         if method == "agents.status":
             return self.agents_status()
         sid, runtime = self._caller(p)
+        if runtime == "resetdeck" and method not in ("agents.hosts", "agents.run", "agents.read"):
+            raise ValueError("ResetDeck can only exchange collector data")
         if method in ("agents.hosts", "agents.run", "agents.read", "agents.shell"):
             self._require("exec")
         if method == "agents.hosts":
