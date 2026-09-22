@@ -76,9 +76,9 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function runAgent(command) {
+function runAgent(command, ...args) {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', [AGENT, command], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('node', [AGENT, command, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => (out += d));
@@ -286,8 +286,10 @@ async function main() {
     let current;
     try {
       const activity = await runAgent('sync-activity');
+      const waits = await runAgent('wait', 'reconcile');
+      if (waits.events?.length) return report(WATCH_FILE, record, { wake: 'external-wait', events: waits.events, errors: waits.errors });
       current = await runAgent('pulse');
-      current.activityErrors = activity.errors || [];
+      current.activityErrors = [...(activity.errors || []), ...(waits.errors || [])];
     } catch (error) {
       // A transient API failure is not an event, but an expired token is not
       // transient. Giving up after a few tries is what turns a silent 30-minute

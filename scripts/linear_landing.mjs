@@ -123,6 +123,27 @@ export function landingStore({ root, stateDir = join(root, '.dev-state'), run = 
   }
   return {
     status,
+    async verifyMerged(id, who, number, cwd) {
+      return lock(async () => {
+        const c = await held(id, who), state = await landingState(stateDir);
+        await enabled(id);
+        if (state.queue.some(e => e.issue === id)) throw new Error('landing reservation remains; reconcile merge first');
+        const entry = [...state.history].reverse().find(e => same(c, e) && e.merged === Number(number));
+        if (!entry?.prepared?.head || !entry.mergeAttempted) throw new Error('no matching verified merge history; preserve legacy evidence');
+        const location = await checkout(c, cwd || entry.cwd);
+        if (location.cwd !== entry.cwd || location.branch !== entry.branch) throw new Error('merged worktree changed');
+        await clean(c, location.cwd);
+        const p = await pr(number); matchesPr(p, entry);
+        if (p.state !== 'MERGED' || p.headRefOid !== entry.prepared.head || p.mergeCommit?.oid !== entry.commit ||
+            (await git(['rev-parse', 'HEAD'], location.cwd)).trim() !== p.headRefOid) throw new Error('merged head/commit mismatch');
+        await git(['fetch', 'origin'], location.cwd);
+        await git(['merge-base', '--is-ancestor', p.mergeCommit.oid, 'origin/main'], location.cwd);
+        await clean(c, location.cwd);
+        if ((await checkout(c, location.cwd)).branch !== entry.branch ||
+            (await git(['rev-parse', 'HEAD'], location.cwd)).trim() !== p.headRefOid) throw new Error('worktree changed during merge verification');
+        return { pr: p.number, head: p.headRefOid, merge: p.mergeCommit.oid, ...location };
+      });
+    },
     async acquire(id, who, cwd) {
       return lock(async () => {
         const c = await held(id, who);

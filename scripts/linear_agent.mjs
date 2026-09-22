@@ -11,6 +11,8 @@ import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promise
 import { randomUUID } from 'node:crypto';
 import { skillStore } from './linear_skills.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
+import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
+import { connectionPages } from './linear_activity.mjs';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -59,7 +61,7 @@ export const WAITING_STATE = 'Waiting for human';
 // staying `awaiting-approval` would put *Waiting for human* on a ticket where
 // the human is done (the exact confusion JAU-18 removed), and going straight to
 // `implementing` is the race this phase avoids.
-export const PHASES = ['planning', 'awaiting-approval', 'queued', 'implementing', 'landing'];
+export const PHASES = ['planning', 'awaiting-approval', 'queued', 'implementing', 'landing', WAIT_PHASE];
 
 // The phases that actually hold the working tree. `planning` reads, greps and
 // surveys; `awaiting-approval` is a session that finished its turn; `queued` is
@@ -567,6 +569,66 @@ async function addComment(identifier, body, parent, options) {
   return (await activity()).publish(identifier, body, parent, options);
 }
 
+// Explicitly fetch each tracked ticket, including old Done issues outside pulse's
+// first page. Complete comment history is required before consuming a decision.
+export async function readWaitThread(id, query = graphql) {
+  let issue;
+  const comments = await connectionPages(async cursor => {
+    const data = await query(`query($id: String!, $cursor: String) { issue(id: $id) {
+      id identifier relations { nodes { type relatedIssue { identifier } } }
+      inverseRelations { nodes { type issue { identifier } } }
+      comments(first: 100, after: $cursor) { nodes { id body createdAt parent { id } botActor { id } user { id email } }
+        pageInfo { hasNextPage endCursor } }
+    } }`, { id, cursor });
+    if (!data.issue || data.issue.identifier !== id) throw new Error('wait issue not found');
+    issue ||= data.issue;
+    return data.issue.comments;
+  });
+  return { ...issue, comments };
+}
+
+export async function syncWaitDiscussion(w, { service, check = async () => {
+  const c = (await listClaims()).find(c => c.issue === w.issue);
+  if (!c || ['claimedAt', 'runtime', 'session'].some(k => c[k] !== w[k])) throw new Error('wait owner changed');
+  if (!(await loopState()).enabled || (await stopRequested(w.issue)).stop) throw new Error('wait stopped or loop off');
+} } = {}) {
+  service ||= await activity();
+  await check();
+  const result = await service.sync(w.issue);
+  if (!result.ok) throw new Error(`wait discussion sync failed: ${JSON.stringify(result.errors)}`);
+  const record = await service.read(w.issue);
+  const source = w.posts.request.id;
+  const own = record.subjects.find(s => s.key === `expect:${source}`);
+  if (!own) throw new Error('wait expectation subject missing');
+  const subjects = [];
+  for (const previous of w.history || []) {
+    for (const key of [`expect:${previous.request.id}`, `feedback:${previous.supersededBy}`]) {
+      const old = record.subjects.find(s => s.key === key);
+      if (old) subjects.push({ ...old, state: 'resolved', reason: 'Wait request superseded by explicit feedback', evidence: previous.supersededBy });
+    }
+  }
+  if (w.state === 'resolved') subjects.push({ ...own, state: w.resolution.ticket ? 'transferred' : 'resolved',
+    reason: 'External wait outcome verified', evidence: w.resolution.evidence,
+    ...(w.resolution.ticket ? { ticket: w.resolution.ticket } : {}) });
+  // Only the decision consumed by this wait; unrelated feedback remains open.
+  const answer = w.resolution && record.subjects.find(s => s.key === `feedback:${w.resolution.comment}`);
+  if (answer) subjects.push({ ...answer, state: 'resolved', reason: 'Wait decision applied', evidence: w.resolution.evidence });
+  if (!subjects.length) return;
+  await check();
+  await service.update(w.issue, { revision: record.revision, subjects });
+}
+
+async function externalWaits() {
+  return waitStore({ stateDir: STATE_DIR, readThread: readWaitThread, agentId: (await agentUser()).id,
+    publish: addComment, persistClaim: writeClaim, syncDiscussion: syncWaitDiscussion,
+    verifyMerge: (c, who, pr, cwd) => landingStore({ root: ROOT }).verifyMerged(c.issue, who, pr, cwd),
+    queuedClaims: async () => (await listClaims()).filter(c => c.phase === 'queued'),
+    promoteQueued: candidates => promoteWaitQueue(candidates, { claims: listClaims,
+      enabled: async id => (await loopState()).enabled && !(await stopRequested(id)).stop,
+      verdict: id => verdict(id, { peek: true }), independent, ready: readyToImplement }),
+  });
+}
+
 // A document holds the long form; the ticket comment holds only the digest. The
 // app token already carries the scope for this — verified against the API, no
 // scope change, so no existing token is revoked.
@@ -886,6 +948,8 @@ async function claim(identifier, phase = 'planning', session, runtime) {
   const issue = await getIssue(identifier);
   const existing = await listClaims().then((c) => c.find((x) => x.issue === issue.identifier));
   const identity = claimIdentity(existing, session, runtime);
+  // Refuse forbidden post-merge transitions before parking or notifying Linear.
+  if (existing) await guardWaitTransition(STATE_DIR, { ...existing, ...identity, phase }, existing);
 
   // Entering `awaiting-approval` is the moment the ticket stops being the
   // agent's business and becomes the human's, and it is the only transition the
@@ -952,6 +1016,7 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
   moveState = setState, unpark = false, onUnpark = () => {} } = {}) {
   const path = join(stateDir, 'claims', `${record.issue}.json`);
   const previous = await optionalJson(path);
+  await guardWaitTransition(stateDir, record, previous);
   if (record.phase === 'landing') await assertLandingAdmission(stateDir, record, previous);
   if (previous && previous.claimedAt !== record.claimedAt) throw new Error('claim cycle changed; retry transition');
   const unchanged = async () => {
@@ -1103,52 +1168,55 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveS
       return { ...inventory, problems: closureProblems(inventory, claim) };
     },
     async release(id, reason, beforeRelease) {
-      const p = paths(id), claim = await optionalJson(p.claim);
-      if (!claim) return { released: false, reason: 'no claim held' };
-      if (!claim.claimedAt || claim.issue !== id) throw new Error('invalid claim; refusing release');
-      await assertLandingReleased(stateDir, id);
-      const issue = await readIssue(id);
-      if (issue?.identifier !== id || !issue.state?.type) throw new Error('cannot verify origin; preserving claim');
-      const inventory = await optionalJson(p.inventory);
-      const requiresInventory = issue.state.type === 'completed' || Boolean(claim.workStartedAt) || CONTENDING_PHASES.includes(claim.phase);
-      const cleanup = !requiresInventory && hasText(reason);
-      if (reason !== undefined && !cleanup) throw new Error('release --reason is only for claims without completed or started work; record a closure instead');
-      if (cleanup && inventory?.claimedAt === claim.claimedAt && inventory.items?.length) {
-        throw new Error('recorded leftovers require normal closure verification, not unstarted cleanup');
-      }
-      if (!cleanup) {
-        const problems = closureProblems(inventory, claim);
-        if (problems.length) throw new Error(`${problems.join('; ')}. Use jaunt-linear closure ${id} --file <json|->; see docs/LINEAR_FOLLOWUPS.md`);
-        for (const item of inventory.items.filter((i) => i.disposition === 'ticket')) {
-          const target = await readIssue(item.ticket);
-          if (target?.identifier !== item.ticket) throw new Error(`${item.key}: follow-up does not exist`);
-          if (!relatedTo(issue, item.ticket) && !relatedTo(target, id)) throw new Error(`${item.key}: missing related link to ${item.ticket}; preserve its ID and finish the relation`);
+      return withWorkerLock(stateDir, 'WAIT-0', async () => {
+        const p = paths(id), claim = await optionalJson(p.claim);
+        if (!claim) return { released: false, reason: 'no claim held' };
+        if (!claim.claimedAt || claim.issue !== id) throw new Error('invalid claim; refusing release');
+        await assertWaitResolved(stateDir, claim);
+        await assertLandingReleased(stateDir, id);
+        const issue = await readIssue(id);
+        if (issue?.identifier !== id || !issue.state?.type) throw new Error('cannot verify origin; preserving claim');
+        const inventory = await optionalJson(p.inventory);
+        const requiresInventory = issue.state.type === 'completed' || Boolean(claim.workStartedAt) || CONTENDING_PHASES.includes(claim.phase);
+        const cleanup = !requiresInventory && hasText(reason);
+        if (reason !== undefined && !cleanup) throw new Error('release --reason is only for claims without completed or started work; record a closure instead');
+        if (cleanup && inventory?.claimedAt === claim.claimedAt && inventory.items?.length) {
+          throw new Error('recorded leftovers require normal closure verification, not unstarted cleanup');
         }
-      }
-      // Re-check local inputs after remote reads; never delete a replacement
-      // claim or release using an inventory edited while verification ran.
-      if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
-          JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during verification; retry release');
-      // Restore before destructive cleanup, after all closure checks. Re-read the
-      // board so a human move during verification is not overwritten.
-      if (claim.phase === 'awaiting-approval' || claim.parkedFrom || issue.state.name === WAITING_STATE) {
-        const current = await readIssue(id);
+        if (!cleanup) {
+          const problems = closureProblems(inventory, claim);
+          if (problems.length) throw new Error(`${problems.join('; ')}. Use jaunt-linear closure ${id} --file <json|->; see docs/LINEAR_FOLLOWUPS.md`);
+          for (const item of inventory.items.filter((i) => i.disposition === 'ticket')) {
+            const target = await readIssue(item.ticket);
+            if (target?.identifier !== item.ticket) throw new Error(`${item.key}: follow-up does not exist`);
+            if (!relatedTo(issue, item.ticket) && !relatedTo(target, id)) throw new Error(`${item.key}: missing related link to ${item.ticket}; preserve its ID and finish the relation`);
+          }
+        }
+        // Re-check local inputs after remote reads; never delete a replacement
+        // claim or release using an inventory edited while verification ran.
         if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
-            JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
-        await restoreClaimState(current, claim, { moveState });
-        if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
-            JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
-      }
-      if (beforeRelease) {
-        await beforeRelease();
-        if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) || JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during removal; preserving claim');
-      }
-      const receipt = { issue: id, claimedAt: claim.claimedAt, releasedAt: new Date().toISOString(),
-        mode: cleanup ? 'unstarted' : 'closure', ...(cleanup ? { reason } : { inventory }) };
-      await atomicJson(p.receipt, receipt);
-      await rm(p.stop, { force: true });
-      await rm(p.claim);
-      return { released: true, was: id, mode: receipt.mode };
+            JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during verification; retry release');
+        // Restore before destructive cleanup, after all closure checks. Re-read the
+        // board so a human move during verification is not overwritten.
+        if (claim.phase === 'awaiting-approval' || claim.parkedFrom || issue.state.name === WAITING_STATE) {
+          const current = await readIssue(id);
+          if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
+              JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
+          await restoreClaimState(current, claim, { moveState });
+          if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
+              JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
+        }
+        if (beforeRelease) {
+          await beforeRelease();
+          if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) || JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during removal; preserving claim');
+        }
+        const receipt = { issue: id, claimedAt: claim.claimedAt, releasedAt: new Date().toISOString(),
+          mode: cleanup ? 'unstarted' : 'closure', ...(cleanup ? { reason } : { inventory }) };
+        await atomicJson(p.receipt, receipt);
+        await rm(p.stop, { force: true });
+        await rm(p.claim);
+        return { released: true, was: id, mode: receipt.mode };
+      });
     },
   };
 }
@@ -1505,6 +1573,9 @@ export async function registerAnswer(issue, answer, held, plan, comments, agentI
   persistClaim = writeClaim, decidePhase = approvalPhase, comment = addComment,
 } = {}) {
   const done = {};
+  // Old plan approval and new feedback route to the retained owner; neither can
+  // restart code that has already merged or erase a delivery obligation.
+  if (held.phase === WAIT_PHASE) return { phase: WAIT_PHASE, note: 'reconcile external wait; plan verdict does not authorize its action' };
 
   // The phase finally says what the session is doing, because something now
   // writes it: approved means the worker codes, feedback means it plans again.
@@ -1815,6 +1886,22 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
+  wait: async ([action, id, ...rest], flags) => {
+    if (rest.length) throw new Error('unexpected wait argument');
+    const store = await externalWaits();
+    if (action === 'reconcile') return store.reconcile(id);
+    required(id, 'wait <begin|read|attempt|resolve|ack> <ID>');
+    if (action === 'read') return store.read(id);
+    if (action === 'ack') return store.acknowledge(id, flags.event, flags.evidence);
+    const who = { runtime: flags.runtime, session: flags.session };
+    if (action === 'decision') return store.decision(id, who);
+    if (action === 'revise') return store.revise(id, who, { action: flags.action, reason: flags.reason, comment: flags.comment, deadline: flags.deadline });
+    if (action === 'begin') return store.begin(id, who, { pr: flags.pr, cwd: flags.cwd || process.cwd(), reason: flags.reason,
+      owner: flags.owner, nextAction: flags.action, resource: flags.resource, deadline: flags.deadline });
+    if (action === 'attempt') return store.attempt(id, who, { action: flags.action, result: flags.result, evidence: flags.evidence, deadline: flags.deadline });
+    if (action === 'resolve') return store.resolve(id, who, { comment: flags.comment, evidence: flags.evidence, ticket: flags.ticket });
+    throw new Error('unknown wait action');
+  },
   landing: async ([action, id, ...rest], flags) => {
     const store = landingStore({ root: ROOT });
     if (action === 'status' && !id && !rest.length) return store.status();
@@ -1943,6 +2030,11 @@ const COMMANDS = {
 // Declare options even for commands that accept none. Subcommands have their
 // own sets: prepare must not silently accept merge's --pr, for example.
 export const COMMAND_FLAGS = {
+  wait: { read: [], reconcile: [], begin: ['runtime', 'session', 'pr', 'cwd', 'reason', 'owner', 'action', 'resource', 'deadline'],
+    decision: ['runtime', 'session'],
+    revise: ['runtime', 'session', 'action', 'reason', 'comment', 'deadline'],
+    attempt: ['runtime', 'session', 'action', 'result', 'evidence', 'deadline'],
+    resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket'], ack: ['event', 'evidence'] },
   'sync-activity': [], discussion: ['file'],
   whoami: [], team: [], next: [], board: [], pulse: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],

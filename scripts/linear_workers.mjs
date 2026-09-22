@@ -74,7 +74,7 @@ export function workerHealth(claim, record, { now = Date.now(), identity = ident
   }
   if (child === 'unknown' && !(record.spawnFailed || record.childExited)) return { state: 'unknown', reason: 'child identity/exit not established' };
   if (wrapper === 'unknown' && !record.endedAt) return { state: 'unknown', reason: 'wrapper identity unknown' };
-  if (['awaiting-approval', 'queued'].includes(claim.phase)) return { state: 'resting', reason: claim.phase };
+  if (['awaiting-approval', 'queued', 'awaiting-external'].includes(claim.phase)) return { state: 'resting', reason: claim.phase };
   if (record.cancelled) return { state: ['owner-closed', 'state-unreadable'].includes(record.cancelled) ? 'interrupted' : 'suspended', reason: record.cancelled };
   if (record.endedAt && record.code === 0 && !record.failure) return { state: 'finished', reason: 'reconcile normal completion before resuming' };
   return { state: 'interrupted', reason: record.failure?.kind || 'process exited unexpectedly' };
@@ -170,16 +170,30 @@ export async function workerReports(state, { now = Date.now(), identity = identi
       const next = { ...schedule, ...decision, issue: claim.issue, claimedAt: claim.claimedAt, attempt: record.attempt, detectedAt, progressPhase: claim.phase };
       schedule = next;
     }
-    reports.push({ issue: claim.issue, runtime: runtimeOf(claim), phase: claim.phase, ...health, attempt: record?.attempt, schedule: health.state === 'interrupted' ? schedule : null });
+    const { readWait, waitProgress } = await import('./linear_waits.mjs');
+    let progress;
+    try {
+      progress = waitProgress(await readWait(state, claim), now);
+      if (claim.phase === 'awaiting-external' && !progress) throw Error('external phase has no current wait evidence');
+    }
+    catch (error) { progress = { state: 'error', error: error.message }; }
+    reports.push({ issue: claim.issue, runtime: runtimeOf(claim), phase: claim.phase, ...health, attempt: record?.attempt,
+      schedule: health.state === 'interrupted' ? schedule : null, ...(progress ? { progress } : {}) });
   }
   return reports;
 }
 // Called only by the watchdog. Persist notifications separately from retry counters.
 export async function workerWake(state, now = Date.now()) {
   if (!(await readJson(join(state, 'linear-loop.json')))?.enabled) return null;
+  try {
+    const wake = await (await import('./linear_waits.mjs')).waitWake(state, now);
+    if (wake) return wake;
+  } catch (e) {
+    if (e.code !== 'EEXIST' && !/already in progress|lock recovery/.test(e.message)) throw e;
+  }
   const reports = await workerReports(state, { mark: false, now });
   for (const report of reports) {
-    if (!report.attempt || ['running', 'resting'].includes(report.state)) continue;
+    if (!report.attempt || report.phase === 'awaiting-external' || ['running', 'resting'].includes(report.state)) continue;
     if (await readJson(join(state, 'claims', `${report.issue}.stop`))) continue;
     const claim = await readJson(join(state, 'claims', `${report.issue}.json`));
     const p = lifecyclePaths(state, claim), notification = join(p.dir, 'notification.json');

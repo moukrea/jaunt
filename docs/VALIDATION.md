@@ -1,5 +1,44 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Durable post-merge waits — JAU-63 (2026-09-22)
+
+The worktree was rebased onto JAU-34's merged `611d792` discussion/label cycle.
+The complete local `npm test` run passed **179 tests**. A focused run of wait and
+landing tests passed **37 tests**. Module syntax checks and
+`python3 scripts/check_project.py` passed. The first complete run exposed missing
+module copies in isolated CLI fixtures; those fixtures now include the new wait
+module and the activity dependency, and the complete run passes.
+
+Temporary state directories, real temporary Git repositories and injected
+GitHub/Linear responses cover exact merged-head admission, dirty worktrees,
+remaining landing reservations, wrong owners, preserved claim/work history,
+noncontending completed surfaces, old verdict protection, and guarded closure.
+Queue tests cover fresh feedback, stop, dependency refusal, owner replacement
+and recovery of routing after promotion. Cleanup retains unacknowledged reply
+and queued-worker routing events; acknowledgement records observed processing,
+not consent or runtime queue acceptance.
+
+Wait tests cover silent/inaccessible peers and accepted-but-held messages,
+deadline/restart deduplication, disabled loops, stop during API reads, bounded
+publication retries, lost create responses, preserved comment IDs after label
+failure, and Linear-only reply discovery after retry exhaustion. Explicit thread
+pagination covers a directly requested ticket independently of the board's
+first-page window. Action decisions reject old approval, ordinary reactions,
+bot/unrelated replies and newer contradictory feedback. Transfer targets match
+complete issue identifiers. Revised requests retain history and require a fresh
+decision. Discussion integration closes only the wait's own expectation and
+consumed decision; unrelated subjects and unread resolution information remain.
+
+These are local/injected network observations, not a real bridge handoff or
+production activation. The canonical launcher checkout was inspected read-only:
+it remains at `77f1ba0` with tracked and untracked local work. It was not replaced,
+and its running watcher has not loaded this worktree's wait protocol. No live
+wait request, human wait decision, publisher activation or product release is
+claimed. Canonical activation and a real Linear-only round trip remain an
+operational follow-up; JAU-67 separately tracks label activation and JAU-66
+tracks the exclusive publisher handoff. No production publication lock,
+workflow, tag, variable or secret was changed by this ticket.
+
 ## Linear discussion lifecycle — JAU-34 (2026-09-22)
 
 Implemented separate permanent provenance, unread harness information and active

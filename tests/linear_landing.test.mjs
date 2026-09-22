@@ -70,6 +70,32 @@ async function fixture(t) {
 async function reserve(f, w) { return f.store.acquire(w.c.issue, w.who, w.cwd); }
 async function prepare(f, w) { await reserve(f, w); return f.store.prepare(w.c.issue, w.who); }
 
+test('post-merge admission verifies durable merge, exact clean head and main ancestry without reserving publication', async t => {
+  const f = await fixture(t), a = await f.worker('JAU-1');
+  f.pr(1, a);
+  const runner = async (cmd, args, cwd) => {
+    const result = await f.runner(cmd, args, cwd);
+    if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') f.prs.get(1).mergeCommit.oid = f.base;
+    return result;
+  };
+  f.store = landingStore({ root: f.root, stateDir: f.stateDir, run: runner });
+  await assert.rejects(f.store.verifyMerged('JAU-1', a.who, 1, a.cwd), /history/);
+  await prepare(f, a);
+  await assert.rejects(f.store.verifyMerged('JAU-1', a.who, 1, a.cwd), /reservation/);
+  await f.store.merge('JAU-1', a.who, 1);
+  const proof = await f.store.verifyMerged('JAU-1', a.who, 1, a.cwd);
+  assert.equal(proof.head, f.base); assert.equal(proof.merge, f.base);
+  assert.equal((await f.store.status()).owner, null);
+  assert.ok(!f.calls.some(args => args.includes('workflow') || args.includes('variable')));
+  await writeFile(join(a.cwd, 'unpublished.txt'), 'keep this');
+  await assert.rejects(f.store.verifyMerged('JAU-1', a.who, 1, a.cwd), /dirty/);
+  await rm(join(a.cwd, 'unpublished.txt'));
+  f.prs.get(1).headRefOid = 'c'.repeat(40);
+  await assert.rejects(f.store.verifyMerged('JAU-1', a.who, 1, a.cwd), /mismatch/);
+  f.prs.get(1).headRefOid = f.base;
+  await assert.rejects(f.store.verifyMerged('JAU-1', { ...a.who, session: 'other' }, 1, a.cwd), /exact claim/);
+});
+
 test('durable FIFO, identity, claim admission and phase refresh survive CLI lifetime', async t => {
   const f = await fixture(t), a = await f.worker('JAU-1'), b = await f.worker('JAU-2');
   await assert.rejects(writeClaim({ ...a.c, phase: 'landing' }, { stateDir: f.stateDir }), /landing acquire/);
@@ -271,7 +297,7 @@ test('canonical CLI acquire persists landing and status without touching another
   const { copyFile, symlink } = await import('node:fs/promises');
   const f = await fixture(t), a = await f.worker('JAU-1'), b = await f.worker('JAU-2');
   await mkdir(join(f.root, 'scripts'));
-  for (const name of ['linear_agent.mjs', 'linear_landing.mjs', 'linear_workers.mjs', 'linear_watch.mjs', 'linear_skills.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(f.root, 'scripts', name));
+  for (const name of ['linear_waits.mjs', 'linear_activity.mjs', 'linear_agent.mjs', 'linear_landing.mjs', 'linear_workers.mjs', 'linear_watch.mjs', 'linear_skills.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(f.root, 'scripts', name));
   await symlink(f.stateDir, join(f.root, '.dev-state'));
   const cli = async (...args) => JSON.parse(await run(process.execPath, [join(f.root, 'scripts', 'linear_agent.mjs'), ...args], a.cwd));
   assert.equal((await cli('landing', 'acquire', a.c.issue, '--runtime', 'codex', '--session', a.c.session)).acquired, true);
