@@ -457,3 +457,30 @@ report a ticket as advanced because a worker was launched — a launch is not a
 result, and neither is an open PR. Nothing is landed until a merge you checked,
 and a ticket that went *Done* on its own is the proof, not your memory of
 dispatching it.
+
+
+## Discussion subjects and unread activity
+
+Follow [the activity protocol](../../../docs/LINEAR_ACTIVITY.md). Before treating
+new feedback or delivering work, run `jaunt-linear sync-activity <ID>` and read
+`jaunt-linear discussion <ID>`. Use revision-checked `discussion --file` patches
+through the canonical launcher to record each subject's owner, source and open,
+resolved or transferred disposition. A reply acknowledges previous information;
+it does not resolve every question. Keep ambiguous subjects open for analysis.
+
+Publication opens review/expectation/plan subjects automatically. Separate
+multiple questions when interpreting feedback. Resolve superseded plan subjects
+with the replacement as evidence. Before handover, resolve delivered work with
+proof and transfer leftovers to verified related tickets. The registry survives
+claim cleanup and supplements the closure inventory. `--expects none`, Done,
+silence and a stopped worker do not close it. Do not ask humans to maintain labels
+or the registry. A final handover remains unread until the human acknowledges it.
+
+For claimed tickets, route subject reconciliation to the owning worker along
+with the human feedback. Reconcile unclaimed tickets yourself, including Done.
+Never infer that approval clears implementation work or unrelated questions.
+
+An `activity-failed` wake reports affected ticket IDs without stopping healthy
+board polling. Inspect and repair their access/ledger state; do not delete a
+ledger or infer closure to silence the warning. `activity-recovered` reports
+that the previously observed errors have cleared.

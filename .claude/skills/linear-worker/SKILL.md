@@ -439,3 +439,21 @@ The orchestrator uses `cleanup <ID> --pr <n>` after verified completion and clos
 it refuses unknown/live workers, unpublished commits and modified/unpublished drafts.
 Legacy workers/plans without lifecycle/publication evidence require explicit evidence
 review; never manufacture that evidence to get past a refusal.
+
+
+## Discussion subjects and unread activity
+
+Follow [the activity protocol](../../../docs/LINEAR_ACTIVITY.md). Before treating
+new feedback or delivering work, run `jaunt-linear sync-activity <ID>` and read
+`jaunt-linear discussion <ID>`. Use revision-checked `discussion --file` patches
+through the canonical launcher to record each subject's owner, source and open,
+resolved or transferred disposition. A reply acknowledges previous information;
+it does not resolve every question. Keep ambiguous subjects open for analysis.
+
+Publication opens review/expectation/plan subjects automatically. Separate
+multiple questions when interpreting feedback. Resolve superseded plan subjects
+with the replacement as evidence. Before handover, resolve delivered work with
+proof and transfer leftovers to verified related tickets. The registry survives
+claim cleanup and supplements the closure inventory. `--expects none`, Done,
+silence and a stopped worker do not close it. Do not ask humans to maintain labels
+or the registry. A final handover remains unread until the human acknowledges it.

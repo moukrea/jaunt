@@ -285,7 +285,9 @@ async function main() {
 
     let current;
     try {
+      const activity = await runAgent('sync-activity');
       current = await runAgent('pulse');
+      current.activityErrors = activity.errors || [];
     } catch (error) {
       // A transient API failure is not an event, but an expired token is not
       // transient. Giving up after a few tries is what turns a silent 30-minute
@@ -299,12 +301,14 @@ async function main() {
     }
     failures = 0;
 
-    if (!previous) {
+    const activityChanged = JSON.stringify(previous?.activityErrors || []) !== JSON.stringify(current.activityErrors);
+    if (!previous && !activityChanged) {
       previous = current;
       await writeJson(PULSE_FILE, previous);
       continue;
     }
-    const events = diff(previous, current);
+    const events = previous ? diff(previous, current) : [];
+    if (activityChanged) events.push({ type: current.activityErrors.length ? 'activity-failed' : 'activity-recovered', errors: current.activityErrors });
     if (events.length > 0) {
       await writeJson(PULSE_FILE, current);
       return report(WATCH_FILE, record, { wake: 'board-changed', at: current.at, events });
