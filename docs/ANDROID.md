@@ -35,6 +35,14 @@ android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDe
 
 The Android test APK contains an isolated clipboard fixture for the emulator. It is not shipped in the release APK and adds no production debug endpoint. Debug WebView automation is disabled in release builds.
 
+## Trying a pull request
+
+Every pull request that runs the Android workflow uploads the debug APK as the
+`android-debug-apk` artifact (kept 14 days). It installs beside the release app
+as `dev.jaunt.android.debug` with its own pairings. CI debug keys may differ
+between runs, so a later debug APK may require uninstalling the previous one.
+See [PR_VALIDATION.md](PR_VALIDATION.md).
+
 ## Validation
 
 See `docs/evidence/android-report.json` for observed results. Physical Android camera, keyboard/IME differences, vendor battery restrictions, real Wi-Fi/mobile handoff and deep-idle notification behavior still require physical-device validation. Emulator screen-off testing is reported separately. No claim is made that an actual Claude Code/Codex build displayed an attachment merely because clipboard bytes and Ctrl+V delivery passed.

@@ -315,6 +315,18 @@ fails unless `host`, `browser-and-relay` and `installer-fedora` all succeed, so
 `test` being red only tells you to look at the job underneath it. No human review
 is required — green is the entire gate.
 
+### Make the PR tryable
+
+A reviewer must be able to try what is under review. When the PR opens, comment
+on the ticket with what will be tryable and from which workflows; once the runs
+finish and you have downloaded and checked the artifacts, update that thread
+before merging with the exact run links, the platform, a short procedure, the
+expected result, what you verified and the limits. A visual check links a
+published capture of the screen concerned. `--expects none` unless the plan
+named a human decision: this is no new approval gate. Recipes, artifact names
+and the desktop sandbox limitation are in
+[docs/PR_VALIDATION.md](../../../docs/PR_VALIDATION.md).
+
 ### A red CI: read it before you name it
 
 ```bash
