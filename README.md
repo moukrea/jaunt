@@ -26,7 +26,7 @@ jaunt status                     # Host and shell status
 jaunt update                     # Check for an update without closing shells
 jaunt doctor                     # Diagnostics without exposing secrets
 jaunt devices                    # List authorized devices
-jaunt revoke -- DEVICE_ID           # Revoke a lost device
+jaunt revoke DEVICE_ID            # Revoke a lost device
 jaunt link PAIRING_CODE          # Link this host to another host (agents and machines)
 jaunt agents pending             # Requests from linked hosts waiting for your answer
 jaunt notify "Build finished"     # Notify connected devices
@@ -34,6 +34,14 @@ jaunt run -- make test            # Notify when a command finishes
 jaunt clipboard < notes.txt      # Make text available to the client
 jaunt stop                       # Stop the host AND its non-tmux shells
 ```
+
+The `unlink`, `revoke`, `agents`, and `notify` commands accept values starting
+with a dash, such as `jaunt unlink -example-room` or `jaunt notify "-finished"`.
+Recognized options and their abbreviations keep their meaning. For a value that
+matches one, use `--` and put all options before it, for example
+`jaunt notify --body "Details" -- --help`. Unknown dash tokens are values on
+these four commands, so a typo such as `notify --boddy` becomes a title.
+For option values that match an option, use `=`, such as `--body=--help`.
 
 Pairing grants access as the **system account running the host**, with all of that account's permissions. Do not run as root for ordinary use. A QR code grants shell access: never publish it.
 
