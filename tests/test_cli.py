@@ -129,3 +129,104 @@ def test_run_forwards_arguments_after_delimiter(monkeypatch):
         cli.main()
     assert exc.value.code == 0
     assert commands == [['echo', '--help', '-x']]
+
+
+@pytest.mark.parametrize('options,expected', [
+    ([], None),
+    (['--language', 'fr'], 'fr'),
+    (['--language=fr'], 'fr'),
+    (['--l', 'fr'], 'fr'),
+    (['--lang=fr'], 'fr'),
+    (['--language=fr', '--language=en'], 'en'),
+    (['--language', 'fr', '--language=en'], 'en'),
+    (['--language=fr', '--language', 'en'], 'en'),
+    (['--language', 'system'], 'system'),
+])
+def test_main_selects_only_global_language(monkeypatch, options, expected):
+    configured = []
+    monkeypatch.setattr(cli.sys, 'argv', ['jaunt', *options, 'status'])
+    monkeypatch.setattr(cli, 'configure_language', configured.append)
+    monkeypatch.setattr(cli, 'control', lambda *args: {})
+    cli.main()
+    assert configured == [expected]
+
+
+@pytest.mark.parametrize('global_options,expected', [([], None), (['--language=en'], 'en')])
+@pytest.mark.parametrize('delimiter', [[], ['--']])
+@pytest.mark.parametrize('child_options', [['--language=fr'], ['--language', 'fr'], ['--lang=fr']])
+def test_run_language_belongs_to_child(monkeypatch, global_options, expected, delimiter, child_options):
+    configured, commands = [], []
+    child = ['echo', *child_options]
+    monkeypatch.setattr(cli.sys, 'argv', ['jaunt', *global_options, 'run', *delimiter, *child])
+    monkeypatch.setattr(cli, 'configure_language', configured.append)
+    monkeypatch.setattr(cli.subprocess, 'call', lambda argv: commands.append(argv) or 7)
+    monkeypatch.setattr(cli, 'control', lambda *args: {})
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 7
+    assert configured == [expected]
+    assert commands == [child]
+
+
+@pytest.mark.parametrize('command,method,field,result', [
+    (['notify'], 'notify', 'title', {}),
+    (['unlink'], 'links.remove', 'room', {'links': []}),
+    (['revoke'], 'revoke', 'id', {}),
+    (['agents', 'cut'], 'agents.cut', 'session', {'log': [{}]}),
+])
+@pytest.mark.parametrize('delimiter', [[], ['--']])
+def test_language_like_positionals_remain_data(monkeypatch, command, method, field, result, delimiter):
+    configured, calls = [], []
+    monkeypatch.setattr(cli.sys, 'argv', ['jaunt', *command, *delimiter, '--language=fr'])
+    monkeypatch.setattr(cli, 'configure_language', configured.append)
+    monkeypatch.setattr(cli, 'control', lambda m, p: calls.append((m, p)) or result)
+    cli.main()
+    assert configured == [None]
+    assert calls[0][0] == method
+    assert calls[0][1][field] == '--language=fr'
+
+
+def test_language_like_local_option_value_remains_data(monkeypatch):
+    configured, calls = [], []
+    monkeypatch.setattr(cli.sys, 'argv', ['jaunt', 'notify', 'title', '--body', '--language=fr'])
+    monkeypatch.setattr(cli, 'configure_language', configured.append)
+    monkeypatch.setattr(cli, 'control', lambda m, p: calls.append((m, p)) or {})
+    cli.main()
+    assert configured == [None]
+    assert calls == [('notify', {'title': 'title', 'body': '--language=fr', 'session': 'synthetic-session'})]
+
+
+@pytest.mark.parametrize('argv', [
+    ['--', '--language=fr', 'status'],
+    ['--', 'status', '--language', 'fr'],
+    ['status', '--language=fr'],
+    ['--language'], ['--language', '--'], ['--language', '--help'],
+    ['--language=xx', 'status'], ['--language=', 'status'],
+    ['--languages=fr', 'status'], ['--typo', 'status'],
+])
+def test_language_prescan_leaves_errors_to_argparse(monkeypatch, argv):
+    monkeypatch.setattr(cli.sys, 'argv', ['jaunt', *argv])
+    configured = []
+    monkeypatch.setattr(cli, 'configure_language', configured.append)
+    monkeypatch.setattr(cli, 'control', lambda *args: pytest.fail('invalid argv reached dispatch'))
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    if argv[0] in ('--', 'status'):
+        assert configured == [None]
+
+
+@pytest.mark.parametrize('argv,text', [
+    (['--language=fr', '--help'], 'Votre propre shell. Partout.'),
+    (['--lang', 'fr', 'gui', '--help'], 'Installe l’application de bureau'),
+    (['--help', '--language', 'fr'], 'Votre propre shell. Partout.'),
+])
+def test_main_renders_translated_help(monkeypatch, capsys, argv, text):
+    from jaunt import i18n
+    monkeypatch.setattr(i18n, '_catalog', {})
+    monkeypatch.setattr(i18n, '_language', 'en')
+    monkeypatch.setattr(cli.sys, 'argv', ['jaunt', *argv])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert text in capsys.readouterr().out

@@ -260,8 +260,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    language_arg=next((arg.split('=',1)[1] for arg in sys.argv[1:] if arg.startswith('--language=')),None)
-    if '--language' in sys.argv and sys.argv.index('--language')+1<len(sys.argv):language_arg=sys.argv[sys.argv.index('--language')+1]
+    # Bootstrap translation before building help, using only the root options.
+    # Keep this in sync with build_parser: --language is the only root option
+    # taking a value, and argparse accepts its unambiguous long abbreviations.
+    language_arg = None
+    argv = iter(sys.argv[1:])
+    for arg in argv:
+        if arg == '--' or not arg.startswith('-') or arg == '-':
+            break
+        name, equals, value = arg.partition('=')
+        if name.startswith('--') and '--language'.startswith(name):
+            if not equals:
+                value = next(argv, None)
+                if value is None or value.startswith('-'):
+                    break  # Leave missing/invalid values to the final parser.
+            language_arg = value
     configure_language(language_arg);argparse._=tr
     args = build_parser().parse_args()
     try:
