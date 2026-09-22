@@ -1,3 +1,8 @@
+# jaunt host 0.1.0-beta.43
+
+- fix(cli): bound language prescan to global arguments (JAU-61) (#86)
+- Source: `8136fc7a8aa6333b35f0140ef532c2cedb51e53b`.
+
 # jaunt 0.1.0-beta.41
 
 **Settings that stay inside their section, and a requester's level within reach.** Each settings section now holds its own list instead of letting it spill under the separator into the next one, so what you read belongs to the heading above it. *Reachable machines* folds, and its pairing-code field moves into a modal opened on demand: machines paired on your device link by themselves, so the code is the exception, not the default path. In the requester table, the level badge of a right opens the choice directly — ask, trust for a while or always, block — and each row carries its own revoke, without going through the multi-select. Client only: the host is unchanged apart from its version.
