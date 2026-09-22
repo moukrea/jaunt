@@ -198,8 +198,8 @@ The claim now reads `implementing` — `verdict` set it. That phase is the answe
 to "is this session waiting on me or working?", so if you ever reach here
 without having read a verdict, say so with
 `jaunt-linear claim <ID> implementing --session "$CODEX_THREAD_ID" --runtime codex`. The
-five phases are `planning`, `awaiting-approval`, `queued`, `implementing`,
-`landing`, and anything else is refused.
+six phases are `planning`, `awaiting-approval`, `queued`, `implementing`,
+`landing` and guarded `awaiting-external`; anything else is refused.
 
 Only `implementing` and `landing` hold the working tree, and that is what the
 dispatch gate compares against. It is also why reaching here in phase `queued`
@@ -394,6 +394,86 @@ workflows in a ticket worker. The exclusive coordinator computes versions and
 owns publication; manual retries go through `auto-release.yml` on main. Read
 `docs/DEPLOYMENT.md` for activation, credential checks and recovery. Keep merge
 landing reservations separate from the GitHub production publication lock.
+
+### Retain an external obligation after verified merge
+
+A merged PR with an unresolved delivery/coordination obligation must not retain
+all source files in `landing`. Once **all code is merged**, use the canonical
+launcher to enter the guarded `awaiting-external` phase:
+
+```sh
+jaunt-linear wait begin <ID> --runtime <actual-runtime> --session <actual-session> \
+  --pr <merged-PR> --reason "<observed blocker>" --owner "<responsible person/session>" \
+  --action "<one precise action requiring a decision>" --resource "jaunt-production-release"
+jaunt-linear wait read <ID>
+```
+
+The default deadline is 15 minutes; `--deadline <UTC-ISO-ending-Z>` sets an explicit
+future deadline. Admission requires the current claim cycle's verified merge
+history, exact clean worktree/head, main ancestry and released landing reservation.
+Missing legacy evidence, unpublished code or an ambiguous merge is a refusal,
+not permission to free files. Do not bypass with a direct phase change. Preserve
+pending admission on publication/label failure and retry reconciliation.
+
+The request in Linear names the owner, reason, attempts, action and deadline.
+Only `/wait <wait-id> approve` in that request's thread authorizes the named action;
+`decline` refuses it and ordinary prose is feedback for this worker. Read the
+current decision **before** acting:
+
+```sh
+jaunt-linear wait decision <ID> --runtime <actual-runtime> --session <actual-session>
+```
+
+`approved` authorizes only the recorded action, subject to its existing guards.
+It does not prove delivery or replace the exclusive publication coordinator.
+Old plan approval, reactions, silence, a bridge accepting a message, and a queue
+accepting a resume are not this decision. A later correction supersedes it.
+Never enable publication to unblock this wait. JAU-66 owns publisher activation.
+
+Record actual attempts, including silent/inaccessible peers and messages held for
+review; none of those outcomes is consent:
+
+```sh
+jaunt-linear wait attempt <ID> --runtime <actual-runtime> --session <actual-session> \
+  --action "<attempt made>" --result "<observed outcome>"
+```
+
+Changing the deadline also requires `--evidence "<new progress/decision>"`. The
+command can reset bounded reconciliation retries after diagnosis, but never
+clears an ambiguous publication intent. Reconciliation searches the complete
+Linear thread for its marker; absence after an uncertain create requires explicit
+investigation, never blind republishing. Label failure with a known comment ID
+requires `sync-activity`, not another comment.
+
+If the human corrects or declines the proposed action, revise it from the latest
+feedback without recycling its approval:
+
+```sh
+jaunt-linear wait revise <ID> --runtime <actual-runtime> --session <actual-session> \
+  --comment <latest-feedback-id> --action "<corrected action>" --reason "<why it changed>"
+```
+
+This archives the old request, gives the corrected action a new wait identifier
+and asks in Linear again. It resolves only the superseded request/feedback subjects.
+The prior approval cannot authorize the corrected action. Preserve and acknowledge
+routing events once their processing is observed; unresolved reply/queued-worker
+routing also blocks cleanup, so no promoted worker loses its wake-up.
+
+After verifying the outcome, resolve against the latest exact decision comment:
+
+```sh
+jaunt-linear wait resolve <ID> --runtime <actual-runtime> --session <actual-session> \
+  --comment <decision-comment-id> --evidence "<observed outcome and proof link>"
+```
+
+For an explicitly approved transfer, add `--ticket <related-ID>`; that target must
+be named in the immutable action and its related link verified. Record the four
+follow-up facts and expectation on the target using the normal follow-up protocol.
+The wait preserves its owner, publication resource and history until this proof;
+source-file release never transfers publication authority. Resolve closes only
+this request and consumed decision in the discussion ledger; other subjects and
+unread delivery information remain. An unresolved wait or failed discussion
+resolution refuses release/cleanup. No old verdict can restart merged code.
 
 ### Hand over
 

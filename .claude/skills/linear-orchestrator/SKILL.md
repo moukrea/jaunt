@@ -244,6 +244,52 @@ recovery or known quota cooldown in that runtime defers it. Other runtimes remai
 independent. The owner must stay alive and the loop enabled; reopening an authorized
 loop reconciles pending work. No service is installed outside that lifetime.
 
+### Reconcile external waits independently of process health
+
+`awaiting-external` retains the original claim/session, transcript, closure and
+publication obligation after verified merge; it does not reserve completed source
+files. Read `workers[].progress` in `status`: a live watcher/worker is not proof
+of progress. An overdue wait reports owner, reason, attempts and next action.
+
+```sh
+jaunt-linear wait reconcile
+jaunt-linear wait read <ID>
+```
+
+The watcher explicitly polls every retained wait, including Done tickets outside
+the ordinary first page, with complete comment pagination. It emits `wait-reply`,
+`wait-overdue` and `wait-queued-ready` events. The local watchdog also reports
+elapsed deadlines without depending on the Linear API. Notifications retry at
+most three times, spaced by five minutes; pending events and errors remain in the
+ledger/status after that budget. Read them on periodic reconciliation instead of
+calling the loop healthy solely because processes exist. A new human reply is
+still discovered after exhausted publication retries.
+
+Route a reply to the recorded runtime and exact owner session using the normal
+resume launcher; never duplicate a running/suspect/unknown worker. When a worker
+is running, leave the event pending until it actually reads it. `wait-queued-ready`
+names a separately approved worker promoted after file release; verify its current
+claim and route it to that session. Candidates are journaled before sequential
+promotion so a crash cannot lose their routing events. Promotion rechecks current
+approval, stop, loop, dependencies and surface admission.
+
+Acknowledge an event only after observing its processing, not when the bridge or
+runtime merely accepts it:
+
+```sh
+jaunt-linear wait ack <origin-ID> --event <event-id> --evidence "<observed processing>"
+```
+
+Acknowledgement changes no approval or publication authority. Do not repeatedly
+resume a silent peer or post the same escalation. The deadline is a request for
+an explicit, actionable decision in Linear, not permission to continue. Stop or
+loop-off suspends active work without deleting any wait evidence. Never call
+`verdict` to advance an external wait; the owner uses `wait decision` and then
+`wait resolve` with outcome evidence. Before cleanup, require resolved wait and
+discussion state in addition to the usual closure/merge checks. Deployment of
+label support remains separate from this protocol; do not overwrite a dirty
+canonical checkout to activate it.
+
 ## 3. Route the conversation
 
 ### How to write on a ticket

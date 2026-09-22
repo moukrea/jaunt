@@ -198,7 +198,7 @@ test('real watcher synchronizes before pulse and reports sync failures without a
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:true}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`);
   const args=[join(root,'scripts/linear_watch.mjs'),'--interval','0.01','--max-minutes','1'];
   const result=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(result.wake,'board-changed');assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\npulse\n');
+  assert.equal(result.wake,'board-changed');assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
   const partialMock = errors => `import {appendFile} from 'node:fs/promises';
     await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n');
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:${errors.length===0},errors:${JSON.stringify(errors)}}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`;
@@ -206,7 +206,7 @@ test('real watcher synchronizes before pulse and reports sync failures without a
   await writeFile(mock,partialMock(errors));await writeFile(join(root,'calls.txt'),'');
   const failed=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
   assert.equal(failed.events[0].type,'activity-failed');
-  assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\npulse\n');
+  assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
   const quiet=JSON.parse((await exec(process.execPath,[...args.slice(0,-1),'0.002'],{timeout:5000})).stdout);
   assert.equal(quiet.wake,'interval-elapsed');
   await writeFile(mock,partialMock([]));
