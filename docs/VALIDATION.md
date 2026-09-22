@@ -1,6 +1,29 @@
 # jaunt — delivery validated on September 14, 2026
 
 
+## PR trial artifacts — JAU-24 (2026-09-23)
+
+PR #91's Android run (35796247091) uploaded `android-debug-apk` (3,161,694 bytes,
+expiring after 14 days) beside the unchanged `android-validation` reports.
+The downloaded archive held only `app-debug.apk`: `aapt2` read package
+`dev.jaunt.android.debug`, version `0.1.0-beta.31-debug`, minimum API 26, and
+`apksigner` verified a v2 signature by `CN=Android Debug`. The instrumentation
+APK is not published. The APK was not installed: no device was attached and the
+local emulator image was missing, so installation beside the release app and
+pairing remain unobserved.
+
+`scripts/dev.py --state <temporary directory>` started from a fresh virtualenv
+(`pip install -e . -r requirements-dev.txt`) served the web app and printed a
+pairing link, with all host state in that directory. Electron from source aborted
+at startup on this Ubuntu machine (`apparmor_restrict_unprivileged_userns=1`,
+SUID sandbox not configured); a minimal Electron app launched with
+`--user-data-dir` reported that directory as `userData`. No desktop package was
+built for this PR, whose paths do not trigger the desktop workflow. The same four
+offline adapter tests fail locally on unchanged main and this branch (220/224),
+while the PR's CI passed; `check_project.py --source` and `git diff --check`
+passed.
+
+
 ## Durable worker telemetry — JAU-38 (2026-09-22)
 
 `npm test` passed 224 tests after rebasing on main through JAU-34, JAU-63 and
