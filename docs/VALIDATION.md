@@ -1,5 +1,39 @@
 # jaunt — delivery validated on September 14, 2026
 
+
+## Deterministic worker routing — JAU-65 (2026-09-22)
+
+After rebasing on JAU-34 and JAU-63 (`de1e52d`), **211 npm tests passed**.
+The 30 routing tests cover complete paginated attribution, edited human replies,
+reaction replacement, approval/decline/feedback forwarding without registering a
+verdict, deferred replies drained on a quiet poll, changed claims, stop/loop-off,
+unknown process evidence, recovery deadlines, replay and concurrent routing.
+Acceptance intent is persisted before launch; simulated response loss is recovered
+from worker lifecycle evidence, while an unproven launch remains an escalation.
+
+Two additional offline adapter scenarios launch real subprocesses behind fake
+Codex/Claude and Linear commands. Each resumed the exact recorded session once;
+the routed human comment caused no intermediary owner queue call. Ordinary worker
+completion still notified the owner. Actual watcher/watchdog subprocess fixtures
+continued polling after handled events, and the external-wait fixture exited to
+the orchestrator without invoking ordinary routing. A legacy watcher regression
+found in the first full run was fixed: without a verified owner handoff, the old
+wake path is preserved, including quiet periodic exits.
+
+JavaScript syntax checks passed for all four changed runtime modules, and
+`python3 scripts/check_project.py --source` passed. No application transport or UI
+code changed. The source check omits the optional generated QR vendor asset.
+
+These are isolated local tests, not evidence of live deployment or measured token
+savings. The canonical checkout was observed at `77f1ba0` with existing tracked
+and untracked changes and was left intact. Operational activation remains with
+JAU-67/71. Bare watcher processes without a supervising owner handoff use the
+existing orchestrator path; ambiguous attribution, missing/currently inapplicable
+verdicts, structural changes and external waits are also escalated. The existing
+verdict query remains bounded to 100 comments, so routing escalates if that reader
+cannot establish an actionable current plan even though routing attribution is
+paginated. Periodic rearming and cross-producer deduplication remain JAU-62 work.
+
 ## Durable post-merge waits — JAU-63 (2026-09-22)
 
 The worktree was rebased onto JAU-34's merged `611d792` discussion/label cycle.

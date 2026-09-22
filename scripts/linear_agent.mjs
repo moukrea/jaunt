@@ -587,6 +587,25 @@ export async function readWaitThread(id, query = graphql) {
   return { ...issue, comments };
 }
 
+// Complete, read-only routing evidence. Do not reuse the bounded show query or
+// activity reconciliation here: routing neither writes labels nor consumes replies.
+export async function readRoutingThread(id, query = graphql) {
+  let issue;
+  const comments = await connectionPages(async cursor => {
+    const data = await query(`query($id: String!, $cursor: String) { issue(id: $id) {
+      identifier state { type }
+      comments(first: 100, after: $cursor) { nodes {
+        id body createdAt botActor { id } user { id email }
+        reactions { emoji createdAt user { id email } }
+      } pageInfo { hasNextPage endCursor } }
+    } }`, { id, cursor });
+    if (data.issue?.identifier !== id) throw new Error('routing issue not found');
+    issue ||= data.issue;
+    return data.issue.comments;
+  });
+  return { ...issue, comments };
+}
+
 export async function syncWaitDiscussion(w, { service, check = async () => {
   const c = (await listClaims()).find(c => c.issue === w.issue);
   if (!c || ['claimedAt', 'runtime', 'session'].some(k => c[k] !== w[k])) throw new Error('wait owner changed');
@@ -1795,6 +1814,7 @@ async function whoami() {
 }
 
 const COMMANDS = {
+  'routing-thread': async ([id]) => ({ ...(await readRoutingThread(required(id, 'routing-thread <ISSUE-ID>'))), agentId: (await agentUser()).id }),
   'sync-activity': async ([id]) => (await activity()).sync(id),
   discussion: async ([id], flags) => {
     required(id, 'discussion <ISSUE-ID> [--file <json|->]');
@@ -2042,7 +2062,7 @@ export const COMMAND_FLAGS = {
   comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],
   attachments: ['out'], uncomment: [],
   create: ['title', 'parent', 'priority', 'expects', 'desc', 'description'],
-  feedback: [], repo: [], workers: [],
+  feedback: [], repo: [], workers: [], 'routing-thread': [],
   landing: {
     status: [], acquire: ['runtime', 'session', 'cwd'],
     prepare: ['runtime', 'session'], merge: ['runtime', 'session', 'pr'],

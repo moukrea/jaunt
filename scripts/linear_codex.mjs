@@ -35,7 +35,7 @@ export function parseArgs(args) {
     if (!args[i].startsWith('--')) { positional.push(args[i]); continue; }
     const key = args[i].slice(2), value = args[++i];
     if (!value || value.startsWith('--')) throw new Error(`--${key} requires a value`);
-    if (!['thread', 'owner-pid', 'cwd', 'message', 'model', 'effort', 'sandbox', 'runtime'].includes(key)) throw new Error(`unknown option --${key}`);
+    if (!['thread', 'owner-pid', 'cwd', 'message', 'model', 'effort', 'sandbox', 'runtime', 'event'].includes(key)) throw new Error(`unknown option --${key}`);
     options[key] = value;
   }
   return { options, positional };
@@ -43,7 +43,7 @@ export function parseArgs(args) {
 export function workerEnvironment(env, root = ROOT) {
   // A worker is a new root session, never the orchestrator's child identity.
   return { ...Object.fromEntries(Object.entries(env).filter(([k]) =>
-    !/^CLAUDE(CODE|_CODE_|_SESSION_ID$)/.test(k) && !/^CODEX_(THREAD_ID|SESSION_ID)$/.test(k))), JAUNT_LINEAR_ROOT: root };
+    k !== 'JAUNT_LINEAR_ROUTING_OWNER' && !/^CLAUDE(CODE|_CODE_|_SESSION_ID$)/.test(k) && !/^CODEX_(THREAD_ID|SESSION_ID)$/.test(k))), JAUNT_LINEAR_ROOT: root };
 }
 export function workerArgs({ session, model, effort, sandbox = 'danger-full-access', prompt, root = ROOT }) {
   if (!['read-only', 'workspace-write', 'danger-full-access'].includes(sandbox)) throw new Error(`unknown sandbox "${sandbox}"`);
@@ -204,7 +204,7 @@ export function claudeArgs(record) {
   args.push(record.prompt);
   return { args };
 }
-async function worker(id, options, resume, runtime = 'codex', recover = false) {
+async function worker(id, options, resume, runtime = 'codex', recover = false, routed = null) {
   ticket(id);
   if (!['codex', 'claude'].includes(runtime)) throw new Error('invalid runtime');
   return withWorkerLock(STATE, id, async () => {
@@ -213,13 +213,21 @@ async function worker(id, options, resume, runtime = 'codex', recover = false) {
     const held = (await agent('claims')).find(c => c.issue === id);
     if (!held || runtimeOf(held) !== runtime) throw new Error(`${id} needs a ${runtime} claim`);
     const evidence = await currentAttempt(STATE, held);
+    if (routed) {
+      const { routeReceiptPath } = await import('./linear_routing.mjs');
+      const receipt = await read(routeReceiptPath(STATE, routed.route.key));
+      if (receipt) {
+        const { acceptRoute } = await import('./linear_routing.mjs');
+        return acceptRoute({ state: STATE, route: routed.route, current: evidence });
+      }
+    }
     if (evidence) {
       const health = workerHealth(held, evidence);
       if (['running', 'suspect', 'unknown'].includes(health.state)) throw new Error(`${id}: ${health.reason}`);
     } else if (previous && !previous.endedAt && livePid(previous.pid)) {
       throw new Error(`${id} is still working; use the stop flag or wait`);
     }
-    const prior = recover ? evidence : previous?.claimedAt === held.claimedAt ? previous : null;
+    const prior = recover || routed ? evidence : previous?.claimedAt === held.claimedAt ? previous : null;
     const session = held.session || evidence?.session;
     if (recover && !session && evidence?.spawnFailed && !evidence.session) resume = false;
     if (resume && !session) throw new Error(`${id} has no saved ${runtime} session to resume`);
@@ -228,7 +236,7 @@ async function worker(id, options, resume, runtime = 'codex', recover = false) {
     const cwd = await realpath(options.cwd || prior.cwd);
     const branch = (await run('git', ['branch', '--show-current'], { cwd })).trim();
     if (!branch.includes(id)) throw new Error('worker branch must contain its ticket identifier');
-    const o = owner(options, runtime);
+    const o = routed ? routed.owner : owner(options, runtime);
     let decision;
     if (recover) {
       decision = await recoveryPreflight({ state: STATE, claim: held, record: evidence, agent,
@@ -239,13 +247,30 @@ async function worker(id, options, resume, runtime = 'codex', recover = false) {
       if (options.model || options.effort || options.sandbox) throw new Error('recovery preserves saved settings');
       if (evidence.cwd !== cwd) throw new Error('recovery worktree changed');
     }
-    const record = await beginAttempt(STATE, held, {
-      role: 'worker', cwd, session: resume || runtime === 'claude' ? session : null, owner: o, resume,
-      ...workerSettings(runtime, prior, options, process.env, recover),
-      prompt: options.message || `Invoke the linear-worker skill for ${id}. Read latest comments, stop flag, approval and PR state before continuing the current phase. Recovery is not approval.`,
-    });
-    if (decision) await atomicJson(lifecyclePaths(STATE, held).schedule, { ...decision, claimedAt: held.claimedAt, attempt: record.attempt });
-    return launch(id, record);
+    const begin = async () => {
+      const record = await beginAttempt(STATE, held, {
+        role: 'worker', cwd, session: resume || runtime === 'claude' ? session : null, owner: o, resume,
+        ...workerSettings(runtime, prior, options, process.env, recover || Boolean(routed)),
+        ...(routed ? { routeKey: routed.route.key } : {}),
+        prompt: options.message || `Invoke the linear-worker skill for ${id}. Read latest comments, stop flag, approval and PR state before continuing the current phase. Recovery is not approval.`,
+      });
+      if (decision) await atomicJson(lifecyclePaths(STATE, held).schedule, { ...decision, claimedAt: held.claimedAt, attempt: record.attempt });
+      return record;
+    };
+    if (routed) {
+      const { acceptRoute, routePreflight } = await import('./linear_routing.mjs');
+      return acceptRoute({ state: STATE, route: routed.route, current: evidence, begin, start: record => launch(id, record),
+        check: async () => {
+          if (!await routingOwnerValid(o)) throw Error('routing owner or instructions changed');
+          await routePreflight({ state: STATE, route: routed.route, claim: held, record: evidence, owner: o,
+            alive: ownerAlive, agent, health: workerHealth,
+            prState: async () => {
+              const prs = JSON.parse(await run('gh', ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'state'], { cwd }));
+              return prs.some(p => p.state === 'MERGED') ? 'MERGED' : 'OPEN';
+            } });
+        } });
+    }
+    return launch(id, await begin());
   });
 }
 // Dependency injection makes lifecycle and wake-up tests use no Linear/model calls.
@@ -309,7 +334,7 @@ async function execute(name, runtime = 'codex') {
       child.stdin.end(command.prompt || '');
     } else {
       const flags = record.role === 'watchdog' ? ['--watchdog', '--grace', '600'] : ['--interval', '30', '--max-minutes', '30'];
-      child = spawn(process.execPath, [join(ROOT, 'scripts/linear_watch.mjs'), ...flags], { detached: true, stdio: ['ignore', 'pipe', 'inherit'] });
+      child = spawn(process.execPath, [join(ROOT, 'scripts/linear_watch.mjs'), ...flags], { env: { ...process.env, JAUNT_LINEAR_ROUTING_OWNER: JSON.stringify(record.owner) }, detached: true, stdio: ['ignore', 'pipe', 'inherit'] });
     }
     if (record.role === 'worker') {
       record.child = processIdentity(child.pid);
@@ -365,6 +390,41 @@ async function execute(name, runtime = 'codex') {
     throw error;
   }
 }
+async function routingOwnerValid(o) {
+  if (!o?.thread || !['codex', 'claude'].includes(o.runtime) || !ownerAlive(o)) return false;
+  const bound = await read(join(STATE, 'skills', 'owner.json'));
+  if (bound?.runtime !== o.runtime || bound?.session !== o.thread) return false;
+  return (await skillStore(ROOT).status(bound)).state === 'fresh';
+}
+async function routeBatch(event) {
+  const { routingStore } = await import('./linear_routing.mjs');
+  let o;
+  try { o = JSON.parse(process.env.JAUNT_LINEAR_ROUTING_OWNER || 'null'); } catch { /* explicit fallback below */ }
+  if (!await routingOwnerValid(o)) {
+    const { readdir } = await import('node:fs/promises');
+    const names = await readdir(join(STATE, 'routing', 'pending')).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
+    const pending = [];
+    for (const name of names.filter(n => /^[A-Z][A-Z0-9]*-\d+\.json$/.test(n))) {
+      if ((await read(join(STATE, 'routing', 'pending', name)))?.pending) pending.push({ type: 'routing-escalated', ticket: name.slice(0, -5) });
+    }
+    return { event: event.events?.length || pending.length || event.wake !== 'board-changed'
+      ? { ...event, events: [...(event.events || []), ...pending], routingError: 'no verified live routing owner/instruction receipt' } : null, outcomes: [] };
+  }
+  return routingStore({ state: STATE, agent,
+    enabled: async () => await routingOwnerValid(o) && (await read(join(STATE, 'linear-loop.json')))?.enabled === true,
+    launch: async route => {
+      const runtime = route.binding.runtime, id = route.binding.issue;
+      const invoke = () => worker(id, {}, true, runtime, route.kind === 'recovery', { route, owner: o });
+      try {
+        return route.kind === 'recovery'
+          ? await withWorkerLock(STATE, `RUNTIME-${runtime === 'codex' ? 1 : 2}`, invoke) : await invoke();
+      } catch (error) {
+        if (/retry deferred until|runtime quota deferred until|another recovery is active/.test(error.message)) return { outcome: 'deferred', reason: error.message };
+        throw error;
+      }
+    },
+  }).drainPendingRoutes(event);
+}
 async function status() {
   const { readdir } = await import('node:fs/promises');
   const files = await readdir(ADAPTER).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
@@ -393,6 +453,7 @@ async function install() {
 }
 export async function main(runtime = 'codex') {
   const { positional: [command, id], options } = parseArgs(process.argv.slice(2));
+  if (command === 'route') return routeBatch(JSON.parse(options.event || '{"wake":"board-changed","events":[]}'));
   if (command === 'arm') { if (runtime !== 'codex') throw new Error('Claude uses the background watcher from its loop skill'); return arm(options); }
   if (command === 'worker' || command === 'resume' || command === 'recover') {
     const chosen = options.runtime || runtime;
@@ -403,7 +464,7 @@ export async function main(runtime = 'codex') {
   if (command === 'status') return status();
   if (command === 'install') return install();
   if (command === 'owner') return owner(options, runtime);
-  return { usage: 'jaunt-linear-codex install|owner|arm|status|worker <ID> --cwd <worktree>|resume <ID>|recover <ID> [--message text] [--model model] [--effort effort]' };
+  return { usage: 'jaunt-linear-codex install|owner|arm|status|route [--event json]|worker <ID> --cwd <worktree>|resume <ID>|recover <ID> [--message text] [--model model] [--effort effort]' };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(entryPath(process.argv[1])).href) {
   main().then(result => { if (result) console.log(JSON.stringify(result, null, 2)); }).catch(e => { console.error(e.message); process.exitCode = 1; });

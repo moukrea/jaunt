@@ -90,7 +90,7 @@ test('recovery rechecks approval, PR, direct prerequisites, identity and stop un
 
 for (const runtime of ['codex', 'claude']) test(`${runtime}: offline crash, durable watchdog wake and one exact-session recovery`, { timeout: 20000 }, async () => temporary(async dir => {
   await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin'));
-  for (const name of ['linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_claude.mjs', 'linear_waits.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+  for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_claude.mjs', 'linear_waits.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
   await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
   const held = { ...claim, runtime, session: runtime === 'claude' ? 'exact' : null };
   await atomicJson(join(dir, '.dev-state/claims/JAU-999.json'), held);
