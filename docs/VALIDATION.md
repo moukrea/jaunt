@@ -1,5 +1,31 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Linear discussion lifecycle — JAU-34 (2026-09-22)
+
+Implemented separate permanent provenance, unread harness information and active
+subject labels. A claim-independent revisioned ledger tracks unresolved subjects;
+human acknowledgments clear only earlier information, never unrelated work.
+The watcher synchronizes marked/tracked tickets, including archived/completed
+ones, before polling. Per-ticket failures preserve their ledger and report
+activity degradation while healthy board polling continues.
+
+Observed locally: 18 focused activity tests passed, including pagination beyond
+100 issues/comments, approval versus 👀, partial replies, stale reactions,
+third-party labels, provenance retries, partial publication failure, busy locks,
+missing/corrupt ledgers, deleted source comments/tickets, verified transfers,
+nested reply roots and an actual watcher subprocess with a fake CLI. The existing
+full npm suite passed 160 tests. The watcher fixture also verified targeted
+activity failure/recovery notifications and deduplication while polling continues.
+Source project checks and git diff whitespace checks passed.
+
+A read-only query against Linear verified the label mutation schema, comment
+parent/user fields and list-shaped reactions. No production label mutation or
+human acknowledgment lifecycle was exercised with this worktree code. The dirty
+canonical checkout was preserved; activation and actual live observations must
+be recorded separately, and the merge alone is not evidence of activation.
+No desktop/Android package is required for this harness-only change.
+
+
 
 ## Automatic publication queue — JAU-30 (2026-09-21)
 

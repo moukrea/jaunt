@@ -558,18 +558,13 @@ async function getIssue(identifier) {
 // `parent` threads the reply under an existing comment instead of starting a new
 // root comment. Without it every answer lands at the bottom of the ticket and the
 // conversation becomes impossible to follow.
-async function addComment(identifier, body, parent) {
-  const issue = await getIssue(identifier);
-  const data = await graphql(
-    `mutation($issueId: String!, $body: String!, $parentId: String) {
-      commentCreate(input: { issueId: $issueId, body: $body, parentId: $parentId }) {
-        success comment { id url }
-      }
-    }`,
-    { issueId: issue.id, body, parentId: parent ?? null },
-  );
-  if (!data.commentCreate.success) throw new Error('commentCreate failed');
-  return data.commentCreate.comment;
+let activityPromise;
+async function activity() {
+  return activityPromise ||= import('./linear_activity.mjs').then(({ activityService }) =>
+    activityService({ stateDir: STATE_DIR, graphql, team: resolveTeam, agent: agentUser }));
+}
+async function addComment(identifier, body, parent, options) {
+  return (await activity()).publish(identifier, body, parent, options);
 }
 
 // A document holds the long form; the ticket comment holds only the digest. The
@@ -732,7 +727,7 @@ async function createIssue({ title, description, parent, priority, expects }) {
   description = issueDescription(description, expects);
   const team = await resolveTeam();
   const input = { teamId: team.id, title };
-  if (description) input.description = description;
+  Object.assign(input, await (await activity()).creationInput(description));
   if (priority !== undefined) input.priority = priority;
   if (parent) input.parentId = (await getIssue(parent)).id;
   // Subscribers go in with the issue rather than being added a call later: there
@@ -764,7 +759,10 @@ async function createIssue({ title, description, parent, priority, expects }) {
   if (lookupFailed) notified = { ok: false, reason: lookupFailed };
   else if (!humans.length) notified = { ok: false, reason: 'no human member found on the team' };
   else notified = { ok: true, who: subscribers.nodes.map((n) => n.name) };
-  return { ...issue, notified };
+  let activityResult;
+  try { await (await activity()).created(issue.identifier); activityResult = { ok: true }; }
+  catch (error) { activityResult = { ok: false, error: error.message, retry: `sync-activity ${issue.identifier}; do not recreate the ticket` }; }
+  return { ...issue, notified, activity: activityResult };
 }
 
 // --- attachments ------------------------------------------------------------
@@ -1526,7 +1524,7 @@ export async function registerAnswer(issue, answer, held, plan, comments, agentI
       ? `je démarre dès que ${queued.queuedBehind.join(', ')} aura libéré les fichiers concernés.`
       : `j'enchaîne sur l'implémentation.`;
     const body = `${ACK_MARKER}\n**Approbation reçue** — ${next}\n\n${expectsLine('none')}`;
-    done.acknowledged = (await comment(issue.identifier, body, plan.id)).id;
+    done.acknowledged = (await comment(issue.identifier, body, plan.id, { technical: true })).id;
   }
 
   if (['approved', 'feedback', 'declined'].includes(answer.verdict)) {
@@ -1726,6 +1724,14 @@ async function whoami() {
 }
 
 const COMMANDS = {
+  'sync-activity': async ([id]) => (await activity()).sync(id),
+  discussion: async ([id], flags) => {
+    required(id, 'discussion <ISSUE-ID> [--file <json|->]');
+    if (flags.file === undefined) return (await activity()).read(id);
+    if (typeof flags.file !== 'string') throw new Error('--file requires a filename or -');
+    const patch = JSON.parse(flags.file === '-' ? await readStdin() : await readFile(flags.file, 'utf8'));
+    return (await activity()).update(id, patch);
+  },
   whoami: async () => whoami(),
   team: async () => {
     const team = await resolveTeam();
@@ -1937,6 +1943,7 @@ const COMMANDS = {
 // Declare options even for commands that accept none. Subcommands have their
 // own sets: prepare must not silently accept merge's --pr, for example.
 export const COMMAND_FLAGS = {
+  'sync-activity': [], discussion: ['file'],
   whoami: [], team: [], next: [], board: [], pulse: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],
   surface: ['files', 'symbols'], stop: [], 'stop-requested': [], list: [], show: [],
