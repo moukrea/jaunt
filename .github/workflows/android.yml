@@ -46,6 +46,14 @@ jobs:
           path: |
             android/app/build/reports/tests/testDebugUnitTest/
             android/app/build/reports/lint-results-debug.html
+      - name: Publish the debug APK for PR validation
+        if: inputs.tag == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
       - name: Sign and publish immutable Android release
         if: inputs.tag != ''
         env:
