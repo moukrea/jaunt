@@ -94,6 +94,34 @@ function runAgent(command, ...args) {
   });
 }
 
+// Route before exiting: suppressing notification after exit would silently
+// remove the watcher. Empty polls drain replies deferred while a worker ran.
+export async function routeWake(event, invoke = async event => {
+  if (!process.env.JAUNT_LINEAR_ROUTING_OWNER) return { event: event.events?.length || event.wake !== 'board-changed' ? event : null, outcomes: [] };
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [join(ROOT, 'scripts/linear_codex.mjs'), 'route', '--event', JSON.stringify(event)],
+      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
+    let out = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.resume();
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code !== 0) return reject(Error('routing subprocess failed'));
+      try { resolve(JSON.parse(out)); } catch { reject(Error('invalid routing response')); }
+    });
+  });
+}) {
+  try {
+    const result = await invoke(event);
+    if (!result || !Object.hasOwn(result, 'event') || !Array.isArray(result.outcomes)) throw Error('invalid routing response');
+    return result.event;
+  } catch (error) {
+    // Preserve the original batch, even when the router itself failed. An empty
+    // batch still needs escalation: it might contain a deferred reply on disk.
+    return { ...event, routingError: error.message };
+  }
+}
+
 async function readJson(path) {
   try {
     return JSON.parse(await readFile(path, 'utf8'));
@@ -311,10 +339,9 @@ async function main() {
     }
     const events = previous ? diff(previous, current) : [];
     if (activityChanged) events.push({ type: current.activityErrors.length ? 'activity-failed' : 'activity-recovered', errors: current.activityErrors });
-    if (events.length > 0) {
-      await writeJson(PULSE_FILE, current);
-      return report(WATCH_FILE, record, { wake: 'board-changed', at: current.at, events });
-    }
+    const unresolved = await routeWake({ wake: 'board-changed', at: current.at, events });
+    if (events.length > 0 || unresolved) await writeJson(PULSE_FILE, current);
+    if (unresolved) return report(WATCH_FILE, record, unresolved);
     previous = current;
   }
 }
@@ -362,7 +389,10 @@ async function watchdog() {
 
     enabled = await loopEnabled(enabled);
     const workerEvent = enabled ? await workerWake(STATE_DIR) : null;
-    if (workerEvent) return report(WATCHDOG_FILE, record, workerEvent);
+    if (workerEvent) {
+      const unresolved = workerEvent.wake === 'worker-recovery-due' ? await routeWake(workerEvent) : workerEvent;
+      if (unresolved) return report(WATCHDOG_FILE, record, unresolved);
+    }
     const health = watcherHealth(await readJson(WATCH_FILE), { now: Date.now(), pidAlive });
     const decision = shouldFire({
       enabled,

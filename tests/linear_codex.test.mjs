@@ -142,7 +142,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    for (const name of ['linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
@@ -228,4 +228,82 @@ test('runtime settings never leak Codex model defaults into Claude and recovery 
   assert.equal(workerSettings('codex', null, {}, env).model, 'codex-model');
   assert.throws(() => workerSettings('claude', null, { sandbox: 'read-only' }, env), /does not implement/);
   assert.ok(claudeArgs({ session: 'exact', resume: true, effort: 'high', prompt: 'continue' }).args.includes('--effort'));
+});
+
+for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launches exact ${targetRuntime} session through real adapter locks (offline)`, { timeout: 25000 }, async () => {
+  const { copyFile, mkdir, writeFile, chmod } = await import('node:fs/promises');
+  const { promisify } = await import('node:util');
+  const { execFile } = await import('node:child_process');
+  const exec = promisify(execFile), dir = await mkdtemp(join(tmpdir(), 'jaunt-route-cli-'));
+  try {
+    await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin')); await mkdir(join(dir, '.dev-state/claims'), { recursive: true });
+    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_waits.mjs', 'linear_skills.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
+    for (const skill of ['linear-loop', 'linear-orchestrator']) {
+      await mkdir(join(dir, '.agents/skills', skill), { recursive: true });
+      await writeFile(join(dir, '.agents/skills', skill, 'SKILL.md'), 'fixture instructions');
+    }
+    await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
+    await writeFile(join(dir, '.dev-state/claims/JAU-999.json'), JSON.stringify({ issue: 'JAU-999',
+      ...(targetRuntime === 'codex' ? { runtime: 'codex', session: null } : { session: 'exact-claude' }),
+      claimedAt: '2026-09-21T00:00:00Z', phase: 'planning' }));
+    await writeFile(join(dir, 'scripts/linear_watch.mjs'), `export const livePid=p=>{try{process.kill(p,0);return Boolean(p);}catch{return false;}};`);
+    await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
+      import { readFileSync,realpathSync } from 'node:fs';
+      import {workerReports} from './linear_workers.mjs';
+      export const entryPath=p=>realpathSync(p);
+      const cmd=process.argv[2],state=process.cwd()+'/.dev-state';
+      if(cmd==='claims') console.log('['+readFileSync(state+'/claims/JAU-999.json')+']');
+      if(cmd==='workers') console.log(JSON.stringify(await workerReports(state)));
+      if(cmd==='stop-requested') console.log('{"stop":false}');
+      if(cmd==='verdict') { if(process.argv[4]!=='--peek') throw Error('approval mutation forbidden'); console.log('{"verdict":"approved"}'); }
+      if(cmd==='routing-thread') console.log(JSON.stringify({ identifier:'JAU-999',agentId:'agent',state:{type:'started'},comments:[
+        {id:'reply',body:'approved',createdAt:'2026-09-22T10:00:00Z',user:{id:'human',email:'human@example.invalid'}}
+      ]}));
+    `);
+    await writeFile(join(dir, 'bin/gh'), '#!/bin/sh\nprintf \'[{"state":"OPEN"}]\'\n'); await chmod(join(dir, 'bin/gh'), 0o755);
+    for (const runtime of ['codex', 'claude']) {
+      await writeFile(join(dir, 'bin', runtime), `#!/usr/bin/env node
+        const fs=require('node:fs'),a=process.argv.slice(2),dir=process.env.FIXTURE_ROOT;
+        if(a[0]==='queue') {fs.appendFileSync(dir+'/queues.jsonl',JSON.stringify(a)+'\\n');process.exit(0);}
+        fs.appendFileSync(dir+'/calls.jsonl',JSON.stringify({runtime:'${runtime}',args:a})+'\\n');
+        console.log(JSON.stringify(${runtime === 'codex' ? "{type:'thread.started',thread_id:'exact-codex'}" : "{type:'system',session_id:'exact-claude'}"}));
+        process.stdin.resume();process.stdin.on('end',()=>console.log(JSON.stringify({type:'turn.completed'})));
+      `); await chmod(join(dir, 'bin', runtime), 0o755);
+    }
+    await exec('git', ['init', '-q'], { cwd: dir }); await exec('git', ['checkout', '-q', '-b', 'agent/JAU-999'], { cwd: dir });
+    await writeFile(join(dir, 'owner.mjs'), `
+      import {execFile} from 'node:child_process';import {promisify} from 'node:util';import assert from 'node:assert/strict';
+      import {readFile,writeFile} from 'node:fs/promises';import {skillStore} from './scripts/linear_skills.mjs';
+      const exec=promisify(execFile),pause=ms=>new Promise(r=>setTimeout(r,ms));
+      const call=async(...a)=>JSON.parse((await exec(process.env.REAL_NODE,['scripts/linear_codex.mjs',...a])).stdout);
+      const read=async p=>JSON.parse(await readFile(p));
+      const path='.dev-state/${targetRuntime}/JAU-999.json';
+      const until=async fn=>{for(let n=0;n<200;n++){try{if(await fn())return;}catch{}await pause(30);}throw Error('fixture timed out');};
+      const skills=skillStore(process.cwd());await skills.bind('codex','fixture-owner');
+      const snapshot=await skills.read('codex','fixture-owner');await skills.acknowledge('codex','fixture-owner',snapshot.fingerprint);
+      await call('worker','JAU-999','--runtime','${targetRuntime}','--cwd',process.cwd());
+      await until(async()=>Boolean((await read(path)).endedAt && (await read((await read(path)).eventPath)).delivered));
+      const original=await read(path),claim=await read('.dev-state/claims/JAU-999.json');
+      claim.session=original.session;claim.phase='awaiting-approval';await writeFile('.dev-state/claims/JAU-999.json',JSON.stringify(claim));
+      process.env.JAUNT_LINEAR_ROUTING_OWNER=JSON.stringify(original.owner);
+      const e=JSON.stringify({wake:'board-changed',events:[{type:'comment',ticket:'JAU-999'}]});
+      const routed=await call('route','--event',e);assert.equal(routed.event,null);assert.equal(routed.outcomes[0].outcome,'handled');
+      await until(async()=>(await read(path)).attempt!==original.attempt && (await read(path)).endedAt && (await read((await read(path)).eventPath)).delivered);
+      const again=await call('route','--event',e);assert.equal(again.event,null);
+      const calls=(await readFile('calls.jsonl','utf8')).trim().split('\\n').map(JSON.parse);assert.equal(calls.length,2);
+      assert.equal(calls[1].runtime,'${targetRuntime}');
+      assert.ok(calls[1].args.includes('${targetRuntime === 'codex' ? 'exact-codex' : 'exact-claude'}'));
+      assert.ok(calls[1].args.includes('${targetRuntime === 'codex' ? 'resume' : '--resume'}'));
+      const queues=(await readFile('queues.jsonl','utf8')).trim().split('\\n').map(JSON.parse);
+      assert.equal(queues.length,2,'only the two worker completions wake the owner, never the routed comment');
+      delete process.env.JAUNT_LINEAR_ROUTING_OWNER;
+      assert.ok((await call('route','--event',e)).event.routingError);
+      assert.equal((await readFile('calls.jsonl','utf8')).trim().split('\\n').length,2);
+      console.log('offline direct routing passed');
+    `);
+    const result = await exec(join(dir, 'bin/codex-fixture'), ['owner.mjs'], { cwd: dir, timeout: 20000,
+      env: { ...process.env, CODEX_THREAD_ID: 'fixture-owner', REAL_NODE: process.execPath, FIXTURE_ROOT: dir, PATH: `${join(dir, 'bin')}:${process.env.PATH}` } });
+    assert.match(result.stdout, /offline direct routing passed/);
+  } finally { await pause(1200); await rm(dir, { recursive: true, force: true }); }
 });

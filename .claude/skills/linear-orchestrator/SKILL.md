@@ -290,6 +290,30 @@ discussion state in addition to the usual closure/merge checks. Deployment of
 label support remains separate from this protocol; do not overwrite a dirty
 canonical checkout to activate it.
 
+## Automatic routing before an orchestrator wake
+
+The supervised watcher routes attributable human replies on claimed tickets and
+recovery-due events through the existing worker launcher before deciding to exit.
+A fully handled batch keeps polling; an active worker's reply is saved locally
+and reconsidered on quiet polls. Routing preserves the claim cycle, runtime and
+exact session, and reads `verdict --peek`; the worker still registers approval.
+An interrupted worker only uses guarded recovery, including its existing budget.
+
+`routing-escalated` and `routingError` require reconciliation. Inspect the
+reported reason and `.dev-state/routing/` together with the worker lifecycle.
+A launch receipt left in `launching` is uncertain evidence, never permission to
+remove the receipt or start another session. A changed claim does not inherit an
+old pending reply. A live/suspect worker must not be resumed concurrently.
+
+Automatic routing requires the live supervising owner and a fresh instruction
+receipt. Bare/legacy watcher processes without that owner handoff retain their
+ordinary wake path. Reloading this implementation in the operational canonical
+checkout is separate deployment work; a merged PR does not prove activation.
+This does not change periodic rearming, cross-producer notification deduplication,
+or agent-write filtering. Normal worker completion, structural board changes,
+unclaimed/ambiguous input and all external-wait events remain yours. In
+particular, never treat this router as acknowledgement of a JAU-63 wait event.
+
 ## 3. Route the conversation
 
 ### How to write on a ticket
