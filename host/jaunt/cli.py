@@ -184,14 +184,29 @@ WantedBy=default.target
         raise RuntimeError("No user service manager found. jaunt start still works; it won't auto-start after reboot.")
 
 
-def main() -> None:
-    language_arg=next((arg.split('=',1)[1] for arg in sys.argv[1:] if arg.startswith('--language=')),None)
-    if '--language' in sys.argv and sys.argv.index('--language')+1<len(sys.argv):language_arg=sys.argv[sys.argv.index('--language')+1]
-    configure_language(language_arg);argparse._=tr
+class Subparser(argparse.ArgumentParser):
+    """Treat unrecognized dash tokens as values only on opted-in commands."""
+
+    def __init__(self, *args, dash_values: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dash_values = dash_values
+
+    def _parse_optional(self, arg_string):
+        if self.dash_values and len(arg_string) > 1 and arg_string[0] in self.prefix_chars:
+            name = arg_string.partition("=")[0]
+            if not any(option.startswith(name) for option in self._option_string_actions):
+                # In particular, do not split a long ID starting with -h into
+                # the help option and an attached argument. Delegate recognized
+                # options without relying on argparse's version-specific result.
+                return None
+        return super()._parse_optional(arg_string)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jaunt", description=tr('Your own shell. Anywhere.'))
     parser.add_argument("--language",choices=("system",*LANGUAGES),help=tr('Override the display language'))
     parser.add_argument("--version", action="version", version=__version__)
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=Subparser)
     language_parser=sub.add_parser("language",help=tr('Set the display language for this host'))
     language_parser.add_argument("language",choices=("system",*LANGUAGES))
     init = sub.add_parser("init", help=tr('Configure this host (existing identity is preserved)'))
@@ -220,18 +235,18 @@ def main() -> None:
     link = sub.add_parser("link", help=tr('Link this host to another jaunt host (paste its pairing code)'))
     link.add_argument("code")
     sub.add_parser("links", help=tr('List linked hosts'))
-    unlink = sub.add_parser("unlink", help=tr('Remove a linked host'))
+    unlink = sub.add_parser("unlink", dash_values=True, help=tr('Remove a linked host'))
     unlink.add_argument("room")
-    agents = sub.add_parser("agents", help=tr('Agents and machines: pending requests, decisions, trust, log'))
+    agents = sub.add_parser("agents", dash_values=True, help=tr('Agents and machines: pending requests, decisions, trust, log'))
     agents.add_argument("action", choices=["status", "pending", "allow", "deny", "trust", "block", "revoke", "log", "shells", "kill", "cut", "rules", "rule", "features", "enable", "disable"])
-    agents.add_argument("target", nargs="?", default="", help=tr("request id, requester, shell or session id (put -- before an id that starts with a dash)"))
+    agents.add_argument("target", nargs="?", default="", help=tr("request id, requester, shell or session id (unknown dash tokens are values; use -- for an option name or abbreviation)"))
     agents.add_argument("--right", choices=["exec", "type"], default="exec")
     agents.add_argument("--trust", choices=["1h", "24h", "always", "rule"], default="", help=tr("allow: trust for a while, or 'rule' to always allow this exact command"))
     agents.add_argument("--pattern", default="", help=tr("rule: a command or a pattern with * and ?"))
     agents.add_argument("--remove", action="store_true", help=tr("rule: remove the pattern instead of adding it"))
-    rev = sub.add_parser("revoke")
+    rev = sub.add_parser("revoke", dash_values=True)
     rev.add_argument("id")
-    notify = sub.add_parser("notify", help=tr('Notify connected browsers and registered push subscriptions'))
+    notify = sub.add_parser("notify", dash_values=True, help=tr('Notify connected browsers and registered push subscriptions'))
     notify.add_argument("title")
     notify.add_argument("--body", default="")
     notify.add_argument("--session", default=os.environ.get("jaunt_SESSION_ID", ""))
@@ -241,7 +256,14 @@ def main() -> None:
     run.add_argument("args", nargs=argparse.REMAINDER)
     service = sub.add_parser("service")
     service.add_argument("action", choices=["install", "stop", "uninstall"])
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    language_arg=next((arg.split('=',1)[1] for arg in sys.argv[1:] if arg.startswith('--language=')),None)
+    if '--language' in sys.argv and sys.argv.index('--language')+1<len(sys.argv):language_arg=sys.argv[sys.argv.index('--language')+1]
+    configure_language(language_arg);argparse._=tr
+    args = build_parser().parse_args()
     try:
         if args.command == "language":
             save_language(args.language);print(tr("Language preference saved."))
