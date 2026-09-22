@@ -84,7 +84,7 @@ while you are planning or waiting for approval.
 ```bash
 jaunt-linear plan <ID> --summary "<3-6 lignes, en français>" \
   --expects "approuver (👍 sur n'importe quel commentaire du fil) ou répondre des corrections" \
-  "$(cat plan.md)"
+  < plan.md
 jaunt-linear claim <ID> awaiting-approval --session "$CLAUDE_CODE_SESSION_ID"
 ```
 
