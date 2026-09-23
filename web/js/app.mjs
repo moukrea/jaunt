@@ -1713,7 +1713,7 @@ function bridgeSettings(a){
     for(const p of participants)list.append(el('div',{class:'bridge-row',text:`${p.runtime==='claude'?'Claude Code':'Codex'} · ${p.terminal} · ${p.project||p.cwd} · ${p.state==='busy'?tr('working'):tr('idle')}`}));
     for(const u of unbridged)list.append(el('div',{class:'bridge-row muted',text:tr("{0} in \"{1}\" has not registered yet: it joins at its next prompt (a session started before the switch needs a restart or /clear first).",u.runtime==='claude'?'Claude Code':'Codex',u.terminal)}));
     if(!participants.length&&!unbridged.length)list.append(el('div',{class:'bridge-row muted',text:tr('No Claude Code or Codex session is running in a jaunt shell right now.')}));
-    rows.push(settingsSection(tr('Bridged sessions'),tr('Real interactive sessions registered through their own hooks. Only sessions of the other runtime on the same project are announced to each other.'),list));
+    rows.push(settingsSection(tr('Bridged sessions'),tr('Real interactive sessions registered through their own hooks. Only sessions of the other runtime on the same project are announced to each other.'),list,{collapsible:true,key:a.machine.room+':bridge'}));
   }
   return rows;
 }
