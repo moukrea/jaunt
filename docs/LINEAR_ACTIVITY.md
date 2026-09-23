@@ -2,13 +2,13 @@
 
 The canonical `jaunt-linear` launcher owns three team labels. Filter the Linear
 board by **Du neuf du harnais** for new agent information, or **Discussion active**
-for all conversations with outstanding work or information to acknowledge.
+for human questions still waiting for an agent answer.
 
 | Label | Meaning | Removal |
 | --- | --- | --- |
 | Créé par le harnais | Created by the harness; a provenance comment repeats the supplied reason/origin | Permanent |
 | Du neuf du harnais | A meaningful agent publication has not been acknowledged | A human reply acknowledges preceding publications; 👀 or an approve/decline reaction acknowledges the target and older publications |
-| Discussion active | At least one open subject, or unread agent information | Only when both are absent |
+| Discussion active | An open human question (`feedback:` subject) with no agent publication after it | An agent publication after the question, or the ticket's closure (Done, Canceled, Duplicate) unless the question was asked after it |
 
 The labels are shared by the ticket, not separate inboxes for each developer.
 Opening a ticket or reading a notification is not an observable acknowledgment.
@@ -18,8 +18,10 @@ are exempt. A delayed provenance repair represents the creation event, not fresh
 unread information. Other applications and missing/unknown authors cannot clear
 unread state; human attribution requires a non-app email on the API user.
 
-`Waiting for human` retains its existing approval semantics. Done, silence,
-`--expects none`, worker exit, or release of a claim never resolves subjects.
+`Waiting for human` retains its existing approval semantics. Answering a
+question takes the label off without resolving its subject: only the ledger
+does that (JAU-102). Silence, `--expects none`, worker exit, or release of a
+claim never resolves subjects; delivery does, with proof (below).
 Approval resolves the plan decision only; promised implementation remains open.
 New human prose opens a review subject automatically. Exact `lu`, `vu`, `merci`,
 `/approve`, and `/decline` acknowledgments do not create another review subject,
@@ -136,6 +138,18 @@ explicit evidence. On delivery, resolve each completed item individually and
 transfer actual leftovers. Read-only `discussion`, `show`, `pulse`, and
 `verdict --peek` do not synchronize labels. An empty/open-free ledger can still
 have unread information: the final handover stays active until acknowledged.
+
+Delivery closes what a merged PR settles (JAU-101). `cleanup <ID> --pr <n>`
+resolves every remaining open subject of the Done ticket with the PR URL as
+evidence, after the claim is released; a failure there is reported with its
+retry and does not restore the claim. A human question the agent never answered
+stays open and is listed under `kept`, never buried. For tickets cleaned up
+before this rule, the same operation runs by hand and refuses a ticket that is
+not Done or a PR that is not merged:
+
+```bash
+jaunt-linear discussion JAU-84 --delivered https://github.com/moukrea/jaunt/pull/99
+```
 
 Activation on a dirty canonical checkout is the orchestrator's responsibility;
 merging a PR alone does not prove the running watcher loaded these changes.
