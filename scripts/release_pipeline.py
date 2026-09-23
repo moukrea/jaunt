@@ -30,6 +30,11 @@ NOTES = {'host': 'docs/RELEASE_NOTES.md', 'desktop': 'docs/DESKTOP_RELEASE_NOTES
 VERSION_FILES = {'pyproject.toml', 'host/jaunt/__init__.py', 'package.json',
                  'package-lock.json', 'android/app/build.gradle', 'web/config.json', *NOTES.values()}
 ALL = set(COMPONENTS)
+# GITHUB_TOKEN cannot hold the workflows permission, and GitHub refuses a new
+# ref from it whose workflow files differ from the default branch. Every ref the
+# runner creates therefore carries main's workflow tree, which the calling
+# run on main uses anyway: reusable workflows resolve from the caller's commit.
+WORKFLOWS = '.github/workflows'
 
 
 def run(*args, cwd=None, data=None, env=None):
@@ -238,7 +243,7 @@ def state_load():
     return json.loads(read_at(sha, 'state.json')), sha
 
 
-def make_commit(files, parent=None, message='Record release receipt', timestamp=None):
+def make_commit(files, parent=None, message='Record release receipt', timestamp=None, workflows=None):
     with tempfile.TemporaryDirectory() as directory:
         env = {'GIT_INDEX_FILE': str(Path(directory) / 'index'),
                'GIT_AUTHOR_NAME': 'jaunt release', 'GIT_AUTHOR_EMAIL': 'release@users.noreply.github.com',
@@ -246,6 +251,9 @@ def make_commit(files, parent=None, message='Record release receipt', timestamp=
         if timestamp:
             env.update(GIT_AUTHOR_DATE=timestamp, GIT_COMMITTER_DATE=timestamp)
         git('read-tree', parent if parent else '--empty', env=env)
+        if workflows:
+            git('rm', '-r', '--cached', '-f', '-q', '--ignore-unmatch', WORKFLOWS, env=env)
+            git('read-tree', f'--prefix={WORKFLOWS}/', f'{workflows}:{WORKFLOWS}', env=env)
         for name, content in files.items():
             blob = git('hash-object', '-w', '--stdin', data=content)
             git('update-index', '--add', '--cacheinfo', f'100644,{blob},{name}', env=env)
@@ -257,6 +265,10 @@ def state_save(state, old, extra_refs=()):
     sha = make_commit({'state.json': json.dumps(state, indent=2) + '\n'}, old)
     git('push', '--atomic', f'--force-with-lease={STATE_REF}:{old or ""}', 'origin', f'{sha}:{STATE_REF}', *extra_refs)
     return sha
+
+
+def same_workflows(sha, main='origin/main'):
+    return git('rev-parse', f'{sha}:{WORKFLOWS}') == git('rev-parse', f'{main}:{WORKFLOWS}')
 
 
 def validate_checks(source):
@@ -466,13 +478,32 @@ def preflight():
     token = os.environ.get('RELEASE_TOKEN', '')
     if not token:
         raise ValueError('RELEASE_TOKEN is required for repository Variables: write')
+    published = []
     for name in ('JAUNT_RELEASE_TAG', 'JAUNT_DESKTOP_RELEASE_TAG', 'JAUNT_ANDROID_RELEASE_TAG'):
         path = f'{repo()}/actions/variables/{name}'
         current = api(path, token=token)
         # Rewriting the same public value tests the actual permission without
         # advertising an unpublished version. The token never enters state/logs.
         api(path, 'PATCH', {'name': name, 'value': current['value']}, token=token)
+        published.append(current['value'])
     summary('Preflight: repository tag variables readable and writable with RELEASE_TOKEN.')
+    probe_tag_push(published)
+
+
+def probe_tag_push(published_tags):
+    # Create, then delete, a tag shaped like a release commit on each published
+    # base: GitHub refuses GITHUB_TOKEN refs whose workflows differ from main.
+    git('fetch', 'origin', 'main', '--tags')
+    bases = sorted({git('rev-parse', f'{tag}^{{commit}}') for tag in published_tags})
+    for index, base in enumerate(bases):
+        probe = make_commit({}, base, 'Probe release tag permission [skip ci]', workflows='origin/main')
+        ref = f'refs/tags/jaunt-preflight-{os.environ["GITHUB_RUN_ID"]}-{index}'
+        try:
+            git('push', 'origin', f'{probe}:{ref}')
+        except RuntimeError as error:
+            raise ValueError(f'GITHUB_TOKEN cannot create release tags on {base}: {error}') from None
+        git('push', 'origin', f':{ref}')
+    summary('Preflight: GITHUB_TOKEN created and deleted release-shaped tags.')
 
 
 def bootstrap():
@@ -537,9 +568,11 @@ def prepare():
                 bump_tree(directory, selected, tags, source, git('show', '-s', '--format=%s', source), max([source_code, *codes]) + 1)
                 files = {name: (Path(directory) / name).read_text() for name in VERSION_FILES}
             timestamp = git('show', '-s', '--format=%cI', source)
-            release_sha = make_commit(files, source, f'build: publish {source}', timestamp)
-            changed = set(git('diff', '--name-only', source, release_sha).splitlines())
-            if not changed <= VERSION_FILES or git('rev-parse', release_sha + '^') != source:
+            release_sha = make_commit(files, source, f'build: publish {source}', timestamp, workflows='origin/main')
+            changed = {name for name in git('diff', '--name-only', source, release_sha).splitlines()
+                       if not name.startswith(WORKFLOWS + '/')}
+            if (not changed <= VERSION_FILES or git('rev-parse', release_sha + '^') != source
+                    or not same_workflows(release_sha)):
                 raise ValueError('Generated release is not an allowed child of validated main')
             state['pending'] = {'source': source, 'sha': release_sha, 'tags': tags, 'components': selected,
                                 'status': 'publishing', 'run': os.environ['GITHUB_RUN_ID']}

@@ -43,7 +43,10 @@ For affected components the coordinator allocates the next numbered beta tag
 from existing tags, preserves independent host/desktop/Android version series,
 and increases Android `versionCode` beyond the existing tags and source value.
 A generated commit has exactly the validated main source as its parent. Only
-version fields, public tag configuration and release notes may differ. Tags and
+version fields, public tag configuration, release notes and `.github/workflows`
+may differ. The workflow tree is copied from current main: GitHub refuses a
+`GITHUB_TOKEN` tag whose workflow files differ from the default branch, and the
+calling run on main already supplies those reusable workflows. Tags and
 the pending receipt are pushed atomically; main is never bypassed or rewritten.
 The tagged commit is the publication source of truth; development main does not
 receive automated version commits. Notes name the source commit and its subject.
@@ -81,6 +84,8 @@ Manually run **Automatic release** on main: even while disabled, its preflight
 tests `RELEASE_TOKEN` by reading and rewriting the same three public tag variable
 values. The token needs repository Variables read/write (or the equivalent
 classic scope). Its presence alone is not evidence of working credentials.
+Preflight then creates and deletes a `jaunt-preflight-*` tag built like a release
+commit on each published base, proving `GITHUB_TOKEN` can push release tags.
 `GITHUB_TOKEN` has Contents and Actions write for atomic receipt/tag pushes and
 continuation dispatches; build jobs retain their existing scoped permissions.
 No secret is stored in a receipt, URL, argument or public variable.
