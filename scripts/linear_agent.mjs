@@ -11,6 +11,7 @@ import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promise
 import { randomUUID } from 'node:crypto';
 import { phaseHistory, archiveClaim, telemetryArchivePath, telemetryReport } from './linear_telemetry.mjs';
 import { skillStore } from './linear_skills.mjs';
+import { wakeStore } from './linear_wakes.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
 import { connectionPages } from './linear_activity.mjs';
@@ -1367,6 +1368,9 @@ async function watcherState() {
     watcher,
     watchdog,
     skills: await skillStore(ROOT).status(),
+    // Delivered, taken and suppressed wakes: what the loop cost in model turns
+    // and what it avoided (JAU-62). `null` when the outbox cannot be read.
+    wakes: await wakeStore(STATE_DIR).status().catch(error => ({ error: error.message })),
   };
 }
 
@@ -1982,7 +1986,16 @@ const COMMANDS = {
     return skillStore(ROOT).bind(flags.runtime, flags.session);
   },
   'skills-read': async (_args, flags) => {
-    return skillStore(ROOT).read(flags.runtime, flags.session);
+    return skillStore(ROOT).read(flags.runtime, flags.session, { ifStale: flags['if-stale'] === true });
+  },
+  // The first gesture of every wake: takes the outstanding batch, or answers
+  // `alreadyHandled` for a replayed one so the pass can stop before paying for
+  // instructions and board reads.
+  wake: async ([action, ...rest], flags) => {
+    if (rest.length) throw new Error('unexpected wake argument');
+    const store = wakeStore(STATE_DIR);
+    if (action === 'take') return store.take(flags.id);
+    return store.status();
   },
   'skills-ack': async (_args, flags) => {
     return skillStore(ROOT).acknowledge(flags.runtime, flags.session, flags.fingerprint);
@@ -2084,7 +2097,8 @@ export const COMMAND_FLAGS = {
   },
   cleanup: ['pr'], status: [], watcher: [],
   'loop-on': ['runtime', 'session'], 'loop-off': [],
-  'skills-bind': ['runtime', 'session'], 'skills-read': ['runtime', 'session'],
+  'skills-bind': ['runtime', 'session'], 'skills-read': ['runtime', 'session', 'if-stale'],
+  wake: { take: ['id'], status: [] },
   'skills-ack': ['runtime', 'session', 'fingerprint'],
   claim: ['session', 'runtime'], closure: ['file'], release: ['reason'],
   verdict: ['peek'], 'ensure-waiting-state': [],
@@ -2121,7 +2135,7 @@ export function parseCommandArgs(command, args) {
       const next = args[i + 1];
       // --peek is a switch even before a positional. Preserve the existing
       // bare-value representation, including claim's bare --session fallback.
-      const bare = name === 'peek' || next === undefined || next.startsWith('--');
+      const bare = name === 'peek' || name === 'if-stale' || next === undefined || next.startsWith('--');
       flags[name] = bare ? true : next;
       if (!bare) i += 1;
     } else {

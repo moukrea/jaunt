@@ -53,9 +53,16 @@ export function skillStore(root, { now = Date.now } = {}) {
       await write(ownerPath, who);
       return status(who); // Binding does not acknowledge anything.
     },
-    async read(runtime, session) {
+    // `ifStale`: when this session already acknowledged the current
+    // fingerprint, answer without the file contents. Re-reading ~8 800 tokens
+    // of unchanged instructions on every wake was most of a quiet pass (JAU-62).
+    async read(runtime, session, { ifStale = false } = {}) {
       const who = identity(runtime, session);
-      return { ...who, ...(await snapshot(runtime)) };
+      const current = await snapshot(runtime);
+      if (ifStale && (await read(receiptPath(who)))?.fingerprint === current.fingerprint) {
+        return { ...who, state: 'fresh', fingerprint: current.fingerprint, unchanged: true, paths: current.files.map(f => f.path) };
+      }
+      return { ...who, ...current };
     },
     async acknowledge(runtime, session, fingerprint) {
       const who = identity(runtime, session);

@@ -32,8 +32,11 @@ loop state and instruction updates. With the loop off no automatic sync occurs.
 Run `jaunt-linear sync-activity JAU-34` to reconcile one ticket explicitly.
 Failures are visible and retryable. Per-ticket errors return `ok: false` with an
 `errors` list; healthy tickets and board polling continue. The watcher emits
-`activity-failed` when that list changes and `activity-recovered` when it clears.
-A global discovery/API failure retains the normal bounded retry policy. A label change may cause one watcher wake;
+`activity-failed` when the reported list changes and `activity-recovered` when it
+clears. A transient error (Linear 5xx/429, network) is reported only after three
+consecutive polls, as `transient: <status>`, so a passing 503 wakes nobody; other
+errors are reported at once. A global discovery/API failure retains the bounded
+retry policy: three failures, or twenty transient ones. A label change may cause one watcher wake;
 unchanged synchronization performs no label mutations and creates no comments.
 
 Tracking begins with the first new harness publication or explicit sync. Existing

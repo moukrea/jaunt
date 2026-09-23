@@ -17,8 +17,9 @@ claude session ID ($CLAUDE_SESSION_ID); if it is unavailable, obtain the actual 
 ID from the runtime, never invent one or reuse another session's receipt.
 
 ```bash
-jaunt-linear skills-read --runtime claude --session "$CLAUDE_SESSION_ID"
-# Read both returned file contents, then use the exact returned fingerprint:
+jaunt-linear skills-read --if-stale --runtime claude --session "$CLAUDE_SESSION_ID"
+# `unchanged: true` → nothing to read or acknowledge. Otherwise read both
+# returned file contents, then use the exact returned fingerprint:
 jaunt-linear skills-ack --runtime claude --session "$CLAUDE_SESSION_ID" --fingerprint <fingerprint>
 ```
 
@@ -118,7 +119,7 @@ Then launch **both** processes, each as its own Bash call with
 `run_in_background: true`:
 
 ```bash
-node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30 --max-minutes 30
+node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30
 node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --watchdog --grace 600
 ```
 
@@ -150,7 +151,11 @@ wake-up. Nothing is spent while the board is still.
 Two consequences worth keeping straight:
 
 - The wake-up carries no payload. The harness hands over the watcher's **output
-  file**; the orchestrator reads it for the event list.
+  file**; the orchestrator reads it for the event list, and first takes its
+  `wakeId` (`jaunt-linear wake take`) so a re-read wake costs nothing.
+- There is no periodic exit any more: a quiet board is no model turn at all.
+  Worker exits and board changes reach the watcher through one outbox, which
+  sends each fact once (JAU-62).
 - Each pass must relaunch the watcher, or the loop ends silently after one
   wake-up. That is `linear-orchestrator` §6.
 
@@ -165,7 +170,8 @@ node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --watchdog --grace 600
 ```
 
 The watchdog never calls Linear and never calls a model. It reads the watcher's
-pulse every 15 s and **exits when the loop has gone blind** — the same mechanism,
+pulse every 15 s, hands finished or lost workers to the outbox for the watcher
+to deliver, and **exits only when the loop has gone blind** — the same mechanism,
 turned against the failure it used to hide. Its exit is a wake-up that says
 `watcher-lost`, and the orchestrator relaunches everything.
 

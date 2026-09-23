@@ -19,8 +19,9 @@ codex session ID ($CODEX_THREAD_ID); if it is unavailable, obtain the actual ses
 ID from the runtime, never invent one or reuse another session's receipt.
 
 ```bash
-jaunt-linear skills-read --runtime codex --session "$CODEX_THREAD_ID"
-# Read both returned file contents, then use the exact returned fingerprint:
+jaunt-linear skills-read --if-stale --runtime codex --session "$CODEX_THREAD_ID"
+# `unchanged: true` → nothing to read or acknowledge. Otherwise read both
+# returned file contents, then use the exact returned fingerprint:
 jaunt-linear skills-ack --runtime codex --session "$CODEX_THREAD_ID" --fingerprint <fingerprint>
 ```
 
@@ -115,10 +116,13 @@ to the owning Codex CLI process**, whose identity is checked every second.
 Shell `&`, PTY IDs, `functions.wait`, and Claude's `run_in_background` are not
 substitutes for this wake-up mechanism.
 
-The watcher polls every 30 seconds without calling a model. A board change or
-30-minute reconciliation interval ends it. The adapter saves the event in
-`.dev-state/codex/watcher-event.json` and uses `codex queue` to wake this exact
-thread. Each pass calls `arm` again. The independent watchdog survives ordinary
+The watcher polls every 30 seconds without calling a model. Only something to
+handle ends it — there is no periodic reconciliation exit any more (JAU-62).
+Worker exits, board changes and activity failures go through one outbox that
+sends each fact once and never queues a second wake while one is untaken. The
+adapter saves the payload in `.dev-state/codex/watcher-event.json` and uses
+`codex queue` to wake this exact thread with its `wakeId`; the pass starts with
+`jaunt-linear wake take --id <wakeId>` and stops at once on `alreadyHandled`. Each pass calls `arm` again. The independent watchdog survives ordinary
 wakes and reports `watcher-lost` after 600 seconds without a healthy watcher.
 Queue failures remain on disk (`delivered: false`); report them.
 

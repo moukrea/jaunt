@@ -23,10 +23,15 @@ claude session ID ($CLAUDE_SESSION_ID); if it is unavailable, obtain the actual 
 ID from the runtime, never invent one or reuse another session's receipt.
 
 ```bash
-jaunt-linear skills-read --runtime claude --session "$CLAUDE_SESSION_ID"
-# Read both returned file contents, then use the exact returned fingerprint:
+jaunt-linear skills-read --if-stale --runtime claude --session "$CLAUDE_SESSION_ID"
+# `unchanged: true` → nothing to read or acknowledge; go on.
+# Otherwise read both returned file contents, then use the exact returned fingerprint:
 jaunt-linear skills-ack --runtime claude --session "$CLAUDE_SESSION_ID" --fingerprint <fingerprint>
 ```
+
+`--if-stale` returns the contents only when they changed since this session's
+receipt; an unchanged pair answers in a few lines instead of ~8 800 tokens
+(JAU-62). Drop the flag to force a full reread.
 
 For an already enabled legacy Claude loop whose `skills` status says no session
 is registered, bind its actual owner before the read/ack sequence:
@@ -101,8 +106,26 @@ string is the entire wiring between the board and the code.
 
 ## What woke you
 
-The watcher exits when the board moves, and the harness hands you its output
-file. Read it: it names events, not state.
+The watcher exits when there is something to handle, and the harness hands you
+its output file. Read it: it names events, not state.
+
+**First gesture, before instructions or board reads:** when the output carries a
+`wakeId`, take it:
+
+```bash
+jaunt-linear wake take --id <wakeId>
+```
+
+`alreadyHandled: true` means this exact wake was already taken — a re-read or
+replayed output. Stop there: re-arm (§6) and end the pass, without reading
+skills, board or status. Otherwise the answer is the payload to handle. Wakes
+without a `wakeId` (`skills-changed`, `external-wait`, `watcher-lost`,
+`watcher-failed`, `loop-off`) are handled as before.
+
+Worker exits, board changes and activity failures leave through one outbox
+(JAU-62): each fact once, grouped for a few seconds, and never a second wake
+while one is untaken. A delivered wake nobody took is offered again after ten
+minutes, so skipping `wake take` costs a delayed duplicate, not a lost event.
 
 | event | what it means |
 |---|---|
@@ -111,8 +134,10 @@ file. Read it: it names events, not state.
 | `ticket-created` | a new ticket must be compared against the whole board — §2 |
 | `ticket-edited` | it returns to the analysis pass — §2 |
 | `state-changed` | a configured PR event, a human action, or the loop changed its state; verify the actual transition; a ticket newly *Done* is §5 |
-| `interval-elapsed` | nothing moved; reconcile (§1) and go back to sleep |
-| `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work. The `error` names what broke — three consecutive polls failed, usually an expired token |
+| `batch` | several wakes left together; `items` holds each one — handle each as its own row of this table |
+| `worker-finished` / `worker-lost` | a worker process ended (one wake, whichever producer saw it first); reconcile that claim and its PR — see worker supervision |
+| `interval-elapsed` | only from a watcher launched with the legacy `--max-minutes`: nothing moved; reconcile (§1) and go back to sleep |
+| `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work. The `error` names what broke — three consecutive polls failed (usually an expired token), or twenty transient ones (Linear 5xx/429) |
 | `watcher-lost` | **the watchdog fired**: the loop ran with nothing watching for longer than its grace, because a pass did not re-arm it. Relaunch both (§6), then say on the board how long it was blind — `blindForSeconds` — because nobody else saw it |
 | `loop-off` | a human switched the flag off; the watcher ended itself. Do nothing and relaunch nothing |
 | `watchdog-superseded` | two watchdogs were started and the older stood down. Nothing is wrong; check §1 and carry on |
@@ -509,10 +534,11 @@ reopen that worker's session (§3) and tell it to implement — nothing else wil
 Last thing, every time, unless the loop is off:
 
 ```bash
-node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30 --max-minutes 30
+node "$(jaunt-linear repo)/scripts/linear_watch.mjs" --interval 30
 ```
 
-Run it with `run_in_background: true`, in a Bash call of its own. **Not a `&` on
+No `--max-minutes`: the watcher no longer exits on a timer, so a quiet board
+costs no model turn at all (JAU-62). Run it with `run_in_background: true`, in a Bash call of its own. **Not a `&` on
 the end of a foreground call** — that kills the process when the call returns and
 leaves the harness with no background task to notify, which is how the loop went
 deaf for 1 h 40 (JAU-52).
@@ -571,6 +597,8 @@ with the human feedback. Reconcile unclaimed tickets yourself, including Done.
 Never infer that approval clears implementation work or unrelated questions.
 
 An `activity-failed` wake reports affected ticket IDs without stopping healthy
-board polling. Inspect and repair their access/ledger state; do not delete a
+board polling. A transient error (Linear 5xx/429, network) is reported only once
+it has persisted for three polls, as `transient: <status>`; a real one (deleted
+ticket, corrupt ledger) at once. Inspect and repair their access/ledger state; do not delete a
 ledger or infer closure to silence the warning. `activity-recovered` reports
 that the previously observed errors have cleared.

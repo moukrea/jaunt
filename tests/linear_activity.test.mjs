@@ -186,7 +186,7 @@ test('real watcher synchronizes before pulse and reports sync failures without a
   const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
   const exec=promisify(execFile),f=await fixture(t),root=f.dir;
   await mkdir(join(root,'scripts'));await mkdir(join(root,'.dev-state'));
-  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
+  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
   await writeFile(join(root,'.dev-state/linear-loop.json'),JSON.stringify({enabled:true}));
   await writeFile(join(root,'.dev-state/linear-pulse.json'),JSON.stringify({tickets:{}}));
   const {skillStore}=await import('../scripts/linear_skills.mjs');
@@ -197,21 +197,24 @@ test('real watcher synchronizes before pulse and reports sync failures without a
     await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n');
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:true}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`);
   const args=[join(root,'scripts/linear_watch.mjs'),'--interval','0.01','--max-minutes','1'];
+  // Each run stands for one pass: the model takes the batch before re-arming.
+  const {wakeStore}=await import('../scripts/linear_wakes.mjs');
+  const take=()=>wakeStore(join(root,'.dev-state')).take();
   const result=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(result.wake,'board-changed');assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
+  assert.equal(result.wake,'board-changed');await take();assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
   const partialMock = errors => `import {appendFile} from 'node:fs/promises';
     await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n');
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:${errors.length===0},errors:${JSON.stringify(errors)}}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`;
   const errors=[{issue:'JAU-2',error:'deleted ticket'}];
   await writeFile(mock,partialMock(errors));await writeFile(join(root,'calls.txt'),'');
   const failed=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(failed.events[0].type,'activity-failed');
+  assert.equal(failed.events[0].type,'activity-failed');await take();
   assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
   const quiet=JSON.parse((await exec(process.execPath,[...args.slice(0,-1),'0.002'],{timeout:5000})).stdout);
   assert.equal(quiet.wake,'interval-elapsed');
   await writeFile(mock,partialMock([]));
   const recovered=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(recovered.events[0].type,'activity-recovered');
+  assert.equal(recovered.events[0].type,'activity-recovered');await take();
   await writeFile(join(root,'calls.txt'),'');
   await writeFile(mock,`import {appendFile} from 'node:fs/promises'; await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n'); console.error('sync unavailable'); process.exit(1);`);
   await assert.rejects(exec(process.execPath,args,{timeout:5000}),e=>{assert.match(e.stderr,/sync unavailable/);assert.equal(JSON.parse(e.stdout).wake,'watcher-failed');return true;});

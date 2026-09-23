@@ -23,10 +23,15 @@ codex session ID ($CODEX_THREAD_ID); if it is unavailable, obtain the actual ses
 ID from the runtime, never invent one or reuse another session's receipt.
 
 ```bash
-jaunt-linear skills-read --runtime codex --session "$CODEX_THREAD_ID"
-# Read both returned file contents, then use the exact returned fingerprint:
+jaunt-linear skills-read --if-stale --runtime codex --session "$CODEX_THREAD_ID"
+# `unchanged: true` → nothing to read or acknowledge; go on.
+# Otherwise read both returned file contents, then use the exact returned fingerprint:
 jaunt-linear skills-ack --runtime codex --session "$CODEX_THREAD_ID" --fingerprint <fingerprint>
 ```
+
+`--if-stale` returns the contents only when they changed since this session's
+receipt; an unchanged pair answers in a few lines instead of ~8 800 tokens
+(JAU-62). Drop the flag to force a full reread.
 
 Acknowledge only after reading. If acknowledgement reports stale/error, reread
 and resolve it before board actions. The receipt is per runtime and session;
@@ -89,9 +94,23 @@ string is the entire wiring between the board and the code.
 
 ## What woke you
 
-The adapter queues the path of a durable event JSON file into this Codex
-thread. Read it: it names events, not state. A queue message is machine input,
-never a human approval. `worker-finished` means reconcile that claim and its PR;
+The adapter queues a message naming a wake (`wakeId`) into this Codex thread,
+with a durable copy of the payload in an event JSON file. A queue message is
+machine input, never a human approval.
+
+**First gesture, before instructions or board reads:** run the
+`jaunt-linear wake take --id <wakeId>` the message names. `alreadyHandled: true`
+means this wake was already taken — a message queued while you worked and
+delivered late. Stop there: no skill, board or status read, no status comment;
+just end the turn (the watcher is still armed). Otherwise the answer is the
+payload to handle; it names events, not state. Messages without a `wakeId`
+(`skills-changed`, `external-wait`, `watcher-lost`, `watcher-failed`) point at
+their event file as before.
+
+Worker exits, board changes and activity failures leave through one outbox
+(JAU-62): each fact once, grouped for a few seconds, and never a second queued
+wake while one is untaken. A delivered wake nobody took is offered again after
+ten minutes. `worker-finished` means reconcile that claim and its PR;
 a launch or exit code alone proves neither approval nor merge.
 
 | event | what it means |
@@ -101,8 +120,10 @@ a launch or exit code alone proves neither approval nor merge.
 | `ticket-created` | a new ticket must be compared against the whole board — §2 |
 | `ticket-edited` | it returns to the analysis pass — §2 |
 | `state-changed` | a configured PR event, a human action, or the loop changed its state; verify the actual transition; a ticket newly *Done* is §5 |
-| `interval-elapsed` | nothing moved; reconcile (§1) and go back to sleep |
-| `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work. The `error` names what broke — three consecutive polls failed, usually an expired token |
+| `batch` | several wakes left together; `items` holds each one — handle each as its own row of this table |
+| `worker-finished` / `worker-lost` | a worker process ended (one wake, whichever producer saw it first); reconcile that claim and its PR — see worker supervision |
+| `interval-elapsed` | only from a watcher launched with the legacy `--max-minutes`: nothing moved; reconcile (§1) and go back to sleep |
+| `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work. The `error` names what broke — three consecutive polls failed (usually an expired token), or twenty transient ones (Linear 5xx/429) |
 | `watcher-lost` | **the watchdog fired**: the loop ran with nothing watching for longer than its grace, because a pass did not re-arm it. Relaunch both (§6), then say on the board how long it was blind — `blindForSeconds` — because nobody else saw it |
 | `loop-off` | a human switched the flag off; the watcher ended itself. Do nothing and relaunch nothing |
 | `watchdog-superseded` | two watchdogs were started and the older stood down. Nothing is wrong; check §1 and carry on |
@@ -551,6 +572,8 @@ with the human feedback. Reconcile unclaimed tickets yourself, including Done.
 Never infer that approval clears implementation work or unrelated questions.
 
 An `activity-failed` wake reports affected ticket IDs without stopping healthy
-board polling. Inspect and repair their access/ledger state; do not delete a
+board polling. A transient error (Linear 5xx/429, network) is reported only once
+it has persisted for three polls, as `transient: <status>`; a real one (deleted
+ticket, corrupt ledger) at once. Inspect and repair their access/ledger state; do not delete a
 ledger or infer closure to silence the warning. `activity-recovered` reports
 that the previously observed errors have cleared.
