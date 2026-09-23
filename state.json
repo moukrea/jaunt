@@ -64,7 +64,7 @@
     },
     "moukrea_107": {
       "pr": 107,
-      "status": "live",
+      "status": "removed",
       "n": 2,
       "candidates": [
         {
@@ -130,7 +130,8 @@
             }
           }
         }
-      ]
+      ],
+      "run": "35854500106"
     }
   }
 }
