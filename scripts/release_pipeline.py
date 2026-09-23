@@ -338,9 +338,31 @@ def release_verify(tag, component, expected_sha=None):
     if release['draft']:
         return None  # resumable publisher owns this unpublished staging area
     with tempfile.TemporaryDirectory() as directory:
-        run('gh', 'release', 'download', tag, '--repo', os.environ['GITHUB_REPOSITORY'], '--dir', directory)
+        download_assets(release['id'], directory)
         hashes = verify_assets(directory, component)
     return {'tag': tag, 'sha': actual, 'url': release['html_url'], 'hashes': hashes}
+
+
+def download_assets(release_id, directory):
+    """Fetch a published release's files by id.
+
+    The tag and list views of some channel releases show `assets: []` while the
+    id views list them (JAU-106), so `gh release download <tag>` finds nothing.
+    """
+    assets = pages(f'{repo()}/releases/{int(release_id)}/assets')
+    if not assets:
+        raise ValueError('Published release has no assets')
+    for asset in assets:
+        name = asset['name']
+        if PurePosixPath(name).name != name or name in ('.', '..') or '\\' in name:
+            raise ValueError(f'Invalid release asset name: {name!r}')
+        if asset['state'] != 'uploaded':
+            raise ValueError(f'Release asset not uploaded: {name}')
+        with open(Path(directory) / name, 'xb') as target:
+            result = subprocess.run(['gh', 'api', f'{repo()}/releases/assets/{int(asset["id"])}',
+                                     '-H', 'Accept: application/octet-stream'], stdout=target, stderr=subprocess.PIPE)
+        if result.returncode:
+            raise RuntimeError(f'gh api asset download failed: {result.stderr.decode(errors="replace")[-2000:]}')
 
 
 def require_authority(selected):
