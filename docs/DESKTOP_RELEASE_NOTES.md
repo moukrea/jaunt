@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.38
+
+- fix(web): hide keyboard button on desktop (JAU-110) (#117)
+- Source: `e3413cd8e51beb9d2f4e3d3658a27ea293fa80bf`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
