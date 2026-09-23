@@ -27,6 +27,8 @@ android {
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     testOptions { unitTests.returnDefaultValues = false }
     sourceSets.main.assets.srcDir file("$buildDir/generated/jauntAssets")
+    // The shared update-channel contract fixtures (docs/UPDATES.md#update-channels) run in the unit tests.
+    sourceSets.test.resources.srcDir file('../../tests/fixtures')
 }
 configurations.configureEach { resolutionStrategy.activateDependencyLocking() }
 dependencies {

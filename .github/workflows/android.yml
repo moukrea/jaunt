@@ -1,7 +1,7 @@
 name: Android APK
 on:
   pull_request:
-    paths: ['android/**', 'web/**', 'scripts/prepare_web.mjs', '.github/workflows/android.yml']
+    paths: ['android/**', 'web/**', 'scripts/prepare_web.mjs', 'tests/fixtures/update_channels.json', '.github/workflows/android.yml']
   push:
     branches: [main, 'android/**']
   workflow_call:
