@@ -456,6 +456,23 @@ jaunt-linear wait resolve <ID> --runtime <actual-runtime> --session <actual-sess
   --comment <decision-comment-id> --evidence "<observed outcome and proof link>"
 ```
 
+A publication wait whose outcome is already delivered closes on proof, not on a
+retroactive decision (JAU-98). Consent gates an action still to be done; it is
+never asked for a result someone else already obtained:
+
+```sh
+jaunt-linear wait resolve <ID> --runtime <actual-runtime> --session <actual-session> \
+  --delivered --evidence "<run and release links>"
+```
+
+Only for `--resource jaunt-production-release`. The CLI itself reads the
+`jaunt-release-state` receipt (`delivered` for the merged source) and the public
+Page's `releaseSource` (that source or a descendant); a network failure refuses.
+It also refuses when the latest human reply in the thread is anything but
+`/wait <wait-id> approve`: a human who answered keeps the hand. Once delivery is
+verified, run it instead of asking the human for `/wait approve`, and do not
+push the deadline back to wait for them.
+
 For an explicitly approved transfer, add `--ticket <related-ID>`; that target must
 be named in the immutable action and its related link verified. Record the four
 follow-up facts and expectation on the target using the normal follow-up protocol.

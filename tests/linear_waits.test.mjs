@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { waitStore, WAIT_PHASE, waitWake, assertWaitResolved, promoteWaitQueue } from '../scripts/linear_waits.mjs';
 import { atomicJson, readJson, workerHealth, workerReports } from '../scripts/linear_workers.mjs';
-import { writeClaim, registerAnswer, contendingClaims, closureStore, readWaitThread, syncWaitDiscussion } from '../scripts/linear_agent.mjs';
+import { releaseDelivery, writeClaim, registerAnswer, contendingClaims, closureStore, readWaitThread, syncWaitDiscussion } from '../scripts/linear_agent.mjs';
 import { observeActivity, updateSubjects } from '../scripts/linear_activity.mjs';
 
 async function fixture(t) {
@@ -23,6 +23,7 @@ async function fixture(t) {
   f.make = () => waitStore({ stateDir, now: () => f.time, readThread: f.thread, agentId: 'agent',
     verifyMerge: async () => { if (f.badProof) throw Error('merge not verified'); return { pr: 100, head: 'a'.repeat(40), merge: 'b'.repeat(40), cwd: '/isolated' }; },
     persistClaim: r => writeClaim(r, { stateDir }),
+    verifyDelivery: async source => f.verifyDelivery(source),
     publish: async (id, body, parent) => {
       f.calls.push({ id, body, parent });
       const comment = { id: `comment-${f.calls.length}`, body, createdAt: new Date(f.time).toISOString(), parent: parent ? { id: parent } : null, user: { id: 'agent' } };
@@ -33,6 +34,7 @@ async function fixture(t) {
     syncDiscussion: async w => { f.syncs.push(structuredClone(w)); if (f.labelFailure) throw Error('label sync failed'); },
     promoteQueued: async () => { f.promotions++; return [{ ticket: 'JAU-998', claimedAt: 'other-cycle', runtime: 'codex', session: 'other-session' }]; },
   });
+  f.verifyDelivery = () => { throw Error('delivery not stubbed'); };
   f.store = f.make();
   f.begin = () => f.store.begin(c.issue, f.who, f.input);
   f.read = () => f.store.read(c.issue);
@@ -83,7 +85,8 @@ test('deadline, restart, Linear-only replies and event acknowledgement are durab
   assert.equal((await waitWake(f.stateDir, f.time)).wake, 'wait-overdue');
   assert.equal(await waitWake(f.stateDir, f.time + 1), null);
   const first = await f.make().reconcile();
-  assert.ok(first.events.some(e => e.type === 'wait-overdue')); assert.equal(f.calls.length, 2);
+  assert.ok(!first.events.some(e => e.type === 'wait-overdue'), 'the watchdog already raised this deadline'); assert.equal(f.calls.length, 2);
+  assert.ok((await f.read()).events.some(e => e.type === 'wait-overdue' && e.notified?.by === 'watchdog'));
   assert.equal((await f.make().reconcile()).events.length, 0); assert.equal(f.calls.length, 2);
   const reply = await f.reply('Le peer retient le message, voici ma correction.');
   const withReply = await f.make().reconcile();
@@ -286,4 +289,94 @@ test('Linear correction revises the immutable action without carrying over old a
   const decision = await f.store.decision(f.c.issue, f.who);
   assert.equal(decision.verdict, 'approved'); assert.equal(decision.comment, yes.id);
   assert.equal((await f.read()).state, 'open', 'decision is not delivery');
+});
+
+// JAU-98: a passed deadline used to leave the watcher on every relaunch until
+// someone pushed it back, and a delivered release still needed a human
+// `/wait approve` for an action already done.
+test('an overdue deadline wakes once per generation, whichever of watcher or watchdog sees it first', async t => {
+  const f = await fixture(t), w = await f.begin();
+  f.time = Date.parse(w.deadline) + 1;
+  const overdue = r => r.events.filter(e => e.type === 'wait-overdue');
+  assert.equal(overdue(await f.make().reconcile()).length, 1);
+  for (let i = 0; i < 4; i++) { f.time += 300001; assert.equal(overdue(await f.make().reconcile()).length, 0, 'no re-wake on relaunch'); }
+  assert.equal(await waitWake(f.stateDir, f.time), null, 'watchdog silent once the watcher raised it');
+  const reply = await f.reply('Je regarde.');
+  const withReply = await f.make().reconcile();
+  assert.deepEqual(withReply.events.map(e => e.type), ['wait-reply'], 'a new reply does not drag the old deadline back');
+  assert.equal(withReply.events[0].comment, reply.id);
+  f.time += 300001;
+  assert.deepEqual((await f.make().reconcile()).events.map(e => e.type), ['wait-reply'], 'replies keep bounded retries');
+  const next = new Date(f.time + 600000).toISOString();
+  await f.store.attempt(f.c.issue, f.who, { action: 'relance', result: 'en cours', evidence: 'run', deadline: next });
+  f.time = Date.parse(next) + 1;
+  const wake = await waitWake(f.stateDir, f.time);
+  assert.equal(wake.generation, 2); assert.equal(wake.wait, w.id);
+  f.time += 300001;
+  assert.equal(await waitWake(f.stateDir, f.time), null, 'watchdog raises a generation once');
+  assert.equal(overdue(await f.make().reconcile()).length, 0, 'watcher does not repeat the watchdog');
+});
+
+test('a delivered publication resolves on CLI-verified proof, without a retroactive human decision', async t => {
+  const f = await fixture(t), checked = [];
+  let delivery;
+  f.verifyDelivery = source => { checked.push(source); return delivery(source); };
+  await f.begin();
+  const resolve = input => f.store.resolve(f.c.issue, f.who, { evidence: 'release publiée', delivered: true, ...input });
+  await assert.rejects(resolve({ comment: 'x' }), /neither/);
+  delivery = () => { throw Error('release receipt for b is failed, not delivered'); };
+  await assert.rejects(resolve(), /not delivered/);
+  assert.equal((await f.read()).state, 'open');
+  delivery = () => ({ source: 'c'.repeat(40), status: 'delivered' });
+  await assert.rejects(resolve(), /not verified/);
+  delivery = source => ({ source, status: 'delivered', run: '123', releaseSource: source, page: 'https://example.invalid/' });
+  const w = await resolve();
+  assert.equal(w.state, 'resolved'); assert.equal(w.resolution.kind, 'delivered'); assert.equal(w.resolution.comment, null);
+  assert.deepEqual(checked.at(-1), 'b'.repeat(40));
+  const post = f.calls.at(-1).body;
+  assert.match(post, /preuve de livraison/); assert.match(post, /Rien attendu de toi/);
+  assert.equal(w.discussionResolved, true);
+  for (const e of w.events.filter(e => e.type === 'wait-queued-ready')) await f.store.acknowledge(f.c.issue, e.id, 'promoted worker read it');
+  await assertWaitResolved(f.stateDir, await readJson(f.claimPath));
+});
+
+test('proof-only resolution never overrides a human answer nor covers other resources', async t => {
+  const f = await fixture(t);
+  f.verifyDelivery = source => ({ source, status: 'delivered', run: '1', releaseSource: source });
+  await f.begin();
+  const resolve = () => f.store.resolve(f.c.issue, f.who, { evidence: 'livré', delivered: true });
+  const no = await f.reply(w => `/wait ${w.id} decline`);
+  await assert.rejects(resolve(), /a human answered/);
+  f.comments.splice(f.comments.indexOf(no), 1);
+  const words = await f.reply('Attends avant de clore.');
+  await assert.rejects(resolve(), /a human answered/);
+  f.comments.splice(f.comments.indexOf(words), 1);
+  const yes = await f.reply(w => `/wait ${w.id} approve`);
+  assert.equal((await resolve()).resolution.comment, yes.id);
+
+  const g = await fixture(t); g.input.resource = 'peer-handoff';
+  g.verifyDelivery = source => ({ source, status: 'delivered' });
+  await g.begin();
+  await assert.rejects(g.store.resolve(g.c.issue, g.who, { evidence: 'livré', delivered: true }), /publication waits only/);
+});
+
+test('release delivery reads the receipt for the exact source and the public Page', async () => {
+  const source = 'b'.repeat(40), later = 'c'.repeat(40);
+  let history = [{ source, status: 'failed', run: '1' }, { source, status: 'delivered', run: '2' }], compare = 'ahead', page = source;
+  const gh = async args => {
+    if (args[1].includes('state.json')) return { content: Buffer.from(JSON.stringify({ history })).toString('base64') };
+    if (args[1].endsWith('/pages')) return { html_url: 'https://example.invalid/jaunt/' };
+    if (args[1].includes('/compare/')) return { status: compare };
+    throw Error(args.join(' '));
+  };
+  const urls = [];
+  const verify = releaseDelivery({ gh, fetchJson: async url => { urls.push(url); return { releaseSource: page }; } });
+  assert.deepEqual(await verify(source), { source, status: 'delivered', run: '2', releaseSource: source, page: 'https://example.invalid/jaunt/' });
+  assert.equal(urls[0], 'https://example.invalid/jaunt/config.json');
+  page = later; assert.equal((await verify(source)).releaseSource, later);
+  compare = 'diverged'; await assert.rejects(verify(source), /does not contain/);
+  compare = 'ahead'; history = [{ source, status: 'delivered' }, { source, status: 'pending' }];
+  await assert.rejects(verify(source), /pending, not delivered/);
+  history = []; await assert.rejects(verify(source), /absent/);
+  await assert.rejects(verify('nope'), /SHA required/);
 });

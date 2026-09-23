@@ -822,7 +822,7 @@ test('Linear CLI declares every command and rejects unknown command-specific opt
      error.message.includes(command)&&error.message.includes(bad)&&error.message.includes('accepted options:'));
    }
    for(const option of options){
-    const toggle=['peek','if-stale','incremental'].includes(option);
+    const toggle=['peek','if-stale','incremental','delivered'].includes(option);
     const {flags}=parseCommandArgs(command,[...prefix,`--${option}`,...(toggle?[]:['value'])]);
     assert.equal(flags[option==='description'?'desc':option],toggle?true:'value');
    }
