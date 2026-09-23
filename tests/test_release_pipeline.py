@@ -15,6 +15,9 @@ SPEC.loader.exec_module(pipeline)
 ROOT = Path(__file__).parents[1]
 
 
+BASELINE = {'host': 'v0.1.0-beta.41', 'desktop': 'desktop-v0.1.0-beta.33', 'android': 'android-v0.1.0-beta.31'}
+
+
 def git(*args, cwd=None):
     return subprocess.check_output(['git', *args], cwd=cwd, text=True, stderr=subprocess.DEVNULL).strip()
 
@@ -42,6 +45,9 @@ def repository(tmp_path, monkeypatch):
         target = checkout / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text((ROOT / name).read_text())
+    # Release builds run these tests on a version-bumped commit: pin the
+    # fixture baseline so expectations never depend on the checkout's versions.
+    pipeline.bump_tree(checkout, pipeline.COMPONENTS, BASELINE, 'fixture', 'fixture baseline', 31)
     git('add', '.')
     git('commit', '-m', 'baseline')
     git('branch', '-M', 'main')
