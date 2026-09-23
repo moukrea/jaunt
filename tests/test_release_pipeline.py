@@ -411,7 +411,7 @@ def test_missing_selected_authority_creates_no_tags(repository, monkeypatch):
     assert 'release-source-' + source not in git('ls-remote', '--tags', 'origin')
 
 
-@pytest.mark.parametrize('interruption', ['bundle-upload', 'asset-upload', 'bundle-delete', 'publish-response'])
+@pytest.mark.parametrize('interruption', ['bundle-upload', 'asset-upload', 'bundle-delete', 'publish-response', None])
 def test_draft_resume_keeps_original_build_bytes(tmp_path, monkeypatch, interruption):
     local = tmp_path / 'build'; local.mkdir()
     assets(local, {'app.apk': b'original build', 'SIGNING-CERTIFICATE.txt': b'cert'})
@@ -424,9 +424,15 @@ def test_draft_resume_keeps_original_build_bytes(tmp_path, monkeypatch, interrup
     def inventory():
         return {**remote['release'], 'assets': [{'name': name, 'state': 'uploaded', 'size': len(data), 'id': name}
                                                 for name, data in remote['assets'].items()]}
-    monkeypatch.setattr(pipeline, 'pages', lambda *args: [inventory()] if remote['release'] else [])
-    def api(*args):
-        raise AssertionError('Draft lookup must use authenticated release inventory, not REST tag lookup')
+    # The release list lags a fresh draft for the whole first run (JAU-92).
+    monkeypatch.setattr(pipeline, 'pages', lambda *args: [inventory()] if remote['release'] and remote['once'] else [])
+    def api(path, method='GET', payload=None):
+        # Draft lookup uses the release inventory: REST /releases/tags misses drafts.
+        assert (path, method) == ('repos/owner/fixture/releases', 'POST') and not remote['release']
+        assert payload['tag_name'] == tag and payload['target_commitish'] == sha
+        assert payload['draft'] and payload['prerelease'] and payload['body']
+        remote['release'] = {'tag_name': tag, 'draft': True}
+        return inventory()
     monkeypatch.setattr(pipeline, 'api', api)
     def interrupt(stage):
         if stage == interruption and not remote['once']:
@@ -434,9 +440,7 @@ def test_draft_resume_keeps_original_build_bytes(tmp_path, monkeypatch, interrup
             raise RuntimeError('connection lost after server accepted operation')
     def run(*args, **kw):
         action = args[2]
-        if action == 'create':
-            remote['release'] = {'tag_name': tag, 'draft': True}
-        elif action == 'upload':
+        if action == 'upload':
             path = Path(args[4]); remote['assets'][path.name] = path.read_bytes()
             interrupt('bundle-upload' if path.name == pipeline.BUNDLE else 'asset-upload')
         elif action == 'download':
@@ -453,8 +457,12 @@ def test_draft_resume_keeps_original_build_bytes(tmp_path, monkeypatch, interrup
         return ''
     monkeypatch.setattr(pipeline, 'run', run)
     monkeypatch.setattr(pipeline, 'release_verify', lambda *args: True)
-    with pytest.raises(RuntimeError, match='connection lost'):
+    if interruption:
+        with pytest.raises(RuntimeError, match='connection lost'):
+            pipeline.publish(local, 'android', tag)
+    else:
         pipeline.publish(local, 'android', tag)
+        remote['once'] = True
     # A rebuild is intentionally different. Resume must retain the frozen bytes.
     assets(local, {'app.apk': b'nonreproducible rebuild', 'SIGNING-CERTIFICATE.txt': b'cert'})
     pipeline.publish(local, 'android', tag)

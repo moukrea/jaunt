@@ -408,10 +408,12 @@ def publish(directory, component, tag):
     gh_repo = os.environ['GITHUB_REPOSITORY']
     if not release:
         verify_assets(directory, component)
-        run('gh', 'release', 'create', tag, '--repo', gh_repo, '--verify-tag', '--draft', '--prerelease',
-            '--title', f'jaunt {component} {tag}', '--notes-file', NOTES[component])
-        # REST /releases/tags only resolves published releases, not drafts.
-        release, = [r for r in pages(f'{repo()}/releases') if r['tag_name'] == tag]
+        # The list lags a fresh draft: use the creation response, never a reread.
+        # The tag was fetched and checked above; target_commitish only guards
+        # against GitHub creating a missing tag on the default branch.
+        release = api(f'{repo()}/releases', 'POST', {
+            'tag_name': tag, 'target_commitish': sha, 'name': f'jaunt {component} {tag}',
+            'body': Path(NOTES[component]).read_text(), 'draft': True, 'prerelease': True})
     with tempfile.TemporaryDirectory() as staging:
         staging = Path(staging)
         inventory = {a['name']: a for a in release['assets']}
