@@ -3,15 +3,15 @@
 // else, nobody identifiable, or a failed read still wakes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selfAuthored, filterSelf, decisive, attributionWindows, attributionQuery, attribute, ATTRIBUTION_PAGE, STAMP_SKEW_MS, reviewWindows, repinSelf } from '../scripts/linear_attribution.mjs';
+import { selfAuthored, filterSelf, decisive, attributionWindows, attributionQuery, attribute, ATTRIBUTION_PAGE, STAMP_SKEW_MS, reviewWindows, repinSelf, stampStore, pruneStamps, STAMP_KEEP, STAMP_TTL_MS } from '../scripts/linear_attribution.mjs';
 import { withoutSelfWrites } from '../scripts/linear_watch.mjs';
 
 const ME = 'agent';
 const HUMAN = 'human';
 const T = n => new Date(Date.UTC(2026, 8, 23, 10, 0, n)).toISOString();
 const SINCE = T(10);
-const issue = ({ history = [], comments = [], creator = ME, createdAt = T(0) } = {}) =>
-  ({ identifier: 'JAU-1', createdAt, creator: { id: creator }, history: { nodes: history }, comments: { nodes: comments } });
+const issue = ({ history = [], comments = [], creator = ME, createdAt = T(0), updatedAt } = {}) =>
+  ({ identifier: 'JAU-1', createdAt, updatedAt, creator: { id: creator }, history: { nodes: history }, comments: { nodes: comments } });
 const entry = (actorId, updatedAt, createdAt = updatedAt) => ({ actorId, createdAt, updatedAt, botActor: null });
 const comment = (user, createdAt, reactions = [], editedAt = null) => ({ user: { id: user }, createdAt, editedAt, reactions });
 const reaction = (user, createdAt, emoji = '+1') => ({ user: { id: user }, createdAt, emoji });
@@ -294,4 +294,56 @@ test('real watcher: its own write moves the baseline without a wake, a human one
   const woke = JSON.parse((await run('0.1')).stdout);
   assert.equal(woke.wake, 'board-changed');
   assert.deepEqual(woke.events.map(e => e.type), ['comment']);
+});
+
+// JAU-111, JAU-108 at 10:28:05.910: the agent set a priority on a ticket it had
+// created 90 s earlier, Linear wrote no history entry, and the bump woke the
+// model. The stamp the mutation returned is the only evidence left.
+test('a stamp the agent journalled explains an update without history', () => {
+  const bumped = issue({ updatedAt: T(31) });
+  assert.deepEqual(selfAuthored(bumped, ME, SINCE).unexplained, true, 'without the journal: a wake');
+  const v = selfAuthored(bumped, ME, SINCE, { stamps: [T(31)] });
+  assert.deepEqual([v.self, v.mine, v.unexplained], [true, 1, false]);
+  // Somebody changed the ticket after the agent's stamp.
+  assert.equal(selfAuthored(issue({ updatedAt: T(40) }), ME, SINCE, { stamps: [T(31)] }).unexplained, true);
+  // A human's trace in the same window outweighs the stamp.
+  const mixed = selfAuthored(issue({ updatedAt: T(31), comments: [comment(HUMAN, T(12))] }), ME, SINCE, { stamps: [T(31)] });
+  assert.deepEqual([mixed.self, mixed.others.map(o => o.kind)], [false, ['comment']]);
+  // A stamp from before the window explains nothing inside it.
+  assert.equal(selfAuthored(issue({ updatedAt: T(5) }), ME, SINCE, { stamps: [T(5)] }).mine, 0);
+});
+
+test('attribute hands each ticket its own stamps', async () => {
+  const graphql = async (q, vars) => {
+    assert.match(q, /identifier createdAt updatedAt/);
+    return Object.fromEntries(Object.keys(vars).map((k, i) => [`t${i}`, issue({ updatedAt: T(31) })]));
+  };
+  const out = await attribute({ 'JAU-1': SINCE, 'JAU-2': SINCE }, { graphql, agentId: ME, stamps: { 'JAU-1': [T(31)] } });
+  assert.deepEqual([out.verdicts['JAU-1'].self, out.verdicts['JAU-2'].self], [true, false]);
+});
+
+test('the stamp journal keeps recent stamps per ticket, bounded', async t => {
+  const { mkdtemp, rm, readdir, writeFile, mkdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'jaunt-stamps-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const now = Date.parse(T(0)) + STAMP_TTL_MS;
+  const old = new Date(now - STAMP_TTL_MS - 1).toISOString();
+  const stamps = Array.from({ length: STAMP_KEEP + 5 }, (_, i) => new Date(now - 1000 * (STAMP_KEEP + 5 - i)).toISOString());
+  assert.deepEqual(pruneStamps([old, ...stamps, stamps[0]], now), stamps.slice(-STAMP_KEEP), 'old, excess and repeated stamps go');
+
+  const store = stampStore(root, { now: () => now });
+  await store.record('JAU-1', old);
+  await store.record('JAU-1', stamps[0]);
+  await store.record('JAU-2', stamps[1]);
+  assert.deepEqual(await store.read(['JAU-1', 'JAU-2', 'JAU-3']), { 'JAU-1': [stamps[0]], 'JAU-2': [stamps[1]] });
+  assert.deepEqual((await readdir(join(root, 'self-stamps'))).sort(), ['JAU-1.json', 'JAU-2.json'], 'one file per ticket, no temp left');
+  await assert.rejects(store.record('../x', stamps[0]), /not a ticket identifier/);
+  // A corrupt journal costs its ticket its stamps, not the read, and the next write repairs it.
+  await mkdir(join(root, 'self-stamps'), { recursive: true });
+  await writeFile(join(root, 'self-stamps/JAU-2.json'), '{');
+  assert.deepEqual(await store.read(['JAU-1', 'JAU-2']), { 'JAU-1': [stamps[0]] });
+  await store.record('JAU-2', stamps[2]);
+  assert.deepEqual((await store.read(['JAU-2']))['JAU-2'], [stamps[2]]);
 });

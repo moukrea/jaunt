@@ -16,7 +16,7 @@ import { landingStore, assertLandingAdmission, assertLandingReleased } from './l
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
 import { connectionPages } from './linear_activity.mjs';
 import { readReply, decideAnswer } from './linear_answers.mjs';
-import { attribute, reviewWindows, repinSelf } from './linear_attribution.mjs';
+import { attribute, reviewWindows, repinSelf, stampStore } from './linear_attribution.mjs';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -334,7 +334,7 @@ async function notifyOwners(issueId) {
   const humans = await boardHumans();
   if (!humans.length) return { ok: false, reason: 'no human member found on the team' };
   const data = await graphql(
-    `query($id: String!) { issue(id: $id) { subscribers { nodes { id name } } } }`,
+    `query($id: String!) { issue(id: $id) { updatedAt subscribers { nodes { id name } } } }`,
     { id: issueId },
   );
   const current = data.issue?.subscribers?.nodes ?? [];
@@ -346,17 +346,28 @@ async function notifyOwners(issueId) {
   const updated = await graphql(
     `mutation($id: String!, $ids: [String!]) {
       issueUpdate(id: $id, input: { subscriberIds: $ids }) {
-        success issue { subscribers { nodes { name } } }
+        success issue { identifier updatedAt subscribers { nodes { name } } }
       }
     }`,
     { id: issueId, ids: [...current.map((n) => n.id), ...missing] },
   );
   if (!updated.issueUpdate.success) throw new Error('issueUpdate failed (subscribers)');
+  await journalSelfStamp(data.issue?.updatedAt, updated.issueUpdate.issue);
   return {
     ok: true,
     added: missing.length,
     who: updated.issueUpdate.issue.subscribers.nodes.map((n) => n.name),
   };
+}
+
+// What the agent's own `issueUpdate` stamped, kept as evidence for the watcher:
+// Linear does not always write a history entry for it (JAU-111). Only a write
+// that moved the stamp counts — a no-op update answers with the previous
+// `updatedAt`, which may be somebody else's. Best effort: the write is done,
+// and a lost stamp costs one wake, never a missed one.
+async function journalSelfStamp(before, issue) {
+  if (!issue?.updatedAt || issue.updatedAt === before) return;
+  await stampStore(STATE_DIR).record(issue.identifier, issue.updatedAt).catch(() => {});
 }
 
 const ISSUE_FIELDS = `
@@ -516,7 +527,8 @@ async function nextIssue() {
 async function repinSelfChanges(issues, ledger) {
   const windows = reviewWindows(issues, ledger);
   if (!Object.keys(windows).length) return;
-  const { verdicts } = await attribute(windows, { graphql, agentId: (await agentUser()).id });
+  const stamps = await stampStore(STATE_DIR).read(Object.keys(windows));
+  const { verdicts } = await attribute(windows, { graphql, agentId: (await agentUser()).id, stamps });
   if (!repinSelf(issues, ledger, verdicts).length) return;
   await mkdir(STATE_DIR, { recursive: true });
   await writeFile(REVIEW_FILE, JSON.stringify(ledger, null, 2));
@@ -756,13 +768,15 @@ async function setState(issue, stateName, opts) {
   const data = await graphql(
     `mutation($id: String!, $stateId: String!) {
       issueUpdate(id: $id, input: { stateId: $stateId }) {
-        success issue { identifier state { name } }
+        success issue { identifier state { name } updatedAt }
       }
     }`,
     { id: issue.id, stateId: state.id },
   );
   if (!data.issueUpdate.success) throw new Error('issueUpdate failed');
-  return { moved: true, from: issue.state?.name ?? null, ...data.issueUpdate.issue };
+  const { updatedAt, ...moved } = data.issueUpdate.issue;
+  if (issue.state?.id !== state.id) await journalSelfStamp(issue.updatedAt, data.issueUpdate.issue);
+  return { moved: true, from: issue.state?.name ?? null, ...moved };
 }
 
 async function moveIssue(identifier, stateName) {
@@ -819,13 +833,15 @@ async function setPriority(identifier, priority) {
   const data = await graphql(
     `mutation($id: String!, $priority: Int!) {
       issueUpdate(id: $id, input: { priority: $priority }) {
-        success issue { identifier priority }
+        success issue { identifier priority updatedAt }
       }
     }`,
     { id: issue.id, priority },
   );
   if (!data.issueUpdate.success) throw new Error('issueUpdate failed');
-  return data.issueUpdate.issue;
+  const { updatedAt, ...updated } = data.issueUpdate.issue;
+  if (issue.priority !== priority) await journalSelfStamp(issue.updatedAt, data.issueUpdate.issue);
+  return updated;
 }
 
 // --- writing structure ------------------------------------------------------
@@ -1921,8 +1937,11 @@ const COMMANDS = {
   pulse: async () => withRateLimit(await pulse()),
   // Who wrote what the watcher just saw move: `{"JAU-1": "<previous updatedAt>"
   // | null}` in, one verdict per ticket out (JAU-15).
-  attribute: async ([windows]) => withRateLimit(
-    await attribute(JSON.parse(required(windows, 'attribute <json {ticket: since|null}>')), { graphql, agentId: (await agentUser()).id })),
+  attribute: async ([windows]) => {
+    const parsed = JSON.parse(required(windows, 'attribute <json {ticket: since|null}>'));
+    const stamps = await stampStore(STATE_DIR).read(Object.keys(parsed));
+    return withRateLimit(await attribute(parsed, { graphql, agentId: (await agentUser()).id, stamps }));
+  },
   reviewed: async ([id, ...words], flags) => {
     return markReviewed(
       required(id, 'reviewed <ISSUE-ID> <why it sits where it sits> [--group <root-cause>]'),
