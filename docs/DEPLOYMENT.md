@@ -162,8 +162,43 @@ again.
 When the PR is closed or merged, `cleanup` deletes every prerelease and tag
 `*.ch.<dev>.<pr>.*` and marks the channel `removed`. The operation is safe to
 replay; a reopened PR continues from the next `n`. Runs are serialized per pull
-request (`jaunt-channel-<pr>`) and never wait for production. Channel documents
-and their Pages paths (`ch/<name>/config.json`) are published separately.
+request (`jaunt-channel-<pr>`) and never wait for production. After `record` and
+after `cleanup`, the run dispatches **Automatic release** to update the channel
+pages below.
+
+### Channel pages
+
+Pages is a single site, redeployed whole. Every deployment carries production at
+the root and, under `ch/<name>/`, the web and channel document of the latest
+`delivered` candidate of each `live` channel in `jaunt-channel-state`. Only
+`auto-release.yml` deploys it, under `jaunt-production-release`: a production
+publication includes the live channels, and a run with no production work
+(`scripts/channel_site.py plan`) compares the wanted channels with the public
+`ch/index.json` and, when they differ, redeploys the last delivered production
+build commit with the same tags and `releaseSource`. `channel.yml` never joins
+that lock: GitHub keeps one pending run per concurrency group, so a pending
+channel job would replace a pending production run, whereas every
+**Automatic release** run rescans both ledgers.
+
+In `pages.yml`, each candidate web is built from its candidate commit in a job
+with read-only contents, no secret and no Pages permission, and uploaded as an
+artifact. The deploying job places it under `ch/<name>/`, sets `channel` and
+`releaseSource` (the pull request head) in its `config.json`, validates the
+document against the [contract](UPDATES.md#update-channels) and requires the
+three prereleases to be published. It then writes `ch/index.json`. A missing or
+invalid candidate web is left out without blocking production. Control scripts
+run from main (`.control`), never from the deployed commits, and
+`scripts/channel_site.py` is excluded from the product graph.
+
+After deployment, `channel_site.py verify` retries until the public
+`ch/index.json` equals the deployed list, every listed document validates and
+matches it, and every `removed` channel answers 404. It runs after `finish` in a
+production run, so a channel failure turns the run red without undoing
+production delivery. A channel left out of the deployment also fails it.
+
+The candidate web shares the origin of the production web app: the maintainer
+label is the trust boundary for its browser data too. Isolating the service
+worker cache between the root and `ch/<name>/` belongs to JAU-87.
 
 ## Required remote acceptance testing
 

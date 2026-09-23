@@ -17,16 +17,88 @@ on:
       android_tag:
         required: true
         type: string
+    outputs:
+      channels:
+        description: ch/index.json entries actually deployed
+        value: ${{ jobs.publish.outputs.channels }}
+      dropped:
+        description: Live channels whose candidate web could not be deployed
+        value: ${{ jobs.publish.outputs.dropped }}
+# One site, redeployed whole: production at the root and ch/<name>/ for each live
+# channel (docs/DEPLOYMENT.md#channel-pages). Only auto-release.yml calls this,
+# under jaunt-production-release. Control scripts always run from the caller's
+# main commit (.control), never from the production or candidate commit deployed.
 permissions:
   contents: read
   pages: write
   id-token: write
+  pull-requests: read
 concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
-  publish:
+  channels:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      channels: ${{ steps.select.outputs.channels }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Read the live channels under the production lock
+        id: select
+        working-directory: .control
+        run: python scripts/channel_site.py select
+        env:
+          GH_TOKEN: ${{ github.token }}
+  # Candidate code runs here only: no secret, no Pages authority, no stored credential.
+  channel-web:
+    needs: channels
+    if: needs.channels.outputs.count != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.channels.outputs.channels) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.channel.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run prepare-web
+        env:
+          jaunt_PRODUCTION: '1'
+          jaunt_RELAY_URL: ${{ vars.jaunt_RELAY_URL }}
+          jaunt_RELEASE_TAG: ${{ matrix.channel.tags.host }}
+          jaunt_ANDROID_RELEASE_TAG: ${{ matrix.channel.tags.android }}
+          jaunt_DESKTOP_RELEASE_TAG: ${{ matrix.channel.tags.desktop }}
+          jaunt_PAGE_URL: ${{ vars.jaunt_PAGE_URL }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: channel-web-${{ matrix.channel.name }}
+          path: web
+          retention-days: 1
+  publish:
+    needs: [channels, channel-web]
+    # A failed candidate web never blocks production: it is dropped and reported.
+    if: ${{ !cancelled() && needs.channels.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      channels: ${{ steps.assemble.outputs.channels }}
+      dropped: ${{ steps.assemble.outputs.dropped }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -121,6 +193,23 @@ jobs:
           assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
           PYDESKTOP
           fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        if: needs.channel-web.result != 'skipped'
+        continue-on-error: true
+        with:
+          pattern: channel-web-*
+          path: .channel-webs
+      - name: Place channel pages and publish their list
+        id: assemble
+        run: python .control/scripts/channel_site.py assemble --site web --webs .channel-webs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNELS: ${{ needs.channels.outputs.channels }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

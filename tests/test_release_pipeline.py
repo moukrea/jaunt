@@ -100,6 +100,7 @@ def test_harness_test_command_does_not_publish(repository):
     ('scripts/check_project.py', ['android', 'desktop', 'host']),
     ('scripts/dev.py', []), ('tests/new.py', []), ('.agents/skills/new.md', []),
     ('.github/workflows/ci.yml', []), ('scripts/release_pipeline.py', []),
+    ('scripts/channel_site.py', []), ('scripts/channel_release.py', []),
 ])
 def test_component_boundaries(repository, name, components):
     assert pipeline.affected('HEAD', 'HEAD', [name]) == components
