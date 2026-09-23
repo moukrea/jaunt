@@ -243,7 +243,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
 
 test('runtime settings never leak Codex model defaults into Claude and recovery preserves explicit nulls', () => {
   const env = { JAUNT_CODEX_MODEL: 'codex-model', JAUNT_CODEX_EFFORT: 'high', JAUNT_CODEX_SANDBOX: 'read-only' };
-  assert.deepEqual(workerSettings('claude', null, {}, env), { model: 'claude-opus-5-5', effort: 'high', sandbox: 'danger-full-access' });
+  assert.deepEqual(workerSettings('claude', null, {}, env), { model: 'claude-opus-5-5', effort: 'medium', sandbox: 'danger-full-access' });
   const saved = { model: null, effort: null, sandbox: 'workspace-write' };
   assert.deepEqual(workerSettings('codex', saved, {}, env, true), saved);
   assert.equal(workerSettings('codex', null, {}, env).model, 'codex-model');

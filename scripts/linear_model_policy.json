@@ -4,7 +4,7 @@
   "note": "The one place to readjust Claude model/effort. Full model IDs only: an alias silently follows new releases. See docs/LINEAR_MODELS.md.",
   "claude": {
     "banned": ["claude-opus-5", "claude-fable-5-1", "fable"],
-    "default": { "model": "claude-opus-5-5", "effort": "high" },
+    "default": { "model": "claude-opus-5-5", "effort": "medium" },
     "subagent": { "model": "claude-opus-5-5" },
     "roles": {
       "classifier": { "model": "claude-opus-5-5", "effort": "low" }
