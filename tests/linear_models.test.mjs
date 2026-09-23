@@ -15,7 +15,7 @@ const clone = () => JSON.parse(JSON.stringify(policy));
 test('the shipped policy pins Opus 5.5, bans Opus 5 and Fable 5.1, and keeps Sonnet out of automatic choices', () => {
   const pairs = [policy.claude.default, policy.claude.subagent, ...Object.values(policy.claude.roles), ...Object.values(policy.claude.categories)];
   assert.ok(pairs.every(p => p.model === 'claude-opus-5-5'));
-  assert.equal(policy.claude.default.effort, 'high');
+  assert.equal(policy.claude.default.effort, 'medium');
   for (const banned of ['claude-opus-5', 'claude-fable-5-1', 'fable', 'Claude-Opus-5[1m]', 'claude-opus-5-20260101', 'us.anthropic.claude-opus-5-v1:0', 'claude-fable-5-1-20260801'])
     assert.ok(bannedModel(banned, policy), banned);
   for (const allowed of ['claude-opus-5-5', 'claude-opus-5-5[1m]', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-fable-5-2'])
@@ -35,7 +35,7 @@ test('a policy edit that reintroduces a banned model, an alias, max or a missing
 });
 
 test('every launch source is checked: option, saved record, environment, recovery and routed resume', () => {
-  assert.deepEqual(claudeSettings({}), { model: 'claude-opus-5-5', effort: 'high' });
+  assert.deepEqual(claudeSettings({}), { model: 'claude-opus-5-5', effort: 'medium' });
   const env = { JAUNT_CLAUDE_MODEL: 'claude-fable-5-1' };
   assert.throws(() => workerSettings('claude', null, {}, env), /banned/);
   assert.throws(() => workerSettings('claude', null, { model: 'claude-opus-5' }, {}), /banned/);
@@ -43,7 +43,7 @@ test('every launch source is checked: option, saved record, environment, recover
   assert.throws(() => workerSettings('claude', { model: 'claude-fable-5-1', effort: 'high' }, {}, {}, true), /banned/);
   assert.throws(() => workerSettings('claude', null, { model: 'opus' }, {}), /not pinned/);
   assert.throws(() => workerSettings('claude', null, { effort: 'ultra' }, {}), /invalid effort/);
-  assert.deepEqual(workerSettings('claude', { model: null, effort: null }, {}, {}, true), { model: 'claude-opus-5-5', effort: 'high', sandbox: 'danger-full-access' });
+  assert.deepEqual(workerSettings('claude', { model: null, effort: null }, {}, {}, true), { model: 'claude-opus-5-5', effort: 'medium', sandbox: 'danger-full-access' });
   assert.equal(workerSettings('claude', { model: 'claude-opus-5-5', effort: 'medium' }, {}, {}, true).effort, 'medium');
   assert.equal(workerSettings('claude', { model: 'claude-opus-5' }, { model: 'claude-opus-5-5' }, {}).model, 'claude-opus-5-5', 'a manual resume can replace a banned saved model');
   assert.throws(() => claudeArgs({ session: 's', model: 'claude-opus-5', effort: 'high', prompt: 'p' }), /banned/);
@@ -104,7 +104,7 @@ test('claude: the real adapter launches an explicit pair and stops a worker whos
     const attempt = JSON.parse(stdout.trim().split('\n').at(-1));
     const call = JSON.parse(await readFile(join(dir, 'call.json'), 'utf8'));
     assert.equal(call.args[call.args.indexOf('--model') + 1], 'claude-opus-5-5');
-    assert.equal(call.args[call.args.indexOf('--effort') + 1], 'high');
+    assert.equal(call.args[call.args.indexOf('--effort') + 1], 'medium');
     assert.equal(call.sub, 'claude-opus-5-5');
     assert.equal(call.model, null);
     assert.equal(attempt.failure.kind, 'configuration', 'no automatic retry of a banned model');

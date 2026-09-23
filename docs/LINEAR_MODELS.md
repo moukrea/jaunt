@@ -21,7 +21,7 @@ silently follows the next release. Automatic efforts are `low`, `medium`,
 The loader refuses a policy that breaks any of these rules, so a bad edit
 stops every Claude launch loudly instead of drifting.
 
-Policy on 2026-09-23: Opus 5.5 everywhere; workers at `high`; classifiers and
+Policy on 2026-09-23: Opus 5.5 everywhere; workers at `medium`; classifiers and
 category A at `low`; B and C at `medium`; D at `high`. Opus 5 and Fable 5.1 are
 banned. Sonnet 5 is out of the automatic choices: restoring it is a one-line
 edit to a category. These are starting choices, not measured optima.
