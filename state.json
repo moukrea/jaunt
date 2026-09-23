@@ -57,7 +57,44 @@
       "host"
     ],
     "status": "failed",
-    "run": "35813749122"
+    "run": "35813749122",
+    "receipts": {
+      "host": {
+        "tag": "v0.1.0-beta.45",
+        "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+        "url": "https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.45",
+        "hashes": {
+          "jaunt_host-0.1.0b45-py3-none-any.whl": "ede804fca44e89d5ca3938737e313b3a42661b9a538f04e4ac2b50848a5bca4b",
+          "host-manifest.json": "a1948108edcc7fda72ce457a094080150146cb106dcf7e1188b137c68893c46f"
+        }
+      },
+      "desktop": {
+        "tag": "desktop-v0.1.0-beta.34",
+        "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+        "url": "https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.34",
+        "hashes": {
+          "jaunt-desktop-0.1.0-beta.34-aarch64.rpm": "3d38c377655728f164133498f75c12b2b212ab4fbd55170b0d272c9fae3baa9e",
+          "jaunt-desktop-0.1.0-beta.34-amd64.deb": "eb4b5726aa5c87c32e1a25134009522e675920462d6543884418977e862438b4",
+          "jaunt-desktop-0.1.0-beta.34-arm64.deb": "f83044a1e5d963bab266d6940cb4c73ce2cc88ca21734a4b7b7c35369ac4a701",
+          "jaunt-desktop-0.1.0-beta.34-arm64.dmg": "461a56a8b0b3cc361522648f122fac5bfd3aa3638aa96db083f38f49c17cc034",
+          "jaunt-desktop-0.1.0-beta.34-arm64.tar.gz": "17d25c6a8426e229e781e3959cfbdab76cc609b0453c42ef17eae2d2f0189a29",
+          "jaunt-desktop-0.1.0-beta.34-arm64.zip": "8933e42a6a3d897349fbe836e16b392b21663bb503a0710a204fd70d2f71e60a",
+          "jaunt-desktop-0.1.0-beta.34-x64.dmg": "ec11c3d792e3ddb01376621a499d4b2cda683395a543b6fb80015f712337809f",
+          "jaunt-desktop-0.1.0-beta.34-x64.tar.gz": "ed8e52dbc3cb376b5eef658083fdbe66ec7783560764eebe1de687954fce10c7",
+          "jaunt-desktop-0.1.0-beta.34-x64.zip": "8d752f64cb060bb8a017262cf7fefa9f109a0bc7e8505209d5a882bc53dc0a7c",
+          "jaunt-desktop-0.1.0-beta.34-x86_64.rpm": "bfd7a1795f4ca6f82ba55d8f15d5bb8e4e53aec322c5d39d21dd8b8267024135"
+        }
+      },
+      "android": {
+        "tag": "android-v0.1.0-beta.32",
+        "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+        "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.32",
+        "hashes": {
+          "jaunt-android-v0.1.0-beta.32.apk": "246a504538f25df1c81e6cf3ec44f915c391f74835efff68fc904396372204e2",
+          "SIGNING-CERTIFICATE.txt": "9af98b62b5100b05a878a1520d92bbb492c66e580e8175299a34b6123216af44"
+        }
+      }
+    }
   },
   "history": [
     {
