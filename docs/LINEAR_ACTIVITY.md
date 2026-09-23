@@ -22,7 +22,10 @@ unread state; human attribution requires a non-app email on the API user.
 `--expects none`, worker exit, or release of a claim never resolves subjects.
 Approval resolves the plan decision only; promised implementation remains open.
 New human prose opens a review subject automatically. Exact `lu`, `vu`, `merci`,
-`/approve`, and `/decline` acknowledgments do not create another review subject.
+`/approve`, and `/decline` acknowledgments do not create another review subject,
+nor do the written approvals and cheers `scripts/linear_answers.mjs` recognises
+(« j'approuve », « go », « Bah faut corriger ! »): the plan decision reads them
+exactly as `verdict` does (JAU-80).
 The worker interprets actual questions and records their individual dispositions.
 
 ## Automatic synchronization and recovery

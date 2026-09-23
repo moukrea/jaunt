@@ -135,7 +135,13 @@ plan comment: the natural gesture is to react to the message you have just read,
 and telling them in words to scroll back up to the plan failed twice before it
 was made true in the code (JAU-36). Do not ask them to aim. What a reaction
 cannot outrank is a message they wrote *after* it — words that came later win,
-so a 👍 followed by "ah, et aussi…" reads as `feedback`.
+so a 👍 followed by "ah, et aussi…" reads as `feedback`. Only words that
+decide, though (JAU-80, `scripts/linear_answers.mjs`): an approval written out
+(« j'approuve », « ok pour le plan », « go ») approves without any emoji, and a
+cheer (« Bah faut corriger ! », « merci », « top ») keeps the 👍 before it without
+approving alone. One correction word (mais, sauf, par contre, plutôt, aussi, non,
+a « ? »…) makes the whole message `feedback`, `/approve` included. Everything
+outside the closed list is `feedback`, as it always was.
 
 ## 5. Resume on the verdict
 
