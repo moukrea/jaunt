@@ -1,3 +1,8 @@
+# jaunt android 0.1.0-beta.35
+
+- feat(updates): switch every connected element's channel at once (JAU-99) (#112)
+- Source: `4158036f6a5463ea6f4a26e687b2460ca65c29d2`.
+
 # jaunt Android 0.1.0-beta.31 (versionCode 31)
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
