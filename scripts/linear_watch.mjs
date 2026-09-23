@@ -10,7 +10,11 @@
 // The consequence, and the whole point: nothing is spent while nothing happens.
 // A cron tick is a model turn even when there is no work; this is not.
 //
-//   node scripts/linear_watch.mjs --interval 30 --max-minutes 30
+//   node scripts/linear_watch.mjs --interval 30
+//
+// It no longer exits on a timer (JAU-62): a periodic `interval-elapsed` exit was
+// a model turn with nothing to do, plus the gap before that turn re-armed it.
+// `--max-minutes N` keeps the old bounded run for tests and legacy launchers.
 //
 // The wake-up carries no payload — the harness hands the session the output
 // FILE and it reads it. So what is printed on exit stays short and structured.
@@ -25,6 +29,7 @@
 
 import { skillStore } from './linear_skills.mjs';
 import { workerWake } from './linear_workers.mjs';
+import { wakeStore } from './linear_wakes.mjs';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
@@ -51,6 +56,9 @@ const LOOP_FILE = join(STATE_DIR, 'linear-loop.json');
 // sign of life (JAU-52).
 export const WATCH_FILE = join(STATE_DIR, 'linear-watch.json');
 export const WATCHDOG_FILE = join(STATE_DIR, 'linear-watchdog.json');
+// When the current Linear rate-limit cut began, across watcher restarts: the
+// owner hears about one cut once, not once per re-arm.
+const RATE_LIMIT_FILE = join(STATE_DIR, 'linear-rate-limit.json');
 const AGENT = join(ROOT, 'scripts', 'linear_agent.mjs');
 
 const args = process.argv.slice(2);
@@ -61,8 +69,9 @@ const flag = (name, fallback) => {
 const has = (name) => args.includes(`--${name}`);
 const INTERVAL_SECONDS = Number(flag('interval', 30));
 const INTERVAL = INTERVAL_SECONDS * 1000;
-const MAX_MINUTES = Number(flag('max-minutes', 30));
-const MAX_MS = MAX_MINUTES * 60_000;
+// 0, the default, means no periodic exit at all.
+const MAX_MINUTES = Number(flag('max-minutes', 0));
+const MAX_MS = MAX_MINUTES > 0 ? MAX_MINUTES * 60_000 : Infinity;
 const GRACE_SECONDS = Number(flag('grace', 600));
 // How long the watchdog sleeps between two readings of the pulse. Short, because
 // it costs a file read and no network; the grace period is what decides when it
@@ -73,6 +82,65 @@ const WATCHDOG_INTERVAL_SECONDS = Number(flag('interval', 15));
 // whole `--max-minutes` and then exited `interval-elapsed`, reporting calm on a
 // board it had never managed to read (JAU-52).
 const MAX_CONSECUTIVE_FAILURES = 3;
+// A transient failure (5xx, 429, network) is Linear being briefly unavailable,
+// not a broken loop: a 503 on one poll used to cost an `activity-failed` wake
+// and an `activity-recovered` wake 30 s later (23/09). Transient errors are
+// reported only once they persist for this many polls, and a watcher whose
+// polls keep failing transiently gives up after the longer budget below.
+export const TRANSIENT_STREAK = 3;
+const MAX_TRANSIENT_FAILURES = 20;
+// How long a fresh wake waits for its siblings: a worker exit seen by the
+// adapter and a Linear change 5 s later leave in one batch (JAU-61, 05:27:18
+// and 05:27:23). Never longer than a poll, so fast test watchers stay fast.
+const SETTLE_MS = Math.min(5000, INTERVAL);
+
+// Linear's complexity budget (2 M points/h, sliding window). Below this share
+// remaining, the watcher stops the costly activity sync and polls less often;
+// on a 429 it waits for the announced reset instead of failing (JAU-62).
+export const LOW_BUDGET_SHARE = 0.25;
+const LOW_BUDGET_SLOWDOWN = 4;
+// A cut longer than the watchdog's grace is worth telling the owner once.
+const RATE_LIMIT_REPORT_MS = GRACE_SECONDS * 1000;
+const MAX_RATE_LIMIT_WAIT_MS = 60 * 60_000;
+
+export const lowBudget = (rateLimit) =>
+  Boolean(rateLimit?.limit) && rateLimit.remaining / rateLimit.limit < LOW_BUDGET_SHARE;
+
+// When a 429 says the budget returns, or null for any other error. Without an
+// announced reset, wait five minutes: never a tight retry against a cut API.
+export function rateLimitedUntil(message, now = Date.now()) {
+  const text = String(message ?? '');
+  if (!/graphql 429\b/.test(text)) return null;
+  const announced = Date.parse(text.match(/graphql 429 \(reset ([^)]+)\)/)?.[1] ?? '');
+  const until = Number.isFinite(announced) && announced > now ? announced : now + 5 * 60_000;
+  return Math.min(until, now + MAX_RATE_LIMIT_WAIT_MS);
+}
+
+export const transientError = (message) =>
+  /graphql (429|5\d\d)\b|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|network/i.test(String(message ?? ''));
+
+// Which per-ticket activity errors are worth a wake. A non-transient error
+// (deleted ticket, corrupt ledger, permission) is reported at once; a transient
+// one only after TRANSIENT_STREAK consecutive polls. `streaks` is carried by
+// the caller across polls. Transient messages are normalised so a 503 whose
+// body changes between polls is not reported as a new failure each time.
+export function reportableErrors(errors, streaks) {
+  const seen = new Set();
+  const reported = [];
+  for (const e of errors) {
+    const transient = transientError(e.error);
+    const key = `${e.issue ?? ''}:${transient ? 'transient' : e.error}`;
+    seen.add(key);
+    const streak = (streaks.get(key) || 0) + 1;
+    streaks.set(key, streak);
+    if (!transient) reported.push(e);
+    else if (streak >= TRANSIENT_STREAK) {
+      reported.push({ ...e, error: `transient: ${String(e.error).match(/graphql \d{3}|[A-Z]{4,}|fetch failed|socket hang up|network/i)?.[0] ?? 'unavailable'}` });
+    }
+  }
+  for (const key of streaks.keys()) if (!seen.has(key)) streaks.delete(key);
+  return reported;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -288,16 +356,55 @@ async function main() {
   enabled = await loopEnabled(enabled);
   if (!enabled) return report(WATCH_FILE, record, { wake: 'loop-off', events: [] });
   let failures = 0;
+  let transientFailures = 0;
+  const streaks = new Map();
+  const wakes = wakeStore(STATE_DIR);
+
+  // The only way a deposited wake reaches the model: this process exiting with
+  // it. Marked delivered first; a delivery that is then lost is re-offered by
+  // the outbox after its redelivery delay.
+  let limitedSince = (await readJson(RATE_LIMIT_FILE))?.since ?? null;
+  let budget = null;
+
+  // Sleeps in short steps so a wake deposited by the watchdog or the adapter
+  // leaves within seconds rather than after the next Linear poll, and keeps the
+  // heartbeat fresh through a long rate-limit wait. True when a wake is due.
+  const pause = async (ms) => {
+    const until = Date.now() + ms;
+    let beat = Date.now();
+    while (Date.now() < until) {
+      await sleep(Math.min(1000, until - Date.now()));
+      if (await wakes.due({ settleMs: SETTLE_MS })) return true;
+      if (Date.now() - beat >= 15_000) {
+        beat = Date.now();
+        record.lastPollAt = new Date().toISOString();
+        await writeJson(WATCH_FILE, record);
+      }
+    }
+    return false;
+  };
+
+  const deliver = async () => {
+    const batch = await wakes.next({ settleMs: SETTLE_MS });
+    if (!batch) return null;
+    await wakes.delivered(batch.wakeId);
+    await report(WATCH_FILE, record, batch);
+    return true;
+  };
 
   for (;;) {
     if (Date.now() - startedMs > MAX_MS) {
-      // A periodic exit with nothing to report: it lets the orchestrator
-      // reconcile its own state (claims, flags, finished workers) even during a
-      // long quiet stretch, and keeps the watcher process from ageing forever.
+      // Only with an explicit `--max-minutes`: the legacy bounded run.
       return report(WATCH_FILE, record, { wake: 'interval-elapsed', events: [] });
     }
+    // A human switching the loop off outranks anything waiting in the outbox.
+    enabled = await loopEnabled(enabled);
+    if (!enabled) return report(WATCH_FILE, record, { wake: 'loop-off', events: [] });
+    if (await deliver()) return;
 
-    await sleep(INTERVAL);
+    const waitMs = record.rateLimitedUntil ? Math.max(0, Date.parse(record.rateLimitedUntil) - Date.now())
+      : lowBudget(budget) ? INTERVAL * LOW_BUDGET_SLOWDOWN : INTERVAL;
+    if (await pause(waitMs)) continue;
 
     // Checked here rather than left to `pkill -f linear_watch.mjs`, which the
     // skill used to prescribe: that pattern would also kill the watcher of any
@@ -312,24 +419,65 @@ async function main() {
     if (changedSkills) return report(WATCH_FILE, record, changedSkills);
 
     let current;
+    let rawErrors;
+    const saving = lowBudget(budget);
     try {
-      const activity = await runAgent('sync-activity');
+      // The activity sync is what costs (~3 600 points per ticket read): only
+      // tickets that moved, and none while the budget is low.
+      const activity = saving ? { errors: previous?.activityErrors || [] } : await runAgent('sync-activity', '--incremental');
+      if (saving) await wakes.note('low-budget-sync');
       const waits = await runAgent('wait', 'reconcile');
       if (waits.events?.length) return report(WATCH_FILE, record, { wake: 'external-wait', events: waits.events, errors: waits.errors });
       current = await runAgent('pulse');
-      current.activityErrors = [...(activity.errors || []), ...(waits.errors || [])];
+      rawErrors = [...(activity.errors || []), ...(waits.errors || [])];
+      budget = current.rateLimit || activity.rateLimit || budget;
+      delete current.rateLimit;
+      // Per-ticket 429s mean the whole budget is gone, not one ticket.
+      const limited = rawErrors.map(e => rateLimitedUntil(e.error)).find(Boolean);
+      if (limited) throw new Error(`graphql 429 (reset ${new Date(limited).toISOString()}): activity sync rate-limited`);
     } catch (error) {
+      const until = rateLimitedUntil(error.message);
+      if (until) {
+        // Not a failure of the loop: Linear said when to come back. Wait for it,
+        // visibly, and tell the owner once if the cut outlasts the grace.
+        if (!limitedSince) {
+          limitedSince = Date.now();
+          await writeJson(RATE_LIMIT_FILE, { since: limitedSince });
+        }
+        record.rateLimitedUntil = new Date(until).toISOString();
+        await writeJson(WATCH_FILE, record);
+        console.error(`rate-limited by Linear until ${record.rateLimitedUntil}`);
+        await wakes.note('rate-limited-poll');
+        if (until - limitedSince >= RATE_LIMIT_REPORT_MS) {
+          await wakes.deposit([{ key: `rate-limited:${limitedSince}`, wake: 'linear-rate-limited', since: new Date(limitedSince).toISOString(), until: record.rateLimitedUntil, events: [] }]);
+        }
+        continue;
+      }
       // A transient API failure is not an event, but an expired token is not
       // transient. Giving up after a few tries is what turns a silent 30-minute
-      // spin into a `watcher-failed` somebody can read.
-      failures += 1;
-      console.error(`poll failed (${failures}/${MAX_CONSECUTIVE_FAILURES}): ${error.message}`);
-      if (failures >= MAX_CONSECUTIVE_FAILURES) {
-        throw new Error(`${failures} consecutive polls failed: ${error.message}`);
+      // spin into a `watcher-failed` somebody can read. A 503 or 429 gets a
+      // longer budget: one bad poll is not a broken loop.
+      if (transientError(error.message)) transientFailures += 1;
+      else failures += 1;
+      console.error(`poll failed (${failures}/${MAX_CONSECUTIVE_FAILURES}, transient ${transientFailures}/${MAX_TRANSIENT_FAILURES}): ${error.message}`);
+      if (failures >= MAX_CONSECUTIVE_FAILURES || transientFailures >= MAX_TRANSIENT_FAILURES) {
+        throw new Error(`${failures + transientFailures} consecutive polls failed: ${error.message}`);
       }
       continue;
     }
     failures = 0;
+    transientFailures = 0;
+    if (limitedSince) {
+      limitedSince = null;
+      await writeJson(RATE_LIMIT_FILE, { since: null });
+    }
+    if (record.rateLimitedUntil || budget) {
+      delete record.rateLimitedUntil;
+      record.rateLimit = budget;
+      await writeJson(WATCH_FILE, record);
+    }
+    current.activityErrors = reportableErrors(rawErrors, streaks);
+    if (rawErrors.length > current.activityErrors.length) await wakes.note('transient-activity');
 
     const activityChanged = JSON.stringify(previous?.activityErrors || []) !== JSON.stringify(current.activityErrors);
     if (!previous && !activityChanged) {
@@ -341,7 +489,7 @@ async function main() {
     if (activityChanged) events.push({ type: current.activityErrors.length ? 'activity-failed' : 'activity-recovered', errors: current.activityErrors });
     const unresolved = await routeWake({ wake: 'board-changed', at: current.at, events });
     if (events.length > 0 || unresolved) await writeJson(PULSE_FILE, current);
-    if (unresolved) return report(WATCH_FILE, record, unresolved);
+    if (unresolved) await wakes.deposit([unresolved]);
     previous = current;
   }
 }
@@ -370,6 +518,7 @@ async function watchdog() {
   await writeJson(WATCHDOG_FILE, record);
 
   const pidAlive = livePid;
+  const wakes = wakeStore(STATE_DIR);
   let enabled = true;
   let unhealthySince = null;
 
@@ -391,7 +540,10 @@ async function watchdog() {
     const workerEvent = enabled ? await workerWake(STATE_DIR) : null;
     if (workerEvent) {
       const unresolved = workerEvent.wake === 'worker-recovery-due' ? await routeWake(workerEvent) : workerEvent;
-      if (unresolved) return report(WATCHDOG_FILE, record, unresolved);
+      // Handed to the outbox, which the watcher delivers: exiting here too was
+      // the second wake for a worker exit the adapter had already reported, and
+      // left the loop unguarded until the next pass relaunched the watchdog.
+      if (unresolved) await wakes.deposit([unresolved]);
     }
     const health = watcherHealth(await readJson(WATCH_FILE), { now: Date.now(), pidAlive });
     const decision = shouldFire({

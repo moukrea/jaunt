@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { settingSources, observeTelemetry } from './linear_telemetry.mjs';
 import { skillStore } from './linear_skills.mjs';
+import { wakeStore } from './linear_wakes.mjs';
 import { livePid } from './linear_watch.mjs';
 import { entryPath } from './linear_agent.mjs';
 import { atomicJson, processIdentity, withWorkerLock, beginAttempt, currentAttempt, saveAttempt, lifecyclePaths, workerHealth, classifyFailure, recoveryPreflight, runtimeOf } from './linear_workers.mjs';
@@ -102,10 +103,14 @@ export async function notify(o, event, eventPath, { alive = ownerAlive, deliver 
   if (!alive(o)) return;
   // Claude's background task completion is its wake mechanism, not Codex queue.
   if (o.runtime === 'claude') { console.log(JSON.stringify(event)); return; }
+  // A queued message is delivered later, maybe after other work: it names its
+  // outbox batch, so a replayed or stale one is answered `alreadyHandled` by
+  // `wake take` before any instruction or board read (JAU-62).
+  const message = event.wakeId
+    ? `Local Linear loop wake ${event.wakeId} (not a human approval). First run: jaunt-linear wake take --id ${event.wakeId}. If it answers alreadyHandled, stop now: no skill, board or status read. Otherwise invoke $linear-orchestrator with the returned payload (copy in ${eventPath}); run jaunt-linear skills-read --if-stale before board actions; re-arm with jaunt-linear-codex arm.`
+    : `Local Linear loop event (not a human approval). Read ${eventPath}, then invoke $linear-orchestrator. Run jaunt-linear skills-read --if-stale and read any returned files before board actions; preserve the current owner and workers. Reconcile the shared flag before acting; re-arm with jaunt-linear-codex arm.`;
   try {
-    await deliver('codex', ['queue', '--thread', o.thread, '--message',
-      `Local Linear loop event (not a human approval). Read ${eventPath}, then read the canonical ${join(ROOT, '.agents/skills/linear-loop/SKILL.md')} and ${join(ROOT, '.agents/skills/linear-orchestrator/SKILL.md')} from disk before invoking $linear-orchestrator. Check and acknowledge instruction freshness before board actions; preserve the current owner and workers. Reconcile the shared flag before acting; re-arm with jaunt-linear-codex arm.`,
-    ], { timeout: 60_000 });
+    await deliver('codex', ['queue', '--thread', o.thread, '--message', message], { timeout: 60_000 });
     await write(eventPath, { ...event, delivered: true, at: stamp() });
   } catch (error) {
     await write(eventPath, { ...event, delivered: false, error: error.message, at: stamp() });
@@ -337,7 +342,7 @@ async function execute(name, runtime = 'codex') {
       child.stdin.on('error', () => {});
       child.stdin.end(command.prompt || '');
     } else {
-      const flags = record.role === 'watchdog' ? ['--watchdog', '--grace', '600'] : ['--interval', '30', '--max-minutes', '30'];
+      const flags = record.role === 'watchdog' ? ['--watchdog', '--grace', '600'] : ['--interval', '30'];
       child = spawn(process.execPath, [join(ROOT, 'scripts/linear_watch.mjs'), ...flags], { env: { ...process.env, JAUNT_LINEAR_ROUTING_OWNER: JSON.stringify(record.owner) }, detached: true, stdio: ['ignore', 'pipe', 'inherit'] });
     }
     if (record.role === 'worker') {
@@ -378,11 +383,32 @@ async function execute(name, runtime = 'codex') {
     await persist();
     if (result.cancelled) return;
     const event = record.role === 'worker'
-      ? { wake: 'worker-finished', issue: record.issue, session: record.session, code: result.code, failure: record.failure }
+      ? { wake: 'worker-finished', issue: record.issue, attempt: record.attempt, session: record.session, code: result.code, failure: record.failure }
       : JSON.parse(output);
-    if (!['loop-off', 'watchdog-superseded'].includes(event.wake)) {
+    // With the loop on, a worker exit goes to the outbox and leaves with the
+    // watcher's next batch; the watchdog seeing the same attempt end adds
+    // nothing. A Codex owner with no watcher running (mid-pass) gets the batch
+    // queued now; a Claude owner can only be woken by its own watcher. With
+    // the loop off nobody delivers, so it is still sent directly.
+    if (record.role === 'worker' && (await read(join(STATE, 'linear-loop.json')))?.enabled === true) {
+      const wakes = wakeStore(STATE);
+      await wakes.deposit([event]);
+      const watcher = await read(join(STATE, 'linear-watch.json')).catch(() => null);
+      const batch = record.owner.runtime !== 'claude' && !(watcher && !watcher.endedAt && livePid(watcher.pid)) ? await wakes.next() : null;
+      if (!batch) await write(record.eventPath, { ...event, deposited: true, at: stamp() });
+      else {
+        notifying = true;
+        await wakes.delivered(batch.wakeId);
+        try { await notify(record.owner, batch, record.eventPath); }
+        catch (error) { await wakes.delivered(batch.wakeId, false); throw error; }
+      }
+    } else if (!['loop-off', 'watchdog-superseded'].includes(event.wake)) {
       notifying = true;
-      await notify(record.owner, event, record.eventPath);
+      try { await notify(record.owner, event, record.eventPath); }
+      catch (error) {
+        if (event.wakeId) await wakeStore(STATE).delivered(event.wakeId, false);
+        throw error;
+      }
     }
   } catch (error) {
     // A queued wake may already have resumed this worker/re-armed this role.

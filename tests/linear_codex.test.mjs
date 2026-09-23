@@ -112,12 +112,24 @@ test('wake-up is durable before queue delivery and targets only its owner', asyn
         assert.equal(cmd, 'codex');
         assert.deepEqual(args.slice(0, 3), ['queue', '--thread', 'owner-thread']);
         assert.ok(args.at(-1).includes(path));
-        assert.match(args.at(-1), /read the canonical .*linear-loop\/SKILL.md.*linear-orchestrator\/SKILL.md.*from disk/);
+        // Instructions are re-read only when their fingerprint changed (JAU-62).
+        assert.match(args.at(-1), /skills-read --if-stale/);
         assert.match(args.at(-1), /preserve the current owner and workers/);
       },
     });
     assert.equal(calls, 1);
     assert.equal(JSON.parse(await readFile(path)).delivered, true);
+    // An outbox batch names itself: a replayed message is answered by
+    // `wake take` before any instruction or board read, not by a mutable file.
+    await notify({ thread: 'owner-thread' }, { wake: 'board-changed', wakeId: 'batch-1', events: [] }, path, {
+      alive: () => true,
+      deliver: async (cmd, args) => {
+        calls++;
+        assert.match(args.at(-1), /jaunt-linear wake take --id batch-1/);
+        assert.match(args.at(-1), /alreadyHandled, stop now/);
+      },
+    });
+    assert.equal(calls, 2);
   } finally { await rm(dir, { recursive: true }); }
 });
 
@@ -142,7 +154,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
@@ -195,7 +207,16 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
       const second=await call('arm');
       assert.deepEqual(first.adapter.map(x=>x.pid),second.adapter.map(x=>x.pid));
       await call('worker','JAU-999','--cwd',process.cwd(),'--model','fixture-model','--effort','high');
+      // The fixture watcher writes no shared pulse, so the adapter queues the
+      // outbox batch itself; the message names the batch, and the owner's pass
+      // takes it. A replay of the same message is answered, not reprocessed.
       await until(async()=>JSON.parse(await readFile((await read('JAU-999')).eventPath)).delivered);
+      const event=JSON.parse(await readFile((await read('JAU-999')).eventPath));
+      assert.equal(event.wake,'worker-finished');
+      assert.match(JSON.parse((await readFile('queued.jsonl','utf8')).trim().split('\\n').at(-1)).at(-1),new RegExp('wake take --id '+event.wakeId));
+      const {wakeStore}=await import('./scripts/linear_wakes.mjs');
+      assert.equal((await wakeStore(process.cwd()+'/.dev-state').take(event.wakeId)).alreadyHandled,false);
+      assert.equal((await wakeStore(process.cwd()+'/.dev-state').take(event.wakeId)).alreadyHandled,true);
       assert.equal((await read('JAU-999')).session,'recorded-thread-id');
       await call('resume','JAU-999','--message','literal $(not a shell command)');
       await until(async()=>JSON.parse((await readFile('exec.jsonl','utf8')).trim().split('\\n').at(-1))[1]==='resume' && (await read('JAU-999')).endedAt);
@@ -237,7 +258,7 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
   const exec = promisify(execFile), dir = await mkdtemp(join(tmpdir(), 'jaunt-route-cli-'));
   try {
     await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin')); await mkdir(join(dir, '.dev-state/claims'), { recursive: true });
-    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_waits.mjs', 'linear_skills.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_waits.mjs', 'linear_skills.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     for (const skill of ['linear-loop', 'linear-orchestrator']) {
       await mkdir(join(dir, '.agents/skills', skill), { recursive: true });
@@ -274,7 +295,7 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
     await exec('git', ['init', '-q'], { cwd: dir }); await exec('git', ['checkout', '-q', '-b', 'agent/JAU-999'], { cwd: dir });
     await writeFile(join(dir, 'owner.mjs'), `
       import {execFile} from 'node:child_process';import {promisify} from 'node:util';import assert from 'node:assert/strict';
-      import {readFile,writeFile} from 'node:fs/promises';import {skillStore} from './scripts/linear_skills.mjs';
+      import {readFile,writeFile} from 'node:fs/promises';import {skillStore} from './scripts/linear_skills.mjs';import {wakeStore} from './scripts/linear_wakes.mjs';
       const exec=promisify(execFile),pause=ms=>new Promise(r=>setTimeout(r,ms));
       const call=async(...a)=>JSON.parse((await exec(process.env.REAL_NODE,['scripts/linear_codex.mjs',...a])).stdout);
       const read=async p=>JSON.parse(await readFile(p));
@@ -284,6 +305,9 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
       const snapshot=await skills.read('codex','fixture-owner');await skills.acknowledge('codex','fixture-owner',snapshot.fingerprint);
       await call('worker','JAU-999','--runtime','${targetRuntime}','--cwd',process.cwd());
       await until(async()=>Boolean((await read(path)).endedAt && (await read((await read(path)).eventPath)).delivered));
+      // No watcher runs here, so the adapter queued the outbox batch itself;
+      // the owner's pass takes it before the next one can leave.
+      await wakeStore(process.cwd()+'/.dev-state').take();
       const original=await read(path),claim=await read('.dev-state/claims/JAU-999.json');
       claim.session=original.session;claim.phase='awaiting-approval';await writeFile('.dev-state/claims/JAU-999.json',JSON.stringify(claim));
       process.env.JAUNT_LINEAR_ROUTING_OWNER=JSON.stringify(original.owner);

@@ -36,6 +36,21 @@ test('receipts isolate runtime/session and binding or reading never acknowledges
   assert.equal((await store.status({ runtime: 'claude', session: who.session })).state, 'unknown');
   await assert.rejects(store.bind('codex', ''), /actual/);
 });
+// JAU-62: re-reading ~8 800 tokens of unchanged instructions on every wake was
+// most of a quiet pass. `ifStale` returns them only when they changed.
+test('skills-read --if-stale omits unchanged contents and returns changed ones', async t => {
+  const { path, store } = await fixture(t);
+  assert.equal((await store.read(who.runtime, who.session, { ifStale: true })).files.length, 2, 'never acknowledged: full read');
+  await ack(store);
+  const fresh = await store.read(who.runtime, who.session, { ifStale: true });
+  assert.deepEqual([fresh.state, fresh.unchanged, fresh.files], ['fresh', true, undefined]);
+  assert.equal(fresh.paths.length, 2);
+  assert.equal((await store.read('claude', who.session, { ifStale: true })).files.length, 2, 'another identity has no receipt');
+  await writeFile(path, 'edited');
+  const stale = await store.read(who.runtime, who.session, { ifStale: true });
+  assert.match(stale.files[1].content, /edited/);
+  assert.equal((await store.read(who.runtime, who.session)).files.length, 2, 'the plain read is unchanged');
+});
 test('content changes, reversions and unrelated/runtime edits use actual contents', async t => {
   const { root, path, store } = await fixture(t);
   const original = await readFile(path, 'utf8');
@@ -79,7 +94,7 @@ test('wake deduplication survives watcher restart while the status remains stale
 test('real watcher checks local instructions before unavailable API and honors loop-off', async t => {
   const { root, store } = await fixture(t);
   await mkdir(join(root, 'scripts'));
-  for (const name of ['linear_watch.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_skills.mjs']) {
+  for (const name of ['linear_watch.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_skills.mjs']) {
     await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
   }
   await writeFile(join(root, 'scripts/linear_agent.mjs'), "process.stderr.write('offline API'); process.exit(1);");
@@ -101,7 +116,7 @@ test('real watcher checks local instructions before unavailable API and honors l
 for (const runtime of ['codex', 'claude']) test(`${runtime}: CLI legacy read/bind/ack works without credentials`, async t => {
   const { root } = await fixture(t);
   await mkdir(join(root, 'scripts'));
-  for (const name of ['linear_waits.mjs', 'linear_activity.mjs', 'linear_landing.mjs', 'linear_agent.mjs', 'linear_watch.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_skills.mjs']) {
+  for (const name of ['linear_waits.mjs', 'linear_activity.mjs', 'linear_landing.mjs', 'linear_agent.mjs', 'linear_watch.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_skills.mjs']) {
     await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
   }
   const run = async (...args) => JSON.parse((await exec(process.execPath, [join(root, 'scripts/linear_agent.mjs'), ...args])).stdout);

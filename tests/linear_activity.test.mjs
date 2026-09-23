@@ -186,7 +186,7 @@ test('real watcher synchronizes before pulse and reports sync failures without a
   const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
   const exec=promisify(execFile),f=await fixture(t),root=f.dir;
   await mkdir(join(root,'scripts'));await mkdir(join(root,'.dev-state'));
-  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
+  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
   await writeFile(join(root,'.dev-state/linear-loop.json'),JSON.stringify({enabled:true}));
   await writeFile(join(root,'.dev-state/linear-pulse.json'),JSON.stringify({tickets:{}}));
   const {skillStore}=await import('../scripts/linear_skills.mjs');
@@ -197,21 +197,24 @@ test('real watcher synchronizes before pulse and reports sync failures without a
     await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n');
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:true}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`);
   const args=[join(root,'scripts/linear_watch.mjs'),'--interval','0.01','--max-minutes','1'];
+  // Each run stands for one pass: the model takes the batch before re-arming.
+  const {wakeStore}=await import('../scripts/linear_wakes.mjs');
+  const take=()=>wakeStore(join(root,'.dev-state')).take();
   const result=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(result.wake,'board-changed');assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
+  assert.equal(result.wake,'board-changed');await take();assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
   const partialMock = errors => `import {appendFile} from 'node:fs/promises';
     await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n');
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:${errors.length===0},errors:${JSON.stringify(errors)}}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`;
   const errors=[{issue:'JAU-2',error:'deleted ticket'}];
   await writeFile(mock,partialMock(errors));await writeFile(join(root,'calls.txt'),'');
   const failed=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(failed.events[0].type,'activity-failed');
+  assert.equal(failed.events[0].type,'activity-failed');await take();
   assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
   const quiet=JSON.parse((await exec(process.execPath,[...args.slice(0,-1),'0.002'],{timeout:5000})).stdout);
   assert.equal(quiet.wake,'interval-elapsed');
   await writeFile(mock,partialMock([]));
   const recovered=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(recovered.events[0].type,'activity-recovered');
+  assert.equal(recovered.events[0].type,'activity-recovered');await take();
   await writeFile(join(root,'calls.txt'),'');
   await writeFile(mock,`import {appendFile} from 'node:fs/promises'; await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n'); console.error('sync unavailable'); process.exit(1);`);
   await assert.rejects(exec(process.execPath,args,{timeout:5000}),e=>{assert.match(e.stderr,/sync unavailable/);assert.equal(JSON.parse(e.stdout).wake,'watcher-failed');return true;});
@@ -245,4 +248,38 @@ test('quoted creation marker alone cannot invent provenance or backfill a human 
   const f=await fixture(t);const i=f.issues.get('JAU-1');i.description=`A quoted example: ${ORIGIN_MARKER}`;
   await f.service.sync();assert.equal(await f.service.read('JAU-1'),null);assert.equal(i.comments.length,0);
   await f.service.publish('JAU-1','Answer');assert.ok(!i.labels.nodes.some(l=>l.name===ACTIVITY_LABELS.origin));
+});
+
+// JAU-62: every 30 s poll used to read every comment and reaction of every
+// tracked ticket twice (~50 000 complexity points), which exhausted Linear's
+// 2 M/h budget and cut the loop off for an hour on 23/09.
+test('incremental sync reads only tickets that moved, once each, with a periodic full sweep',async t=>{
+  const f=await fixture(t,3);
+  for(const id of ['JAU-1','JAU-2','JAU-3'])await f.service.publish(id,'News');
+  const reads=()=>f.calls.filter(c=>c.q.includes('issue(id:')).length;
+  const now=Date.parse('2026-09-23T00:00:00Z');
+  let before=reads();
+  const first=await f.service.sync(undefined,{incremental:true,now});
+  assert.equal(first.full,true,'no cursor yet: full sweep');
+  assert.equal(reads()-before,3,'one read per ticket, not two');
+  before=reads();
+  const quiet=await f.service.sync(undefined,{incremental:true,now:now+30_000});
+  assert.deepEqual([quiet.full,quiet.skipped,reads()-before],[false,3,0],'a quiet board costs only discovery');
+  const i=f.issues.get('JAU-2');i.comments.push(comment('reply',40,'Une question',user));i.updatedAt=at(40);
+  before=reads();
+  const moved=await f.service.sync(undefined,{incremental:true,now:now+60_000});
+  assert.deepEqual([moved.skipped,reads()-before],[2,1]);
+  assert.equal(moved.tickets[0].issue,'JAU-2');
+  assert.equal((await f.service.read('JAU-2')).unread,false,'the reply is still observed');
+  before=reads();
+  const sweep=await f.service.sync(undefined,{incremental:true,now:now+30*60_000});
+  assert.deepEqual([sweep.full,reads()-before],[true,3],'full sweep every 30 min');
+  before=reads();
+  await f.service.sync();
+  assert.equal(reads()-before,3,'an explicit sync without --incremental is always full');
+  // A deleted ticket is retried every poll so its error stays visible.
+  f.issues.delete('JAU-3');
+  const gone=await f.service.sync(undefined,{incremental:true,now:now+31*60_000});
+  assert.equal(gone.errors[0].issue,'JAU-3');
+  assert.equal((await f.service.sync(undefined,{incremental:true,now:now+32*60_000})).errors[0].issue,'JAU-3');
 });

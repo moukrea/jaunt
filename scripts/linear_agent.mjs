@@ -11,6 +11,7 @@ import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promise
 import { randomUUID } from 'node:crypto';
 import { phaseHistory, archiveClaim, telemetryArchivePath, telemetryReport } from './linear_telemetry.mjs';
 import { skillStore } from './linear_skills.mjs';
+import { wakeStore } from './linear_wakes.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
 import { connectionPages } from './linear_activity.mjs';
@@ -182,6 +183,17 @@ async function getToken({ force = false } = {}) {
   return mintToken();
 }
 
+// Linear's complexity budget as of the last response: 2 M points per hour on a
+// sliding window. The watcher reads it from `sync-activity`/`pulse` output to
+// slow down before the API cuts it off (JAU-62, 23/09 00:00 UTC).
+let lastRateLimit = null;
+function recordRateLimit(res) {
+  const n = name => { const v = Number(res.headers?.get?.(name)); return Number.isFinite(v) && res.headers.get(name) !== null ? v : null; };
+  const limit = n('x-ratelimit-complexity-limit'), remaining = n('x-ratelimit-complexity-remaining');
+  if (limit === null || remaining === null) return;
+  lastRateLimit = { limit, remaining, reset: n('x-ratelimit-complexity-reset'), at: new Date().toISOString() };
+}
+
 async function graphql(query, variables = {}, { retried = false } = {}) {
   const token = await getToken({ force: retried });
   const res = await fetch(GRAPHQL_ENDPOINT, {
@@ -196,7 +208,14 @@ async function graphql(query, variables = {}, { retried = false } = {}) {
   // A rejected token is the expected failure mode after 30 days: re-mint once.
   if (res.status === 401 && !retried) return graphql(query, variables, { retried: true });
 
+  recordRateLimit(res);
   const text = await res.text();
+  // A 429 names when the budget comes back, so the watcher can wait for it
+  // rather than count failures against a cut it cannot shorten.
+  if (res.status === 429) {
+    const reset = lastRateLimit?.reset ?? Number(res.headers?.get?.('x-ratelimit-complexity-reset') || res.headers?.get?.('x-ratelimit-requests-reset'));
+    throw new Error(`graphql 429${Number.isFinite(reset) && reset > 0 ? ` (reset ${new Date(reset).toISOString()})` : ''}: ${text.slice(0, 300)}`);
+  }
   if (!res.ok) throw new Error(`graphql ${res.status}: ${text.slice(0, 400)}`);
   const payload = JSON.parse(text);
   if (payload.errors?.length) {
@@ -562,6 +581,9 @@ async function getIssue(identifier) {
 // root comment. Without it every answer lands at the bottom of the ticket and the
 // conversation becomes impossible to follow.
 let activityPromise;
+// Attached to the watcher-facing reads only: what the budget looked like after them.
+const withRateLimit = result => (lastRateLimit ? { ...result, rateLimit: lastRateLimit } : result);
+
 async function activity() {
   return activityPromise ||= import('./linear_activity.mjs').then(({ activityService }) =>
     activityService({ stateDir: STATE_DIR, graphql, team: resolveTeam, agent: agentUser }));
@@ -1367,6 +1389,9 @@ async function watcherState() {
     watcher,
     watchdog,
     skills: await skillStore(ROOT).status(),
+    // Delivered, taken and suppressed wakes: what the loop cost in model turns
+    // and what it avoided (JAU-62). `null` when the outbox cannot be read.
+    wakes: await wakeStore(STATE_DIR).status().catch(error => ({ error: error.message })),
   };
 }
 
@@ -1821,7 +1846,7 @@ async function whoami() {
 
 const COMMANDS = {
   'routing-thread': async ([id]) => ({ ...(await readRoutingThread(required(id, 'routing-thread <ISSUE-ID>'))), agentId: (await agentUser()).id }),
-  'sync-activity': async ([id]) => (await activity()).sync(id),
+  'sync-activity': async ([id], flags) => withRateLimit(await (await activity()).sync(id, { incremental: flags.incremental === true })),
   discussion: async ([id], flags) => {
     required(id, 'discussion <ISSUE-ID> [--file <json|->]');
     if (flags.file === undefined) return (await activity()).read(id);
@@ -1841,7 +1866,7 @@ const COMMANDS = {
   },
   next: async () => nextIssue(),
   board: async () => board(),
-  pulse: async () => pulse(),
+  pulse: async () => withRateLimit(await pulse()),
   reviewed: async ([id, ...words], flags) => {
     return markReviewed(
       required(id, 'reviewed <ISSUE-ID> <why it sits where it sits> [--group <root-cause>]'),
@@ -1982,7 +2007,16 @@ const COMMANDS = {
     return skillStore(ROOT).bind(flags.runtime, flags.session);
   },
   'skills-read': async (_args, flags) => {
-    return skillStore(ROOT).read(flags.runtime, flags.session);
+    return skillStore(ROOT).read(flags.runtime, flags.session, { ifStale: flags['if-stale'] === true });
+  },
+  // The first gesture of every wake: takes the outstanding batch, or answers
+  // `alreadyHandled` for a replayed one so the pass can stop before paying for
+  // instructions and board reads.
+  wake: async ([action, ...rest], flags) => {
+    if (rest.length) throw new Error('unexpected wake argument');
+    const store = wakeStore(STATE_DIR);
+    if (action === 'take') return store.take(flags.id);
+    return store.status();
   },
   'skills-ack': async (_args, flags) => {
     return skillStore(ROOT).acknowledge(flags.runtime, flags.session, flags.fingerprint);
@@ -2065,7 +2099,7 @@ export const COMMAND_FLAGS = {
     revise: ['runtime', 'session', 'action', 'reason', 'comment', 'deadline'],
     attempt: ['runtime', 'session', 'action', 'result', 'evidence', 'deadline'],
     resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket'], ack: ['event', 'evidence'] },
-  'sync-activity': [], discussion: ['file'],
+  'sync-activity': ['incremental'], discussion: ['file'],
   whoami: [], team: [], next: [], board: [], pulse: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],
   surface: ['files', 'symbols'], stop: [], 'stop-requested': [], list: [], show: [],
@@ -2084,7 +2118,8 @@ export const COMMAND_FLAGS = {
   },
   cleanup: ['pr'], status: [], watcher: [],
   'loop-on': ['runtime', 'session'], 'loop-off': [],
-  'skills-bind': ['runtime', 'session'], 'skills-read': ['runtime', 'session'],
+  'skills-bind': ['runtime', 'session'], 'skills-read': ['runtime', 'session', 'if-stale'],
+  wake: { take: ['id'], status: [] },
   'skills-ack': ['runtime', 'session', 'fingerprint'],
   claim: ['session', 'runtime'], closure: ['file'], release: ['reason'],
   verdict: ['peek'], 'ensure-waiting-state': [],
@@ -2121,7 +2156,7 @@ export function parseCommandArgs(command, args) {
       const next = args[i + 1];
       // --peek is a switch even before a positional. Preserve the existing
       // bare-value representation, including claim's bare --session fallback.
-      const bare = name === 'peek' || next === undefined || next.startsWith('--');
+      const bare = ['peek', 'if-stale', 'incremental'].includes(name) || next === undefined || next.startsWith('--');
       flags[name] = bare ? true : next;
       if (!bare) i += 1;
     } else {
