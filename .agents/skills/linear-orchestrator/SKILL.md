@@ -50,47 +50,57 @@ processes need their normal controlled rearm to load this new detection code.
 
 ## Who owns the ticket's state
 
-Linear's GitHub integration moves tickets on git events, and it was doing it
-before the loop existed. Transitions depend on the team configuration; a draft
-PR may remain in *Backlog*. Read actual PR and ticket states:
+One column, one author (JAU-112). Each column has exactly one writer, and
+nobody calls `move` for a column that is not theirs:
 
-| git event | ticket |
-|---|---|
-| a linked PR reaches a configured event (for example, opened or review) | verify the configured transition; push alone is not proof |
-| its linked PR is merged | verify *Done* in Linear |
+| column | author | a ticket is there when |
+|---|---|---|
+| *Backlog* | loop | new, not yet analysed, blocked, or declined |
+| *Todo* | loop (`triage`) | analysed at its current version, no open blocker, unclaimed, forecast surface declared after that analysis: exactly the §4 dispatch candidates |
+| ***Waiting for human*** | loop (`claim`/`verdict`) | a plan is posted; `verdict` puts it back where it came from |
+| *In Progress* | loop, once git leaves it | a worker is actually coding (`implementing`) |
+| *In Review* | git | its linked PR is open |
+| *Done* | git | its linked PR is merged |
 
-git cannot see one thing, and it is the thing the human most needs to see: that
-a ticket is stuck on **them**. *In Progress* covered the worker planning, the
-worker waiting for an answer and the worker coding alike, and the only one of
-the three where the human had something to do was the only one that did not
-announce itself. So there is a column, ***Waiting for human***, and the loop
-owns it end to end:
+**Git's half.** Linear's GitHub integration moves tickets on the team's
+configured PR events. Read the actual PR and ticket states rather than assuming
+them. Measured on three tickets: JAU-3, JAU-12 and JAU-4 each went *Done* one
+second after PR #58, #59 and #61 merged, with nobody calling `move`. The
+counter-proof landed in the same minute — `chore/linear-loop` (#57) merged and
+moved nothing, because its name carries no identifier, and its five tickets had
+to be moved by hand. **Every branch the loop creates carries the ticket
+identifier**; that string is the entire wiring between the board and the code.
 
-| loop event | ticket |
-|---|---|
-| a worker claims `awaiting-approval` after posting a plan | → *Waiting for human* |
-| `verdict` reads a real answer — approved, declined, feedback | → back to where it was parked from |
+***In Progress* changes hands with one setting.** Until 23/09 the team's "PR
+opened" event (`start`) targeted *In Progress* and nothing ever reached *In
+Review* (it only fires on review requests, and the loop requests none). The
+administrator re-points "PR opened" at *In Review*; the app cannot. The code
+reads the team's git automations and writes *In Progress* only when none targets
+it — `jaunt-linear triage` reports `progress: git|loop`. While it says `git`,
+the loop writes nothing there, exactly as before. Once it says `loop`:
+`verdict` sends an approved ticket to *In Progress* instead of back to where it
+was parked from, `ready` does the same when a queued claim is promoted, and a
+claim released while its ticket is still *In Progress* (no PR was ever opened)
+sends it back to *Backlog*. A queued ticket returns to where it was parked from.
+Nothing is ever moved out of *In Review* or *Done*.
 
-Nobody calls `move` for either: both ride on `claim` and `verdict`, which the
-approval path already runs. `jaunt-linear board` lists them under
-`waitingOnHuman`. That list covers parked plans, not every human decision.
-Backlog arbitration, testing and decisions after delivery may also need a human
-answer. Descriptions and comments must name the actual action and when it is
-needed, independently of the column; use `--expects none` only when no human
-action is currently requested.
+**The waiting column.** git cannot see the thing the human most needs to see:
+that a ticket is stuck on **them**. So there is ***Waiting for human***, and the
+loop owns it end to end: a worker claiming `awaiting-approval` after posting a
+plan parks the ticket there, and `verdict` reading a real answer (approved,
+declined, feedback) takes it out. Nobody calls `move` for either: both ride on
+`claim` and `verdict`, which the approval path already runs. It is matched by
+name, never by type: JAU's was created as `unstarted`, like *Todo*.
+`jaunt-linear board` lists these tickets under `waitingOnHuman`. That list covers
+parked plans, not every human decision. Backlog arbitration, testing and
+decisions after delivery may also need a human answer. Descriptions and comments
+must name the actual action and when it is needed, independently of the column;
+use `--expects none` only when no human action is currently requested.
 
-Measured on three tickets: JAU-3, JAU-12 and JAU-4 each went *Done* one second
-after PR #58, #59 and #61 merged, with nobody calling `move`. The counter-proof
-landed in the same minute — `chore/linear-loop` (#57) merged and moved nothing,
-because its name carries no identifier, and its five tickets had to be moved by
-hand.
-
-So the rule is: **git owns *In Progress* and *Done*; the loop owns only what git
-cannot see** — a ticket parked in *Backlog*, and the waiting column above.
-Calling `move` for a transition git already performs puts two
-authorities on one field with no arbitration, and the loop loses as often as it
-wins. **Every branch the loop creates carries the ticket identifier**; that
-string is the entire wiring between the board and the code.
+**Todo is the loop's, not a human's to-do list.** `triage` promotes what is
+ready and takes back what it promoted as soon as it is not. A ticket a human put
+in *Todo* by hand is their prioritisation: `triage` reports it under `held` and
+moves it back only when an open blocker appears, with a comment saying so.
 
 ## What woke you
 
@@ -211,7 +221,20 @@ Run the pass now; there is nothing else to wait for.
    a narrow or empty surface to pass the gate. If evidence is insufficient, keep
    the candidate undispatched and explain what is missing. Only forecast
    unclaimed tickets: a claimed ticket's surface belongs to its worker,
-   including while it is waiting for approval or queued.
+   including while it is waiting for approval or queued. A declined ticket is
+   not a candidate: do not forecast it until a human asks for it again.
+
+7. **Sort Backlog and Todo** once the pass is written down:
+
+   ```bash
+   jaunt-linear triage
+   ```
+
+   It promotes every unclaimed ticket that is reviewed at its current version,
+   blocked by nothing open and forecast after that review, and takes back what
+   it promoted that no longer is. Idempotent; run it at the end of every pass,
+   and read `moves`, `held` and `errors`. A candidate that stays in *Backlog* is
+   missing one of the three; the output names which.
 
 Amend tickets when the evidence says so: fix an unusable title, add the detail
 you established, mark duplicates with `relate <A> duplicate <B>`, split a ticket
@@ -383,7 +406,9 @@ that its scope is current. Then ask the gate:
 jaunt-linear independent <ID>
 ```
 
-Only `independent: true` permits dispatch. For `gate: unknown`, inspect
+Pick candidates from *Todo* first, in priority order (`jaunt-linear next`
+ranks *Todo* before *Backlog* and never offers *Waiting for human*). Only
+`independent: true` permits dispatch. For `gate: unknown`, inspect
 `unknowns`: establish missing candidate evidence through the read-only survey,
 refresh its surface, and ask again. If a claimed worker's surface is missing,
 route the request to that worker; never overwrite its declaration to clear the
@@ -431,8 +456,9 @@ Two things about that block are load-bearing and easy to "tidy" away:
 - **`-b agent/<ID>`.** The identifier links the PR to the ticket so configured
   integration events can update it. Verify the link and actual state instead of
   assuming that naming the branch proves a transition.
-- **No `move "In Progress"` to simulate progress.** Check the configured PR
-  event and actual ticket state. Dispatch is not a state change:
+- **No `move "In Progress"` to simulate progress.** *In Progress* is written by
+  `verdict`/`ready` when coding starts, and only once git no longer writes it
+  (see "Who owns the ticket's state"). Dispatch is not a state change:
   at this point nothing has been written, and claiming otherwise is how the
   board came to say *In Progress* about tickets where no code existed.
 
