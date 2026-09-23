@@ -249,3 +249,18 @@ test('replayed recovery wake is acknowledged after its accepted attempt advances
   f.report = { issue: 'JAU-1', state: 'running', attempt: 'new' };
   assert.equal((await f.run(e)).event, null); assert.equal(f.launches, 1);
 });
+test('a new session on the claim receives later replies; an outstanding route keeps its old identity (JAU-37)', async t => {
+  const f = await fixture(t); f.claim.runtime = 'claude';
+  await f.run(); assert.equal(f.launches, 1);
+  f.claim = { ...f.claim, session: 'fresh-implementer', phase: 'implementing' };
+  f.thread.comments.push({ ...comment('One more thing'), id: 'reply-2', createdAt: '2026-09-22T11:00:00Z' });
+  assert.equal((await f.run()).event, null);
+  assert.equal(f.launches, 2);
+  assert.equal(f.launched.binding.session, 'fresh-implementer');
+  f.report.state = 'running';
+  f.thread.comments.push({ ...comment('And this'), id: 'reply-3', createdAt: '2026-09-22T12:00:00Z' });
+  assert.equal((await f.run()).outcomes[0].outcome, 'deferred');
+  f.claim = { ...f.claim, session: 'someone-else' };
+  assert.match((await f.run({ wake: 'board-changed', events: [] })).outcomes[0].reason, /claim identity changed/);
+  assert.equal(f.launches, 2);
+});

@@ -88,7 +88,9 @@ export function routingStore({ state, agent, launch, enabled = async () => (awai
         const claim = (await agent('claims')).find(c => c.issue === id);
         if (!claim?.session || !claim.claimedAt || !['codex', 'claude'].includes(runtimeOf(claim))) return finish('escalate', 'no exact worker identity');
         const binding = bindingOf(claim);
-        if (saved?.binding && !sameBinding(saved.binding, binding)) return finish('escalate', 'claim identity changed; old route retained for reconciliation');
+        // Only an outstanding route is bound to the old identity. With nothing
+        // pending, a new session (JAU-37: fresh implementation) is the address.
+        if (saved?.pending && saved.binding && !sameBinding(saved.binding, binding)) return finish('escalate', 'claim identity changed; old route retained for reconciliation');
         saved = { ...saved, binding };
         if (claim.phase === 'awaiting-external') return finish('escalate', 'external wait belongs to reconciliation');
         if ((await agent('stop-requested', id)).stop) return finish('deferred', 'stop requested', saved?.pending || incoming);

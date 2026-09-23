@@ -8,7 +8,8 @@ import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { settingSources, observeTelemetry } from './linear_telemetry.mjs';
-import { claudeSettings, claudeEnvironment, observedBanned, assertAllowed, loadPolicy } from './linear_models.mjs';
+import { claudeSettings, claudeEnvironment, observedBanned, assertAllowed, loadPolicy, classifierArgs, classifierPrompt, parseClassifier } from './linear_models.mjs';
+import { randomUUID } from 'node:crypto';
 import { skillStore } from './linear_skills.mjs';
 import { wakeStore } from './linear_wakes.mjs';
 import { livePid } from './linear_watch.mjs';
@@ -217,6 +218,38 @@ export function claudeArgs(record) {
   args.push(record.prompt);
   return { args };
 }
+// A short dedicated session (JAU-35): read-only tools, no MCP, no transcript.
+// A failed classification is recorded and falls back to the policy default in
+// the open; a banned model in its result refuses the launch instead.
+const CONTEXT_LIMIT = 60000;
+export function ticketContext(issue, plan = null) {
+  const comments = (issue.comments?.nodes || []).map(c => `--- ${c.user?.name || 'unknown'} (${c.createdAt})\n${c.body}`).join('\n');
+  const ticket = `# ${issue.identifier}: ${issue.title}\n\n${issue.description || ''}\n\n## Comments (newest first)\n${comments}`.slice(0, plan ? CONTEXT_LIMIT / 2 : CONTEXT_LIMIT);
+  return plan ? `${ticket}\n\n## Approved plan (${plan.url || 'document'})\n${String(plan.content || '').slice(0, CONTEXT_LIMIT / 2)}` : ticket;
+}
+export async function classify(phase, context, cwd, { spawnImpl = spawn, env = process.env, timeout = 600_000 } = {}) {
+  const at = stamp();
+  let stdout = '', stderr = '';
+  try {
+    const code = await new Promise((accept, reject) => {
+      const child = spawnImpl('claude', classifierArgs(), { cwd, env: claudeEnvironment(workerEnvironment(env)), stdio: ['pipe', 'pipe', 'pipe'], timeout });
+      child.stdout.on('data', d => { stdout += d; });
+      child.stderr.on('data', d => { stderr = (stderr + d).slice(-4096); });
+      child.on('error', reject);
+      child.on('close', accept);
+      child.stdin.on('error', () => {});
+      child.stdin.end(classifierPrompt(phase, context));
+    });
+    if (!stdout.trim()) return { phase, at, failed: `classifier exited ${code}: ${stderr.trim().slice(0, 300)}` };
+  } catch (error) { return { phase, at, failed: error.message }; }
+  return { phase, at, ...parseClassifier(stdout) };
+}
+async function planRouting(id, cwd, phase, plan = null) {
+  const issue = await agent('show', id).catch(error => ({ error }));
+  const routing = issue.error ? { phase, at: stamp(), failed: `ticket unreadable: ${issue.error.message.slice(0, 200)}` }
+    : await classify(phase, ticketContext(issue, plan), cwd);
+  return { ...routing, applied: routing.decision ? { model: routing.decision.model, effort: routing.decision.effort } : claudeSettings({}) };
+}
 async function worker(id, options, resume, runtime = 'codex', recover = false, routed = null) {
   ticket(id);
   if (!['codex', 'claude'].includes(runtime)) throw new Error('invalid runtime');
@@ -249,6 +282,11 @@ async function worker(id, options, resume, runtime = 'codex', recover = false, r
     const cwd = await realpath(options.cwd || prior.cwd);
     const branch = (await run('git', ['branch', '--show-current'], { cwd })).trim();
     if (!branch.includes(id)) throw new Error('worker branch must contain its ticket identifier');
+    // An approved plan is implemented by a fresh session, never by its planner.
+    if (runtime === 'claude' && resume && !recover && held.phase === 'awaiting-approval' &&
+        (await agent('verdict', id, '--peek')).verdict === 'approved') throw new Error(`${id}: plan approved; start the implementation session with: implement ${id}`);
+    const routing = runtime === 'claude' && !resume && !recover && !routed && !options.model && !options.effort
+      ? await planRouting(id, cwd, 'plan') : null;
     const o = routed ? routed.owner : owner(options, runtime);
     let decision;
     if (recover) {
@@ -264,9 +302,10 @@ async function worker(id, options, resume, runtime = 'codex', recover = false, r
       const record = await beginAttempt(STATE, held, {
         role: 'worker', cwd,
         launchMode: recover ? 'recovery' : routed ? 'routed-resume' : resume ? 'resume' : 'start',
-        settingSources: settingSources(runtime, prior, options, process.env, recover ? 'recovery' : routed ? 'routed-resume' : null),
+        settingSources: settingSources(runtime, prior, options, process.env, recover ? 'recovery' : routed ? 'routed-resume' : null, routing),
         session: resume || runtime === 'claude' ? session : null, owner: o, resume,
-        ...workerSettings(runtime, prior, options, process.env, recover || Boolean(routed)),
+        ...workerSettings(runtime, prior, routing ? { ...options, ...routing.applied } : options, process.env, recover || Boolean(routed)),
+        ...(routing ? { routing } : {}),
         ...(routed ? { routeKey: routed.route.key } : {}),
         prompt: options.message || `Invoke the linear-worker skill for ${id}. Read latest comments, stop flag, approval and PR state before continuing the current phase. Recovery is not approval.`,
       });
@@ -287,6 +326,42 @@ async function worker(id, options, resume, runtime = 'codex', recover = false, r
         } });
     }
     return launch(id, await begin());
+  });
+}
+// After approval: classify the remaining work against the approved plan, then
+// start a new session and make it the claim's address, so later human replies
+// reach the implementer rather than the replaced planner.
+async function implement(id, options) {
+  ticket(id);
+  return withWorkerLock(STATE, id, async () => {
+    const held = (await agent('claims')).find(c => c.issue === id);
+    if (!held || runtimeOf(held) !== 'claude') throw new Error(`${id} needs a claude claim`);
+    if (!['awaiting-approval', 'queued', 'implementing'].includes(held.phase)) throw new Error(`${id} is in phase ${held.phase}, not an approved plan`);
+    if ((await agent('stop-requested', id)).stop) throw new Error(`${id}: stop requested`);
+    const evidence = await currentAttempt(STATE, held);
+    if (evidence?.routing?.phase === 'implementation') throw new Error(`${id} already has an implementation session; use resume`);
+    if (evidence) {
+      const health = workerHealth(held, evidence);
+      if (!['resting', 'finished'].includes(health.state)) throw new Error(`${id}: ${health.reason}`);
+    }
+    if ((await agent('verdict', id, '--peek')).verdict !== 'approved') throw new Error(`${id}: no active approval`);
+    const cwd = await realpath(options.cwd || evidence?.cwd || '');
+    if (!(await run('git', ['branch', '--show-current'], { cwd })).trim().includes(id)) throw new Error('worker branch must contain its ticket identifier');
+    const o = owner(options, 'claude');
+    const plan = await agent('plan-read', id);
+    const routing = options.model || options.effort ? null : await planRouting(id, cwd, 'implementation', plan);
+    const session = randomUUID();
+    await agent('claim', id, held.phase, '--session', session, '--runtime', 'claude');
+    const current = (await agent('claims')).find(c => c.issue === id);
+    if (current?.session !== session || current.claimedAt !== held.claimedAt) throw new Error('claim changed while starting implementation');
+    const record = await beginAttempt(STATE, current, {
+      role: 'worker', cwd, launchMode: 'implement', session, owner: o, resume: false,
+      settingSources: settingSources('claude', null, options, {}, null, routing),
+      ...workerSettings('claude', null, routing ? { ...options, ...routing.applied } : options, process.env),
+      ...(routing ? { routing } : {}),
+      prompt: options.message || `Invoke the linear-worker skill for ${id}. You are its implementation session, started fresh after the plan was approved: run jaunt-linear verdict ${id} first, read the approved plan with jaunt-linear plan-read ${id} (${plan.url}), then implement (§6) and land it (§7). The survey is in that plan, not in your memory: verify what you rely on.`,
+    });
+    return launch(id, record);
   });
 }
 // Dependency injection makes lifecycle and wake-up tests use no Linear/model calls.
@@ -500,11 +575,15 @@ export async function main(runtime = 'codex') {
     if (command === 'recover') return withWorkerLock(STATE, `RUNTIME-${chosen === 'codex' ? 1 : 2}`, () => worker(id, options, true, chosen, true));
     return worker(id, options, command === 'resume', chosen);
   }
+  if (command === 'implement') {
+    if ((options.runtime || runtime) !== 'claude') throw new Error('implement is the Claude fresh-session path');
+    return implement(id, options);
+  }
   if (command === '_run') return execute(id, options.runtime || runtime);
   if (command === 'status') return status();
   if (command === 'install') return install();
   if (command === 'owner') return owner(options, runtime);
-  return { usage: 'jaunt-linear-codex install|owner|arm|status|route [--event json]|worker <ID> --cwd <worktree>|resume <ID>|recover <ID> [--message text] [--model model] [--effort effort]' };
+  return { usage: 'jaunt-linear-codex install|owner|arm|status|route [--event json]|worker <ID> --cwd <worktree>|resume <ID>|implement <ID>|recover <ID> [--message text] [--model model] [--effort effort]' };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(entryPath(process.argv[1])).href) {
   main().then(result => { if (result) console.log(JSON.stringify(result, null, 2)); }).catch(e => { console.error(e.message); process.exitCode = 1; });

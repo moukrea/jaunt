@@ -329,6 +329,9 @@ A fully handled batch keeps polling; an active worker's reply is saved locally
 and reconsidered on quiet polls. Routing preserves the claim cycle, runtime and
 exact session, and reads `verdict --peek`; the worker still registers approval.
 An interrupted worker only uses guarded recovery, including its existing budget.
+An **approved** Claude plan still `awaiting-approval` is escalated, not resumed:
+its implementation needs a fresh session, which you start with `implement`
+(see §3). The router then follows the claim's new session for later replies.
 
 `routing-escalated` and `routingError` require reconciliation. Inspect the
 reported reason and `.dev-state/routing/` together with the worker lifecycle.
@@ -372,7 +375,19 @@ from an owning Codex loop session; never pass its UUID to `claude --resume`.
 If this Claude session owns the loop, invoke `codex exec resume <exact-session>
 --json "<request>"` in the saved worktree instead, with the Codex worker skill.
 Check `.dev-state/codex/<ID>.json` first and never resume a worker still running.
-For Claude claims, keep the existing procedure:
+For Claude claims, read `jaunt-linear verdict <ID> --peek` first. An
+**approved** plan whose claim is still `awaiting-approval` or `queued` starts
+the implementation in a **fresh session**, never by resuming the planner (the
+launcher refuses that resume):
+
+```bash
+node "$(jaunt-linear repo)/scripts/linear_claude.mjs" implement <ID>
+```
+
+It classifies the remaining work against the approved plan, moves the claim's
+`session` to the new session and launches it; later replies reach that session.
+Once an implementation session exists, `implement` refuses again: use `resume`.
+Feedback, a decline or any later comment keeps the existing procedure:
 
 ```bash
 SID=$(node -e 'console.log(require("./.dev-state/claims/JAU-3.json").session)')
@@ -440,6 +455,11 @@ and refuses a banned model from any source — option, saved record, environment
 or the running stream. A refusal is a `configuration` failure, never retried
 automatically; report it, do not work around it. Readjusting the policy is an
 edit to that file ([docs/LINEAR_MODELS.md](../../../docs/LINEAR_MODELS.md)).
+
+`worker` first runs a short **plan classifier** (read-only, about ten seconds)
+and starts the planner with the pair it routes to. The decision, its facts and
+its own cost are in the attempt (`jaunt-linear telemetry <ID>`). A failed
+classification falls back to the policy default and says so; it does not block.
 
 The supervised launcher purges `CLAUDECODE` and `CLAUDE_CODE_*`: without it the spawned
 session is treated as an ephemeral child, persists no transcript, and cannot be

@@ -46,21 +46,25 @@ export function archiveClaim(claim, receipt, issue) {
 }
 
 // Keep the launch contract unchanged; provenance is additional evidence only.
-export function settingSources(runtime, previous, options, env, mode) {
+export function settingSources(runtime, previous, options, env, mode, routing = null) {
   const prefix = runtime === 'claude' ? 'JAUNT_CLAUDE' : 'JAUNT_CODEX';
   // Claude has no runtime default any more: a gap is filled by the policy.
   const fallback = runtime === 'claude' ? 'jaunt model policy' : 'runtime default (not observed)';
   const source = key => mode === 'recovery' || mode === 'routed-resume'
     ? (runtime === 'claude' && !previous?.[key] ? `${fallback} (${mode})` : mode)
-    : options[key] ? 'explicit option' : previous?.[key] ? 'saved setting'
+    : options[key] ? 'explicit option'
+      : routing ? routing.decision ? `${routing.phase} classifier (${routing.decision.category})` : `${fallback} (classifier failed)`
+      : previous?.[key] ? 'saved setting'
       : env[`${prefix}_${key.toUpperCase()}`] ? 'runtime environment' : fallback;
   return { model: source('model'), effort: source('effort'),
     // Explicit operator metadata, never copied from a prompt or provider output.
-    rationale: typeof options.rationale === 'string' ? options.rationale.slice(0, 1000) : null };
+    rationale: typeof options.rationale === 'string' ? options.rationale.slice(0, 1000)
+      : routing ? (routing.reasons || routing.failed || null) : null };
 }
 export function startTelemetry(record) {
+  // The classifier's facts, rule notes and own cost travel with the attempt they routed.
   return { version: 1, requested: { model: label(record.model), effort: label(record.effort),
-    sources: record.settingSources || null }, models: [], runtimeVersion: null, reportedCost: null, crashedResult: false, turn: 0, turns: {}, messages: {}, result: null };
+    sources: record.settingSources || null, routing: record.routing || null }, models: [], runtimeVersion: null, reportedCost: null, crashedResult: false, turn: 0, turns: {}, messages: {}, result: null };
 }
 function usage(value, runtime, source) {
   const result = { source };
@@ -148,7 +152,7 @@ function reconcileCosts(records, attempts) {
     const a = attempts[i], r = records[i], cost = a.reportedCost;
     if (!numeric(cost.value)) continue;
     const previous = attempts[i - 1], previousRecord = records[i - 1];
-    const fresh = r.launchMode === 'start' && !r.resume;
+    const fresh = ['start', 'implement'].includes(r.launchMode) && !r.resume;
     let value = null, source = null;
     if (cost.scope === 'invocation' || fresh) {
       value = cost.value; source = fresh ? 'new session result estimate' : 'pre-2.1.277 invocation result estimate';
@@ -213,8 +217,12 @@ export async function telemetryReport(state, id, now = new Date().toISOString())
   return { version: 1, issue: id, generatedAt: now, generations,
     counts: { attempts: attempts.length, resumes: attempts.filter(a => a.mode === 'resume' || a.mode === 'routed-resume').length,
       recoveries: attempts.filter(a => a.mode === 'recovery').length,
+      implementations: attempts.filter(a => a.mode === 'implement').length,
       unknownModes: attempts.filter(a => a.mode.includes('legacy')).length },
     knownUsageSubtotal: Object.fromEntries(fields.map(key => [key, subtotal(attempts, key)])),
+    // Separate from worker usage: a classifier is its own short session.
+    classifierCostUsd: (routed => ({ value: routed.some(r => numeric(r.classifier?.costUsd?.value)) ? routed.reduce((s, r) => s + (r.classifier?.costUsd?.value || 0), 0) : null,
+      kind: 'estimated', classifications: routed.length, reported: routed.filter(r => numeric(r.classifier?.costUsd?.value)).length }))(attempts.map(a => a.requested?.routing).filter(Boolean)),
     scope: 'Recorded worker attempts only. Not the complete cost of a ticket or evidence of savings.',
     gaps: ['Orchestrator evaluations are not accounted for. Claude main-loop tokens exclude subagents; its reported USD estimate includes them.',
       'Pre-telemetry usage and deleted claim histories cannot be reconstructed.',

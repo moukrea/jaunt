@@ -7,10 +7,11 @@
     "default": { "model": "claude-opus-5-5", "effort": "medium" },
     "subagent": { "model": "claude-opus-5-5" },
     "roles": {
-      "classifier": { "model": "claude-opus-5-5", "effort": "low" }
+      "classifier": { "model": "claude-opus-5-5", "effort": "low", "maxBudgetUsd": 2 }
     },
+    "escalation": { "elevated": "high", "exceptional": "xhigh" },
     "categories": {
-      "A": { "model": "claude-opus-5-5", "effort": "low" },
+      "A": { "model": "claude-opus-5-5", "effort": "low", "longEffort": "medium" },
       "B": { "model": "claude-opus-5-5", "effort": "medium" },
       "C": { "model": "claude-opus-5-5", "effort": "medium" },
       "D": { "model": "claude-opus-5-5", "effort": "high" }

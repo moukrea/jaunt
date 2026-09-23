@@ -170,7 +170,7 @@ ready <ID>` when that claim releases and reopens you.
 
 | verdict | what to do |
 |---|---|
-| `approved` | implement (§6), then land it (§7) — unless `registered.phase` is `queued`: comment what holds you, stop |
+| `approved` | implement (§6), then land it (§7) — unless `registered.phase` is `queued`: comment what holds you, stop. You are then the fresh implementation session the orchestrator started with `implement`; read the approved plan with `jaunt-linear plan-read <ID>` |
 | `feedback` | the human is steering: fold it in, retract the superseded plan with `jaunt-linear uncomment <COMMENT-ID>`, post a new one, stop again |
 | `declined` | comment that it is parked, `jaunt-linear move <ID> "Backlog"`, tell the orchestrator you are done |
 | `pending` | nothing was answered — stop; you will be reopened |
@@ -179,6 +179,11 @@ ready <ID>` when that claim releases and reopens you.
 ## 6. Implement
 
 On your worktree branch, and nowhere else.
+
+The implementation runs in a **new session** with its own model and effort,
+chosen from the approved plan (JAU-37). You do not remember the survey: the
+plan document is your context, so verify anything you rely on. Write plans
+accordingly — self-contained, with the files, symbols and risks named.
 
 The claim now reads `implementing` — `verdict` set it. That phase is the answer
 to "is this session waiting on me or working?", so if you ever reach here
