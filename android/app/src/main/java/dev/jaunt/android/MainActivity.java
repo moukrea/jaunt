@@ -112,6 +112,8 @@ public class MainActivity extends Activity {
                 case "app.ready":appReady=true;loading.setVisibility(View.GONE);web.postInvalidateOnAnimation();reply.done(true,null);updater.check(getIntent().getBooleanExtra("checkUpdate",false),true);getIntent().removeExtra("checkUpdate");return;
                 case "app.language":Lang.set(p.getString("language"));reply.done(true,null);return;
                 case "app.updates":updater.check(true);reply.done(true,null);return;
+                case "app.channel":reply.done(new JSONObject().put("channel",updater.channel()),null);return;
+                case "app.channel.set":updater.switchChannel(p.getString("channel"));reply.done(new JSONObject().put("channel",updater.channel()),null);return;
                 case "clipboard.read":{
                     if(!foreground)throw new SecurityException("Open jaunt before reading the clipboard.");
                     ClipboardManager manager=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData clip=manager.getPrimaryClip();

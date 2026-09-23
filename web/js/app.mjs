@@ -20,7 +20,7 @@ import * as push from './push.mjs';
 const {Terminal, FitAddon} = terminalBundle;
 const vault = new Vault(), machines = new Map(), transfers = [];
 let desktopHostAvailable=false;
-let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null;
+let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null, androidChannel=null;
 let settingsMachine, settingsRequest = 0;
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
@@ -1773,7 +1773,7 @@ function switchHostChannel(a,channel){
   return followHostUpdate(a,()=>a.link.request('updates.configure',{channel}),null,false,()=>switchHostChannel(a,channel));
 }
 // Host and desktop share one chooser: `switchTo` starts that surface's explicit switch.
-function chooseChannel(switchTo){
+function chooseChannel(switchTo,hint=tr("Its version is installed now, even if it is older than the running one. Automatic updates then follow only this channel.")){
   const input=el('input',{value:'',placeholder:'moukrea_9',maxLength:39,autocapitalize:'none',spellcheck:false});
   const save=async()=>{
     const channel=input.value.trim();
@@ -1782,7 +1782,7 @@ function chooseChannel(switchTo){
     closeModal();await switchTo(channel);
   };
   input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save().catch(error=>reportError(error,'modal'));}};
-  modal(tr('Change update channel'),el('div',{},field(tr('Channel name'),input,tr("Its version is installed now, even if it is older than the running one. Automatic updates then follow only this channel.")),
+  modal(tr('Change update channel'),el('div',{},field(tr('Channel name'),input,hint),
     el('div',{class:'modal-actions'},button(tr('Cancel'),closeModal),button(tr('Switch and install'),save,'button primary'))));
   input.focus();
 }
@@ -1790,10 +1790,16 @@ function hostChannelControl(a){
   if(hostUpdateJobs.has(a.machine.room))return el('span',{class:'settings-hint',text:tr('Update in progress…')});
   return channelControl(a.info.updates.channel,channel=>switchHostChannel(a,channel),()=>{});
 }
-function channelControl(channel,switchTo,failed){
-  const change=button(tr('Change channel'),()=>chooseChannel(switchTo));
+function channelControl(channel,switchTo,failed,copy={}){
+  const change=button(tr('Change channel'),()=>chooseChannel(switchTo,copy.choose));
   if((channel||'main')==='main')return change;
-  return el('span',{},change,button(tr('Return to main'),()=>confirmAction(tr('Return to main?'),tr('The production release is installed now, even if it is older than the running one.'),tr('Return to main'),()=>{switchTo('main').catch(failed);})));
+  return el('span',{},change,button(tr('Return to main'),()=>confirmAction(tr('Return to main?'),copy.back||tr('The production release is installed now, even if it is older than the running one.'),tr('Return to main'),()=>{switchTo('main').catch(failed);})));
+}
+// Android cannot install a lower versionCode: the app installs the target only when it is newer and explains otherwise.
+function androidChannelControl(){
+  return channelControl(androidChannel,async channel=>{androidChannel=(await nativeCall('app.channel.set',{channel})).channel;renderSettings();},report,{
+    choose:tr('Android installs this channel’s build if it is newer than the installed one. Automatic updates then follow only this channel.'),
+    back:tr('Android cannot install an older build: if production is older than the installed one, jaunt returns to it with the next production release.')});
 }
 const channelDescription=channel=>(channel||'main')==='main'?tr('main · production releases'):tr('{0} · builds of a pull request under review',channel);
 // The desktop installs the channel's release at once and reopens; a failure stays visible in the desktop update activity.
@@ -1954,7 +1960,9 @@ function renderSettings() {
     if (installedPrompt) { await installedPrompt.prompt(); await installedPrompt.userChoice; installedPrompt = null; renderSettings(); }
     else modal(tr('Install jaunt on your phone'), el('div', {}, el('p', {class: 'modal-copy', text: tr('Open the browser menu and choose “Install app” or “Add to Home screen”. On iPhone/iPad, use Safari → Share → Add to Home Screen. This installs the web app. For Android camera, clipboard and notification integration, use Download Android APK in Settings.')})));
   });
+  if (isAndroid && androidChannel === null) nativeCall('app.channel').then(value => { androidChannel = value.channel; renderSettings(); }).catch(report);
   groups.push(settingsGroup(tr('jaunt'), settingsRow(isAndroid ? 'jaunt for Android' : tr('Installable web app'), isAndroid ? tr('Installed APK · bundled interface and native Android integrations.') : 'A focused window on your home screen, with the same remembered machines.', isAndroid ? button(tr('Check for updates'), () => nativeCall('app.updates')) : install),
+    ...(isAndroid && androidChannel !== null ? [settingsRow(tr('Update channel'), channelDescription(androidChannel), androidChannelControl())] : []),
     el('p', {class: 'settings-notice', text: tr('jaunt 0.1.0 beta · Host-authenticated encrypted channels · Open source. The custom protocol has automated tests, not an independent security audit. The relay transports ciphertext but can see routing metadata and interrupt availability. Never pair an untrusted device.')})));
   content.replaceChildren(...groups);
 }
