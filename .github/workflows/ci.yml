@@ -117,7 +117,7 @@ jobs:
       - name: Download the public legacy host fixture
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release download v0.1.0-beta.10 --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --pattern 'host-manifest.json' --pattern 'SHA256SUMS' --dir "$RUNNER_TEMP/legacy-host"
+        run: python scripts/release_pipeline.py download --tag v0.1.0-beta.10 --pattern '*.whl' --pattern 'host-manifest.json' --pattern 'SHA256SUMS' --directory "$RUNNER_TEMP/legacy-host"
       - name: Verify legacy restart protection and explicit migration
         env:
           jaunt_LEGACY_RELEASE_DIR: ${{ runner.temp }}/legacy-host
