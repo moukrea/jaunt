@@ -28,6 +28,11 @@ jobs:
       # must not block a frozen release commit that carries older copies of them.
       - run: pytest -q --ignore=tests/test_release_pipeline.py
       - run: python scripts/build_release.py
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-control
       - name: Publish verified release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -36,14 +41,12 @@ jobs:
           python - "$TAG" <<'PY'
           import sys,tomllib
           from packaging.version import Version
+          # The trusted copy maps production and channel candidate tags to PEP 440.
+          sys.path.insert(0,'release-control/scripts')
+          import update_channels
           configured=tomllib.load(open('pyproject.toml','rb'))['project']['version']
-          assert Version(sys.argv[1].removeprefix('v'))==Version(configured), 'Tag/package version mismatch'
+          assert Version(update_channels.python_version(sys.argv[1]))==Version(configured), 'Tag/package version mismatch'
           PY
-      - name: Read trusted resumable publisher
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: release-control
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'

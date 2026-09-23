@@ -16,12 +16,19 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
 import zipfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import update_channels  # noqa: E402
+
 STATE_REF = 'refs/heads/jaunt-release-state'
+# Channel candidates live on their own ref: a channel write can never fail a
+# production lease, and production never waits for a channel (JAU-82).
+CHANNEL_REF = 'refs/heads/jaunt-channel-state'
 COMPONENTS = ('host', 'desktop', 'android')
 PREFIX = {'host': 'v', 'desktop': 'desktop-v', 'android': 'android-v'}
 CONFIG = {'host': 'release', 'desktop': 'desktopRelease', 'android': 'androidRelease'}
@@ -211,7 +218,7 @@ def bump_tree(root, selected, tags, source, subject, android_code):
             continue
         version = tags[component][len(PREFIX[component]):]
         if component == 'host':
-            python_version = version.replace('-beta.', 'b')
+            python_version = update_channels.python_version(tags[component])
             replace('pyproject.toml', r'^version = "[^"]+"', lambda m: f'version = "{python_version}"')
             # pyproject version is not the first line; handle multiline separately below.
             replace('host/jaunt/__init__.py', r'__version__ = "[^"]+"', lambda m: f'__version__ = "{python_version}"')
@@ -234,11 +241,11 @@ def bump_tree(root, selected, tags, source, subject, android_code):
     config_path.write_text(json.dumps(config, indent=2) + '\n')
 
 
-def state_load():
-    refs = git('ls-remote', 'origin', STATE_REF).split()
+def state_load(ref=STATE_REF):
+    refs = git('ls-remote', 'origin', ref).split()
     if not refs:
         return None, None
-    git('fetch', 'origin', STATE_REF)
+    git('fetch', 'origin', ref)
     sha = git('rev-parse', 'FETCH_HEAD')
     return json.loads(read_at(sha, 'state.json')), sha
 
@@ -261,9 +268,9 @@ def make_commit(files, parent=None, message='Record release receipt', timestamp=
         return git('commit-tree', tree, *(['-p', parent] if parent else []), data=message + '\n', env=env)
 
 
-def state_save(state, old, extra_refs=()):
+def state_save(state, old, extra_refs=(), ref=STATE_REF):
     sha = make_commit({'state.json': json.dumps(state, indent=2) + '\n'}, old)
-    git('push', '--atomic', f'--force-with-lease={STATE_REF}:{old or ""}', 'origin', f'{sha}:{STATE_REF}', *extra_refs)
+    git('push', '--atomic', f'--force-with-lease={ref}:{old or ""}', 'origin', f'{sha}:{ref}', *extra_refs)
     return sha
 
 
@@ -302,7 +309,7 @@ def verify_assets(directory, component):
     if component == 'host':
         manifest = json.loads((root / 'host-manifest.json').read_text())
         wheel = manifest['wheel']
-        if set(checks) != {'host-manifest.json', wheel} or not re.fullmatch(r'jaunt_host-[\w.]+-py3-none-any.whl', wheel):
+        if set(checks) != {'host-manifest.json', wheel} or not re.fullmatch(r'jaunt_host-[\w.]+(\+[a-z0-9.]+)?-py3-none-any.whl', wheel):
             raise ValueError('Invalid host asset inventory')
         if manifest['sha256'] != checks[wheel]:
             raise ValueError('Host manifest hash mismatch')
@@ -362,6 +369,24 @@ def unpack_bundle(bundle, destination):
         archive.extractall(destination)
 
 
+def publication_sha(component, tag):
+    """The build commit a tag may publish: the production pending receipt, or a reserved channel candidate."""
+    if '.ch.' not in tag:
+        state, _ = state_load()
+        pending = state and state['pending']
+        if not pending or pending['tags'].get(component) != tag or component not in pending['components']:
+            raise ValueError('Publication does not match the serialized pending receipt')
+        return pending['sha']
+    info = update_channels.parse(tag)
+    state, _ = state_load(CHANNEL_REF)
+    channel = state and state['channels'].get(info['channel'])
+    candidate = channel and channel['status'] == 'live' and next(
+        (c for c in channel['candidates'] if c['tags'].get(component) == tag), None)
+    if info['component'] != component or not candidate:
+        raise ValueError('Publication does not match a reserved channel candidate')
+    return candidate['sha']
+
+
 def publish(directory, component, tag):
     """Freeze build bytes in one draft asset, then resume missing uploads.
 
@@ -369,17 +394,14 @@ def publish(directory, component, tag):
     later run to reuse the ORIGINAL bytes even if a rebuild is nondeterministic.
     Never replace a published asset or a completed staging asset.
     """
-    state, _ = state_load()
-    pending = state and state['pending']
-    if not pending or pending['tags'].get(component) != tag or component not in pending['components']:
-        raise ValueError('Publication does not match the serialized pending receipt')
+    sha = publication_sha(component, tag)
     git('fetch', 'origin', f'refs/tags/{tag}:refs/tags/{tag}')
-    if git('rev-parse', f'{tag}^{{commit}}') != pending['sha']:
+    if git('rev-parse', f'{tag}^{{commit}}') != sha:
         raise ValueError('Publication tag moved')
     releases = pages(f'{repo()}/releases')
     release = next((r for r in releases if r['tag_name'] == tag), None)
     if release and not release['draft']:
-        if not release_verify(tag, component, pending['sha']):
+        if not release_verify(tag, component, sha):
             raise ValueError('Published release disappeared')
         return
     gh_repo = os.environ['GITHUB_REPOSITORY']
@@ -557,15 +579,17 @@ def prepare():
             tag_list = git('tag', '--list').splitlines()
             tags = dict(state['tags'])
             tags.update({c: next_tag(c, tag_list) for c in selected if c in COMPONENTS})
+            # Spaced so that every channel candidate of a base sorts below the next release.
             codes = [int(re.search(r'versionCode (\d+)', read_at(t, 'android/app/build.gradle'))[1])
-                     for t in tag_list if t.startswith('android-v')]
+                     for t in tag_list if t.startswith('android-v') and '.ch.' not in t]
             source_code = int(re.search(r'versionCode (\d+)', read_at(source, 'android/app/build.gradle'))[1])
             with tempfile.TemporaryDirectory() as directory:
                 for name in VERSION_FILES:
                     p = Path(directory) / name
                     p.parent.mkdir(parents=True, exist_ok=True)
                     p.write_text(read_at(source, name) + '\n')
-                bump_tree(directory, selected, tags, source, git('show', '-s', '--format=%s', source), max([source_code, *codes]) + 1)
+                bump_tree(directory, selected, tags, source, git('show', '-s', '--format=%s', source),
+                          update_channels.next_production_code(max([source_code, *codes])))
                 files = {name: (Path(directory) / name).read_text() for name in VERSION_FILES}
             timestamp = git('show', '-s', '--format=%cI', source)
             release_sha = make_commit(files, source, f'build: publish {source}', timestamp, workflows='origin/main')
