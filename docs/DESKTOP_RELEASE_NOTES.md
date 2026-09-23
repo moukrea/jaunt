@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.40
+
+- fix(web): size revoke buttons to content in devices modal (JAU-1) (#122)
+- Source: `f010f6fcd6453583e3a706e74cac8b4f2bc943af`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
