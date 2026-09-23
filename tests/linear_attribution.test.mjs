@@ -3,7 +3,7 @@
 // else, nobody identifiable, or a failed read still wakes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selfAuthored, filterSelf, decisive, attributionWindows, attributionQuery, attribute, ATTRIBUTION_PAGE, reviewWindows, repinSelf } from '../scripts/linear_attribution.mjs';
+import { selfAuthored, filterSelf, decisive, attributionWindows, attributionQuery, attribute, ATTRIBUTION_PAGE, STAMP_SKEW_MS, reviewWindows, repinSelf } from '../scripts/linear_attribution.mjs';
 import { withoutSelfWrites } from '../scripts/linear_watch.mjs';
 
 const ME = 'agent';
@@ -42,7 +42,7 @@ test('nothing identifiable wakes: unsigned history, no evidence, missing issue',
   assert.equal(selfAuthored(issue({ history: [entry(null, T(11))] }), ME, SINCE).self, false, 'an integration or unknown actor');
   const none = selfAuthored(issue(), ME, SINCE);
   assert.deepEqual([none.self, none.unexplained], [false, true], 'a deleted comment or withdrawn reaction leaves no trace');
-  assert.deepEqual(selfAuthored(null, ME, SINCE), { self: false, others: [], unexplained: true });
+  assert.deepEqual(selfAuthored(null, ME, SINCE), { self: false, mine: 0, others: [], unexplained: true });
 });
 
 test('creation is attributed to the creator when the ticket is new', () => {
@@ -146,6 +146,95 @@ test('the watcher drops its own writes, counts them, and wakes when it cannot te
   assert.deepEqual(await withoutSelfWrites(events, previous, wakes, async () => { throw new Error('graphql 503'); }), events);
   // Nothing attributable: no Linear call at all.
   assert.deepEqual(await withoutSelfWrites([{ type: 'ticket-gone', ticket: 'JAU-1' }], previous, wakes, async () => { throw new Error('must not be called'); }), [{ type: 'ticket-gone', ticket: 'JAU-1' }]);
+});
+
+// JAU-103: the two wakes of 23/09, from the raw Linear history (ids shortened).
+const WORKFLOW = { id: 'linear', type: 'workflow' };
+const auto = (at, relationChanges = [{ type: 'ar' }], extra = {}) =>
+  ({ actorId: null, botActor: WORKFLOW, createdAt: at, updatedAt: at, relationChanges, ...extra });
+const Z = s => `2026-09-23T${s}Z`;
+
+test('trace 08:23: the relation Linear copies onto a duplicate target is not a human', () => {
+  // JAU-101 marked duplicate of JAU-102 by the agent; Linear moved its
+  // `related JAU-84` onto JAU-102, signing both sides as its workflow bot.
+  const jau102 = issue({
+    creator: HUMAN, createdAt: Z('08:22:52.612'),
+    history: [entry(ME, Z('08:23:40.292'), Z('08:23:40.115')), auto(Z('08:23:39.380')), entry(ME, Z('08:23:39.164'), Z('08:23:38.757'))],
+    comments: [comment(ME, Z('08:23:39.598'))],
+  });
+  const v = selfAuthored(jau102, ME, Z('08:22:53.000'));
+  assert.deepEqual([v.self, v.mine, v.automated, v.others], [true, 3, 1, []]);
+  const jau84 = issue({ history: [auto(Z('08:23:39.380')), entry(ME, Z('07:47:23.470'), Z('07:19:51.867'))] });
+  const only = selfAuthored(jau84, ME, Z('07:47:23.450'));
+  assert.deepEqual([only.self, only.mine, only.unexplained], [true, 0, false], 'nothing but Linear moved it: nothing to wake for');
+});
+
+test('trace 05:42: a workflow entry that never bumped updatedAt no longer lingers', () => {
+  // 01:42 Linear dropped JAU-87's "blocked by JAU-81" without moving updatedAt;
+  // the agent's relation at 05:41 then opened a window that still held it.
+  const jau87 = issue({ history: [entry(ME, Z('05:41:29.487')), auto(Z('01:42:02.828'), [{ type: 'br' }]), entry(ME, Z('01:16:06.984'), Z('01:08:49.230'))] });
+  assert.equal(selfAuthored(jau87, ME, Z('01:16:06.960')).self, true);
+});
+
+test('trace 05:42: a 👀 on the agent\'s fresh comment leaves no event awake', () => {
+  // JAU-99: human creation, then the agent's triage and comment, then a 👀 read
+  // by the same poll (this machine ran ~21 s behind Linear).
+  const jau99 = issue({
+    creator: HUMAN, createdAt: Z('05:40:47.418'),
+    history: [entry(ME, Z('05:42:24.981'), Z('05:41:30.797')), entry(ME, Z('05:41:29.512'), Z('05:41:27.665'))],
+    comments: [comment(ME, Z('05:41:30.105'), [reaction(HUMAN, Z('05:42:15.625'), 'eyes')])],
+  });
+  const v = selfAuthored(jau99, ME, Z('05:40:47.500'));
+  assert.equal(v.self, false);
+  const out = filterSelf([{ type: 'comment', ticket: 'JAU-99' }], { 'JAU-99': v });
+  assert.deepEqual([out.events, out.idle], [[], 1]);
+});
+
+test('workflow entries count when they carry more than relations, or are not relations', () => {
+  for (const extra of [{ toStateId: 'done' }, { toPriority: 1 }, { addedLabelIds: ['l'] }, { toAssigneeId: HUMAN }, { relationChanges: null }]) {
+    const v = selfAuthored(issue({ history: [entry(ME, T(11)), auto(T(12), [{ type: 'ar' }], extra)] }), ME, SINCE);
+    assert.equal(v.self, false, JSON.stringify(extra));
+  }
+  // An integration (GitHub) stays another author.
+  const gh = { actorId: null, botActor: { id: 'gh', type: 'integration' }, createdAt: T(12), updatedAt: T(12), relationChanges: [{ type: 'ar' }] };
+  assert.equal(selfAuthored(issue({ history: [entry(ME, T(11)), gh] }), ME, SINCE).self, false);
+});
+
+test('the write the previous pulse saw does not leak back into the window', () => {
+  // updatedAt of the issue is stamped a few ms before its history entry.
+  const since = Z('07:46:26.349');
+  const human = issue({ history: [entry(HUMAN, Z('07:46:26.365'), Z('07:46:26.240')), entry(ME, Z('07:50:00.000'))] });
+  assert.equal(selfAuthored(human, ME, since).self, true);
+  // Extended past the skew, the same merged entry is a new write and counts.
+  const later = new Date(Date.parse(since) + STAMP_SKEW_MS).toISOString();
+  assert.equal(selfAuthored(issue({ history: [entry(HUMAN, later, Z('07:46:26.240')), entry(ME, Z('07:50:00.000'))] }), ME, since).self, false);
+  // An entry created inside the window counts however close to its start.
+  assert.equal(selfAuthored(issue({ history: [entry(HUMAN, Z('07:46:26.360')), entry(ME, Z('07:50:00.000'))] }), ME, since).self, false);
+});
+
+test('a 👀 hides nothing the agent did not write, nor a deciding reaction', () => {
+  const eyes = { kind: 'reaction', userId: HUMAN, at: T(12), emoji: 'eyes', onAgent: true };
+  const verdicts = {
+    'JAU-1': { self: false, mine: 1, others: [eyes], unexplained: false },
+    'JAU-2': { self: false, mine: 0, others: [eyes], unexplained: false },
+    'JAU-3': { self: false, mine: 1, others: [{ ...eyes, emoji: '+1' }], unexplained: false },
+    'JAU-4': { self: false, mine: 1, others: [eyes, { kind: 'creation', userId: HUMAN, at: T(1) }], unexplained: false },
+  };
+  const events = ['JAU-1', 'JAU-2', 'JAU-3', 'JAU-4'].map(ticket => ({ type: 'comment', ticket }));
+  events.push({ type: 'state-changed', ticket: 'JAU-1' }, { type: 'ticket-gone', ticket: 'JAU-1' });
+  const out = filterSelf(events, verdicts);
+  assert.deepEqual(out.events.map(e => `${e.type}:${e.ticket}`), ['comment:JAU-2', 'comment:JAU-3', 'comment:JAU-4', 'ticket-gone:JAU-1']);
+  assert.equal(out.idle, 2);
+});
+
+test('the watcher logs the batches attribution could not read, and wakes for them', async t => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const wakes = { note: async () => {} };
+  const events = [{ type: 'comment', ticket: 'JAU-1' }];
+  const kept = await withoutSelfWrites(events, { tickets: { 'JAU-1': { u: T(10) } } }, wakes,
+    async () => ({ verdicts: {}, errors: [{ tickets: ['JAU-1'], error: 'graphql 400' }] }));
+  assert.deepEqual(kept, events);
+  assert.match(logged.mock.calls[0].arguments[0], /JAU-1.*graphql 400/);
 });
 
 test('board: a ticket the agent alone annotated since review stays reviewed', () => {

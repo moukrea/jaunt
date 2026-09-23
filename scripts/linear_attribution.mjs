@@ -12,6 +12,18 @@
 //
 // Anything else — a deleted comment, a withdrawn reaction, a reorder without
 // history, an entry nobody signed — is `unexplained`, and wakes as before.
+//
+// Two measured exceptions (JAU-103, 23/09):
+// - Linear's own automations sign as `botActor.type = 'workflow'` with no
+//   `actorId`: copying a duplicate's relations onto the canonical ticket, or
+//   dropping a "blocked by" once the blocker is done. Such relation-only
+//   entries are nobody's decision — whatever triggered them has its own trace —
+//   and some never bump the issue's `updatedAt`, so they used to linger into the
+//   next window and turn the agent's following write into a wake;
+// - the issue's `updatedAt` is stamped a few ms (16–32 measured) before the
+//   history entry of the same write, so the entry the previous pulse already
+//   saw ends just inside the next window. An entry created before the window
+//   and ending less than `STAMP_SKEW_MS` into it is that write, not a new one.
 
 // Newest first whatever orderBy says (see `comments.nodes` in linear_agent).
 // A page this full of changes since the window opened may hide older ones.
@@ -19,7 +31,9 @@ export const ATTRIBUTION_PAGE = 20;
 
 export const ATTRIBUTION_FIELDS = `
   identifier createdAt creator { id }
-  history(first: ${ATTRIBUTION_PAGE}) { nodes { createdAt updatedAt actorId botActor { id } } }
+  history(first: ${ATTRIBUTION_PAGE}) {
+    nodes { createdAt updatedAt actorId botActor { id type } relationChanges { type } toStateId toPriority addedLabelIds removedLabelIds toAssigneeId }
+  }
   comments(first: ${ATTRIBUTION_PAGE}, orderBy: updatedAt) {
     nodes { createdAt editedAt user { id } botActor { id } reactions { emoji createdAt user { id } } }
   }`;
@@ -35,16 +49,28 @@ export function attributionQuery(identifiers) {
 
 const after = (at, since) => Boolean(at) && (since === null || Date.parse(at) > Date.parse(since));
 
+export const STAMP_SKEW_MS = 1000;
+const alreadySeen = (h, since) => since !== null && Boolean(h.createdAt) && !after(h.createdAt, since)
+  && Date.parse(h.updatedAt) - Date.parse(since) < STAMP_SKEW_MS;
+
+// Relation-only, signed by Linear's workflow bot: anything else it carries — a
+// state, a priority, a label, an assignee, or nothing we can read — still counts.
+const automatic = h => h.botActor?.type === 'workflow' && !h.actorId && h.relationChanges?.length > 0
+  && !h.toStateId && h.toPriority == null && !h.addedLabelIds?.length && !h.removedLabelIds?.length && !h.toAssigneeId;
+
 // `since` is the ticket's previous `updatedAt` as Linear stamped it — a server
 // timestamp, so no clock skew between this machine and Linear. `null` means the
 // ticket is new to the caller: its creation is part of the change.
 //
 // `self` is true only when at least one piece of evidence is the agent's and
-// none is anybody else's. Other authors are returned as found, emoji included,
-// so a caller can weigh a reaction without re-reading the thread.
+// none is anybody else's; Linear's automatic relation entries weigh neither
+// way. Other authors are returned as found, emoji included, so a caller can
+// weigh a reaction without re-reading the thread; `mine` says whether the agent
+// wrote at all.
 export function selfAuthored(issue, agentId, since) {
-  if (!issue) return { self: false, others: [], unexplained: true };
+  if (!issue) return { self: false, mine: 0, others: [], unexplained: true };
   let mine = 0;
+  let automated = 0;
   const others = [];
   const credit = (kind, userId, at, extra = {}) => {
     if (userId && userId === agentId) mine += 1;
@@ -54,7 +80,9 @@ export function selfAuthored(issue, agentId, since) {
   if (since === null) credit('creation', issue.creator?.id, issue.createdAt);
   const history = issue.history?.nodes ?? [];
   for (const h of history) {
-    if (after(h.updatedAt, since)) credit('history', h.actorId, h.updatedAt);
+    if (!after(h.updatedAt, since) || alreadySeen(h, since)) continue;
+    if (automatic(h)) automated += 1;
+    else credit('history', h.actorId, h.updatedAt);
   }
   const comments = issue.comments?.nodes ?? [];
   let commentsMoved = 0;
@@ -71,8 +99,9 @@ export function selfAuthored(issue, agentId, since) {
   // A full page of changes cannot prove there is nothing older behind it.
   const truncated = (since !== null && history.length >= ATTRIBUTION_PAGE && history.every(h => after(h.updatedAt, since)))
     || (since !== null && comments.length >= ATTRIBUTION_PAGE && commentsMoved >= ATTRIBUTION_PAGE);
-  const unexplained = mine === 0 && others.length === 0;
-  return { self: mine > 0 && others.length === 0 && !truncated, others, unexplained, ...(truncated ? { truncated } : {}) };
+  const unexplained = mine === 0 && automated === 0 && others.length === 0;
+  const self = mine + automated > 0 && others.length === 0 && !truncated;
+  return { self, mine, others, unexplained, ...(automated ? { automated } : {}), ...(truncated ? { truncated } : {}) };
 }
 
 // The events the agent's own writes produced, removed. Ticket-less events
@@ -92,7 +121,9 @@ export const decisive = r => {
 };
 
 // Only the events a reaction can produce: on the newest comment it moves `cu`
-// (`comment-updated`), on an older one only the issue (`ticket-edited`).
+// (`comment-updated`), on an older one only the issue (`ticket-edited`). When
+// the agent wrote in the same window, the other events are its own too: a 👀
+// landing on its fresh comment left a `comment` event awake (JAU-103).
 const REACTABLE = new Set(['comment-updated', 'ticket-edited']);
 const idleReactions = v => Boolean(v) && !v.unexplained && !v.truncated && v.others?.length > 0
   && v.others.every(o => o.kind === 'reaction' && !decisive(o));
@@ -104,7 +135,7 @@ export function filterSelf(events, verdicts = {}) {
   for (const e of events) {
     const verdict = e.ticket ? verdicts[e.ticket] : undefined;
     if (e.ticket && ATTRIBUTABLE.has(e.type) && verdict?.self === true) suppressed += 1;
-    else if (REACTABLE.has(e.type) && idleReactions(verdict)) idle += 1;
+    else if ((REACTABLE.has(e.type) || (ATTRIBUTABLE.has(e.type) && verdict?.mine > 0)) && idleReactions(verdict)) idle += 1;
     else kept.push(e);
   }
   return { events: kept, suppressed, idle };
