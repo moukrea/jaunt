@@ -37,6 +37,8 @@ final class UpdateManager {
         String tag=document.optString("androidRelease");if(!UpdateChannels.parse(tag).component.equals("android"))throw new IOException("Not an Android release");
         return tag;
     }
+    /** The raw channel list for the channel menu, which validates it (web/js/channels.mjs); the WebView itself cannot fetch it. */
+    JSONObject channelIndex()throws Exception{return new JSONObject(new String(fetch(UpdateChannels.INDEX,1048576),java.nio.charset.StandardCharsets.UTF_8));}
     private static final class HttpStatus extends IOException{final int code;HttpStatus(int code){super("Release download failed (HTTP "+code+")");this.code=code;}}
     private byte[] fetch(String url,int maximum)throws Exception{return fetch(url,maximum,null);}
     private byte[] fetch(String url,int maximum,java.util.function.BiConsumer<Integer,Long> progress)throws Exception{

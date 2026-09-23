@@ -21,6 +21,7 @@ public class UpdateChannelsTest {
         for(Object n:items(names.getJSONArray("publishable"))){assertTrue(UpdateChannels.publishable((String)n));assertEquals(UpdateChannels.PAGE+"ch/"+n+"/config.json",UpdateChannels.documentUrl((String)n));}
         for(Object n:items(names.getJSONArray("notPublishable")))assertFalse(n.toString(),UpdateChannels.publishable((String)n));
         assertEquals(UpdateChannels.PAGE+"config.json",UpdateChannels.documentUrl("main"));
+        assertEquals("https://moukrea.github.io/jaunt/ch/index.json",UpdateChannels.INDEX);
     }
     @Test public void tags()throws Exception{
         JSONObject tags=contract().getJSONObject("tags");

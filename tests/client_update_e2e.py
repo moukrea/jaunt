@@ -181,16 +181,24 @@ async def main():
                 (mirror/'ch/moukrea_9').mkdir(parents=True)
                 (mirror/'ch/moukrea_9/config.json').write_text(json.dumps({**config,'channel':'moukrea_9','repository':'moukrea/jaunt','release':candidate,
                     'androidRelease':'android-v0.1.0-beta.31.ch.moukrea.9.1','desktopRelease':'desktop-v0.1.0-beta.33.ch.moukrea.9.1','releaseSource':'0'*40}))
+                # The grouped menu offers it from the published list and switches the connected host.
+                (mirror/'ch/index.json').write_text(json.dumps({'version':1,'page':config['page'],'repository':'moukrea/jaunt','channels':[
+                    {'name':'moukrea_9','pr':9,'n':1,'title':'Channel fixture','release':candidate,'releaseSource':'0'*40},{'name':'main_4','pr':4,'n':1}]}))
                 before=json.loads(cli('status'))
-                await page.get_by_role('button',name='Change channel',exact=True).click()
-                await page.get_by_label('Channel name').fill('moukrea_9')
+                await page.locator('#settings-button').click()
+                await page.get_by_role('button',name='Choose channel',exact=True).click()
+                select=page.locator('#modal select')
+                await expect(select.locator('option')).to_have_text(['main · production releases','moukrea_9 · #9 · Channel fixture','Other…'],timeout=15000)
+                await expect(page.locator('#modal input[type=checkbox]')).to_be_checked()
+                await select.select_option('moukrea_9')
+                (ROOT/'test-results').mkdir(exist_ok=True);await page.screenshot(path=str(ROOT/'test-results/channel-menu.png'))
                 await page.locator('#modal').get_by_role('button',name='Switch and install',exact=True).click()
                 await installed_through_ui(candidate)
                 after=json.loads(cli('status'))
                 assert after['machine']['version']==candidate_pep and cli('--version').strip()==candidate_pep
                 assert after['sessions'][0]['pid']==before['sessions'][0]['pid'] and after['sessions'][0]['alive']
                 assert json.loads((t/'state/installation.json').read_text())['channel']=='moukrea_9'
-                passed(f'explicit switch to moukrea_9 installs the older candidate {candidate} (PEP 440 local wheel) over {newer}, shells kept')
+                passed(f'the grouped menu lists moukrea_9 from ch/index.json and its switch installs the older candidate {candidate} (PEP 440 local wheel) over {newer}, shells kept')
                 # 6. The channel's pull request is closed: the host keeps its version and says so.
                 (mirror/'ch/moukrea_9/config.json').unlink()
                 await page.locator('#host-settings').click()
