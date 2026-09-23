@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.34
+
+- feat(updates): let the host follow an update channel (JAU-84) (#98)
+- Source: `caa16ad8f878b03ca84d66f9d8977545625c8d1e`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
