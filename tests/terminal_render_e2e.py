@@ -1,9 +1,66 @@
 #!/usr/bin/env python3
 """Terminal scroll, native text selection, themes, and actual CLI startup screens."""
-import asyncio,json,os,shlex,shutil
+import asyncio,json,os,re,shlex,shutil
 from pathlib import Path
 from playwright.async_api import async_playwright,expect
 from browser_e2e import Harness,ROOT,terminal_command,scrollback,until
+# A diff-rendering TUI (like Codex/ratatui): it paints the whole screen once, repaints it only when
+# the size it reads changes, and otherwise writes truecolor updates to one row.
+DIFF_TUI=r'''
+import os,sys,signal,time,pathlib
+go,pidf,done=map(pathlib.Path,sys.argv[1:4])
+out=sys.stdout.buffer;C=b'\x1b[38;2;45;47;48m';R=b'\x1b[0m';size=None;winch=False
+def full():
+    global size
+    size=os.get_terminal_size(1);cols,rows=size
+    s=b'\x1b[0m\x1b[H\x1b[2J'+C+b'HEADER-PROOF'+R
+    if go.exists():s+=b' REPAINT-PROOF'
+    for r in range(2,rows):s+=b'\x1b[%d;1H'%r+C+b'body row %02d'%r+R
+    out.write(s+b'\x1b[%d;1H'%rows+C+b'FOOTER-PROOF'+R+b'\x1b[%d;1H'%(rows//2));out.flush()
+def onwinch(*_):
+    global winch;winch=True
+signal.signal(signal.SIGWINCH,onwinch)
+pidf.write_text(str(os.getpid()));full()
+def idle():
+    global winch
+    if winch:
+        winch=False
+        if os.get_terminal_size(1)!=size:full()
+while not go.exists():time.sleep(.02);idle()
+total=i=0
+while total<400*1024:
+    s=b'\x1b[%d;1H'%(size[1]//2)+b''.join(C+bytes([c]) for c in b'UPDATE-%06d'%i)+R+b'\x1b[K'
+    out.write(s);out.flush();total+=len(s);i+=1
+done.write_text(str(total))
+while True:time.sleep(.02);idle()
+'''
+async def hidden_burst_repaints(page,h):
+    """JAU-64: a hidden (detached) tab whose diff-rendering program wrote more than the catch-up
+    budget comes back with its full screen at the same size, no stray escape fragment, same process."""
+    async def new_shell(name):
+        await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill(name);await page.get_by_label('Working directory').fill(str(h.work));await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click();await expect(page.locator('#modal')).not_to_be_visible()
+        await expect(page.locator('#tabs')).to_contain_text(name)
+    await new_shell('Diff TUI')
+    fixture=h.work/'diff_tui.py';fixture.write_text(DIFF_TUI);go,pidf,done=h.work/'go',h.work/'tui.pid',h.work/'tui.done'
+    await terminal_command(page,'python3 '+' '.join(shlex.quote(str(p)) for p in (fixture,go,pidf,done)))
+    rows=page.locator('.terminal-container:not([hidden]) .xterm-rows')
+    await expect(rows).to_contain_text('FOOTER-PROOF',timeout=15000)
+    session=lambda:next(s for s in json.loads(h.cli('status'))['sessions'] if s['name']=='Diff TUI')
+    size,pid=(session()['cols'],session()['rows']),int(pidf.read_text())
+    await new_shell('Other tab');await asyncio.sleep(.8)
+    go.write_text('1');await until(lambda:done.exists(),timeout=60)
+    await page.locator('#tabs').get_by_role('tab',name='Diff TUI',exact=False).click()
+    await expect(page.locator('#terminal-meta')).to_contain_text('older output trimmed')
+    await expect(rows).to_contain_text('REPAINT-PROOF',timeout=10000)
+    await expect(rows).to_contain_text('HEADER-PROOF');await expect(rows).to_contain_text('FOOTER-PROOF')
+    text=await rows.inner_text()
+    await page.screenshot(path=str(ROOT/'test-results/hidden-burst-repaint.png'))
+    assert not re.search(r'(?<![A-Za-z])\d+(?:;\d+)*m',text),('Replay began inside an escape sequence',text)
+    assert (session()['cols'],session()['rows'])==size and int(pidf.read_text())==pid,'Same size, same process'
+    os.kill(pid,0)
+    for name in ('Diff TUI','Other tab'):
+        await page.locator('#list-sessions').click();await page.locator('#modal .settings-row').filter(has_text=name).get_by_role('button',name='Terminate',exact=True).click();await page.get_by_role('button',name='Terminate session',exact=True).click();await asyncio.sleep(.3)
+    print('PASS hidden diff-rendering tab repaints after a trimmed catch-up, without resize or stray escape text')
 async def main():
     h=Harness()
     try:
@@ -55,6 +112,7 @@ async def main():
             assert saved=='light', 'Theme was not committed to the local vault'
             await page.reload();await page.locator('#settings-button').click();await expect(page.get_by_label('Color theme')).to_have_value('light')
             await page.get_by_label('Color theme').select_option('dark');await page.locator('[data-view=terminal]').first.click()
+            await hidden_burst_repaints(page,h)
             for name,setting in [('claude','CLAUDE_CONFIG_DIR'),('codex','CODEX_HOME')]:
                 executable=shutil.which(name)
                 if not executable:continue # Optional installed programs, core fixture is always required.

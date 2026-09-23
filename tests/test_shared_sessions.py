@@ -252,3 +252,135 @@ async def test_output_frames_never_exceed_the_relay_budget(tmp_path,monkeypatch)
         late=[e for p,e in events if p=='late' and e['type']=='terminal.output']
         assert late and max(len(unb64(e['data'])) for e in late)<=FRAME_BYTES
     finally:await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_trimmed_catch_up_starts_on_a_clean_boundary():
+    """JAU-64: a trimmed replay never begins inside an escape sequence or a UTF-8 character."""
+    from jaunt.sessions import Session,SAFE_CUT
+    async def noop(*args):pass
+    sessions=Sessions(noop,noop,'.')
+    s=Session(id='x',name='x',cwd='.',pid=0,fd=-1,cols=80,rows=24)
+    s.ring.extend([(0,b'ab8;2;45;47',80,24),(11,b';48mtext\x1b[0m',80,24)])
+    assert sessions._clean_start(s,3)==19,'the cut moves to the next escape, across ring chunks'
+    s.ring.clear();s.ring.append((0,b'tail of a line\r\nnext',80,24))
+    assert sessions._clean_start(s,2)==16,'a line start is a clean boundary'
+    s.ring.clear();s.ring.append((0,b'\xa0\xa0plain'+b'x'*SAFE_CUT+b'\x1b[m',80,24))
+    assert sessions._clean_start(s,0)==2,'without an escape nearby, the cut skips to a UTF-8 character start'
+
+@pytest.mark.asyncio
+async def test_trimmed_catch_up_asks_the_program_to_repaint_without_changing_the_size(tmp_path,monkeypatch):
+    """JAU-64: after a trimmed catch-up the PTY width is toggled one column and back (Codex ignores a
+    same-size SIGWINCH); a contiguous resume or an exited shell is left alone, and requests are rate limited."""
+    import fcntl,termios,struct,time
+    from jaunt import sessions as sessions_module
+    from jaunt.crypto import unb64
+    monkeypatch.setattr(sessions_module,'REDRAW_TOGGLE',.02)
+    monkeypatch.setattr(sessions_module,'REDRAW_INTERVAL',.6)
+    monkeypatch.setenv('SHELL','/bin/sh')
+    events=[];sizes=[];box={}
+    real=fcntl.ioctl
+    def ioctl(fd,request,*args):
+        if request==termios.TIOCSWINSZ and box.get('fd')==fd:
+            rows,cols=struct.unpack('HHHH',args[0])[:2];sizes.append((time.monotonic(),cols,rows))
+        return real(fd,request,*args)
+    monkeypatch.setattr(fcntl,'ioctl',ioctl)
+    async def send(peer,value):events.append((peer,value))
+    async def changed():pass
+    sessions=Sessions(send,changed,tmp_path)
+    try:
+        s=await sessions.create({'cwd':str(tmp_path),'cols':80,'rows':24});sid=s['id'];session=sessions.get(sid);box['fd']=session.fd
+        fixture=tmp_path/'burst.py';fixture.write_text("import sys\nsys.stdout.write('\\x1b[38;2;45;47;48mUPDATE'*40000+'\\nDO'+'NE\\n')\n")
+        await sessions.write(sid,f'python3 {fixture}\n'.encode())
+        for _ in range(200):
+            await asyncio.sleep(.05)
+            if b'DONE' in b''.join(c for _,c,_,_ in session.ring):break
+        else:pytest.fail('burst did not complete')
+        async def settle():
+            for _ in range(100):
+                if session.redraw is None or session.redraw.done():return
+                await asyncio.sleep(.02)
+            pytest.fail('repaint request never completed')
+        # Contiguous resume: no reset, no repaint.
+        await sessions.attach('near',{'id':sid,'after':session.offset-10});await settle()
+        assert not [e for p,e in events if p=='near' and e['type']=='terminal.reset'] and sizes==[]
+        # Far behind: the replay starts on an escape and the program is asked to repaint once.
+        await sessions.attach('late',{'id':sid,'after':0})
+        late=[e for p,e in events if p=='late']
+        reset=late[0];assert reset['type']=='terminal.reset' and reset['trimmed']
+        first=next(e for e in late if e['type']=='terminal.output')
+        assert first['offset']==reset['offset'] and unb64(first['data']).startswith(b'\x1b[38;2;45;47;48m')
+        await settle()
+        assert [(c,r) for _,c,r in sizes]==[(79,24),(80,24)]
+        assert (session.cols,session.rows)==(80,24),'the shared geometry is untouched'
+        assert not [e for p,e in events if e['type']=='terminal.geometry' and e['cols']!=80]
+        # Two more trimmed catch-ups right away: coalesced into one repaint, after the interval.
+        await sessions.attach('late2',{'id':sid,'after':0});await sessions.attach('late3',{'id':sid,'after':0})
+        await settle()
+        assert len(sizes)==4 and sizes[2][0]-sizes[0][0]>=.55,'repaint requests are coalesced and rate limited'
+        assert [(c,r) for _,c,r in sizes[2:]]==[(79,24),(80,24)]
+        # An exited shell is never nudged.
+        await sessions.write(sid,b'exit\n')
+        for _ in range(100):
+            if not session.alive:break
+            await asyncio.sleep(.03)
+        assert not session.alive
+        await asyncio.sleep(.7);await sessions.attach('after-exit',{'id':sid,'after':0});await settle()
+        assert [e for p,e in events if p=='after-exit'][0]['trimmed'] and len(sizes)==4
+    finally:await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_redraw_serializes_with_activity_and_restores_on_cancel(tmp_path,monkeypatch):
+    import fcntl,termios,struct
+    from jaunt import sessions as module
+    monkeypatch.setenv('SHELL','/bin/sh')
+    monkeypatch.setattr(module,'REDRAW_TOGGLE',.1)
+    monkeypatch.setattr(module,'REDRAW_INTERVAL',0)
+    async def noop(*args):pass
+    sessions=Sessions(noop,noop,tmp_path)
+    try:
+        info=await sessions.create({'cols':80,'rows':24});s=sessions.get(info['id'])
+        await sessions.attach('view',{'id':s.id})
+        def size():return struct.unpack('HHHH',fcntl.ioctl(s.fd,termios.TIOCGWINSZ,b'\0'*8))[:2]
+        async def toggled():
+            for _ in range(100):
+                if size()[1]==s.cols-1:return
+                await asyncio.sleep(.005)
+            pytest.fail('PTY never entered the temporary size')
+        sessions._request_redraw(s);await toggled()
+        await sessions.activity('view',s.id,{'cols':100,'rows':30})
+        await s.redraw
+        assert size()==(30,100) and (s.rows,s.cols)==(30,100)
+        assert s.active_view=='view'
+        sessions._request_redraw(s);await toggled();s.redraw.cancel()
+        await asyncio.gather(s.redraw,return_exceptions=True)
+        assert size()==(30,100),'Cancellation restores the PTY before releasing resize_lock'
+        # Closing a session also drains a pending, rate-limited redraw task.
+        monkeypatch.setattr(module,'REDRAW_INTERVAL',60)
+        sessions._request_redraw(s);pending=s.redraw
+        await sessions.terminate(s.id)
+        assert pending.done() and s.fd==-1 and s.id not in sessions.items
+    finally:await sessions.shutdown()
+
+@pytest.mark.asyncio
+async def test_slow_viewer_ack_requests_redraw_after_trim(tmp_path,monkeypatch):
+    from jaunt.sessions import Session,MIN_WINDOW
+    from jaunt.crypto import unb64
+    events=[];requested=[]
+    async def send(peer,event):events.append(event)
+    async def noop(*args):pass
+    sessions=Sessions(send,noop,tmp_path)
+    s=Session(id='slow',name='slow',cwd='.',pid=0,fd=-1,cols=80,rows=24)
+    sessions.items[s.id]=s
+    data=b'\x1b[31mUPDATE\x1b[0m'*20000
+    s.ring.append((0,data,80,24));s.offset=len(data)
+    viewer=sessions._viewer('view',0);viewer.window=MIN_WINDOW;viewer.behind=True
+    s.subscribers['view']=viewer
+    monkeypatch.setattr(sessions,'_request_redraw',lambda session:requested.append(session.id))
+    await sessions.ack('view',s.id,0)
+    assert requested==[s.id]
+    reset=events[0];assert reset['type']=='terminal.reset' and reset['trimmed']
+    outputs=[e for e in events if e['type']=='terminal.output']
+    assert outputs[0]['offset']==reset['offset']
+    assert unb64(outputs[0]['data']).startswith(b'\x1b')
+    assert sum(len(unb64(e['data'])) for e in outputs)<=MIN_WINDOW//2
+    assert viewer.sent==s.offset and not viewer.behind
