@@ -170,7 +170,8 @@ fetch "${BASE%/}/host-manifest.json" "$jaunt_INSTALL_TMP/host-manifest.json"
 WHEEL="$("$PY" - "$jaunt_INSTALL_TMP/host-manifest.json" <<'PY'
 import json,re,sys
 m=json.load(open(sys.argv[1]));w=m['wheel']
-assert re.fullmatch(r'jaunt_host-[A-Za-z0-9_.]+-py3-none-any\.whl',w), 'Invalid wheel name'
+# A channel candidate is a PEP 440 local version: jaunt_host-0.1.0b41+ch.moukrea.9.2-py3-none-any.whl
+assert re.fullmatch(r'jaunt_host-[A-Za-z0-9_.]+(\+[a-z0-9.]+)?-py3-none-any\.whl',w), 'Invalid wheel name'
 assert re.fullmatch(r'[a-f0-9]{64}',m['sha256']), 'Invalid checksum'
 print(w)
 PY
@@ -287,7 +288,7 @@ from jaunt.state import state_dir, atomic_json
 from jaunt.updates import installation
 prefix,bindir,page,repo,tag,no_service,dev,release_base,system_site,no_deps=sys.argv[1:]
 old=installation()
-record={'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True)}
+record={'prefix':prefix,'bin':bindir,'page':page.rstrip('/'),'repository':repo,'tag':tag,'noService':no_service=='1','automatic':old.get('automatic',True),'channel':old.get('channel','main')}
 # Explicit local installer tests keep their mirror so self-updates can be tested too.
 if dev=='1':record['dev']={'releaseBase':release_base,'env':{'TEST_SYSTEM_SITE':system_site,'PIP_NO_DEPS':no_deps}}
 atomic_json(state_dir()/'installation.json', record)

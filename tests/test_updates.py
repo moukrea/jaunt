@@ -224,3 +224,120 @@ async def test_shared_workspace_follows_the_host_and_prunes_dead_sessions(tmp_pa
     off=await host.workspace_configure(P(),{'sync':False});assert off['sync'] is False and off['displayedOnly'] is False
     with pytest.raises(ValueError,match='synchronization is off'):
         await host.workspace_update(P(),w)
+
+CANDIDATE_SOURCE = '0123456789abcdef0123456789abcdef01234567'
+
+def channel_document(n=1, base=41, name='moukrea_9', **patch):
+    dev, pr = name.split('_')
+    suffix = f'.ch.{dev}.{pr}.{n}'
+    return {'version': 1, 'channel': name, 'relay': 'wss://relay.example.test', 'page': 'https://example.test/jaunt/',
+            'repository': 'moukrea/jaunt', 'release': f'v0.1.0-beta.{base}{suffix}',
+            'androidRelease': f'android-v0.1.0-beta.31{suffix}', 'desktopRelease': f'desktop-v0.1.0-beta.33{suffix}',
+            'releaseSource': CANDIDATE_SOURCE, **patch}
+
+@pytest.fixture
+def channel_release(tmp_path, monkeypatch):
+    """A host on channel moukrea_9 whose Page serves production and one channel document."""
+    import urllib.error
+    monkeypatch.setenv('jaunt_STATE', str(tmp_path))
+    atomic_json(tmp_path / 'installation.json', {'page': 'https://example.test/jaunt', 'repository': 'moukrea/jaunt', 'tag': 'v0.1.0-beta.41',
+                                                 'automatic': True, 'channel': 'moukrea_9', 'prefix': str(tmp_path/'runtime'), 'bin': str(tmp_path/'bin')})
+    content = io.BytesIO()
+    with zipfile.ZipFile(content, 'w') as z: z.writestr('jaunt/installer.sh', '#!/bin/sh\nexit 0\n')
+    served = {'/config.json': {'release': 'v0.1.0-beta.42'}, '/ch/moukrea_9/config.json': channel_document(2)}
+    requested = []
+    def fetch(url, maximum, **_):
+        requested.append(url)
+        path = url.removeprefix('https://example.test/jaunt')
+        if path in served:
+            if served[path] is None: raise urllib.error.HTTPError(url, 404, 'Not Found', {}, None)
+            return json.dumps(served[path]).encode()
+        tag = url.split('/releases/download/')[1].split('/')[0]
+        wheel = content.getvalue(); name = f'jaunt_host-{updates.channels.python_version(tag)}-py3-none-any.whl'
+        return wheel if url.endswith('.whl') else json.dumps({'schema': 1, 'wheel': name, 'sha256': hashlib.sha256(wheel).hexdigest()}).encode()
+    monkeypatch.setattr(updates, 'fetch', fetch)
+    monkeypatch.setattr('jaunt.cli.control', lambda method: {'sessions': []})
+    installed = []
+    monkeypatch.setattr(updates.subprocess, 'run', lambda args, **k: (installed.append(k['env']['jaunt_VERSION']) or type('Result', (), {'returncode': 0})()))
+    return tmp_path, served, requested, installed
+
+def set_tag(root, tag):
+    atomic_json(root/'installation.json', {**updates.installation(root), 'tag': tag})
+
+def test_channel_installs_a_newer_candidate_of_its_own_channel_only(channel_release):
+    root, served, requested, installed = channel_release
+    set_tag(root, 'v0.1.0-beta.41.ch.moukrea.9.1')
+    assert updates.update(automatic=True)['state'] == 'installed'
+    assert requested[0] == 'https://example.test/jaunt/ch/moukrea_9/config.json' and installed == ['v0.1.0-beta.41.ch.moukrea.9.2']
+    assert (root/'updates/jaunt_host-0.1.0b41+ch.moukrea.9.2-py3-none-any.whl').exists()
+    # A newer production release never reaches a host on a channel, automatic or manual.
+    set_tag(root, 'v0.1.0-beta.41.ch.moukrea.9.2'); served['/ch/moukrea_9/config.json'] = channel_document(1)
+    assert updates.update()['state'] == 'current' and updates.update(automatic=True)['state'] == 'current'
+    assert len(installed) == 1
+
+def test_production_host_does_not_follow_a_channel_without_a_switch(channel_release):
+    root, _, _, installed = channel_release
+    assert updates.update()['state'] == 'current' and not installed
+
+def test_explicit_switch_installs_an_older_target_and_only_on_a_person_s_request(channel_release):
+    root, served, _, installed = channel_release
+    set_tag(root, 'v0.1.0-beta.42')
+    served['/ch/moukrea_9/config.json'] = channel_document(1)
+    assert updates.update(automatic=True, switch='moukrea_9')['state'] == 'current'
+    assert updates.update(switch='other_1')['state'] == 'current'
+    assert not installed
+    result = updates.update(switch='moukrea_9')
+    assert result['state'] == 'installed' and 'switch' not in result and installed == ['v0.1.0-beta.41.ch.moukrea.9.1']
+    # Returning to main reinstalls production even when it sorts below the candidate.
+    updates.configure(name='main'); set_tag(root, 'v0.1.0-beta.42.ch.moukrea.9.1')
+    assert updates.update()['state'] == 'current'
+    assert updates.update(switch='main')['state'] == 'installed' and installed[-1] == 'v0.1.0-beta.42'
+
+def test_a_deferred_switch_keeps_its_switch_for_the_resume(channel_release, monkeypatch):
+    root, _, _, installed = channel_release
+    set_tag(root, 'v0.1.0-beta.42')
+    monkeypatch.setattr('jaunt.cli.control', lambda method: {'sessions': [], 'activeTransfers': 1})
+    result = updates.update(switch='moukrea_9')
+    assert result['state'] == 'deferred' and result['switch'] == 'moukrea_9' and updates.status()['switch'] == 'moukrea_9'
+    assert updates.update(automatic=True)['state'] == 'current' and 'switch' not in updates.status()
+
+@pytest.mark.parametrize('patch', [{'page': 'https://evil.test/jaunt/'}, {'repository': 'evil/jaunt'}, {'channel': 'moukrea_12'},
+                                   {'release': 'v0.1.0-beta.43'}, {'androidRelease': 'android-v0.1.0-beta.31.ch.moukrea.9.1'}])
+def test_rejected_channel_document_downloads_nothing(channel_release, patch):
+    root, served, requested, installed = channel_release
+    served['/ch/moukrea_9/config.json'] = channel_document(2, **patch)
+    set_tag(root, 'v0.1.0-beta.41.ch.moukrea.9.1')
+    assert updates.update(switch='moukrea_9')['state'] == 'error'
+    assert requested == ['https://example.test/jaunt/ch/moukrea_9/config.json'] and not installed
+
+def test_removed_channel_keeps_the_installed_version(channel_release):
+    root, served, _, installed = channel_release
+    set_tag(root, 'v0.1.0-beta.41.ch.moukrea.9.2'); served['/ch/moukrea_9/config.json'] = None
+    result = updates.update(switch='moukrea_9')
+    assert result['state'] == 'channel-missing' and result['version'] == 'v0.1.0-beta.41.ch.moukrea.9.2' and not installed
+    assert updates.installation(root)['channel'] == 'moukrea_9'
+    served['/config.json'] = None; updates.configure(name='main')
+    assert updates.update()['state'] == 'error'
+
+def test_channel_setting_accepts_only_main_or_a_publishable_name(channel_release):
+    for name in ('https://evil.test/', 'beta', 'main_9', 'moukrea', 'Moukrea_9', '../main', 7):
+        with pytest.raises(ValueError):
+            updates.configure(name=name)
+    assert updates.configure(name='dev2_123456')['channel'] == 'dev2_123456'
+    assert updates.configure(False)['channel'] == 'dev2_123456' and updates.status()['automatic'] is False
+    assert updates.configure(name='main')['channel'] == 'main'
+
+def test_existing_installations_are_on_main(release):
+    assert updates.status()['channel'] == 'main'
+
+@pytest.mark.asyncio
+async def test_daemon_passes_a_switch_only_to_a_person_s_update(tmp_path, monkeypatch):
+    from jaunt.daemon import Host
+    from jaunt.state import State
+    host = Host(State(tmp_path)); launched = []
+    atomic_json(tmp_path/'installation.json', {'page': 'https://example.test', 'repository': 'moukrea/jaunt', 'tag': 'v0.1.0-beta.4', 'prefix': '', 'bin': ''})
+    class Process:
+        def poll(self): return 0
+    monkeypatch.setattr('jaunt.daemon.subprocess.Popen', lambda args, **k: (launched.append(args) or Process()))
+    host.launch_update(switch='moukrea_9'); host.launch_update(automatic=True, switch='moukrea_9')
+    assert launched[0][-2:] == ['--switch', 'moukrea_9'] and '--switch' not in launched[1]

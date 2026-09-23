@@ -163,6 +163,49 @@ async def main():
                 assert json.loads((t/'state/installation.json').read_text())['tag']==newer
                 await expect(page.get_by_role('button',name='Try again',exact=True)).to_be_visible()
                 passed('broken newer release: the installer refuses it, the client shows the real reason with "Try again", the previous runtime and shell keep running and the pointer is unchanged')
+                async def installed_through_ui(expected):
+                    row=page.locator('#activity .activity-row').first;deadline=time.time()+240
+                    while time.time()<deadline:
+                        text=await row.locator('[role=status]').text_content()
+                        if 'Update installed' in text:break
+                        if 'Update failed' in text or 'Cancelled' in text:raise AssertionError('Update failed in the UI: '+text+'\n'+(t/'state/update.log').read_text(errors='replace')[-3000:])
+                        await asyncio.sleep(.25)
+                    else:raise AssertionError('Update never completed: %r'%status_file())
+                    assert status_file()['state']=='installed' and status_file()['version']==expected,status_file()
+                    await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
+                    assert json.loads((t/'state/installation.json').read_text())['tag']==expected
+                # 5. An explicit channel switch installs the channel's candidate even though it is older.
+                candidate=f'{tag}.ch.moukrea.9.1';candidate_pep=f'{version}+ch.moukrea.9.1'
+                publish(mirror,dict(config),candidate,f'jaunt_host-{candidate_pep}-py3-none-any.whl',bumped_wheel(ROOT/'dist'/manifest['wheel'],version,candidate_pep))
+                (mirror/'config.json').write_text(json.dumps(config))
+                (mirror/'ch/moukrea_9').mkdir(parents=True)
+                (mirror/'ch/moukrea_9/config.json').write_text(json.dumps({**config,'channel':'moukrea_9','repository':'moukrea/jaunt','release':candidate,
+                    'androidRelease':'android-v0.1.0-beta.31.ch.moukrea.9.1','desktopRelease':'desktop-v0.1.0-beta.33.ch.moukrea.9.1','releaseSource':'0'*40}))
+                before=json.loads(cli('status'))
+                await page.get_by_role('button',name='Change channel',exact=True).click()
+                await page.get_by_label('Channel name').fill('moukrea_9')
+                await page.locator('#modal').get_by_role('button',name='Switch and install',exact=True).click()
+                await installed_through_ui(candidate)
+                after=json.loads(cli('status'))
+                assert after['machine']['version']==candidate_pep and cli('--version').strip()==candidate_pep
+                assert after['sessions'][0]['pid']==before['sessions'][0]['pid'] and after['sessions'][0]['alive']
+                assert json.loads((t/'state/installation.json').read_text())['channel']=='moukrea_9'
+                passed(f'explicit switch to moukrea_9 installs the older candidate {candidate} (PEP 440 local wheel) over {newer}, shells kept')
+                # 6. The channel's pull request is closed: the host keeps its version and says so.
+                (mirror/'ch/moukrea_9/config.json').unlink()
+                await page.locator('#host-settings').click()
+                await page.get_by_role('button',name='Check for updates',exact=True).click()
+                row=page.locator('#activity .activity-row').first
+                await expect(row.locator('[role=status]')).to_contain_text('no longer exists',timeout=30000)
+                assert status_file()['state']=='channel-missing' and json.loads(cli('status'))['machine']['version']==candidate_pep
+                passed('a deleted channel keeps the installed candidate and tells the person it no longer exists')
+                # 7. Returning to main is also explicit and installs production.
+                publish(mirror,config,newer,f'jaunt_host-{newer_pep}-py3-none-any.whl',bumped_wheel(ROOT/'dist'/manifest['wheel'],version,newer_pep))
+                await page.get_by_role('button',name='Return to main',exact=True).click()
+                await page.locator('#modal').get_by_role('button',name='Return to main',exact=True).click()
+                await installed_through_ui(newer)
+                assert cli('--version').strip()==newer_pep and json.loads((t/'state/installation.json').read_text())['channel']=='main'
+                passed(f'returning to main installs production {newer} again')
                 assert not service_calls.exists(),'No-service installation invoked the account service manager'
                 await browser.close();browser=None
         finally:

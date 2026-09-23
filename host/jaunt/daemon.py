@@ -464,7 +464,11 @@ class Host:
             return status(self.state.root)
         if method == "updates.configure":
             from .updates import configure
-            return configure(p.get("automatic"))
+            if "channel" not in p:
+                return configure(p.get("automatic"))
+            # Changing the channel is the explicit switch: reinstall that channel's release now.
+            configure(name=p.get("channel"))
+            return self.launch_update(switch=p["channel"])
         if method == "updates.install":
             return self.launch_update(allow_restart=p.get("allowRestart") is True)
         if method == "agent.rights":
@@ -1380,7 +1384,7 @@ class Host:
                     manual = current.get("manual", False)
                     if manual or config.get("automatic", False):
                         with contextlib.suppress(ValueError):
-                            self.launch_update(automatic=not manual)
+                            self.launch_update(automatic=not manual, switch=current.get("switch", "") if manual else "")
                         continue
             if config.get("automatic", False) and time.monotonic() - self.last_update_check >= 900:
                 with contextlib.suppress(ValueError):
@@ -1408,7 +1412,7 @@ class Host:
             if active or time.monotonic() - self.update_watch_until < 0:
                 await self.push_update_status()
 
-    def launch_update(self, *, automatic: bool = False, allow_restart: bool = False) -> dict:
+    def launch_update(self, *, automatic: bool = False, allow_restart: bool = False, switch: str = "") -> dict:
         from .updates import installation
         if not installation(self.state.root):
             raise ValueError("Use the public installer once to enable automatic updates")
@@ -1429,6 +1433,8 @@ class Host:
             args.append("--automatic")
         elif allow_restart is True:
             args.append("--allow-restart")
+        if switch and not automatic:
+            args += ["--switch", switch]
         env = os.environ.copy(); env["jaunt_STATE"] = str(self.state.root)
         from .state import atomic_json
         operation = token(12)
