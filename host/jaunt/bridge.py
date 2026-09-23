@@ -512,7 +512,8 @@ class Bridge:
             existing.mode_class = p["modeClass"]
         existing.last_seen = now
         existing.state = {"prompt": "busy", "tool": "busy", "stop": "idle", "start": "idle", "compact": "busy"}.get(event, existing.state)
-        context = self.context_for(existing, event, str(p.get("source", ""))) if self.enabled else ""
+        # Only hooks that can deliver context may consume the roster version.
+        context = self.context_for(existing, event, str(p.get("source", ""))) if self.enabled and event in ("start", "prompt") else ""
         if replaced or existing.roster_seen < 0:
             await self.changed()
         return {"enabled": True, "id": existing.id, "context": context, "peers": [self.public(q) for q in self.relevant(existing)]}
@@ -617,7 +618,7 @@ class Bridge:
 
     def context_for(self, me: Participant, event: str, source: str = "") -> str:
         """Roster text for the model. Only when something changed, or on (re)start/compaction."""
-        forced = event == "start" or event == "compact" or source in ("resume", "clear", "compact")
+        forced = event == "start" or source in ("resume", "clear", "compact")
         if not forced and me.roster_seen == self.version:
             return ""
         me.roster_seen = self.version

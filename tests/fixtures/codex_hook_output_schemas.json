@@ -1,0 +1,154 @@
+{
+  "version": "0.155.1",
+  "provenance": {
+    "binary": "standalone/releases/0.155.1-x86_64-unknown-linux-musl/bin/codex",
+    "sha256": "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761",
+    "extraction": "JSON object immediately following each <event>.command.output marker in the installed binary"
+  },
+  "schemas": {
+    "PostCompact": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "continue": {
+          "default": true,
+          "type": "boolean"
+        },
+        "stopReason": {
+          "default": null,
+          "type": "string"
+        },
+        "suppressOutput": {
+          "default": false,
+          "type": "boolean"
+        },
+        "systemMessage": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "title": "post-compact.command.output",
+      "type": "object"
+    },
+    "SessionStart": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "definitions": {
+        "SessionStartHookSpecificOutputWire": {
+          "additionalProperties": false,
+          "properties": {
+            "additionalContext": {
+              "default": null,
+              "type": "string"
+            },
+            "hookEventName": {
+              "const": "SessionStart",
+              "type": "string"
+            }
+          },
+          "required": [
+            "hookEventName"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "continue": {
+          "default": true,
+          "type": "boolean"
+        },
+        "hookSpecificOutput": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SessionStartHookSpecificOutputWire"
+            }
+          ],
+          "default": null
+        },
+        "stopReason": {
+          "default": null,
+          "type": "string"
+        },
+        "suppressOutput": {
+          "default": false,
+          "type": "boolean"
+        },
+        "systemMessage": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "title": "session-start.command.output",
+      "type": "object"
+    },
+    "UserPromptSubmit": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "definitions": {
+        "BlockDecisionWire": {
+          "enum": [
+            "block"
+          ],
+          "type": "string"
+        },
+        "UserPromptSubmitHookSpecificOutputWire": {
+          "additionalProperties": false,
+          "properties": {
+            "additionalContext": {
+              "default": null,
+              "type": "string"
+            },
+            "hookEventName": {
+              "const": "UserPromptSubmit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "hookEventName"
+          ],
+          "type": "object"
+        }
+      },
+      "properties": {
+        "continue": {
+          "default": true,
+          "type": "boolean"
+        },
+        "decision": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BlockDecisionWire"
+            }
+          ],
+          "default": null
+        },
+        "hookSpecificOutput": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UserPromptSubmitHookSpecificOutputWire"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "default": null,
+          "type": "string"
+        },
+        "stopReason": {
+          "default": null,
+          "type": "string"
+        },
+        "suppressOutput": {
+          "default": false,
+          "type": "boolean"
+        },
+        "systemMessage": {
+          "default": null,
+          "type": "string"
+        }
+      },
+      "title": "user-prompt-submit.command.output",
+      "type": "object"
+    }
+  }
+}

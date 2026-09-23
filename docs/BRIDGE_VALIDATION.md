@@ -72,3 +72,38 @@ Local test right after the host update: the older Claude Code session (its conve
 - The MCP server process keeps the environment of the conversation it was started with, so after `/clear` its `CLAUDE_CODE_SESSION_ID` named a conversation the hooks had already replaced. The host now resolves a tool call to the terminal's live participant when the id it carries is unknown or ended (unit test *stale conversation*).
 - Bridge participants lived only in memory and were lost by the in-place host update; every hook-registered session then looked unreachable until its next hook event. The registry is now exported into the handoff snapshot and restored by the new host (unit test *handoff export/restore*); verified by `tests/handoff_e2e.py` with real shells.
 - The `jaunt_send` tool description now states that replies arrive later as messages and that `wait_seconds` is only for answers the caller needs before continuing. Whether a model waits is its decision; this is a wording change, not a guarantee.
+
+## PostCompact contract (JAU-69, 2026-09-23)
+
+The hook now emits context only for `SessionStart` and `UserPromptSubmit`.
+`PostCompact` still registers the session and its busy state, but produces no
+stdout and does not consume the pending roster version. The regression fixture
+`tests/fixtures/codex_hook_output_schemas.json` contains output schemas extracted
+from the installed Codex 0.155.1 Linux binary, with its SHA-256 and extraction
+provenance. All three schemas also matched the installed 0.156.1 binary.
+The offline validator reproduces rejection of the previous PostCompact output.
+
+Observed checks on this branch:
+
+- Bridge tests: 32 passed, including both runtimes' start/prompt/compact output,
+  registration on PostCompact, pending roster preservation and forced delivery
+  on `SessionStart(source=compact)`.
+- Full Python suite: 405 passed.
+- The default `npm test` run hit the known watcher poll-count timing failure at
+  `tests/linear_wakes.test.mjs:159` (JAU-113), with 311/312 passing. The isolated
+  watcher suite passed 15/15; the full Node suite with `--test-concurrency=1`
+  before the test paths passed 312/312.
+- Real Codex 0.155.1 and 0.156.1 ran in separate disposable jaunt terminals,
+  each using a temporary `CODEX_HOME` with a copy of authentication/config and
+  a hook wrapper executing this branch's client. After a normal prompt, manual
+  `/compact` completed. The recorded PostCompact output was empty with exit 0;
+  no invalid PostCompact JSON error appeared. On the next prompt,
+  `SessionStart(source=compact)` returned the roster, and the model quoted its
+  first sentence without tools. The temporary project had no Claude peer.
+
+The installed host and real user hook configuration were not changed. These
+real runs validate the branch client against the installed host; host-side
+roster consumption is covered by the Python tests. They do not prove peer
+message delivery, Claude runtime compaction, or activation of a published fix.
+Publication and a real compact with the updated installed host remain to be
+verified after merge.

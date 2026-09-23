@@ -78,6 +78,12 @@ def claude_inbox() -> dict:
     return {"socket": os.environ.get("CLAUDE_CODE_MESSAGING_SOCKET", ""), "sessionPid": os.environ.get("CLAUDE_PID", "")}
 
 
+CONTEXT_EVENTS = {
+    "claude": {"start": "SessionStart", "prompt": "UserPromptSubmit"},
+    "codex": {"start": "SessionStart", "prompt": "UserPromptSubmit"},
+}
+
+
 def hook_main(runtime: str) -> int:
     """Called by the runtime for each configured hook event with JSON on stdin."""
     session = jaunt_session()
@@ -107,8 +113,10 @@ def hook_main(runtime: str) -> int:
     except Exception:
         return 0  # host stopped, bridge off or not a jaunt shell: stay silent
     context = result.get("context") if isinstance(result, dict) else ""
-    if context and event in ("start", "prompt", "compact"):
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context}}))
+    # PostCompact registers activity, but neither runtime accepts context there.
+    output_event = CONTEXT_EVENTS.get(runtime, {}).get(event)
+    if context and output_event:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": output_event, "additionalContext": context}}))
     return 0
 
 
