@@ -56,3 +56,7 @@ test('detached archive installation preserves app data and unrelated running she
  const installed=path.join(root,'.local/share/jaunt-desktop/current',mac?'jaunt.app/Contents/MacOS/jaunt':'jaunt-desktop');assert.equal(execFileSync(installed).toString(),'updated-desktop');
  assert.equal(await fs.readFile(data,'utf8'),'saved-device-identity');process.kill(host.pid,0);
 });
+test('desktop refuses every channel candidate until it implements the channel contract',()=>{
+ const channels=require('./fixtures/update_channels.json');
+ for(const tag of [...channels.tags.valid.map(c=>c.tag),...channels.tags.invalid])assert.throws(()=>newer(tag,'0.1.0-beta.1'),/Unsupported desktop version/);
+});

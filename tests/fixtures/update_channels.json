@@ -1,0 +1,103 @@
+{
+  "description": "Shared update-channel contract fixtures (docs/UPDATES.md#update-channels). Host, desktop, Android and the channel publisher must all agree with every case.",
+  "names": {
+    "valid": ["main", "moukrea", "moukrea_9", "dev2_123456", "a", "abcdefghijklmnopqrstuvwxyz012345_1"],
+    "invalid": ["", "Main", "moukrea_0", "moukrea_09", "moukrea_1234567", "9moukrea", "_9", "moukrea_", "moukrea-9", "moukrea.9", "moukrea_9_2", "abcdefghijklmnopqrstuvwxyz0123456", "https://evil.test/", "../main", "moukrea 9", "moukréa"],
+    "publishable": ["moukrea_9", "dev2_123456"],
+    "notPublishable": ["main", "beta", "moukrea", "main_9", "beta_9"]
+  },
+  "tags": {
+    "valid": [
+      {"tag": "v0.1.0-beta.41.ch.moukrea.9.2", "component": "host", "base": "v0.1.0-beta.41", "channel": "moukrea_9", "n": 2, "python": "0.1.0b41+ch.moukrea.9.2"},
+      {"tag": "desktop-v0.1.0-beta.33.ch.moukrea.9.2", "component": "desktop", "base": "desktop-v0.1.0-beta.33", "channel": "moukrea_9", "n": 2, "version": "0.1.0-beta.33.ch.moukrea.9.2"},
+      {"tag": "android-v0.1.0-beta.31.ch.moukrea.9.2", "component": "android", "base": "android-v0.1.0-beta.31", "channel": "moukrea_9", "n": 2, "version": "0.1.0-beta.31.ch.moukrea.9.2"},
+      {"tag": "v1.2.3-rc.1.ch.dev2.123456.999999", "component": "host", "base": "v1.2.3-rc.1", "channel": "dev2_123456", "n": 999999, "python": "1.2.3rc1+ch.dev2.123456.999999"},
+      {"tag": "android-v0.2.0-alpha.7.ch.a.1.1", "component": "android", "base": "android-v0.2.0-alpha.7", "channel": "a_1", "n": 1, "version": "0.2.0-alpha.7.ch.a.1.1"}
+    ],
+    "invalid": [
+      "v0.1.0-beta.41-ch.moukrea.9.2",
+      "v0.1.0-beta.41.ch.moukrea.9.0",
+      "v0.1.0-beta.41.ch.moukrea.09.2",
+      "v0.1.0-beta.41.ch.moukrea.9.02",
+      "v0.1.0-beta.41.ch.moukrea.0.2",
+      "v0.1.0-beta.41.ch.moukrea.9",
+      "v0.1.0-beta.41.ch.main.9.1",
+      "v0.1.0-beta.41.ch.beta.9.1",
+      "v0.1.0-beta.41.ch.Moukrea.9.1",
+      "v0.1.0-beta.41.ch.9moukrea.9.1",
+      "v0.1.0.ch.moukrea.9.1",
+      "v0.1.0-beta.41.ch.moukrea.9.1.1",
+      "v0.1.0-beta.41.ch.moukrea.9.1-debug",
+      "desktop-v0.1.0-beta.41.ch.moukrea.9.1/../x",
+      "x-v0.1.0-beta.41.ch.moukrea.9.1",
+      "v0.1.0-beta.41.ch.moukrea.9.1234567"
+    ],
+    "production": ["v0.1.0-beta.41", "desktop-v0.1.0-beta.33", "android-v0.1.0-beta.31", "v0.1.0"]
+  },
+  "order": {
+    "ascending": [
+      ["v0.1.0-beta.41", "v0.1.0-beta.41.ch.moukrea.9.1"],
+      ["v0.1.0-beta.41.ch.moukrea.9.1", "v0.1.0-beta.41.ch.moukrea.9.2"],
+      ["v0.1.0-beta.41.ch.moukrea.9.2", "v0.1.0-beta.41.ch.moukrea.9.10"],
+      ["v0.1.0-beta.41.ch.moukrea.9.999", "v0.1.0-beta.42"],
+      ["v0.1.0-beta.41.ch.moukrea.9.5", "v0.1.0-beta.42.ch.moukrea.9.1"],
+      ["android-v0.1.0-beta.31.ch.moukrea.9.3", "android-v0.1.0-beta.32"]
+    ],
+    "notComparable": [
+      ["v0.1.0-beta.41.ch.moukrea.9.1", "v0.1.0-beta.41.ch.moukrea.12.1"],
+      ["v0.1.0-beta.41.ch.moukrea.9.1", "v0.1.0-beta.41.ch.other.9.1"],
+      ["v0.1.0-beta.41.ch.moukrea.9.1", "desktop-v0.1.0-beta.41.ch.moukrea.9.2"]
+    ]
+  },
+  "automatic": [
+    {"channel": "main", "current": "v0.1.0-beta.41", "target": "v0.1.0-beta.42", "install": true},
+    {"channel": "main", "current": "v0.1.0-beta.41", "target": "v0.1.0-beta.41.ch.moukrea.9.1", "install": false},
+    {"channel": "main", "current": "v0.1.0-beta.41.ch.moukrea.9.3", "target": "v0.1.0-beta.41", "install": false},
+    {"channel": "main", "current": "v0.1.0-beta.41.ch.moukrea.9.3", "target": "v0.1.0-beta.42", "install": true},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.9.1", "target": "v0.1.0-beta.41.ch.moukrea.9.2", "install": true},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.9.2", "target": "v0.1.0-beta.41.ch.moukrea.9.2", "install": false},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.9.2", "target": "v0.1.0-beta.41.ch.moukrea.9.1", "install": false},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.9.2", "target": "v0.1.0-beta.42.ch.moukrea.9.1", "install": true},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41", "target": "v0.1.0-beta.41.ch.moukrea.9.1", "install": false},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.12.1", "target": "v0.1.0-beta.41.ch.moukrea.9.1", "install": false},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.9.1", "target": "v0.1.0-beta.42", "install": false},
+    {"channel": "moukrea_9", "current": "v0.1.0-beta.41.ch.moukrea.9.1", "target": "v0.1.0-beta.41.ch.moukrea.12.2", "install": false}
+  ],
+  "android": {
+    "nextProductionCode": [[31, 32000], [32000, 33000], [32999, 33000]],
+    "candidateCode": [
+      {"base": 31, "k": 1, "code": 31001},
+      {"base": 32000, "k": 1, "code": 32001},
+      {"base": 32000, "k": 999, "code": 32999}
+    ],
+    "invalidCandidateCode": [{"base": 31, "k": 0}, {"base": 31, "k": 1000}, {"base": 32001, "k": 1}],
+    "switch": [
+      {"current": 31, "target": 31001, "allowed": true},
+      {"current": 31001, "target": 31002, "allowed": true},
+      {"current": 31002, "target": 31001, "allowed": false},
+      {"current": 31001, "target": 31, "allowed": false},
+      {"current": 31002, "target": 32000, "allowed": true},
+      {"current": 32000, "target": 32000, "allowed": false}
+    ]
+  },
+  "documents": {
+    "official": {"page": "https://moukrea.github.io/jaunt/", "repository": "moukrea/jaunt"},
+    "valid": [
+      {"name": "moukrea_9", "document": {"version": 1, "channel": "moukrea_9", "relay": "wss://jaunt-relay.moukrea.workers.dev", "page": "https://moukrea.github.io/jaunt/", "repository": "moukrea/jaunt", "release": "v0.1.0-beta.41.ch.moukrea.9.2", "androidRelease": "android-v0.1.0-beta.31.ch.moukrea.9.2", "desktopRelease": "desktop-v0.1.0-beta.33.ch.moukrea.9.2", "releaseSource": "0123456789abcdef0123456789abcdef01234567"}}
+    ],
+    "invalid": [
+      {"why": "channel field differs from the requested name", "name": "moukrea_9", "patch": {"channel": "moukrea_12"}},
+      {"why": "missing channel field", "name": "moukrea_9", "patch": {"channel": null}},
+      {"why": "foreign page", "name": "moukrea_9", "patch": {"page": "https://evil.test/jaunt/"}},
+      {"why": "foreign repository", "name": "moukrea_9", "patch": {"repository": "evil/jaunt"}},
+      {"why": "production tag in a channel", "name": "moukrea_9", "patch": {"release": "v0.1.0-beta.41"}},
+      {"why": "tag of another channel", "name": "moukrea_9", "patch": {"desktopRelease": "desktop-v0.1.0-beta.33.ch.moukrea.12.2"}},
+      {"why": "components of different candidates", "name": "moukrea_9", "patch": {"androidRelease": "android-v0.1.0-beta.31.ch.moukrea.9.1"}},
+      {"why": "tag of the wrong component", "name": "moukrea_9", "patch": {"androidRelease": "desktop-v0.1.0-beta.33.ch.moukrea.9.2"}},
+      {"why": "missing release source", "name": "moukrea_9", "patch": {"releaseSource": null}},
+      {"why": "malformed release source", "name": "moukrea_9", "patch": {"releaseSource": "main"}},
+      {"why": "unsupported schema version", "name": "moukrea_9", "patch": {"version": 2}},
+      {"why": "reserved name has no channel document", "name": "main", "patch": {"channel": "main"}}
+    ]
+  }
+}
