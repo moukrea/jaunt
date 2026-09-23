@@ -85,3 +85,4 @@ A channel lets a person follow the binaries of one pull request under review ins
 Web and desktop image transfers retain their actual result: verified upload and quoted path insertion without Enter, or host clipboard completion plus Ctrl+V delivery. They do not claim that a CLI recognized an attachment. Host checks show completion, failure or explicit deferral for active work. Android uses native progress dialogs for checks and APK downloads, followed by the OS installer confirmation.
 
 <!-- JAU-83 channel pages trial: do not merge -->
+<!-- retry after stale release assets -->
