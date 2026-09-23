@@ -434,6 +434,13 @@ jaunt-linear claim <ID> planning --session "$SID"
 node "$(jaunt-linear repo)/scripts/linear_claude.mjs" worker <ID> --cwd ../wt-<ID>
 ```
 
+Do not add `--model` or `--effort`: the launcher always passes both explicitly
+from `scripts/linear_model_policy.json`, pins subagents to the policy's model,
+and refuses a banned model from any source — option, saved record, environment
+or the running stream. A refusal is a `configuration` failure, never retried
+automatically; report it, do not work around it. Readjusting the policy is an
+edit to that file ([docs/LINEAR_MODELS.md](../../../docs/LINEAR_MODELS.md)).
+
 The supervised launcher purges `CLAUDECODE` and `CLAUDE_CODE_*`: without it the spawned
 session is treated as an ephemeral child, persists no transcript, and cannot be
 resumed — which breaks routing and resumption both.

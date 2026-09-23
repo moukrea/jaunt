@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { settingSources, observeTelemetry } from './linear_telemetry.mjs';
+import { claudeSettings, claudeEnvironment, observedBanned, assertAllowed, loadPolicy } from './linear_models.mjs';
 import { skillStore } from './linear_skills.mjs';
 import { wakeStore } from './linear_wakes.mjs';
 import { livePid } from './linear_watch.mjs';
@@ -193,6 +194,12 @@ function ticket(id) {
 }
 export function workerSettings(runtime, previous, options, env, recover = false) {
   if (runtime === 'claude' && options.sandbox && options.sandbox !== 'danger-full-access') throw new Error('Claude launcher does not implement Codex sandbox modes');
+  // Claude always launches with an explicit, policy-checked pair, recovery
+  // and routed resume included: a saved banned model is refused, not replayed.
+  if (runtime === 'claude') return { ...claudeSettings(recover
+    ? { model: previous?.model, effort: previous?.effort }
+    : { model: options.model || previous?.model || env.JAUNT_CLAUDE_MODEL, effort: options.effort || previous?.effort || env.JAUNT_CLAUDE_EFFORT },
+  undefined, recover ? 'saved setting' : 'launch'), sandbox: 'danger-full-access' };
   if (recover) return { model: previous.model, effort: previous.effort, sandbox: previous.sandbox };
   const prefix = runtime === 'claude' ? 'JAUNT_CLAUDE' : 'JAUNT_CODEX';
   return {
@@ -205,8 +212,8 @@ export function claudeArgs(record) {
   if (!record.session) throw new Error('Claude requires its recorded session ID');
   const args = ['-p', record.resume ? '--resume' : '--session-id', record.session,
     '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions'];
-  if (record.model) args.push('--model', record.model);
-  if (record.effort) args.push('--effort', record.effort);
+  if (!record.model || !record.effort) throw new Error('Claude launches need an explicit model and effort');
+  args.push('--model', assertAllowed(record.model, loadPolicy()), '--effort', record.effort);
   args.push(record.prompt);
   return { args };
 }
@@ -336,7 +343,7 @@ async function execute(name, runtime = 'codex') {
     let child, output = '';
     if (record.role === 'worker') {
       const command = runtime === 'claude' ? claudeArgs(record) : workerArgs({ ...record });
-      child = spawn(runtime, command.args, { cwd: record.cwd, env: workerEnvironment(process.env), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(runtime, command.args, { cwd: record.cwd, env: runtime === 'claude' ? claudeEnvironment(workerEnvironment(process.env)) : workerEnvironment(process.env), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
       let stderr = '';
       child.stderr.on('data', data => { stderr = (stderr + data).slice(-8192); record.stderrFailure = classifyFailure(stderr); });
       child.stdin.on('error', () => {});
@@ -374,6 +381,8 @@ async function execute(name, runtime = 'codex') {
         if (event.type === 'turn.failed' || event.type === 'error' || event.is_error) record.failure = classifyFailure(event.error || event);
         if (runtime === 'claude' && event.session_id && event.session_id !== record.session) throw new Error('Claude emitted a different session');
         observeTelemetry(record, event);
+        const banned = runtime === 'claude' && observedBanned(event);
+        if (banned) { record.bannedModel = banned; throw new Error(`invalid model: ${banned} observed in the stream is banned by the Jaunt model policy`); }
         await persist();
       },
     });

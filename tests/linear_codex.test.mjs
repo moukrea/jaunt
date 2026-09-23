@@ -154,7 +154,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
@@ -243,12 +243,13 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
 
 test('runtime settings never leak Codex model defaults into Claude and recovery preserves explicit nulls', () => {
   const env = { JAUNT_CODEX_MODEL: 'codex-model', JAUNT_CODEX_EFFORT: 'high', JAUNT_CODEX_SANDBOX: 'read-only' };
-  assert.deepEqual(workerSettings('claude', null, {}, env), { model: null, effort: null, sandbox: 'danger-full-access' });
+  assert.deepEqual(workerSettings('claude', null, {}, env), { model: 'claude-opus-5-5', effort: 'high', sandbox: 'danger-full-access' });
   const saved = { model: null, effort: null, sandbox: 'workspace-write' };
   assert.deepEqual(workerSettings('codex', saved, {}, env, true), saved);
   assert.equal(workerSettings('codex', null, {}, env).model, 'codex-model');
   assert.throws(() => workerSettings('claude', null, { sandbox: 'read-only' }, env), /does not implement/);
-  assert.ok(claudeArgs({ session: 'exact', resume: true, effort: 'high', prompt: 'continue' }).args.includes('--effort'));
+  assert.ok(claudeArgs({ session: 'exact', resume: true, model: 'claude-opus-5-5', effort: 'high', prompt: 'continue' }).args.includes('--effort'));
+  assert.throws(() => claudeArgs({ session: 'exact', effort: 'high', prompt: 'continue' }), /explicit model and effort/);
 });
 
 for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launches exact ${targetRuntime} session through real adapter locks (offline)`, { timeout: 25000 }, async () => {
@@ -258,7 +259,7 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
   const exec = promisify(execFile), dir = await mkdtemp(join(tmpdir(), 'jaunt-route-cli-'));
   try {
     await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin')); await mkdir(join(dir, '.dev-state/claims'), { recursive: true });
-    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_waits.mjs', 'linear_skills.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_waits.mjs', 'linear_skills.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     for (const skill of ['linear-loop', 'linear-orchestrator']) {
       await mkdir(join(dir, '.agents/skills', skill), { recursive: true });

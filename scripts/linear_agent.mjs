@@ -1993,6 +1993,11 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
+  // Imported on use: fixtures that copy this script need not carry the policy.
+  models: async ([action, ...rest]) => {
+    if (action !== 'check' || rest.length) throw Error('models check');
+    return (await import('./linear_models.mjs')).modelsCheck();
+  },
   telemetry: async ([id, ...rest]) => {
     if (rest.length) throw Error('telemetry accepts one issue identifier');
     return telemetryReport(STATE_DIR, id);
@@ -2166,7 +2171,7 @@ export const COMMAND_FLAGS = {
   comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],
   attachments: ['out'], uncomment: [],
   create: ['title', 'parent', 'priority', 'expects', 'desc', 'description'],
-  feedback: [], repo: [], workers: [], telemetry: [], 'routing-thread': [],
+  feedback: [], repo: [], workers: [], models: [], telemetry: [], 'routing-thread': [],
   landing: {
     status: [], acquire: ['runtime', 'session', 'cwd'],
     prepare: ['runtime', 'session'], merge: ['runtime', 'session', 'pr'],

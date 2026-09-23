@@ -48,9 +48,12 @@ export function archiveClaim(claim, receipt, issue) {
 // Keep the launch contract unchanged; provenance is additional evidence only.
 export function settingSources(runtime, previous, options, env, mode) {
   const prefix = runtime === 'claude' ? 'JAUNT_CLAUDE' : 'JAUNT_CODEX';
-  const source = key => mode === 'recovery' || mode === 'routed-resume' ? mode
+  // Claude has no runtime default any more: a gap is filled by the policy.
+  const fallback = runtime === 'claude' ? 'jaunt model policy' : 'runtime default (not observed)';
+  const source = key => mode === 'recovery' || mode === 'routed-resume'
+    ? (runtime === 'claude' && !previous?.[key] ? `${fallback} (${mode})` : mode)
     : options[key] ? 'explicit option' : previous?.[key] ? 'saved setting'
-      : env[`${prefix}_${key.toUpperCase()}`] ? 'runtime environment' : 'runtime default (not observed)';
+      : env[`${prefix}_${key.toUpperCase()}`] ? 'runtime environment' : fallback;
   return { model: source('model'), effort: source('effort'),
     // Explicit operator metadata, never copied from a prompt or provider output.
     rationale: typeof options.rationale === 'string' ? options.rationale.slice(0, 1000) : null };

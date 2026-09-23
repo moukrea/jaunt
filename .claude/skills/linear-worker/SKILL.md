@@ -45,7 +45,9 @@ describing a symptom you never saw.
 ## 2. Survey, then verify
 
 Send an **Explore** subagent at the areas the ticket names — you have the `Agent`
-tool, use it. Its report is a survey, not a verification.
+tool, use it. Its report is a survey, not a verification. Do not pass it a
+`model`: the launcher pins subagents to the policy's model, and a banned one
+seen in your stream stops this worker.
 
 Then check, yourself, the specific things your plan will depend on:
 
