@@ -344,7 +344,10 @@ def test_preflight_rejects_other_publication_and_does_not_log_token(monkeypatch,
         calls.append((method, payload, token))
         return {'value': 'existing-public-tag'}
     monkeypatch.setattr(pipeline, 'api', api)
+    probes = []
+    monkeypatch.setattr(pipeline, 'probe_tag_push', probes.append)
     pipeline.preflight()
+    assert probes == [['existing-public-tag'] * 3]
     assert sum(c[0] == 'PATCH' for c in calls) == 3
     assert all(c[1]['value'] == 'existing-public-tag' for c in calls if c[0] == 'PATCH')
     assert 'never-print-this-fixture' not in capsys.readouterr().out
@@ -432,3 +435,55 @@ def test_staging_bundle_cannot_escape(tmp_path):
     with pytest.raises(ValueError, match='path'):
         pipeline.unpack_bundle(bundle, tmp_path / 'target')
     assert not (tmp_path / 'outside').exists()
+
+
+GITHUB_WORKFLOW_GUARD = """#!/bin/sh
+# Mirrors GitHub: a GITHUB_TOKEN ref may not differ from main in workflow files.
+main=$(git rev-parse refs/heads/main) || exit 1
+while read old new ref; do
+  case "$ref" in refs/tags/*) ;; *) continue ;; esac
+  [ "$new" = 0000000000000000000000000000000000000000 ] && continue
+  if [ "$(git rev-parse "$new:.github/workflows")" != "$(git rev-parse "$main:.github/workflows")" ]; then
+    echo "refusing to allow a GitHub App to create or update workflow without workflows permission" >&2
+    exit 1
+  fi
+done
+"""
+
+
+def guard_workflows(repository):
+    hook = repository['remote'] / 'hooks/pre-receive'
+    hook.write_text(GITHUB_WORKFLOW_GUARD)
+    hook.chmod(0o755)
+
+
+def test_release_tag_carries_main_workflows_when_main_changed_them_later(repository):
+    guard_workflows(repository)
+    source = repository['commit']('host/jaunt/new.py', '# app')
+    workflow = '.github/workflows/android.yml'
+    main = repository['commit'](workflow, Path(workflow).read_text() + '# later CI change\n', 'ci: later')
+    pipeline.prepare()
+    pending, _ = pipeline.state_load()
+    pending = pending['pending']
+    assert pending['source'] == source and pending['tags']['host'] == 'v0.1.0-beta.42'
+    assert git('rev-parse', pending['sha'] + '^') == source
+    assert pipeline.read_at(pending['sha'], workflow) == pipeline.read_at(main, workflow)
+    changed = set(git('diff', '--name-only', source, pending['sha']).splitlines())
+    assert changed - pipeline.VERSION_FILES == {workflow}
+    assert git('rev-parse', 'v0.1.0-beta.42') == pending['sha']
+
+
+def test_preflight_probe_creates_and_removes_release_shaped_tag(repository):
+    guard_workflows(repository)
+    workflow = '.github/workflows/android.yml'
+    repository['commit'](workflow, Path(workflow).read_text() + '# later CI change\n', 'ci: later')
+    pipeline.probe_tag_push(list(repository['tags'].values()))
+    assert 'jaunt-preflight' not in git('ls-remote', '--tags', 'origin')
+
+
+def test_preflight_probe_reports_refused_tag_creation(repository):
+    hook = repository['remote'] / 'hooks/pre-receive'
+    hook.write_text('#!/bin/sh\necho "refusing to allow a GitHub App" >&2\nexit 1\n')
+    hook.chmod(0o755)
+    with pytest.raises(ValueError, match='GITHUB_TOKEN cannot create release tags'):
+        pipeline.probe_tag_push(list(repository['tags'].values()))
