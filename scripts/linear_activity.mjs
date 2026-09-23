@@ -19,6 +19,12 @@ const iso = value => typeof value === 'string' && Number.isFinite(Date.parse(val
 const nonempty = value => typeof value === 'string' && Boolean(value.trim());
 const originLabel = issue => issue.labels.nodes.some(l => l.name === ACTIVITY_LABELS.origin);
 const keyOf = id => { if (!/^[A-Z][A-Z0-9]*-\d+$/.test(id)) throw new Error('invalid discussion identifier'); return id; };
+// The watcher's incremental sync re-reads a tracked ticket only when Linear's
+// `updatedAt` moved (comments and reactions bump it), plus a full sweep this
+// often. Reading every comment and reaction of every tracked ticket twice per
+// 30 s poll cost ~50 000 complexity points, ~4.4 M/h against Linear's 2 M/h,
+// and the API cut the loop off for an hour on 23/09 (JAU-62).
+export const FULL_SWEEP_MS = 30 * 60_000;
 const human = (user, me) => Boolean(user?.id && user.id !== me && user.email && !/@oauthapp\.linear\.app$/i.test(user.email));
 
 // Connections must be complete before deciding that there is nothing left.
@@ -244,6 +250,7 @@ export function activityService({ stateDir, graphql, team, agent }) {
     // Recovery republishes no new facts: unread chronology uses issue.createdAt
     // for this marker, so a delayed provenance repair cannot undo a human reply.
     await rawComment(issue, `${PROVENANCE_MARKER}\nTicket créé par le harnais. Motif et origine fournis :\n\n${reason}`, null);
+    return true;
   }
   return {
     labels,
@@ -297,34 +304,49 @@ export function activityService({ stateDir, graphql, team, agent }) {
         return reconcile(issue, await saveChanged(before, next));
       });
     },
-    async sync(id) {
+    // `incremental` (the watcher): skip tracked tickets whose `updatedAt` has
+    // not moved since their last successful sync, except on a full sweep.
+    async sync(id, { incremental = false, now = Date.now() } = {}) {
       let ids;
+      const discovered = new Map();
+      const cursorPath = join(stateDir, 'activity-sync.json');
+      const cursor = (id ? null : await readJson(cursorPath).catch(() => null)) || { fullAt: 0, seen: {} };
+      const full = !incremental || now - cursor.fullAt >= FULL_SWEEP_MS;
       if (id) ids = [keyOf(id)];
       else {
         const t = await team();
         const issues = await connectionPages(async cursor => (await graphql(`query($teamId: ID!, $cursor: String) {
           issues(first: 100, after: $cursor, includeArchived: true, filter: { team: { id: { eq: $teamId } } }) {
-            nodes { identifier description labels { nodes { name } } } ${pageInfo}
+            nodes { identifier updatedAt description labels { nodes { name } } } ${pageInfo}
           }
         }`, { teamId: t.id, cursor })).issues);
+        for (const i of issues) discovered.set(i.identifier, i.updatedAt);
         ids = [...new Set([...(await store.ids()), ...issues.filter(i => i.labels.nodes.some(l => Object.values(ACTIVITY_LABELS).includes(l.name))).map(i => i.identifier)])];
       }
-      const results = [], failures = [];
+      const results = [], failures = [], seen = full ? {} : { ...cursor.seen };
+      let skipped = 0;
       for (const key of ids) {
+        // A ticket missing from discovery (deleted) is always retried: that is
+        // how its error stays visible.
+        if (!full && discovered.has(key) && cursor.seen[key] === discovered.get(key)) { skipped += 1; continue; }
         try {
           results.push(await store.lock(key, async () => {
             let issue = await readIssue(key);
             const existing = await store.read(key);
             const tracked = issue.labels.nodes.some(l => Object.values(ACTIVITY_LABELS).includes(l.name));
             const record = existing || await initial(issue, { recovery: Boolean(tracked) });
-            await provenance(issue, record);
-            issue = await readIssue(key);
+            // Read again only when provenance actually wrote a comment.
+            if (await provenance(issue, record)) issue = await readIssue(key);
             const next = await reconcile(issue, record);
             return { issue: key, unread: next.unread, active: next.active, revision: next.revision };
           }));
-        } catch (e) { failures.push({ issue: key, error: e.message }); }
+          // The discovery date, not the post-sync one: a label written just now
+          // moves `updatedAt`, which costs one more read next poll, then settles.
+          if (discovered.has(key)) seen[key] = discovered.get(key);
+        } catch (e) { failures.push({ issue: key, error: e.message }); delete seen[key]; }
       }
-      return { ok: failures.length === 0, tickets: results, errors: failures };
+      if (!id) await atomicJson(cursorPath, { fullAt: full ? now : cursor.fullAt, seen });
+      return { ok: failures.length === 0, tickets: results, errors: failures, ...(id ? {} : { full, skipped }) };
     },
   };
 }

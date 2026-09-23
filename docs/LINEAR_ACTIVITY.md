@@ -27,8 +27,16 @@ The worker interprets actual questions and records their individual dispositions
 
 ## Automatic synchronization and recovery
 
-The watcher calls `jaunt-linear sync-activity` before each pulse, after checking
-loop state and instruction updates. With the loop off no automatic sync occurs.
+The watcher calls `jaunt-linear sync-activity --incremental` before each pulse,
+after checking loop state and instruction updates. Incremental sync reads a
+tracked ticket's full thread only when its `updatedAt` moved since its last
+successful sync (comments and reactions bump it), with a full sweep every
+30 minutes; a ticket missing from discovery is retried every poll. Reading every
+tracked thread twice per poll cost ~50 000 of Linear's 2 M complexity points per
+hour and got the loop cut off on 23/09. Below 25 % of the budget the watcher
+skips the sync and polls four times less often; on a 429 it waits for the
+announced reset, and a cut longer than the watchdog grace wakes the owner once
+(`linear-rate-limited`). With the loop off no automatic sync occurs.
 Run `jaunt-linear sync-activity JAU-34` to reconcile one ticket explicitly.
 Failures are visible and retryable. Per-ticket errors return `ok: false` with an
 `errors` list; healthy tickets and board polling continue. The watcher emits

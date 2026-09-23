@@ -138,6 +138,7 @@ minutes, so skipping `wake take` costs a delayed duplicate, not a lost event.
 | `worker-finished` / `worker-lost` | a worker process ended (one wake, whichever producer saw it first); reconcile that claim and its PR — see worker supervision |
 | `interval-elapsed` | only from a watcher launched with the legacy `--max-minutes`: nothing moved; reconcile (§1) and go back to sleep |
 | `watcher-failed` | the loop is blind: say so plainly, restart the watcher, do not pretend to work. The `error` names what broke — three consecutive polls failed (usually an expired token), or twenty transient ones (Linear 5xx/429) |
+| `linear-rate-limited` | Linear cut the API (complexity budget, 2 M points/h) for longer than the watchdog's grace; the watcher is alive and waits for `until` on its own. Say on the board that the loop is blind from `since` to `until`; do not relaunch anything or retry Linear calls before `until`. One wake per cut |
 | `watcher-lost` | **the watchdog fired**: the loop ran with nothing watching for longer than its grace, because a pass did not re-arm it. Relaunch both (§6), then say on the board how long it was blind — `blindForSeconds` — because nobody else saw it |
 | `loop-off` | a human switched the flag off; the watcher ended itself. Do nothing and relaunch nothing |
 | `watchdog-superseded` | two watchdogs were started and the older stood down. Nothing is wrong; check §1 and carry on |

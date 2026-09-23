@@ -249,3 +249,37 @@ test('quoted creation marker alone cannot invent provenance or backfill a human 
   await f.service.sync();assert.equal(await f.service.read('JAU-1'),null);assert.equal(i.comments.length,0);
   await f.service.publish('JAU-1','Answer');assert.ok(!i.labels.nodes.some(l=>l.name===ACTIVITY_LABELS.origin));
 });
+
+// JAU-62: every 30 s poll used to read every comment and reaction of every
+// tracked ticket twice (~50 000 complexity points), which exhausted Linear's
+// 2 M/h budget and cut the loop off for an hour on 23/09.
+test('incremental sync reads only tickets that moved, once each, with a periodic full sweep',async t=>{
+  const f=await fixture(t,3);
+  for(const id of ['JAU-1','JAU-2','JAU-3'])await f.service.publish(id,'News');
+  const reads=()=>f.calls.filter(c=>c.q.includes('issue(id:')).length;
+  const now=Date.parse('2026-09-23T00:00:00Z');
+  let before=reads();
+  const first=await f.service.sync(undefined,{incremental:true,now});
+  assert.equal(first.full,true,'no cursor yet: full sweep');
+  assert.equal(reads()-before,3,'one read per ticket, not two');
+  before=reads();
+  const quiet=await f.service.sync(undefined,{incremental:true,now:now+30_000});
+  assert.deepEqual([quiet.full,quiet.skipped,reads()-before],[false,3,0],'a quiet board costs only discovery');
+  const i=f.issues.get('JAU-2');i.comments.push(comment('reply',40,'Une question',user));i.updatedAt=at(40);
+  before=reads();
+  const moved=await f.service.sync(undefined,{incremental:true,now:now+60_000});
+  assert.deepEqual([moved.skipped,reads()-before],[2,1]);
+  assert.equal(moved.tickets[0].issue,'JAU-2');
+  assert.equal((await f.service.read('JAU-2')).unread,false,'the reply is still observed');
+  before=reads();
+  const sweep=await f.service.sync(undefined,{incremental:true,now:now+30*60_000});
+  assert.deepEqual([sweep.full,reads()-before],[true,3],'full sweep every 30 min');
+  before=reads();
+  await f.service.sync();
+  assert.equal(reads()-before,3,'an explicit sync without --incremental is always full');
+  // A deleted ticket is retried every poll so its error stays visible.
+  f.issues.delete('JAU-3');
+  const gone=await f.service.sync(undefined,{incremental:true,now:now+31*60_000});
+  assert.equal(gone.errors[0].issue,'JAU-3');
+  assert.equal((await f.service.sync(undefined,{incremental:true,now:now+32*60_000})).errors[0].issue,'JAU-3');
+});

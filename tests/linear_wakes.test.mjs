@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { wakeStore, wakeKey, REDELIVER_MS } from '../scripts/linear_wakes.mjs';
-import { reportableErrors, transientError, TRANSIENT_STREAK } from '../scripts/linear_watch.mjs';
+import { reportableErrors, transientError, TRANSIENT_STREAK, rateLimitedUntil, lowBudget } from '../scripts/linear_watch.mjs';
 
 async function temporary(t) {
   const dir = await mkdtemp(join(tmpdir(), 'jaunt-wakes-'));
@@ -124,14 +124,14 @@ test('transient activity errors are reported only when they persist', () => {
 });
 
 // The watcher fixture: a quiet board by default, a stubbed worker supervisor.
-async function watchFixture(t, { pulse = "{at:new Date().toISOString(),tickets:{'JAU-1':{u:'1',s:'Backlog',c:'c1',cu:'1'}}}", sync = '{"errors":[]}', worker = 'null' } = {}) {
+async function watchFixture(t, { pulse = "{at:new Date().toISOString(),tickets:{'JAU-1':{u:'1',s:'Backlog',c:'c1',cu:'1'}}}", sync = '{"errors":[]}', worker = 'null', agent = null } = {}) {
   const root = await temporary(t);
   await mkdir(join(root, 'scripts')); await mkdir(join(root, '.dev-state'));
   for (const name of ['linear_watch.mjs', 'linear_wakes.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
   await writeFile(join(root, '.dev-state/linear-loop.json'), '{"enabled":true}');
   await writeFile(join(root, 'scripts/linear_skills.mjs'), 'export const skillStore=()=>({wake:async()=>null});');
   await writeFile(join(root, 'scripts/linear_workers.mjs'), `let sent=false;export async function workerWake(){if(sent)return null;sent=true;return ${worker};}`);
-  await writeFile(join(root, 'scripts/linear_agent.mjs'), `
+  await writeFile(join(root, 'scripts/linear_agent.mjs'), agent ?? `
     import {appendFileSync} from 'node:fs';
     const cmd=process.argv[2];appendFileSync('calls.txt',cmd+'\\n');
     if(cmd==='sync-activity')console.log(${JSON.stringify(sync)});
@@ -194,4 +194,60 @@ test('the watchdog hands a worker exit to the outbox instead of exiting on it', 
   const status = await wakeStore(join(root, '.dev-state')).status();
   assert.equal(status.pending, 1);
   assert.equal(status.metrics.deposited, 1);
+});
+
+// 23/09 00:00 UTC: Linear answered 429 (2 M complexity points/h spent) and the
+// watcher died `watcher-failed` for about an hour.
+test('a 429 is a wait until the announced reset, not a failure', () => {
+  const now = Date.parse('2026-09-23T00:00:00Z');
+  assert.equal(rateLimitedUntil('graphql 503: nope', now), null);
+  assert.equal(rateLimitedUntil('graphql 429 (reset 2026-09-23T00:20:00.000Z): ratelimited', now), Date.parse('2026-09-23T00:20:00Z'));
+  assert.equal(rateLimitedUntil('graphql 429: no header', now), now + 5 * 60_000, 'no announced reset: back off five minutes');
+  assert.equal(rateLimitedUntil('graphql 429 (reset 2026-09-23T09:00:00.000Z): far', now), now + 60 * 60_000, 'never blind for more than an hour at a time');
+  assert.equal(lowBudget({ limit: 2_000_000, remaining: 400_000 }), true);
+  assert.equal(lowBudget({ limit: 2_000_000, remaining: 1_700_000 }), false);
+  assert.equal(lowBudget(null), false);
+});
+
+const limitedAgent = (resetInMs) => `
+  import {appendFileSync} from 'node:fs';
+  const cmd=process.argv[2];appendFileSync('calls.txt',cmd+'\\n');
+  if(cmd==='sync-activity'){console.error('graphql 429 (reset '+new Date(Date.now()+${resetInMs}).toISOString()+'): ratelimited');process.exit(1);}
+  if(cmd==='wait')console.log('{"events":[]}');
+  if(cmd==='pulse')console.log('{"at":"x","tickets":{}}');
+`;
+
+test('a long Linear cut wakes the owner once, never as watcher-failed, and not again after a re-arm', async t => {
+  const { root, start } = await watchFixture(t, { agent: limitedAgent(20 * 60_000) });
+  const first = await race(start().exited, 3000);
+  const payload = JSON.parse(first.out);
+  assert.equal(payload.wake, 'linear-rate-limited');
+  assert.ok(Date.parse(payload.until) > Date.now() + 15 * 60_000);
+  const watch = JSON.parse(await readFile(join(root, '.dev-state/linear-watch.json'), 'utf8'));
+  assert.equal(watch.wake, 'linear-rate-limited');
+  assert.ok(watch.rateLimitedUntil);
+  await wakeStore(join(root, '.dev-state')).take(payload.wakeId);
+  // The pass re-arms while Linear is still cut: the same cut is not news.
+  const again = start();
+  assert.equal(await race(again.exited, 1500), 'running');
+  assert.equal((await readFile(join(root, 'calls.txt'), 'utf8')).split('\n').filter(l => l === 'sync-activity').length, 2, 'no retry before the reset');
+});
+
+test('a short 429 is waited out silently and polling resumes', async t => {
+  const { root, start } = await watchFixture(t, { agent: limitedAgent(1500) });
+  const w = start();
+  assert.equal(await race(w.exited, 2500), 'running');
+  assert.ok((await readFile(join(root, 'calls.txt'), 'utf8')).split('\n').filter(l => l === 'sync-activity').length >= 2, 'polled again after the reset');
+  assert.equal(w.output(), '');
+});
+
+test('with little budget left the watcher skips the activity sync and polls less often', async t => {
+  const { root, start } = await watchFixture(t, { pulse: "{at:new Date().toISOString(),tickets:{},rateLimit:{limit:2000000,remaining:100000}}" });
+  const w = start();
+  assert.equal(await race(w.exited, 1000), 'running');
+  const calls = (await readFile(join(root, 'calls.txt'), 'utf8')).trim().split('\n');
+  assert.equal(calls.filter(l => l === 'sync-activity').length, 1, 'only the first poll, before the budget was known');
+  assert.ok(calls.filter(l => l === 'pulse').length >= 2);
+  assert.ok((await wakeStore(join(root, '.dev-state')).status()).metrics['suppressed:low-budget-sync'] >= 1);
+  assert.equal(JSON.parse(await readFile(join(root, '.dev-state/linear-watch.json'), 'utf8')).rateLimit.remaining, 100000);
 });

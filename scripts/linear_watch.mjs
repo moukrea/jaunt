@@ -56,6 +56,9 @@ const LOOP_FILE = join(STATE_DIR, 'linear-loop.json');
 // sign of life (JAU-52).
 export const WATCH_FILE = join(STATE_DIR, 'linear-watch.json');
 export const WATCHDOG_FILE = join(STATE_DIR, 'linear-watchdog.json');
+// When the current Linear rate-limit cut began, across watcher restarts: the
+// owner hears about one cut once, not once per re-arm.
+const RATE_LIMIT_FILE = join(STATE_DIR, 'linear-rate-limit.json');
 const AGENT = join(ROOT, 'scripts', 'linear_agent.mjs');
 
 const args = process.argv.slice(2);
@@ -90,6 +93,28 @@ const MAX_TRANSIENT_FAILURES = 20;
 // adapter and a Linear change 5 s later leave in one batch (JAU-61, 05:27:18
 // and 05:27:23). Never longer than a poll, so fast test watchers stay fast.
 const SETTLE_MS = Math.min(5000, INTERVAL);
+
+// Linear's complexity budget (2 M points/h, sliding window). Below this share
+// remaining, the watcher stops the costly activity sync and polls less often;
+// on a 429 it waits for the announced reset instead of failing (JAU-62).
+export const LOW_BUDGET_SHARE = 0.25;
+const LOW_BUDGET_SLOWDOWN = 4;
+// A cut longer than the watchdog's grace is worth telling the owner once.
+const RATE_LIMIT_REPORT_MS = GRACE_SECONDS * 1000;
+const MAX_RATE_LIMIT_WAIT_MS = 60 * 60_000;
+
+export const lowBudget = (rateLimit) =>
+  Boolean(rateLimit?.limit) && rateLimit.remaining / rateLimit.limit < LOW_BUDGET_SHARE;
+
+// When a 429 says the budget returns, or null for any other error. Without an
+// announced reset, wait five minutes: never a tight retry against a cut API.
+export function rateLimitedUntil(message, now = Date.now()) {
+  const text = String(message ?? '');
+  if (!/graphql 429\b/.test(text)) return null;
+  const announced = Date.parse(text.match(/graphql 429 \(reset ([^)]+)\)/)?.[1] ?? '');
+  const until = Number.isFinite(announced) && announced > now ? announced : now + 5 * 60_000;
+  return Math.min(until, now + MAX_RATE_LIMIT_WAIT_MS);
+}
 
 export const transientError = (message) =>
   /graphql (429|5\d\d)\b|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|network/i.test(String(message ?? ''));
@@ -338,6 +363,27 @@ async function main() {
   // The only way a deposited wake reaches the model: this process exiting with
   // it. Marked delivered first; a delivery that is then lost is re-offered by
   // the outbox after its redelivery delay.
+  let limitedSince = (await readJson(RATE_LIMIT_FILE))?.since ?? null;
+  let budget = null;
+
+  // Sleeps in short steps so a wake deposited by the watchdog or the adapter
+  // leaves within seconds rather than after the next Linear poll, and keeps the
+  // heartbeat fresh through a long rate-limit wait. True when a wake is due.
+  const pause = async (ms) => {
+    const until = Date.now() + ms;
+    let beat = Date.now();
+    while (Date.now() < until) {
+      await sleep(Math.min(1000, until - Date.now()));
+      if (await wakes.due({ settleMs: SETTLE_MS })) return true;
+      if (Date.now() - beat >= 15_000) {
+        beat = Date.now();
+        record.lastPollAt = new Date().toISOString();
+        await writeJson(WATCH_FILE, record);
+      }
+    }
+    return false;
+  };
+
   const deliver = async () => {
     const batch = await wakes.next({ settleMs: SETTLE_MS });
     if (!batch) return null;
@@ -356,15 +402,9 @@ async function main() {
     if (!enabled) return report(WATCH_FILE, record, { wake: 'loop-off', events: [] });
     if (await deliver()) return;
 
-    // Sleep in short steps so a wake deposited by the watchdog or the adapter
-    // leaves within seconds rather than after the next Linear poll.
-    const wakeAt = Date.now() + INTERVAL;
-    let due = false;
-    while (!due && Date.now() < wakeAt) {
-      await sleep(Math.min(1000, wakeAt - Date.now()));
-      due = await wakes.due({ settleMs: SETTLE_MS });
-    }
-    if (due) continue;
+    const waitMs = record.rateLimitedUntil ? Math.max(0, Date.parse(record.rateLimitedUntil) - Date.now())
+      : lowBudget(budget) ? INTERVAL * LOW_BUDGET_SLOWDOWN : INTERVAL;
+    if (await pause(waitMs)) continue;
 
     // Checked here rather than left to `pkill -f linear_watch.mjs`, which the
     // skill used to prescribe: that pattern would also kill the watcher of any
@@ -380,13 +420,39 @@ async function main() {
 
     let current;
     let rawErrors;
+    const saving = lowBudget(budget);
     try {
-      const activity = await runAgent('sync-activity');
+      // The activity sync is what costs (~3 600 points per ticket read): only
+      // tickets that moved, and none while the budget is low.
+      const activity = saving ? { errors: previous?.activityErrors || [] } : await runAgent('sync-activity', '--incremental');
+      if (saving) await wakes.note('low-budget-sync');
       const waits = await runAgent('wait', 'reconcile');
       if (waits.events?.length) return report(WATCH_FILE, record, { wake: 'external-wait', events: waits.events, errors: waits.errors });
       current = await runAgent('pulse');
       rawErrors = [...(activity.errors || []), ...(waits.errors || [])];
+      budget = current.rateLimit || activity.rateLimit || budget;
+      delete current.rateLimit;
+      // Per-ticket 429s mean the whole budget is gone, not one ticket.
+      const limited = rawErrors.map(e => rateLimitedUntil(e.error)).find(Boolean);
+      if (limited) throw new Error(`graphql 429 (reset ${new Date(limited).toISOString()}): activity sync rate-limited`);
     } catch (error) {
+      const until = rateLimitedUntil(error.message);
+      if (until) {
+        // Not a failure of the loop: Linear said when to come back. Wait for it,
+        // visibly, and tell the owner once if the cut outlasts the grace.
+        if (!limitedSince) {
+          limitedSince = Date.now();
+          await writeJson(RATE_LIMIT_FILE, { since: limitedSince });
+        }
+        record.rateLimitedUntil = new Date(until).toISOString();
+        await writeJson(WATCH_FILE, record);
+        console.error(`rate-limited by Linear until ${record.rateLimitedUntil}`);
+        await wakes.note('rate-limited-poll');
+        if (until - limitedSince >= RATE_LIMIT_REPORT_MS) {
+          await wakes.deposit([{ key: `rate-limited:${limitedSince}`, wake: 'linear-rate-limited', since: new Date(limitedSince).toISOString(), until: record.rateLimitedUntil, events: [] }]);
+        }
+        continue;
+      }
       // A transient API failure is not an event, but an expired token is not
       // transient. Giving up after a few tries is what turns a silent 30-minute
       // spin into a `watcher-failed` somebody can read. A 503 or 429 gets a
@@ -401,6 +467,15 @@ async function main() {
     }
     failures = 0;
     transientFailures = 0;
+    if (limitedSince) {
+      limitedSince = null;
+      await writeJson(RATE_LIMIT_FILE, { since: null });
+    }
+    if (record.rateLimitedUntil || budget) {
+      delete record.rateLimitedUntil;
+      record.rateLimit = budget;
+      await writeJson(WATCH_FILE, record);
+    }
     current.activityErrors = reportableErrors(rawErrors, streaks);
     if (rawErrors.length > current.activityErrors.length) await wakes.note('transient-activity');
 
