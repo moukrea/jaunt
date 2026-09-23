@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fnmatch
 import secrets
 import hashlib
 import json
@@ -343,7 +344,7 @@ def release_verify(tag, component, expected_sha=None):
     return {'tag': tag, 'sha': actual, 'url': release['html_url'], 'hashes': hashes}
 
 
-def download_assets(release_id, directory):
+def download_assets(release_id, directory, patterns=None):
     """Fetch a published release's files by id.
 
     The tag and list views of some channel releases show `assets: []` while the
@@ -352,6 +353,11 @@ def download_assets(release_id, directory):
     assets = pages(f'{repo()}/releases/{int(release_id)}/assets')
     if not assets:
         raise ValueError('Published release has no assets')
+    if patterns:
+        for pattern in patterns:
+            if not any(fnmatch.fnmatchcase(a['name'], pattern) for a in assets):
+                raise ValueError(f'No release asset matches {pattern!r}')
+        assets = [a for a in assets if any(fnmatch.fnmatchcase(a['name'], p) for p in patterns)]
     for asset in assets:
         name = asset['name']
         if PurePosixPath(name).name != name or name in ('.', '..') or '\\' in name:
@@ -363,6 +369,16 @@ def download_assets(release_id, directory):
                                      '-H', 'Accept: application/octet-stream'], stdout=target, stderr=subprocess.PIPE)
         if result.returncode:
             raise RuntimeError(f'gh api asset download failed: {result.stderr.decode(errors="replace")[-2000:]}')
+
+
+def release_download(tag, directory, patterns):
+    """`gh release download <tag>` through the id views: production tag views
+    also show `assets: []`, intermittently (JAU-108)."""
+    matches = [r for r in pages(f'{repo()}/releases') if r['tag_name'] == tag]
+    if len(matches) != 1 or matches[0]['draft']:
+        raise ValueError(f'No published release for tag: {tag}')
+    Path(directory).mkdir(parents=True, exist_ok=True)
+    download_assets(matches[0]['id'], directory, patterns)
 
 
 def require_authority(selected):
@@ -733,13 +749,16 @@ async def relay_probe():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['preflight', 'prepare', 'promote', 'finish', 'failed', 'verify-assets', 'relay-probe', 'publish'])
+    parser.add_argument('command', choices=['preflight', 'prepare', 'promote', 'finish', 'failed', 'verify-assets', 'relay-probe', 'publish', 'download'])
     parser.add_argument('--directory')
     parser.add_argument('--tag')
     parser.add_argument('--component', choices=COMPONENTS)
+    parser.add_argument('--pattern', action='append')
     args = parser.parse_args()
     if args.command == 'publish':
         publish(args.directory, args.component, args.tag)
+    elif args.command == 'download':
+        release_download(args.tag, args.directory, args.pattern)
     elif args.command == 'relay-probe':
         asyncio.run(relay_probe())
     elif args.command == 'verify-assets':

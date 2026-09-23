@@ -134,12 +134,18 @@ jobs:
           p.write_text(json.dumps(value,indent=2)+'\n')
           PYCONFIG
       - run: python scripts/check_project.py
+      # Main's release tooling: it reads release files by id (JAU-108).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .control
+          persist-credentials: false
       - name: Require published host assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).release")
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern host-manifest.json --pattern SHA256SUMS --pattern 'jaunt_host-*.whl' --dir /tmp/jaunt-release
+          python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern host-manifest.json --pattern SHA256SUMS --pattern 'jaunt_host-*.whl' --directory /tmp/jaunt-release
           python - <<'PYVERIFY'
           import hashlib,json,pathlib
           root=pathlib.Path('/tmp/jaunt-release')
@@ -163,7 +169,7 @@ jobs:
         run: |
           TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).androidRelease || ''")
           if [ -n "$TAG" ]; then
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --pattern SHA256SUMS --pattern SIGNING-CERTIFICATE.txt --dir /tmp/jaunt-android-release
+            python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern '*.apk' --pattern SHA256SUMS --pattern SIGNING-CERTIFICATE.txt --directory /tmp/jaunt-android-release
             python3 - <<'PYANDROID'
           import hashlib,pathlib
           root=pathlib.Path('/tmp/jaunt-android-release')
@@ -184,7 +190,7 @@ jobs:
         run: |
           TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).desktopRelease || ''")
           if [ -n "$TAG" ]; then
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-x64.tar.gz' --pattern SHA256SUMS --dir /tmp/jaunt-desktop-release
+            python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern '*-x64.tar.gz' --pattern SHA256SUMS --directory /tmp/jaunt-desktop-release
             python3 - <<'PYDESKTOP'
           import hashlib,pathlib
           root=pathlib.Path('/tmp/jaunt-desktop-release')
@@ -193,11 +199,6 @@ jobs:
           assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
           PYDESKTOP
           fi
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: .control
-          persist-credentials: false
       - uses: actions/download-artifact@v4
         if: needs.channel-web.result != 'skipped'
         continue-on-error: true

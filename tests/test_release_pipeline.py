@@ -426,6 +426,27 @@ def test_release_verify_refuses_unsafe_or_incomplete_assets(monkeypatch, name, s
         pipeline.release_verify('v1.ch.fixture.1', 'host')
 
 
+def test_release_download_reads_matching_assets_by_release_id(monkeypatch, tmp_path):
+    files = host_release_files()
+    calls = by_id_release(monkeypatch, files)
+    pipeline.release_download('v1.ch.fixture.1', tmp_path / 'out', ['host-manifest.json', 'jaunt_host-*.whl'])
+    assert sorted(p.name for p in (tmp_path / 'out').iterdir()) == sorted(n for n in files if n != 'SHA256SUMS')
+    assert 'repos/owner/fixture/releases/42/assets' in calls
+    assert len([c for c in calls if isinstance(c, list)]) == 2  # SHA256SUMS was not fetched
+
+
+def test_release_download_refuses_missing_pattern_draft_or_unknown_tag(monkeypatch, tmp_path):
+    by_id_release(monkeypatch, host_release_files())
+    with pytest.raises(ValueError, match='No release asset matches'):
+        pipeline.release_download('v1.ch.fixture.1', tmp_path, ['*.apk'])
+    assert not any(tmp_path.iterdir())
+    with pytest.raises(ValueError, match='No published release'):
+        pipeline.release_download('v9.unknown', tmp_path, None)
+    monkeypatch.setattr(pipeline, 'pages', lambda path, field=None: [{'id': 42, 'tag_name': 'v1.ch.fixture.1', 'draft': True}])
+    with pytest.raises(ValueError, match='No published release'):
+        pipeline.release_download('v1.ch.fixture.1', tmp_path, None)
+
+
 def test_preflight_rejects_other_publication_and_does_not_log_token(monkeypatch, capsys):
     monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/fixture')
     monkeypatch.setenv('GITHUB_RUN_ID', '123')
