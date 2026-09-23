@@ -54,7 +54,7 @@
     "components": [
       "host"
     ],
-    "status": "publishing",
+    "status": "failed",
     "run": "35812733155"
   },
   "history": [
