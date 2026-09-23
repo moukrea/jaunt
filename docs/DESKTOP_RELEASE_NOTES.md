@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.36
+
+- feat(android): let the app follow an update channel (JAU-86) (#100)
+- Source: `2b8d0452894f4a17b28a63ece626562c75abb890`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
