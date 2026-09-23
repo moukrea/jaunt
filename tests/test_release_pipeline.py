@@ -370,6 +370,62 @@ def test_release_verify_refuses_wrong_tag_target(repository, monkeypatch):
         namespace['release_verify'](repository['tags']['host'], 'host', 'f' * 40)
 
 
+def host_release_files():
+    wheel = 'jaunt_host-0.1.0b47+ch.fixture.1.1-py3-none-any.whl'
+    data = bytes(range(256))  # not UTF-8: the download must stay binary
+    manifest = json.dumps({'wheel': wheel, 'sha256': hashlib.sha256(data).hexdigest()}).encode()
+    files = {wheel: data, 'host-manifest.json': manifest}
+    files['SHA256SUMS'] = ''.join(f'{hashlib.sha256(v).hexdigest()}  {k}\n' for k, v in files.items()).encode()
+    return files
+
+
+def by_id_release(monkeypatch, files, states=None):
+    """A published release whose list view shows no assets but whose id view does (JAU-106)."""
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/fixture')
+    assets = [{'id': 500 + i, 'name': name, 'state': (states or {}).get(name, 'uploaded')} for i, name in enumerate(files)]
+    by_id = {a['id']: files[a['name']] for a in assets}
+    listed = {'id': 42, 'tag_name': 'v1.ch.fixture.1', 'draft': False, 'html_url': 'https://example.invalid/r', 'assets': []}
+    calls = []
+
+    def pages(path, field=None):
+        calls.append(path)
+        return assets if path == 'repos/owner/fixture/releases/42/assets' else [listed]
+
+    real = subprocess.run
+
+    def fake_run(args, **kw):
+        if args[:2] != ['gh', 'api']:
+            return real(args, **kw)
+        calls.append(args)
+        kw['stdout'].write(by_id[int(args[2].rsplit('/', 1)[1])])
+        return subprocess.CompletedProcess(args, 0, stderr=b'')
+
+    monkeypatch.setattr(pipeline, 'pages', pages)
+    monkeypatch.setattr(pipeline, 'git', lambda *args, **kw: 'a' * 40)
+    monkeypatch.setattr(pipeline, 'run', lambda *args, **kw: pytest.fail(f'unexpected command {args}'))
+    monkeypatch.setattr(pipeline.subprocess, 'run', fake_run)
+    return calls
+
+
+def test_release_verify_reads_assets_by_release_id(monkeypatch):
+    files = host_release_files()
+    calls = by_id_release(monkeypatch, files)
+    receipt = pipeline.release_verify('v1.ch.fixture.1', 'host', 'a' * 40)
+    assert receipt['hashes'] == {k: hashlib.sha256(v).hexdigest() for k, v in files.items() if k != 'SHA256SUMS'}
+    assert 'repos/owner/fixture/releases/42/assets' in calls
+    assert all('Accept: application/octet-stream' in c for c in calls if isinstance(c, list))
+
+
+@pytest.mark.parametrize('name,state', [('../escape', 'uploaded'), ('SHA256SUMS', 'starter')])
+def test_release_verify_refuses_unsafe_or_incomplete_assets(monkeypatch, name, state):
+    files = host_release_files()
+    if name not in files:
+        files[name] = b'x'
+    by_id_release(monkeypatch, files, {name: state})
+    with pytest.raises(ValueError, match='Invalid release asset name|not uploaded'):
+        pipeline.release_verify('v1.ch.fixture.1', 'host')
+
+
 def test_preflight_rejects_other_publication_and_does_not_log_token(monkeypatch, capsys):
     monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/fixture')
     monkeypatch.setenv('GITHUB_RUN_ID', '123')
