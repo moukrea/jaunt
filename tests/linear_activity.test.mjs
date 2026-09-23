@@ -32,13 +32,34 @@ test('eyes on old messages, foreign apps and unknown authors cannot clear newer 
 test('approval closes only plan decision, not promised work; eyes never approves', () => {
   const p = comment('p', 1, '<!-- jaunt-agent:plan -->\nPlan', me, [reaction('+1', 3)]);
   const result = observeActivity(base(), issue([p]), me.id);
-  assert.equal(result.unread, false); assert.equal(result.active, true);
+  assert.equal(result.unread, false); assert.equal(result.active, false, 'open work is not a question to the agent');
   assert.equal(result.subjects.find(s => s.key === 'plan:p').state, 'resolved');
   assert.equal(result.subjects.find(s => s.key === 'work:p').state, 'open');
   p.reactions = [reaction('eyes', 3)];
   assert.equal(observeActivity(base(), issue([p]), me.id).subjects.find(s => s.key === 'plan:p').state, 'open');
   p.reactions = [reaction('+1', 3)];
   assert.equal(observeActivity(base(), issue([p, comment('h', 4, 'Une correction', user)]), me.id).subjects.find(s => s.key === 'plan:p').state, 'open');
+});
+
+test('the label marks only a human question the agent has not answered yet (JAU-102)', () => {
+  const asked = [comment('a', 1, 'News'), comment('h', 2, 'Pourquoi ?', user)];
+  const waiting = observeActivity(base(), issue(asked), me.id);
+  assert.equal(waiting.active, true);
+  const answered = observeActivity(waiting, issue([...asked, comment('r', 3, 'Parce que…')]), me.id);
+  assert.equal(answered.active, false, 'an agent reply takes the label off');
+  assert.equal(answered.subjects.find(s => s.key === 'feedback:h').state, 'open', 'but does not resolve the question');
+  const technical = { ...waiting, technical: ['t'] };
+  assert.equal(observeActivity(technical, issue([...asked, comment('t', 3, 'Receipt'), comment('k', 4, '<!-- jaunt-agent:ack -->\nOK')]), me.id).active, true, 'receipts are not answers');
+  assert.equal(observeActivity(base(), issue([comment('p', 1, '<!-- jaunt-agent:plan -->\nPlan'), comment('e', 2, '**Attendu de toi :** choisir')]), me.id).active, false, 'questions to the human do not set it');
+});
+
+test('closing the ticket takes the label off, except for a question asked after closure (JAU-101)', () => {
+  const closed = comments => ({ ...issue(comments), state: { type: 'completed' }, completedAt: at(5) });
+  const before = [comment('h', 2, 'Pourquoi ?', user)];
+  assert.equal(observeActivity(base(), closed(before), me.id).active, false);
+  assert.equal(observeActivity(base(), { ...issue(before), state: { type: 'duplicate' }, canceledAt: at(5) }, me.id).active, false);
+  assert.equal(observeActivity(base(), closed([...before, comment('late', 8, 'Et ça ?', user)]), me.id).active, true);
+  assert.equal(observeActivity(base(), { ...issue(before), state: { type: 'started' } }, me.id).active, true);
 });
 
 test('written approvals and cheers resolve the plan like verdict does (JAU-80)', () => {
@@ -113,7 +134,7 @@ test('publish repairs partial label failure without duplicating comment or losin
   assert.equal(result.activity.ok,false);assert.ok(result.id);assert.match(result.activity.retry,/do not republish/);
   assert.equal(f.issues.get('JAU-1').comments.length,1);
   f.failLabels(false);await f.service.sync('JAU-1');
-  assert.deepEqual(f.issues.get('JAU-1').labels.nodes.map(l=>l.id).sort(),['active','third-party','unread']);
+  assert.deepEqual(f.issues.get('JAU-1').labels.nodes.map(l=>l.id).sort(),['third-party','unread']);
   const before=f.writes;await f.service.sync('JAU-1');assert.equal(f.writes,before);
   f.issues.get('JAU-1').comments.push(comment('read',20,'lu',user));await f.service.sync('JAU-1');
   assert.deepEqual(f.issues.get('JAU-1').labels.nodes.map(l=>l.id),['third-party']);
@@ -124,7 +145,7 @@ test('persistent subjects survive claims, partial resolution, unread handover an
   let r=await f.service.read('JAU-1');assert.equal(r.subjects.length,2);
   const close=s=>({...s,state:'resolved',reason:'Verified delivered',evidence:'https://example.invalid/pr/1'});
   await f.service.update('JAU-1',{revision:r.revision,subjects:r.subjects.map(close)});
-  r=await f.service.read('JAU-1');assert.equal(r.active,true,'handover still unread');
+  r=await f.service.read('JAU-1');assert.equal(r.unread,true,'handover still unread');assert.equal(r.active,false);
   f.issues.get('JAU-1').comments.push(comment('read',20,'lu',user));await f.service.sync('JAU-1');
   assert.equal((await discussionStore(f.dir).read('JAU-1')).active,false);
   f.issues.get('JAU-1').comments.push(comment('new',21,'One more question',user));await f.service.sync();
@@ -150,7 +171,8 @@ test('complete pagination reaches older comments and archived/unclaimed tracked 
   i.comments=Array.from({length:105},(_,n)=>comment(`bot${n}`,300+n,'technical',null));
   i.comments.push(comment('agent',1,'News'),comment('human',200,'lu',user));
   await f.service.sync();const record=await f.service.read('JAU-105');
-  assert.equal(record.unread,false);assert.equal(record.active,true,'lost ledger needs explicit reconciliation');
+  assert.equal(record.unread,false);assert.equal(record.active,false,'a lost ledger is worker work, not a question to answer');
+  assert.ok(record.subjects.some(s=>s.key==='recovery'&&s.state==='open'),'lost ledger needs explicit reconciliation');
   assert.ok(f.calls.filter(c=>c.q.includes('issues(first:')).length>=2);
   assert.ok(f.calls.some(c=>c.q.includes('comments(first:')&&c.v.cursor==='100'));
   await assert.rejects(connectionPages(async()=>({nodes:[],pageInfo:{hasNextPage:true,endCursor:'same'}})),/did not advance/);
@@ -298,4 +320,22 @@ test('incremental sync reads only tickets that moved, once each, with a periodic
   const gone=await f.service.sync(undefined,{incremental:true,now:now+31*60_000});
   assert.equal(gone.errors[0].issue,'JAU-3');
   assert.equal((await f.service.sync(undefined,{incremental:true,now:now+32*60_000})).errors[0].issue,'JAU-3');
+});
+
+test('delivery resolves settled subjects with proof, keeps unanswered questions, refuses an open ticket (JAU-101)',async t=>{
+  const f=await fixture(t),i=f.issues.get('JAU-1');
+  await f.service.publish('JAU-1','<!-- jaunt-agent:plan -->\nPlan');
+  i.comments.push(comment('answered',10,'Pourquoi ?',user));await f.service.publish('JAU-1','Parce que…');
+  i.comments.push(comment('pending',50,'Et ça ?',user));await f.service.sync('JAU-1');
+  await assert.rejects(f.service.delivered('JAU-1','https://example.invalid/pull/1'),/not Done/);
+  i.state={type:'completed'};i.completedAt=at(60);
+  await assert.rejects(f.service.delivered('JAU-1',' '),/evidence/);
+  const result=await f.service.delivered('JAU-1','https://example.invalid/pull/1');
+  assert.deepEqual(result.kept,['feedback:pending']);assert.equal(result.active,false);
+  const r=await f.service.read('JAU-1');
+  assert.equal(r.subjects.find(s=>s.key==='feedback:pending').state,'open');
+  for(const s of r.subjects.filter(s=>s.key!=='feedback:pending'))assert.deepEqual([s.state,s.evidence],['resolved','https://example.invalid/pull/1']);
+  assert.ok(!i.labels.nodes.some(l=>l.id==='active'));
+  const again=await f.service.delivered('JAU-1','https://example.invalid/pull/1');
+  assert.deepEqual(again.closed,[]);assert.equal(again.revision,r.revision);
 });

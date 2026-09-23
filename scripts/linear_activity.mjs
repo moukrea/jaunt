@@ -17,6 +17,7 @@ const APPROVE = new Set(['+1', 'thumbsup', '👍', 'white_check_mark', 'rocket',
 const DECLINE = new Set(['-1', 'thumbsdown', 'x', 'no_entry']);
 const ackText = body => /^(?:lu|vu|merci|\/approve|\/decline)[.!\s]*$/i.test(body.trim());
 const iso = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+const CLOSED = new Set(['completed', 'canceled', 'duplicate']);
 const nonempty = value => typeof value === 'string' && Boolean(value.trim());
 const originLabel = issue => issue.labels.nodes.some(l => l.name === ACTIVITY_LABELS.origin);
 const keyOf = id => { if (!/^[A-Z][A-Z0-9]*-\d+$/.test(id)) throw new Error('invalid discussion identifier'); return id; };
@@ -129,8 +130,26 @@ export function observeActivity(record, issue, me) {
   const unread = publications.some(c => Date.parse(c.body.startsWith(PROVENANCE_MARKER) ? issue.createdAt : c.createdAt) > acknowledged);
   next.subjects = [...subjects.values()];
   next.unread = unread;
-  next.active = unread || next.subjects.some(s => s.state === 'open');
+  // « Discussion active » means a human question waits for the agent, nothing
+  // else (JAU-102): unread news has its own label, and a ticket closed with
+  // every subject still open used to keep it forever (JAU-101). Closing the
+  // ticket takes it off, except for a question asked after the closure.
+  const closedAt = CLOSED.has(issue.state?.type) ? Date.parse(issue.completedAt || issue.canceledAt || '') : NaN;
+  next.active = pendingQuestions(next, issue, me).some(s => !CLOSED.has(issue.state?.type) ||
+    Date.parse(issue.comments.find(c => c.id === s.source).createdAt) > closedAt);
   return next;
+}
+
+// Open human questions with no agent publication after them. Answering takes
+// the label off but does not resolve the subject: only the ledger does that.
+export function pendingQuestions(record, issue, me) {
+  const said = issue.comments.filter(c => c.user?.id === me && !c.botActor && iso(c.createdAt) && !record.technical.includes(c.id) &&
+    !c.body.startsWith(ACK_MARKER) && !c.body.startsWith(PROVENANCE_MARKER)).map(c => Date.parse(c.createdAt));
+  return record.subjects.filter(s => {
+    if (s.state !== 'open' || !s.key.startsWith('feedback:')) return false;
+    const asked = issue.comments.find(c => c.id === s.source);
+    return Boolean(asked) && !said.some(at => at > Date.parse(asked.createdAt));
+  });
 }
 
 export function updateSubjects(record, patch, comments) {
@@ -178,7 +197,8 @@ export function activityService({ stateDir, graphql, team, agent }) {
     let issue;
     const comments = await connectionPages(async cursor => {
       const data = await graphql(`query($id: String!, $cursor: String) { issue(id: $id) {
-        id identifier title description createdAt updatedAt team { id } labels { nodes { id name } }
+        id identifier title description createdAt updatedAt completedAt canceledAt state { type }
+        team { id } labels { nodes { id name } }
         comments(first: 100, after: $cursor) { nodes { id body createdAt parent { id } botActor { id }
           user { id email } reactions { emoji createdAt user { id email } } } ${pageInfo} }
       } }`, { id, cursor });
@@ -285,6 +305,25 @@ export function activityService({ stateDir, graphql, team, agent }) {
       });
     },
     async read(id) { return store.read(keyOf(id)); },
+    // Delivery closes what a merged PR settles (JAU-101). A human question the
+    // agent never answered stays open and is reported, not buried.
+    async delivered(id, evidence) {
+      if (!nonempty(evidence)) throw new Error('delivery evidence required');
+      return store.lock(id, async () => {
+        const issue = await readIssue(id);
+        if (issue.state?.type !== 'completed') throw new Error(`${id}: ticket is not Done; subjects stay open`);
+        const before = await initial(issue), me = (await agent()).id;
+        const kept = new Set(pendingQuestions(observeActivity(before, issue, me), issue, me).map(s => s.key));
+        const next = structuredClone(before), closed = [];
+        for (const s of next.subjects) {
+          if (s.state !== 'open' || kept.has(s.key)) continue;
+          Object.assign(s, { state: 'resolved', reason: 'Ticket livré et clos', evidence });
+          closed.push(s.key);
+        }
+        const result = await reconcile(issue, await saveChanged(before, next));
+        return { issue: id, closed, kept: [...kept], active: result.active, revision: result.revision };
+      });
+    },
     async update(id, patch) {
       return store.lock(id, async () => {
         const issue = await readIssue(id), before = await initial(issue);

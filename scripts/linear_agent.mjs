@@ -1893,7 +1893,14 @@ const COMMANDS = {
   'routing-thread': async ([id]) => ({ ...(await readRoutingThread(required(id, 'routing-thread <ISSUE-ID>'))), agentId: (await agentUser()).id }),
   'sync-activity': async ([id], flags) => withRateLimit(await (await activity()).sync(id, { incremental: flags.incremental === true })),
   discussion: async ([id], flags) => {
-    required(id, 'discussion <ISSUE-ID> [--file <json|->]');
+    required(id, 'discussion <ISSUE-ID> [--file <json|-> | --delivered <merged-PR-URL>]');
+    if (flags.delivered !== undefined) {
+      // For tickets cleaned up before JAU-101: the merged PR is the proof.
+      if (typeof flags.delivered !== 'string' || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+$/.test(flags.delivered)) throw new Error('--delivered requires a GitHub PR URL');
+      const { stdout } = await exec('gh', ['pr', 'view', flags.delivered, '--json', 'state'], { cwd: ROOT });
+      if (JSON.parse(stdout).state !== 'MERGED') throw new Error('--delivered requires a merged PR');
+      return (await activity()).delivered(id, flags.delivered);
+    }
     if (flags.file === undefined) return (await activity()).read(id);
     if (typeof flags.file !== 'string') throw new Error('--file requires a filename or -');
     const patch = JSON.parse(flags.file === '-' ? await readStdin() : await readFile(flags.file, 'utf8'));
@@ -2036,10 +2043,14 @@ const COMMANDS = {
       const claim = (await listClaims()).find(c => c.issue === id);
       if (!claim || (await getIssue(id)).state.type !== 'completed') throw new Error('completed claimed ticket required');
       const run = async (cmd, args, cwd) => (await exec(cmd, args, { cwd })).stdout;
-      const pr = JSON.parse(await run('gh', ['pr', 'view', flags.pr, '--json', 'state,headRefName,headRefOid,mergeCommit'], ROOT));
-      return cleanupWorktree({ root: ROOT, state: STATE_DIR, claim, pr, record: await currentAttempt(STATE_DIR, claim), run,
+      const pr = JSON.parse(await run('gh', ['pr', 'view', flags.pr, '--json', 'state,headRefName,headRefOid,mergeCommit,url'], ROOT));
+      const released = await cleanupWorktree({ root: ROOT, state: STATE_DIR, claim, pr, record: await currentAttempt(STATE_DIR, claim), run,
         remove: cwd => run('git', ['worktree', 'remove', cwd], ROOT),
         release: before => closureStore().release(id, undefined, before) });
+      // The claim is gone already: a failed ledger write is reported with its
+      // retry, never undone into a half-released claim (JAU-101).
+      try { return { ...released, discussion: await (await activity()).delivered(id, pr.url) }; }
+      catch (e) { return { ...released, discussion: { ok: false, error: e.message, retry: `discussion ${id} --delivered ${pr.url}` } }; }
     });
   },
   status: async () => ({ landing: await landingStore({ root: ROOT }).status(), workers: await workerReports(STATE_DIR), ...(await lockStatus()), loop: { ...(await loopState()), ...(await watcherState()) } }),
@@ -2148,7 +2159,7 @@ export const COMMAND_FLAGS = {
     revise: ['runtime', 'session', 'action', 'reason', 'comment', 'deadline'],
     attempt: ['runtime', 'session', 'action', 'result', 'evidence', 'deadline'],
     resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket', 'delivered'], ack: ['event', 'evidence'] },
-  'sync-activity': ['incremental'], discussion: ['file'],
+  'sync-activity': ['incremental'], discussion: ['file', 'delivered'],
   whoami: [], team: [], next: [], board: [], pulse: [], attribute: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],
   surface: ['files', 'symbols'], stop: [], 'stop-requested': [], list: [], show: [],
