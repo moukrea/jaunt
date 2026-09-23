@@ -29,6 +29,7 @@
 
 import { skillStore } from './linear_skills.mjs';
 import { workerWake } from './linear_workers.mjs';
+import { attributionWindows, filterSelf } from './linear_attribution.mjs';
 import { wakeStore } from './linear_wakes.mjs';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -326,6 +327,25 @@ export function diff(previous, current) {
   return events;
 }
 
+// The agent's own Linear writes — comments, plans, activity labels, relations,
+// created tickets, states it parked — move the pulse like anybody else's, and
+// each one used to cost a model turn that found nothing (JAU-15). The author is
+// read back only for tickets that moved; a failed read keeps every event.
+export async function withoutSelfWrites(events, previous, wakes, read = windows => runAgent('attribute', JSON.stringify(windows))) {
+  const windows = attributionWindows(events, previous);
+  if (!Object.keys(windows).length) return events;
+  let verdicts;
+  try {
+    ({ verdicts } = await read(windows));
+  } catch (error) {
+    console.error(`attribution failed, waking anyway: ${error.message}`);
+    return events;
+  }
+  const kept = filterSelf(events, verdicts);
+  if (kept.suppressed) await wakes.note('self-authored', kept.suppressed);
+  return kept.events;
+}
+
 // Every exit goes through here, so the record on disk can never say "polling"
 // about a process that has stopped. That is the state the old watcher left
 // behind on every single exit, and it is indistinguishable from a crash.
@@ -485,10 +505,13 @@ async function main() {
       await writeJson(PULSE_FILE, previous);
       continue;
     }
-    const events = previous ? diff(previous, current) : [];
+    const moved = previous ? diff(previous, current) : [];
+    const events = await withoutSelfWrites(moved, previous, wakes);
     if (activityChanged) events.push({ type: current.activityErrors.length ? 'activity-failed' : 'activity-recovered', errors: current.activityErrors });
     const unresolved = await routeWake({ wake: 'board-changed', at: current.at, events });
-    if (events.length > 0 || unresolved) await writeJson(PULSE_FILE, current);
+    // The baseline advances past the agent's own writes too, or they would be
+    // attributed again on every poll.
+    if (moved.length > 0 || events.length > 0 || unresolved) await writeJson(PULSE_FILE, current);
     if (unresolved) await wakes.deposit([unresolved]);
     previous = current;
   }

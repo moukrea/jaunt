@@ -194,7 +194,7 @@ for (const role of ['watcher', 'watchdog', 'external-wait']) test(`real ${role} 
   const root = await mkdtemp(join(tmpdir(), 'jaunt-route-watch-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'scripts')); await mkdir(join(root, '.dev-state'));
-  for (const name of ['linear_watch.mjs', 'linear_wakes.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
+  for (const name of ['linear_watch.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
   await writeFile(join(root, '.dev-state/linear-loop.json'), '{"enabled":true}');
   await writeFile(join(root, 'scripts/linear_skills.mjs'), 'export const skillStore=()=>({wake:async()=>null});');
   await writeFile(join(root, 'scripts/linear_workers.mjs'), `

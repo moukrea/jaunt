@@ -186,7 +186,7 @@ test('real watcher synchronizes before pulse and reports sync failures without a
   const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
   const exec=promisify(execFile),f=await fixture(t),root=f.dir;
   await mkdir(join(root,'scripts'));await mkdir(join(root,'.dev-state'));
-  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
+  for(const name of ['linear_watch.mjs','linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_skills.mjs'])await copyFile(new URL(`../scripts/${name}`,import.meta.url),join(root,'scripts',name));
   await writeFile(join(root,'.dev-state/linear-loop.json'),JSON.stringify({enabled:true}));
   await writeFile(join(root,'.dev-state/linear-pulse.json'),JSON.stringify({tickets:{}}));
   const {skillStore}=await import('../scripts/linear_skills.mjs');
@@ -201,7 +201,9 @@ test('real watcher synchronizes before pulse and reports sync failures without a
   const {wakeStore}=await import('../scripts/linear_wakes.mjs');
   const take=()=>wakeStore(join(root,'.dev-state')).take();
   const result=JSON.parse((await exec(process.execPath,args,{timeout:5000})).stdout);
-  assert.equal(result.wake,'board-changed');await take();assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\n');
+  // A ticket that appeared is attributed before it wakes anyone (JAU-15); this
+  // mock answers no verdict, so the watcher wakes as it always did.
+  assert.equal(result.wake,'board-changed');await take();assert.equal(await readFile(join(root,'calls.txt'),'utf8'),'sync-activity\nwait\npulse\nattribute\n');
   const partialMock = errors => `import {appendFile} from 'node:fs/promises';
     await appendFile(new URL('../calls.txt',import.meta.url),process.argv[2]+'\\n');
     console.log(JSON.stringify(process.argv[2]==='sync-activity'?{ok:${errors.length===0},errors:${JSON.stringify(errors)}}:{at:'now',tickets:{'JAU-1':{u:'1',s:'Backlog',c:'one',cu:'1'}}}));`;
