@@ -88,7 +88,7 @@ export async function promoteWaitQueue(candidates, { claims, enabled, verdict, i
 }
 
 export function waitStore({ stateDir, readThread, agentId, publish, persistClaim, verifyMerge,
-  syncDiscussion, queuedClaims = async () => [], promoteQueued = async () => [], now = () => Date.now() }) {
+  verifyDelivery = async () => { throw Error('delivery verification unavailable'); }, syncDiscussion, queuedClaims = async () => [], promoteQueued = async () => [], now = () => Date.now() }) {
   const lock = action => withWorkerLock(stateDir, 'WAIT-0', action);
   const save = w => atomicJson(path(stateDir, w.issue), w);
   const stamp = () => new Date(now()).toISOString();
@@ -208,11 +208,18 @@ export function waitStore({ stateDir, readThread, agentId, publish, persistClaim
         await post(w, name, `**Échéance dépassée** — ${w.reason}\nResponsable : ${w.owner}. Échéance : ${w.deadline}.\n` +
           `Prochaine action : ${w.nextAction}\nTentatives : ${w.attempts.length ? w.attempts.map(a => `${a.action} → ${a.result}`).join('; ') : 'aucune'}.\n` +
           `La demande précise à traiter reste celle en tête de ce fil ; aucune reprise sur silence.\n\n**Rien attendu de toi de plus que la réponse demandée en tête de ce fil.**`, thread.comments);
-        event(w, name, 'wait-overdue');
+        // One wake per deadline: if the watchdog already raised this generation,
+        // the event is born notified and the watcher does not wake again (JAU-98).
+        const raised = w.watchdog?.generation === w.generation && w.watchdog.at;
+        event(w, name, 'wait-overdue', raised ? { notified: { attempts: 1, at: raised, by: 'watchdog' } } : {});
       }
       if (w.state === 'resolved') {
-        await post(w, 'resolution', `**Attente résolue** — ${w.resolution.evidence}\n` +
-          `${w.resolution.ticket ? `Obligation transférée explicitement à ${w.resolution.ticket}.` : 'Résultat enregistré par la session propriétaire.'}\n\n**Rien attendu de toi.** Pour information.`, thread.comments);
+        const d = w.resolution.delivery;
+        await post(w, 'resolution', d
+          ? `**Attente résolue sur preuve de livraison** — ${w.resolution.evidence}\n` +
+            `Vérifié par le CLI : reçu \`${d.status}\` pour ${d.source} (run ${d.run}), Page publique sur ${d.releaseSource}. Aucune décision humaine n'est nécessaire pour constater un résultat déjà obtenu.\n\n**Rien attendu de toi.** Pour information.`
+          : `**Attente résolue** — ${w.resolution.evidence}\n` +
+            `${w.resolution.ticket ? `Obligation transférée explicitement à ${w.resolution.ticket}.` : 'Résultat enregistré par la session propriétaire.'}\n\n**Rien attendu de toi.** Pour information.`, thread.comments);
         await active(w); await syncDiscussion(w);
         w.discussionResolved = true;
       }
@@ -264,11 +271,14 @@ export function waitStore({ stateDir, readThread, agentId, publish, persistClaim
             const w = await reconcileOne(c);
             results.push({ issue: id, ...waitProgress(w, now()) });
             if (w.error) errors.push({ issue: id, error: w.error });
-            const pending = w.events.filter(e => !e.acknowledged);
-            const signature = pending.map(e => e.id).join('|');
-            const n = w.notification?.signature === signature ? w.notification : { signature, attempts: 0 };
-            if (pending.length && n.attempts < 3 && (!n.at || now() - Date.parse(n.at) >= 300000)) {
-              events.push(...pending); w.notification = { ...n, attempts: n.attempts + 1, at: stamp() }; await save(w);
+            // Tracked per event, so a new reply never drags an old deadline back
+            // in. An overdue deadline wakes once (its Linear comment stays);
+            // replies and promotions carry a message and keep bounded retries.
+            const due = w.events.filter(e => !e.acknowledged && (e.type === 'wait-overdue' ? !e.notified
+              : (e.notified?.attempts || 0) < 3 && (!e.notified?.at || now() - Date.parse(e.notified.at) >= 300000)));
+            if (due.length) {
+              for (const e of due) e.notified = { attempts: (e.notified?.attempts || 0) + 1, at: stamp() };
+              events.push(...due); await save(w);
             }
           } catch (e) { errors.push({ issue: id, error: e.message }); }
         }
@@ -336,6 +346,24 @@ export function waitStore({ stateDir, readThread, agentId, publish, persistClaim
         if (!w || !text(input.evidence)) throw Error('wait and outcome evidence required');
         if (w.state === 'resolved') return reconcileOne(c);
         const thread = await readThread(id), replies = waitReplies(w, thread.comments, agentId), latest = replies.at(-1);
+        // Observing a verified outcome needs no consent; consent gates actions
+        // still to be done (JAU-98). Publication only, checked by the CLI, and
+        // never over a human who answered anything but approval.
+        if (input.delivered) {
+          if (input.comment || input.ticket) throw Error('--delivered takes neither a decision comment nor a transfer');
+          if (w.resource !== 'jaunt-production-release') throw Error('proof-only resolution covers publication waits only; this wait needs the human decision');
+          if (latest && latest.body.trim() !== `/wait ${w.id} approve`) throw Error('a human answered this wait; follow their latest message instead of resolving on proof');
+          const delivery = await verifyDelivery(w.proof.merge);
+          if (delivery?.source !== w.proof.merge || delivery.status !== 'delivered') throw Error('delivery of the merged source not verified');
+          const fresh = waitReplies(w, (await readThread(id)).comments, agentId).at(-1);
+          if (JSON.stringify(fresh) !== JSON.stringify(latest)) throw Error('Linear thread changed during resolution');
+          await unchanged(c);
+          w.state = 'resolved'; w.lastProgressAt = stamp();
+          w.resolution = { at: stamp(), kind: 'delivered', comment: latest?.id || null, evidence: input.evidence, delivery };
+          w.failures = 0; delete w.retryAt;
+          await save(w);
+          return reconcileOne(c);
+        }
         if (!latest || latest.id !== input.comment || latest.body.trim() !== `/wait ${w.id} approve`) throw Error('latest explicit Linear decision for this action required; silence/reactions/old approval are not consent');
         if (input.ticket) {
           key(input.ticket);
@@ -371,12 +399,14 @@ export async function waitWake(state, now = Date.now()) {
       if (!c?.claimedAt || await readJson(join(state, 'claims', `${c.issue}.stop`))) continue;
       const w = await readWait(state, c);
       if (!w || w.state !== 'open' || now < Date.parse(w.deadline)) continue;
-      if (w.posts[`deadline-${w.generation}`]?.id) continue;
-      const n = w.watchdog?.generation === w.generation ? w.watchdog : { generation: w.generation, attempts: 0 };
-      if (n.attempts >= 3 || (n.at && now - Date.parse(n.at) < 300000)) continue;
-      w.watchdog = { ...n, attempts: n.attempts + 1, at: new Date(now).toISOString() };
+      // One wake per deadline generation, shared with the watcher's reconcile:
+      // whichever raises it first, the other stays silent (JAU-98).
+      if (w.posts[`deadline-${w.generation}`]?.id || w.events.some(e => e.id === `deadline-${w.generation}`)) continue;
+      if (w.watchdog?.generation === w.generation) continue;
+      w.watchdog = { generation: w.generation, attempts: 1, at: new Date(now).toISOString() };
       await atomicJson(path(state, c.issue), w);
-      return { wake: 'wait-overdue', events: [{ type: 'wait-overdue', ticket: c.issue }], progress: waitProgress(w, now) };
+      return { wake: 'wait-overdue', wait: w.id, generation: w.generation,
+        events: [{ type: 'wait-overdue', ticket: c.issue }], progress: waitProgress(w, now) };
     }
     return null;
   });

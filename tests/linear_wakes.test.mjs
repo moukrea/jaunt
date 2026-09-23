@@ -251,3 +251,12 @@ test('with little budget left the watcher skips the activity sync and polls less
   assert.ok((await wakeStore(join(root, '.dev-state')).status()).metrics['suppressed:low-budget-sync'] >= 1);
   assert.equal(JSON.parse(await readFile(join(root, '.dev-state/linear-watch.json'), 'utf8')).rateLimit.remaining, 100000);
 });
+
+test('an overdue wait deadline noticed twice by the watchdog is one wake (JAU-98)', async t => {
+  const c = clock(), wakes = wakeStore(await temporary(t), c);
+  const overdue = { wake: 'wait-overdue', wait: 'w1', generation: 2, events: [{ type: 'wait-overdue', ticket: 'JAU-84' }] };
+  assert.equal(wakeKey(overdue), 'wait-overdue:JAU-84:w1:2');
+  assert.notEqual(wakeKey(overdue), wakeKey({ ...overdue, generation: 3 }));
+  assert.equal(await wakes.deposit([overdue]), 1);
+  assert.equal(await wakes.deposit([{ ...overdue }]), 0);
+});

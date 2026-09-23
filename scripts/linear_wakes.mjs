@@ -41,6 +41,10 @@ export function wakeKey(event) {
         : `worker:${issue}:${attempt}:ended`;
     }
   }
+  // One overdue deadline is one fact, however often the watchdog notices it.
+  if (event.wake === 'wait-overdue' && event.wait && event.generation) {
+    return `wait-overdue:${event.events?.[0]?.ticket ?? ''}:${event.wait}:${event.generation}`;
+  }
   // A board batch is the difference between two pulses: its time and content
   // together identify it.
   if (event.wake === 'board-changed') return `board:${event.at ?? ''}:${createHash('sha256').update(JSON.stringify(event.events ?? [])).digest('hex').slice(0, 16)}`;

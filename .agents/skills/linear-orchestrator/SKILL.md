@@ -272,9 +272,11 @@ jaunt-linear wait read <ID>
 The watcher explicitly polls every retained wait, including Done tickets outside
 the ordinary first page, with complete comment pagination. It emits `wait-reply`,
 `wait-overdue` and `wait-queued-ready` events. The local watchdog also reports
-elapsed deadlines without depending on the Linear API. Notifications retry at
-most three times, spaced by five minutes; pending events and errors remain in the
-ledger/status after that budget. Read them on periodic reconciliation instead of
+elapsed deadlines without depending on the Linear API. An overdue deadline
+wakes once per generation, whichever of watcher or watchdog sees it first; its
+Linear comment and `wait read` keep it visible. Replies and queued-worker events
+retry at most three times, spaced by five minutes, each on its own; pending
+events and errors remain in the ledger/status after that budget. Read them on periodic reconciliation instead of
 calling the loop healthy solely because processes exist. A new human reply is
 still discovered after exhausted publication retries.
 
@@ -298,7 +300,9 @@ resume a silent peer or post the same escalation. The deadline is a request for
 an explicit, actionable decision in Linear, not permission to continue. Stop or
 loop-off suspends active work without deleting any wait evidence. Never call
 `verdict` to advance an external wait; the owner uses `wait decision` and then
-`wait resolve` with outcome evidence. Before cleanup, require resolved wait and
+`wait resolve` with outcome evidence. For a publication wait whose release you
+observed delivered, have the owner run `wait resolve --delivered` (the CLI checks
+the receipt and Page itself) instead of asking the human for `/wait approve`. Before cleanup, require resolved wait and
 discussion state in addition to the usual closure/merge checks. Deployment of
 label support remains separate from this protocol; do not overwrite a dirty
 canonical checkout to activate it.

@@ -678,10 +678,35 @@ export async function syncWaitDiscussion(w, { service, check = async () => {
   await service.update(w.issue, { revision: record.revision, subjects });
 }
 
+// Publication is delivered only when the coordinator's durable receipt says so
+// for this exact source and the public Page serves it or a descendant. Read from
+// GitHub each time: a worker's word is never the proof (JAU-98).
+export function releaseDelivery({
+  gh = async args => JSON.parse((await exec('gh', args, { cwd: ROOT })).stdout),
+  fetchJson = async url => { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw Error(`${url}: HTTP ${r.status}`); return r.json(); },
+} = {}) {
+  return async source => {
+    if (!/^[0-9a-f]{40}$/.test(source || '')) throw Error('merged source SHA required');
+    const file = await gh(['api', 'repos/{owner}/{repo}/contents/state.json?ref=jaunt-release-state']);
+    const state = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+    const entry = (state.history || []).findLast(h => h.source === source);
+    if (entry?.status !== 'delivered') throw Error(`release receipt for ${source} is ${entry?.status || 'absent'}, not delivered`);
+    const page = (await gh(['api', 'repos/{owner}/{repo}/pages'])).html_url;
+    const { releaseSource } = await fetchJson(new URL('config.json', page).href);
+    if (!/^[0-9a-f]{40}$/.test(releaseSource || '')) throw Error('public Page has no releaseSource');
+    if (releaseSource !== source) {
+      const { status } = await gh(['api', `repos/{owner}/{repo}/compare/${source}...${releaseSource}`]);
+      if (status !== 'ahead') throw Error(`public Page serves ${releaseSource}, which does not contain ${source}`);
+    }
+    return { source, status: entry.status, run: entry.run, releaseSource, page };
+  };
+}
+
 async function externalWaits() {
   return waitStore({ stateDir: STATE_DIR, readThread: readWaitThread, agentId: (await agentUser()).id,
     publish: addComment, persistClaim: writeClaim, syncDiscussion: syncWaitDiscussion,
     verifyMerge: (c, who, pr, cwd) => landingStore({ root: ROOT }).verifyMerged(c.issue, who, pr, cwd),
+    verifyDelivery: releaseDelivery(),
     queuedClaims: async () => (await listClaims()).filter(c => c.phase === 'queued'),
     promoteQueued: candidates => promoteWaitQueue(candidates, { claims: listClaims,
       enabled: async id => (await loopState()).enabled && !(await stopRequested(id)).stop,
@@ -1976,7 +2001,7 @@ const COMMANDS = {
     if (action === 'begin') return store.begin(id, who, { pr: flags.pr, cwd: flags.cwd || process.cwd(), reason: flags.reason,
       owner: flags.owner, nextAction: flags.action, resource: flags.resource, deadline: flags.deadline });
     if (action === 'attempt') return store.attempt(id, who, { action: flags.action, result: flags.result, evidence: flags.evidence, deadline: flags.deadline });
-    if (action === 'resolve') return store.resolve(id, who, { comment: flags.comment, evidence: flags.evidence, ticket: flags.ticket });
+    if (action === 'resolve') return store.resolve(id, who, { comment: flags.comment, evidence: flags.evidence, ticket: flags.ticket, delivered: flags.delivered === true });
     throw new Error('unknown wait action');
   },
   landing: async ([action, id, ...rest], flags) => {
@@ -2120,7 +2145,7 @@ export const COMMAND_FLAGS = {
     decision: ['runtime', 'session'],
     revise: ['runtime', 'session', 'action', 'reason', 'comment', 'deadline'],
     attempt: ['runtime', 'session', 'action', 'result', 'evidence', 'deadline'],
-    resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket'], ack: ['event', 'evidence'] },
+    resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket', 'delivered'], ack: ['event', 'evidence'] },
   'sync-activity': ['incremental'], discussion: ['file'],
   whoami: [], team: [], next: [], board: [], pulse: [], attribute: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],
@@ -2178,7 +2203,7 @@ export function parseCommandArgs(command, args) {
       const next = args[i + 1];
       // --peek is a switch even before a positional. Preserve the existing
       // bare-value representation, including claim's bare --session fallback.
-      const bare = ['peek', 'if-stale', 'incremental'].includes(name) || next === undefined || next.startsWith('--');
+      const bare = ['peek', 'if-stale', 'incremental', 'delivered'].includes(name) || next === undefined || next.startsWith('--');
       flags[name] = bare ? true : next;
       if (!bare) i += 1;
     } else {
