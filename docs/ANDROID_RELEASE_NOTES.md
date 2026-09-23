@@ -1,3 +1,8 @@
+# jaunt android 0.1.0-beta.33
+
+- feat(desktop): let the desktop follow an update channel (JAU-85) (#99)
+- Source: `daa7ace2ca441494fa12ba7c73ebfdb80149b976`.
+
 # jaunt Android 0.1.0-beta.31 (versionCode 31)
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
