@@ -1719,7 +1719,7 @@ function bridgeSettings(a){
 let updatePromptTarget='';
 // One modal per launch when a newer desktop version is known: update now, or ignore for this run.
 function desktopUpdatePrompt(value) {
-  if(!['available','ready'].includes(value.state) || !value.target || updatePromptTarget===value.target || $('modal').open) return;
+  if(!['available','ready'].includes(value.state) || !value.target || value.switch || updatePromptTarget===value.target || $('modal').open) return;
   updatePromptTarget=value.target;
   const target=value.target.replace(/^desktop-v/,''), current=value.currentVersion||'';
   const install=async()=>{closeModal();try{if(value.state==='ready')await desktop.updates('install');else{const state=await desktop.updates('check',true);if(state.state==='ready')await desktop.updates('install');}}catch(error){report(error);}};
@@ -1728,16 +1728,17 @@ function desktopUpdatePrompt(value) {
 }
 function desktopUpdateStatus(value) {
   value={...value,message:tr(value.message||'')};
-  const changed=desktopUpdateState?.state!==value.state || desktopUpdateState?.automatic!==value.automatic;
+  const changed=desktopUpdateState?.state!==value.state || desktopUpdateState?.automatic!==value.automatic || desktopUpdateState?.channel!==value.channel;
   desktopUpdateState=value;
   desktopUpdatePrompt(value);
-  if((!desktopUpdateOperation || desktopUpdateOperation.item.dismissed) && ['downloading','verifying','ready','installed','error'].includes(value.state))desktopUpdateOperation=activity('desktop-update',tr('Desktop update'));
+  if((!desktopUpdateOperation || desktopUpdateOperation.item.dismissed) && ['downloading','verifying','ready','installed','error','channel-missing'].includes(value.state))desktopUpdateOperation=activity('desktop-update',tr('Desktop update'));
   const job=desktopUpdateOperation;
   if(job){
     job.update({status:value.message+(value.target?' · '+value.target:''),percent:value.percent??null,done:false,error:false,waiting:false,action:null});
     if(value.state==='error'){job.fail(new Error(value.message));job.update({action:{label:tr('Try again'),run:checkDesktopUpdate}});}
     else if(value.state==='available')job.update({done:true,waiting:true,status:value.message,action:{label:tr('Update now'),run:()=>desktop.updates('check',true).then(desktopUpdateStatus).catch(report)}});
     else if(value.state==='ready')job.update({done:true,waiting:true,status:value.message+(value.target?' · '+value.target:'')+(value.requiresAuthorization?' System authorization will be requested.':''),action:{label:tr('Install and reopen'),run:()=>desktop.updates('install')}});
+    else if(value.state==='channel-missing')job.update({done:true,waiting:true,status:value.message,action:{label:tr('Return to main'),run:()=>switchDesktopChannel('main').catch(report)}});
     else if(['current','installed'].includes(value.state))job.finish(value.message);
   }
   if(settingsOpen() && changed)renderSettings();
@@ -1771,13 +1772,14 @@ function switchHostChannel(a,channel){
   a.info.updates={...a.info.updates,channel};
   return followHostUpdate(a,()=>a.link.request('updates.configure',{channel}),null,false,()=>switchHostChannel(a,channel));
 }
-function chooseHostChannel(a){
+// Host and desktop share one chooser: `switchTo` starts that surface's explicit switch.
+function chooseChannel(switchTo){
   const input=el('input',{value:'',placeholder:'moukrea_9',maxLength:39,autocapitalize:'none',spellcheck:false});
   const save=async()=>{
     const channel=input.value.trim();
     // The host is the authority on names; this only answers a typo before anything is installed.
     if(!/^[a-z][a-z0-9]{0,31}_[1-9][0-9]{0,5}$/.test(channel)||/^(main|beta)_/.test(channel))throw new Error(tr('A pull request channel looks like moukrea_9.'));
-    closeModal();await switchHostChannel(a,channel);
+    closeModal();await switchTo(channel);
   };
   input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save().catch(error=>reportError(error,'modal'));}};
   modal(tr('Change update channel'),el('div',{},field(tr('Channel name'),input,tr("Its version is installed now, even if it is older than the running one. Automatic updates then follow only this channel.")),
@@ -1786,8 +1788,19 @@ function chooseHostChannel(a){
 }
 function hostChannelControl(a){
   if(hostUpdateJobs.has(a.machine.room))return el('span',{class:'settings-hint',text:tr('Update in progress…')});
-  if((a.info.updates.channel||'main')==='main')return button(tr('Change channel'),()=>chooseHostChannel(a));
-  return el('span',{},button(tr('Change channel'),()=>chooseHostChannel(a)),button(tr('Return to main'),()=>confirmAction(tr('Return to main?'),tr('The production release is installed now, even if it is older than the running one.'),tr('Return to main'),()=>{switchHostChannel(a,'main').catch(()=>{});})));
+  return channelControl(a.info.updates.channel,channel=>switchHostChannel(a,channel),()=>{});
+}
+function channelControl(channel,switchTo,failed){
+  const change=button(tr('Change channel'),()=>chooseChannel(switchTo));
+  if((channel||'main')==='main')return change;
+  return el('span',{},change,button(tr('Return to main'),()=>confirmAction(tr('Return to main?'),tr('The production release is installed now, even if it is older than the running one.'),tr('Return to main'),()=>{switchTo('main').catch(failed);})));
+}
+const channelDescription=channel=>(channel||'main')==='main'?tr('main · production releases'):tr('{0} · builds of a pull request under review',channel);
+// The desktop installs the channel's release at once and reopens; a failure stays visible in the desktop update activity.
+async function switchDesktopChannel(channel){
+  desktopUpdateOperation=activity('desktop-update',tr('Desktop update'));
+  desktopUpdateOperation.update({status:tr('Checking published version…')});
+  try{desktopUpdateStatus(await desktop.updates('switch',channel));}catch(error){desktopUpdateOperation.fail(error);}
 }
 async function followHostUpdate(a,start,initial=null,allowRestart=false,retry=()=>checkHostUpdate(a,allowRestart)) {
   const existing=hostUpdateJobs.get(a.machine.room);
@@ -1850,7 +1863,7 @@ function hostSettingsGroups(a) {
   const groups = [settingsGroup(tr('THIS MACHINE'),
       settingsRow(a.machine.name, `${a.info?.platform || tr('Remote host')} · ${a.info?.version || tr('Connecting')} · ${a.link.state}`, button(tr('Reconnect'), () => { a.link.start(); })),
       ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
-        settingsRow(tr('Update channel'), (a.info.updates.channel || 'main') === 'main' ? tr('main · production releases') : tr('{0} · builds of a pull request under review', a.info.updates.channel), hostChannelControl(a)),
+        settingsRow(tr('Update channel'), channelDescription(a.info.updates.channel), hostChannelControl(a)),
         settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
         ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
       ...workspaceSettings(a),
@@ -1931,6 +1944,7 @@ function renderSettings() {
     autoDesktop.onchange=()=>desktop.updates('configure',autoDesktop.checked).then(desktopUpdateStatus).catch(report);
     groups.push(settingsGroup(tr('DESKTOP APP'),
       settingsRow(tr('Desktop version'),desktopUpdateState?.message || tr('Loading update status…'),button(tr('Check desktop update'),checkDesktopUpdate)),
+      settingsRow(tr('Update channel'),channelDescription(desktopUpdateState?.channel),channelControl(desktopUpdateState?.channel,switchDesktopChannel,report)),
       settingsRow(tr('Automatic desktop updates'),tr('Downloads and verifies updates automatically. Installs when the app closes; host shells keep running. System packages may require OS authorization.'),autoDesktop),
       settingsRow(tr('Desktop notifications'),tr('Show the program’s notification when this window is in the background.'),notifications)));
   }

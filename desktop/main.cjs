@@ -64,6 +64,12 @@ app.whenReady().then(async()=>{
     if(action==='status')return {...updates.state};
     if(action==='configure')return updates.configure(value);
     if(action==='check')return updates.check(value!==false);
+    // Changing the channel is the explicit switch: its release is installed at once, then the app reopens.
+    if(action==='switch'){
+      const state=await updates.switchChannel(value);
+      if(state.state==='ready'){await updates.install(true);installingDesktop=true;setImmediate(()=>app.exit());}
+      return updates.state;
+    }
     if(action==='install'){
       await updates.install(true);installingDesktop=true;setImmediate(()=>app.exit());return updates.state;
     }
