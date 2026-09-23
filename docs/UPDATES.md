@@ -52,6 +52,24 @@ A visible activity row follows checking, downloading, verification, readiness an
 
 An installation result is retained in the private desktop profile. Failure is displayed on the next launch; it is not immediately hidden by the startup check. Older desktop builds need one installation of a release that includes this updater, using the public package or `jaunt gui --install-only`.
 
+## Update channels
+
+A channel lets a person follow the binaries of one pull request under review instead of production. This section is the contract every surface and the channel publisher implement; [`tests/fixtures/update_channels.json`](../tests/fixtures/update_channels.json) is its executable form and `scripts/update_channels.py` its reference implementation. Released clients do not implement channels yet: their version parsers refuse every candidate tag, and tests assert that until each surface adopts the contract.
+
+**Names.** A channel name matches `[a-z][a-z0-9]{0,31}(_[1-9][0-9]{0,5})?`. `main` is the default and means production. `beta` is reserved for a future public channel. Only a per-pull-request sub-channel `<developer>_<pr>` (for example `moukrea_9`) whose developer part is not reserved can be published. A name is never a URL: it resolves to `<page>/ch/<name>/config.json`, where the Page and repository are those of the official installation (`installation.json` on the host, a single constant in desktop and Android).
+
+**Channel document.** `ch/<name>/config.json` has the schema of the production `config.json` (`version` 1, `relay`, `page`, `repository`, `release`, `androidRelease`, `desktopRelease`, `releaseSource` as a full commit SHA) plus `channel`. A client rejects the document unless `channel` equals the requested name, `page` and `repository` equal the official ones, and all three release fields are candidates of that channel, of the matching component, with the same candidate number.
+
+**Candidate tags.** A candidate extends the component's current production prerelease tag: `<production tag>.ch.<developer>.<pr>.<n>`, for example `v0.1.0-beta.41.ch.moukrea.9.2`, `desktop-v0.1.0-beta.33.ch.moukrea.9.2` and `android-v0.1.0-beta.31.ch.moukrea.9.2`. `n` starts at 1, increases with every pushed commit that is published, and is shared by the three components of one candidate. The separator is a dot, not a hyphen: in semver `41-ch` would be an alphanumeric identifier ranked above every later numeric beta. The host runtime version is the PEP 440 local version `0.1.0b41+ch.moukrea.9.2`; desktop and Android use `0.1.0-beta.41.ch.moukrea.9.2`. Candidate tags never match the production numbering (`next_tag` in `scripts/release_pipeline.py`).
+
+**Order.** Versions compare by production base first, then production before its candidates, then by `n`. A candidate sorts above its base and below the next production release. Candidates of two different channels have no order. An unattended check on `main` installs only a newer production release; on a channel it installs only a newer candidate of that same channel. No automatic update crosses a channel.
+
+**Explicit switch.** Only a person changing the channel setting may install a target that is not newer, including a return to `main`; the content of a document never triggers a switch. The host and desktop reinstall the target immediately. Android cannot install a lower `versionCode`, so its production codes are spaced: the next production release after code `C` gets `(C + 1) × 1000` while `C < 1000`, then the next multiple of 1000; a candidate gets its base code (spaced) plus `k`, a counter from 1 to 999 assigned by the publisher. Android can therefore move to a candidate published later, and returns to `main` automatically with the next production release; an immediate return on the same base requires uninstalling, which the app explains instead of failing.
+
+**Removed channel.** When a pull request is merged or closed, its tags, prereleases and channel document are deleted. A client whose channel document is missing keeps its installed version, says the channel no longer exists and offers `main`; it does not switch by itself.
+
+**Trust.** Host and desktop verify only a SHA-256 taken from the release itself, so the authority over what a channel installs is the publication trigger: a maintainer label or `workflow_dispatch` on a pull request of the official repository, never code from a fork. Android candidates are signed with the production key, and Android keeps checking the package name and signing certificate.
+
 ## Visible progress
 
 Web and desktop image transfers retain their actual result: verified upload and quoted path insertion without Enter, or host clipboard completion plus Ctrl+V delivery. They do not claim that a CLI recognized an attachment. Host checks show completion, failure or explicit deferral for active work. Android uses native progress dialogs for checks and APK downloads, followed by the OS installer confirmation.
