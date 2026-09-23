@@ -111,7 +111,7 @@ test('Linear CLI rejects invalid priorities before credentials or waiting for st
  try{
   await mkdir(join(dir,'scripts'));
   // An isolated CLI has no credentials. No real Linear mutation is possible.
-  for(const file of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs'])
+  for(const file of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs','linear_answers.mjs'])
    await copyFile(new URL(`../scripts/${file}`,import.meta.url),join(dir,'scripts',file));
   const cases=[
    ['priority','JAU-55'],['create','Example','--priority'],
@@ -358,6 +358,20 @@ test('a reaction does not outlive the message that came after it',()=>{
  // 👎 travels the same path as 👍 — one rule, not two.
  const no=agent('a3',T(6),[{emoji:'-1',createdAt:T(7),user:{id:HUMAN}}]);
  assert.equal(read([plan,no],plan).verdict,'declined');
+});
+// JAU-80: approvals written in words, and words that confirm a 👍 instead of
+// taking it back. Both replayed from the tickets where they were lost.
+test('a written approval approves, and a cheer after a 👍 keeps it',()=>{
+ const plan=agent('plan',T(1));
+ const jau15=read([{...plan,reactions:[thumb(T(2))]},human('h',T(3),'J\'ai approuvé le plan donc si tu réponds pas ça devrait retirer le label "du neuf du harnais"')],plan);
+ assert.equal(jau15.verdict,'approved');assert.equal(jau15.via,'comment');assert.equal(jau15.readAs,'h','the receipt can quote what it read');
+ assert.equal(read([plan,human('h',T(3),"j'approuve")],plan).verdict,'approved','no emoji needed');
+ const jau92=read([{...plan,reactions:[thumb('2026-09-19T01:33:30.000Z')]},human('h','2026-09-19T01:33:34.000Z','Bah faut corriger !')],plan);
+ assert.equal(jau92.verdict,'approved');assert.equal(jau92.via,'reaction');assert.equal(jau92.on,'plan');
+ assert.equal(read([plan,human('h',T(3),'Bah faut corriger !')],plan).verdict,'feedback','a cheer alone never approves');
+ assert.equal(read([{...plan,reactions:[thumb(T(2))]},human('h',T(3),"ok mais ajoute un test Android")],plan).verdict,'feedback');
+ assert.equal(read([plan,human('a',T(2),'/approve'),human('b',T(3),'attends, change X')],plan).verdict,'feedback','later words win over /approve too');
+ assert.equal(read([plan,human('a',T(2),'/decline'),human('b',T(3),'merci')],plan).verdict,'declined');
 });
 const {pickOwners,subscribersToAdd}=await import('../scripts/linear_agent.mjs');
 // Linear notifies subscribers and nobody else, so a ticket the harness opened
@@ -653,7 +667,7 @@ test('create rejects missing or conflicting expectations before loading credenti
  const {execFile}=await import('node:child_process');
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-expects-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));
- for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs','linear_answers.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  for(const args of [[],['--expects'],['--expects',''],['--expects','none','--desc','**Attendu de toi :** choose now']]){
   const result=await new Promise(resolve=>execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),'create','Example',...args],
    {timeout:5000},(error,stdout,stderr)=>resolve({error,stdout,stderr})));
@@ -666,7 +680,7 @@ test('closure CLI saves and reads drafts on stdin without loading credentials',a
  const {execFile}=await import('node:child_process');
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-closure-cli-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));await fs.mkdir(path.join(dir,'scripts'));await fs.mkdir(path.join(dir,'.dev-state/claims'),{recursive:true});
- for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
+ for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs','linear_answers.mjs'])await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  await fs.writeFile(path.join(dir,'.dev-state/claims/JAU-50.json'),JSON.stringify({issue:'JAU-50',claimedAt:'cycle',phase:'planning'}));
  const run=(args,input)=>new Promise((resolve,reject)=>{
   const child=execFile(process.execPath,[path.join(dir,'scripts/linear_agent.mjs'),...args],{timeout:5000},(error,stdout,stderr)=>{
@@ -809,6 +823,18 @@ test('answer registration restores all real answers, preserves queuing and does 
 });
 
 // JAU-40: validate before dispatch, including commands with no options.
+test('a receipt for a written approval quotes the words it read',async t=>{
+ const f=await parkingFixture(t);let body;
+ const plan={id:'plan',createdAt:'2026-09-21T13:01:00Z'};
+ const comments=[{id:'h',user:{id:'human'},createdAt:'2026-09-21T13:05:00Z',body:"J'ai approuvé\n le plan"}];
+ await registerAnswer(f.origin,{verdict:'approved',readAs:'h'},f.claim,plan,comments,'agent',{
+  persistClaim:(record,options)=>writeClaim(record,{...f.options,...options}),
+  decidePhase:async()=>({phase:'implementing'}),
+  comment:async(id,b,parent,options)=>{body=b;assert.equal(options.technical,true,'still exempt from unread');return {id:'ack'};},
+ });
+ assert.match(body,/\*\*Approbation reçue\*\* \(lue dans : « J'ai approuvé le plan »\)/);
+});
+
 const {COMMAND_FLAGS,parseCommandArgs}=await import('../scripts/linear_agent.mjs');
 test('Linear CLI declares every command and rejects unknown command-specific options',async()=>{
  const source=await fs.readFile(new URL('../scripts/linear_agent.mjs',import.meta.url),'utf8');
@@ -852,7 +878,7 @@ async function flagCliFixture(t){
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'jaunt-flags-'));
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  await fs.mkdir(path.join(dir,'scripts'));
- for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs'])
+ for(const name of ['linear_waits.mjs','linear_landing.mjs','linear_skills.mjs','linear_agent.mjs','linear_watch.mjs','linear_workers.mjs','linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs','linear_activity.mjs','linear_answers.mjs'])
   await fs.copyFile(new URL('../scripts/'+name,import.meta.url),path.join(dir,'scripts',name));
  const run=(args,input,preload)=>new Promise(resolve=>{
   const child=execFile(process.execPath,[...(preload?['--import',preload]:[]),path.join(dir,'scripts/linear_agent.mjs'),...args],

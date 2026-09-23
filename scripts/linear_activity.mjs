@@ -3,6 +3,7 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { atomicJson, readJson, withWorkerLock } from './linear_workers.mjs';
+import { readReply, decideAnswer } from './linear_answers.mjs';
 
 export const ACTIVITY_LABELS = {
   origin: 'Créé par le harnais', unread: 'Du neuf du harnais', active: 'Discussion active',
@@ -86,7 +87,8 @@ export function observeActivity(record, issue, me) {
   for (const c of comments) {
     if (!c.botActor && human(c.user, me)) {
       acknowledged = Math.max(acknowledged, Date.parse(c.createdAt));
-      if (!ackText(c.body)) add(`feedback:${c.id}`, c.body.slice(0, 180), 'worker', c.id);
+      // An approval or a cheer is an answer, not a new question for the worker.
+      if (!ackText(c.body) && readReply(c.body) === 'correction') add(`feedback:${c.id}`, c.body.slice(0, 180), 'worker', c.id);
     }
   }
   for (const c of publications) {
@@ -108,19 +110,20 @@ export function observeActivity(record, issue, me) {
   // another question. Later prose wins; skills reconcile it explicitly.
   for (const c of publications.filter(c => c.body.startsWith(PLAN_MARKER))) {
     const answers = comments.filter(h => !h.botActor && human(h.user, me) && Date.parse(h.createdAt) > Date.parse(c.createdAt))
-      .map(h => ({ at: h.createdAt, approved: /^\/approve\s*$/i.test(h.body.trim()), declined: /^\/decline\s*$/i.test(h.body.trim()), evidence: h.id }));
+      .map(h => ({ at: h.createdAt, kind: readReply(h.body), evidence: h.id }));
     for (const on of publications.filter(p => Date.parse(p.createdAt) >= Date.parse(c.createdAt))) {
       for (const r of on.reactions || []) {
         const emoji = r.emoji?.replace(/:/g, '');
         if (human(r.user, me) && iso(r.createdAt) && (APPROVE.has(emoji) || DECLINE.has(emoji))) {
-          answers.push({ at: r.createdAt, approved: APPROVE.has(emoji), declined: DECLINE.has(emoji), evidence: on.id });
+          answers.push({ at: r.createdAt, kind: APPROVE.has(emoji) ? 'approve' : 'decline', evidence: on.id });
         }
       }
     }
-    answers.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-    const last = answers.at(-1), subject = subjects.get(`plan:${c.id}`);
-    if (subject.state === 'open' && (last?.approved || last?.declined)) Object.assign(subject, {
-      state: 'resolved', reason: last.approved ? 'Plan approuvé' : 'Plan refusé', evidence: last.evidence,
+    // Same reading as `verdict` (JAU-80): the newest decisive answer, looking
+    // through cheers, so the registry and the claim never disagree.
+    const last = decideAnswer(answers), subject = subjects.get(`plan:${c.id}`);
+    if (subject.state === 'open' && ['approve', 'decline'].includes(last?.kind)) Object.assign(subject, {
+      state: 'resolved', reason: last.kind === 'approve' ? 'Plan approuvé' : 'Plan refusé', evidence: last.evidence,
     });
   }
   const unread = publications.some(c => Date.parse(c.body.startsWith(PROVENANCE_MARKER) ? issue.createdAt : c.createdAt) > acknowledged);

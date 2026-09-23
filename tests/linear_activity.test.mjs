@@ -41,6 +41,20 @@ test('approval closes only plan decision, not promised work; eyes never approves
   assert.equal(observeActivity(base(), issue([p, comment('h', 4, 'Une correction', user)]), me.id).subjects.find(s => s.key === 'plan:p').state, 'open');
 });
 
+test('written approvals and cheers resolve the plan like verdict does (JAU-80)', () => {
+  const plan = (reactions = []) => comment('p', 1, '<!-- jaunt-agent:plan -->\nPlan', me, reactions);
+  const state = comments => observeActivity(base(), issue(comments), me.id);
+  const words = state([plan(), comment('h', 3, "J'ai approuvé le plan donc si tu réponds pas ça devrait retirer le label", user)]);
+  assert.equal(words.subjects.find(s => s.key === 'plan:p').state, 'resolved');
+  assert.equal(words.subjects.some(s => s.key.startsWith('feedback:')), false, 'an approval is not a new question');
+  const cheer = state([plan([reaction('+1', 2)]), comment('h', 3, 'Bah faut corriger !', user)]);
+  assert.equal(cheer.subjects.find(s => s.key === 'plan:p').state, 'resolved');
+  assert.equal(cheer.subjects.some(s => s.key.startsWith('feedback:')), false);
+  const fix = state([plan([reaction('+1', 2)]), comment('h', 3, 'ok mais renomme-le', user)]);
+  assert.equal(fix.subjects.find(s => s.key === 'plan:p').state, 'open');
+  assert.equal(fix.subjects.some(s => s.key === 'feedback:h'), true);
+});
+
 test('technical ACK, read acknowledgments, baseline and delayed provenance do not create false activity', () => {
   const record = base(); record.technical.push('tech'); record.baseline.push('old');
   const result = observeActivity(record, issue([comment('old', 1, 'Old question'), comment('tech', 2, 'Technical'), comment('ack', 3, '<!-- jaunt-agent:ack -->\nOK'), comment('h', 4, 'lu', user)]), me.id);

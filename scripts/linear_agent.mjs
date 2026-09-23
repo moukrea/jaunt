@@ -15,6 +15,7 @@ import { wakeStore } from './linear_wakes.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
 import { connectionPages } from './linear_activity.mjs';
+import { readReply, decideAnswer } from './linear_answers.mjs';
 import { attribute, reviewWindows, repinSelf } from './linear_attribution.mjs';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -1662,6 +1663,11 @@ export function ackNeeded(comments, plan, agentId) {
 // place where "the human answered" can be recorded without depending on a later
 // step nobody is forced to take. Asking the skill to remember was the previous
 // design, and the skill did not (JAU-18). `--peek` is the way to only look.
+const quote = (text, max = 120) => {
+  const line = String(text).replace(/\s+/g, ' ').trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};
+
 export async function registerAnswer(issue, answer, held, plan, comments, agentId, {
   persistClaim = writeClaim, decidePhase = approvalPhase, comment = addComment,
 } = {}) {
@@ -1687,7 +1693,11 @@ export async function registerAnswer(issue, answer, held, plan, comments, agentI
     const next = queued
       ? `je démarre dès que ${queued.queuedBehind.join(', ')} aura libéré les fichiers concernés.`
       : `j'enchaîne sur l'implémentation.`;
-    const body = `${ACK_MARKER}\n**Approbation reçue** — ${next}\n\n${expectsLine('none')}`;
+    // An approval read from prose says which words it read: the human can see a
+    // misreading at once and correct it with a reply.
+    const read = answer.readAs && comments.find((c) => c.id === answer.readAs);
+    const quoted = read ? ` (lue dans : « ${quote(read.body)} »)` : '';
+    const body = `${ACK_MARKER}\n**Approbation reçue**${quoted} — ${next}\n\n${expectsLine('none')}`;
     done.acknowledged = (await comment(issue.identifier, body, plan.id, { technical: true })).id;
   }
 
@@ -1828,33 +1838,11 @@ export function readAnswer(issue, plan, planAt, comments, agentId) {
   );
 
   const replies = comments.filter((c) => !isAgent(c) && new Date(c.createdAt) > planAt);
-  const lastReplyAt = replies.length
-    ? new Date(replies[replies.length - 1].createdAt)
-    : null;
-
-  // A reaction older than the human's last message no longer speaks for them.
-  // Without this, widening the scan above would make a single 👍 permanent —
-  // approved once, approved for ever — and every correction written afterwards
-  // would be swallowed in silence. Most recent wins among what is left.
-  const live = answering
-    .filter((r) => !lastReplyAt || new Date(r.at) > lastReplyAt)
-    .sort((a, b) => new Date(b.at) - new Date(a.at));
 
   const unread = unreadReactions(reactions, planAt);
   const withUnread = (answer) => (unread.length ? { ...answer, unreadReactions: unread } : answer);
 
-  if (live.length) {
-    return withUnread({
-      verdict: live[0].means,
-      issue: issue.identifier,
-      via: 'reaction',
-      // Which comment carried it: the plan is no longer the only answer.
-      on: live[0].comment,
-      messages: [],
-    });
-  }
-
-  if (replies.length === 0) {
+  if (answering.length === 0 && replies.length === 0) {
     return withUnread({ verdict: 'pending', issue: issue.identifier, planCommentId: plan.id });
   }
 
@@ -1866,14 +1854,28 @@ export function readAnswer(issue, plan, planAt, comments, agentId) {
     body: c.body,
     at: c.createdAt,
   }));
-  const commands = replies.map((c) => c.body.trim().toLowerCase());
-  if (commands.some((b) => b.startsWith('/approve'))) {
-    return withUnread({ verdict: 'approved', issue: issue.identifier, via: 'comment', messages });
+
+  // Words that came after a reaction outrank it — otherwise a single 👍 would be
+  // approved once, approved for ever — but only words that decide something.
+  // "Bah faut corriger !" four seconds after a 👍 confirms it (JAU-92), and a
+  // plain "j'approuve" is an approval without any emoji (JAU-15). The newest
+  // decisive signal wins; everything outside the closed list is a correction.
+  const decided = decideAnswer([
+    ...answering.map((r) => ({ at: r.at, kind: r.means === 'approved' ? 'approve' : 'decline', via: 'reaction', id: r.comment })),
+    ...replies.map((c) => ({ at: c.createdAt, kind: readReply(c.body), via: 'comment', id: c.id })),
+  ]);
+
+  if (!decided || decided.kind === 'correction') {
+    return withUnread({ verdict: 'feedback', issue: issue.identifier, messages });
   }
-  if (commands.some((b) => b.startsWith('/decline'))) {
-    return withUnread({ verdict: 'declined', issue: issue.identifier, via: 'comment', messages });
+  const verdict = decided.kind === 'approve' ? 'approved' : 'declined';
+  if (decided.via === 'reaction') {
+    // Which comment carried it: the plan is no longer the only answer.
+    return withUnread({ verdict, issue: issue.identifier, via: 'reaction', on: decided.id, messages });
   }
-  return withUnread({ verdict: 'feedback', issue: issue.identifier, messages });
+  // Which message was read as the answer, so the receipt can quote it and a
+  // misreading shows on the ticket instead of in the code.
+  return withUnread({ verdict, issue: issue.identifier, via: 'comment', readAs: decided.id, messages });
 }
 
 async function whoami() {
