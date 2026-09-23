@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from packaging.version import Version
-from jaunt import updates
+from jaunt import channels as host, updates
 
 ROOT = Path(__file__).parents[1]
 FIXTURES = json.loads((ROOT / 'tests/fixtures/update_channels.json').read_text())
@@ -93,8 +93,52 @@ def test_candidates_never_become_production_versions():
         assert pipeline.next_tag(component, tags) == pipeline.next_tag(component, [tag for tag in tags if tag in production])
 
 
-def test_current_host_refuses_every_candidate():
-    """Until the host implements channels, no candidate can be installed by accident."""
-    for tag in CANDIDATES + FIXTURES['tags']['invalid']:
+def test_host_accepts_host_candidates_and_refuses_everything_else():
+    """The host implements channels: its own candidates parse, other components and malformed tags do not."""
+    for case in FIXTURES['tags']['valid']:
+        if case['component'] == 'host':
+            assert updates.version(case['tag'])['channel'] == case['channel']
+            assert updates.tag_from_version(case['python']) == case['tag']
+        else:
+            with pytest.raises(ValueError):
+                updates.version(case['tag'])
+    for tag in FIXTURES['tags']['invalid']:
         with pytest.raises(ValueError):
             updates.version(tag)
+
+
+def test_host_channels_agree_with_every_fixture():
+    """jaunt.channels reimplements the reference for the wheel; the shared fixtures bind them together."""
+    names = FIXTURES['names']
+    assert all(host.valid_name(name) for name in names['valid'])
+    assert not any(host.valid_name(name) for name in names['invalid'])
+    assert all(host.publishable(name) for name in names['publishable'])
+    assert not any(host.publishable(name) for name in names['notPublishable'] + names['invalid'])
+    for case in FIXTURES['tags']['valid']:
+        info = host.parse(case['tag'])
+        assert (info['component'], info['base'], info['channel'], info['n']) == (case['component'], case['base'], case['channel'], case['n'])
+        assert info == channels.parse(case['tag'])
+        if 'python' in case:
+            assert host.python_version(case['tag']) == case['python'] and host.host_tag(case['python']) == case['tag']
+    for tag in FIXTURES['tags']['invalid']:
+        with pytest.raises(ValueError):
+            host.parse(tag)
+    for tag in FIXTURES['tags']['production']:
+        assert host.parse(tag) == channels.parse(tag)
+    for low, high in FIXTURES['order']['ascending']:
+        assert host.compare(low, high) == -1 and host.compare(high, low) == 1
+    for a, b in FIXTURES['order']['notComparable']:
+        with pytest.raises(host.NotComparable):
+            host.compare(a, b)
+    for case in FIXTURES['automatic']:
+        assert host.automatic(case['channel'], case['current'], case['target']) is case['install']
+    official = FIXTURES['documents']['official']
+    valid = FIXTURES['documents']['valid'][0]
+    # installation.json stores the Page without its trailing slash; both spellings name the official Page.
+    for page in (official['page'], official['page'].rstrip('/')):
+        assert host.validate_document(valid['document'], valid['name'], page, official['repository'])
+        for case in FIXTURES['documents']['invalid']:
+            document = copy.deepcopy(valid['document'])
+            document.update(case['patch'])
+            with pytest.raises(ValueError):
+                host.validate_document(document, case['name'], page, official['repository'])

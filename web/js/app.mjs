@@ -1372,6 +1372,7 @@ function hostVersionText(a) {
   if (active) return `${a.info.version} · ${describeUpdate(status)}`;
   if (status.state === 'deferred') return `${a.info.version} · ${tr('Update {0} is downloaded and waits to install', status.version || '')}`;
   if (status.state === 'error') return `${a.info.version} · ${tr('Last update attempt failed')}`;
+  if (status.state === 'channel-missing') return `${a.info.version} · ${tr('This update channel no longer exists')}`;
   return a.info.version;
 }
 function settingsRow(title, description, control) {
@@ -1747,7 +1748,7 @@ async function checkDesktopUpdate(){
   try{desktopUpdateStatus(await desktop.updates('check'));}catch(error){desktopUpdateOperation.fail(error);}
 }
 const hostUpdateJobs=new Map();
-function updateLabels(){return {checking:tr('Checking published version…'),downloading:tr('Downloading host update…'),verifying:tr('Verifying downloaded files…'),installing:tr('Installing · shells are kept running…'),current:tr('Up to date'),installed:tr('Update installed · shells were kept'),deferred:tr('Downloaded · waiting to install'),error:tr('Update failed'),disabled:tr('Automatic updates are disabled on this host')};}
+function updateLabels(){return {checking:tr('Checking published version…'),downloading:tr('Downloading host update…'),verifying:tr('Verifying downloaded files…'),installing:tr('Installing · shells are kept running…'),current:tr('Up to date'),installed:tr('Update installed · shells were kept'),deferred:tr('Downloaded · waiting to install'),error:tr('Update failed'),disabled:tr('Automatic updates are disabled on this host'),'channel-missing':tr('This update channel no longer exists')};}
 function describeUpdate(status){
   if(!status||!status.state)return '';
   const text=(status.message&&tr(status.message))||updateLabels()[status.state]||tr('Checking…');
@@ -1765,14 +1766,37 @@ function hostUpdateProgress(a,status){
   if(settingsOpen()&&a===current())renderSettings();
 }
 function checkHostUpdate(a,allowRestart=false){return followHostUpdate(a,()=>a.link.request('updates.install',{allowRestart}),null,allowRestart);}
-async function followHostUpdate(a,start,initial=null,allowRestart=false) {
+// Changing the channel is the explicit switch: the host reinstalls that channel's release at once.
+function switchHostChannel(a,channel){
+  a.info.updates={...a.info.updates,channel};
+  return followHostUpdate(a,()=>a.link.request('updates.configure',{channel}),null,false,()=>switchHostChannel(a,channel));
+}
+function chooseHostChannel(a){
+  const input=el('input',{value:'',placeholder:'moukrea_9',maxLength:39,autocapitalize:'none',spellcheck:false});
+  const save=async()=>{
+    const channel=input.value.trim();
+    // The host is the authority on names; this only answers a typo before anything is installed.
+    if(!/^[a-z][a-z0-9]{0,31}_[1-9][0-9]{0,5}$/.test(channel)||/^(main|beta)_/.test(channel))throw new Error(tr('A pull request channel looks like moukrea_9.'));
+    closeModal();await switchHostChannel(a,channel);
+  };
+  input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save().catch(error=>reportError(error,'modal'));}};
+  modal(tr('Change update channel'),el('div',{},field(tr('Channel name'),input,tr("Its version is installed now, even if it is older than the running one. Automatic updates then follow only this channel.")),
+    el('div',{class:'modal-actions'},button(tr('Cancel'),closeModal),button(tr('Switch and install'),save,'button primary'))));
+  input.focus();
+}
+function hostChannelControl(a){
+  if(hostUpdateJobs.has(a.machine.room))return el('span',{class:'settings-hint',text:tr('Update in progress…')});
+  if((a.info.updates.channel||'main')==='main')return button(tr('Change channel'),()=>chooseHostChannel(a));
+  return el('span',{},button(tr('Change channel'),()=>chooseHostChannel(a)),button(tr('Return to main'),()=>confirmAction(tr('Return to main?'),tr('The production release is installed now, even if it is older than the running one.'),tr('Return to main'),()=>{switchHostChannel(a,'main').catch(()=>{});})));
+}
+async function followHostUpdate(a,start,initial=null,allowRestart=false,retry=()=>checkHostUpdate(a,allowRestart)) {
   const existing=hostUpdateJobs.get(a.machine.room);
   if(existing){existing.job.update({});return;}
   const job=activity('host-update-'+a.machine.room,tr("Host update · {0}",hostName(a)),a.machine.room);
   const tracker={job,operation:initial?.operation||null,requestedAt:Date.now()/1000,settled:false};
   hostUpdateJobs.set(a.machine.room,tracker);
   let settle;const settled=new Promise(resolve=>{settle=resolve;});
-  const terminal=['current','installed','deferred','error','disabled'];
+  const terminal=['current','installed','deferred','error','disabled','channel-missing'];
   tracker.observe=status=>{
     if(tracker.settled||!status.state)return;
     if(tracker.operation&&status.operation&&status.operation!==tracker.operation)return;
@@ -1780,7 +1804,7 @@ async function followHostUpdate(a,start,initial=null,allowRestart=false) {
     const text=describeUpdate(status);
     if(!terminal.includes(status.state)){job.update({status:text,waiting:false,error:false,action:null});return;}
     tracker.settled=true;
-    if(status.state==='error'){job.fail(new Error(text));job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});}
+    if(status.state==='error'){job.fail(new Error(text));job.update({action:{label:tr('Try again'),run:retry}});}
     else{job.finish(text);if(status.state==='deferred')job.update({waiting:true,action:{label:tr('Review update'),run:()=>{selected=a.machine.room;setView('settings');}}});}
     settle();
   };
@@ -1795,7 +1819,7 @@ async function followHostUpdate(a,start,initial=null,allowRestart=false) {
     if(tracker.settled||a.link.state!=='online')return;
     a.link.request('updates.status',{},15000).then(status=>hostUpdateProgress(a,status)).catch(()=>{});
   },5000);
-  const deadline=setTimeout(()=>{if(!tracker.settled){tracker.settled=true;job.fail(new Error(tr('The host has not confirmed completion yet. Check again to see its current state.')));job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});settle();}},30*60*1000);
+  const deadline=setTimeout(()=>{if(!tracker.settled){tracker.settled=true;job.fail(new Error(tr('The host has not confirmed completion yet. Check again to see its current state.')));job.update({action:{label:tr('Try again'),run:retry}});settle();}},30*60*1000);
   try {
     let started=initial||{};
     if(start){
@@ -1810,7 +1834,7 @@ async function followHostUpdate(a,start,initial=null,allowRestart=false) {
     if(started.operation)tracker.operation=started.operation;
     if(started.state)tracker.observe(started);
     await settled;
-  } catch(error){if(!tracker.settled){tracker.settled=true;job.fail(error);job.update({action:{label:tr('Try again'),run:()=>checkHostUpdate(a,allowRestart)}});}}
+  } catch(error){if(!tracker.settled){tracker.settled=true;job.fail(error);job.update({action:{label:tr('Try again'),run:retry}});}}
   finally {clearInterval(poll);clearTimeout(deadline);a.link.removeEventListener('status',onStatus);if(hostUpdateJobs.get(a.machine.room)===tracker)hostUpdateJobs.delete(a.machine.room);if(settingsOpen()&&a===current())renderSettings();}
 }
 function languagePicker(id,detected=false) {
@@ -1826,6 +1850,7 @@ function hostSettingsGroups(a) {
   const groups = [settingsGroup(tr('THIS MACHINE'),
       settingsRow(a.machine.name, `${a.info?.platform || tr('Remote host')} · ${a.info?.version || tr('Connecting')} · ${a.link.state}`, button(tr('Reconnect'), () => { a.link.start(); })),
       ...(a.info?.updates?.supported ? [settingsRow(tr('Automatic host updates'), tr('Checks every 15 minutes. Downloads are verified; ordinary active shells are never closed automatically.'), button(a.info.updates.automatic ? tr('Disable auto-update') : tr('Enable auto-update'), async () => { a.info.updates = await a.link.request('updates.configure', {automatic: !a.info.updates.automatic}); renderSettings(); })),
+        settingsRow(tr('Update channel'), (a.info.updates.channel || 'main') === 'main' ? tr('main · production releases') : tr('{0} · builds of a pull request under review', a.info.updates.channel), hostChannelControl(a)),
         settingsRow(tr('Host version'), hostVersionText(a), hostUpdateJobs.has(a.machine.room) ? el('span', {class: 'settings-hint', text: tr('Update in progress…')}) : button(tr('Check for updates'), ()=>checkHostUpdate(a))),
         ...(a.info.seamlessUpdates ? [settingsRow(tr('Keep shells running'),tr('This host replaces its runtime during updates while keeping shell processes and their history. Transfers finish before installation.'))] : [settingsRow(tr('Update and restart now'), tr('This explicitly closes ordinary shells and interrupts ongoing transfers. Pairing keys are preserved.'), button(tr('Update and restart'), () => confirmAction(tr('Close active shells and update?'), tr('This may terminate running commands in ordinary shells and interrupt file transfers on this host. Continue only when ready.'), tr('Close shells and update'), ()=>checkHostUpdate(a,true), true), 'button danger'))])] : []),
       ...workspaceSettings(a),

@@ -15,33 +15,32 @@ import re
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+from . import channels
 from .state import atomic_json, state_dir
 
-TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$")
-PEP = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?$")
 INSTALL_TIMEOUT = 1800
 # The installer's own failure lines are the only ones worth showing to a person.
 LOG_FAILURE = re.compile(r"^jaunt: (.+)$")
 
-def version(tag: str) -> tuple:
-    match = TAG.fullmatch(tag)
-    if not match:
+def version(tag: str) -> dict:
+    """A host release tag, production or channel candidate; anything else is refused."""
+    info = channels.parse(tag)
+    if info["component"] != "host":
         raise ValueError("Unsupported release version")
-    major, minor, patch, stage, number = match.groups()
-    return int(major), int(minor), int(patch), {"alpha": 0, "beta": 1, "rc": 2, None: 3}[stage], int(number or 0)
+    return info
 
 def tag_from_version(text: str) -> str:
-    """Turn a PEP 440 runtime version such as ``0.1.0b11`` into the release tag ``v0.1.0-beta.11``."""
-    match = PEP.fullmatch(text or "")
-    if not match:
-        raise ValueError("Unsupported runtime version")
-    major, minor, patch, stage, number = match.groups()
-    suffix = {"a": "-alpha.", "b": "-beta.", "rc": "-rc.", None: ""}[stage] + (number or "")
-    return f"v{major}.{minor}.{patch}{suffix}"
+    """Turn a PEP 440 runtime version such as ``0.1.0b11`` or ``0.1.0b41+ch.moukrea.9.2`` into its release tag."""
+    return channels.host_tag(text)
+
+def channel(config: dict) -> str:
+    name = config.get("channel", "main")
+    return name if name == "main" or channels.publishable(name) else "main"
 
 from .downloads import fetch
 
@@ -68,15 +67,23 @@ def status(root: Path | None = None) -> dict:
         result.update(json.loads((root / "update-status.json").read_text()))
     except (OSError, ValueError):
         pass
+    # The last run may describe another channel; the configured one is what Settings shows.
+    result["channel"] = channel(config)
     return result
 
-def configure(enabled: bool) -> dict:
-    if type(enabled) is not bool:
+def configure(enabled: bool | None = None, name: str | None = None) -> dict:
+    """Store the automatic preference and/or the channel. Only a person calls this."""
+    if enabled is not None and type(enabled) is not bool:
         raise ValueError("Automatic update preference must be true or false")
+    if name is not None and name != "main" and not channels.publishable(name):
+        raise ValueError("Unknown update channel name")
     config = installation()
     if not config:
         raise ValueError("Use the public installer once to enable automatic updates")
-    config["automatic"] = enabled
+    if enabled is not None:
+        config["automatic"] = enabled
+    if name is not None:
+        config["channel"] = name
     atomic_json(state_dir() / "installation.json", config)
     return status()
 
@@ -92,15 +99,25 @@ def failure_reason(log: Path) -> str:
             return match.group(1).strip()[:160]
     return ""
 
-def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
+def update(*, automatic: bool = False, allow_restart: bool = False, switch: str = "") -> dict:
+    """Install the configured channel's release when it is newer, or whatever it is on an explicit switch.
+
+    ``switch`` names the channel a person just selected. It is honoured only while
+    that channel is still the configured one and never on an automatic run.
+    """
     from .cli import control
     root = state_dir()
     config = installation(root)
     if not config or (automatic and not config.get("automatic", True)):
         return {"state": "disabled"}
+    name = channel(config)
+    switching = bool(switch) and not automatic and switch == name
     def record(state: str, **extra) -> dict:
         result = {"state": state, "checkedAt": time.time(), "operation": os.environ.get("jaunt_UPDATE_ID", ""),
-                  "manual": not automatic, **extra}
+                  "manual": not automatic, "channel": name, **extra}
+        # A deferred switch must resume as a switch; any other outcome ends it.
+        if switching and state in ("checking", "downloading", "verifying", "deferred", "installing"):
+            result["switch"] = name
         atomic_json(root / "update-status.json", result)
         return result
     with open(root / "update.lock", "a") as lock:
@@ -120,17 +137,28 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
             # end to end. Production installations never carry this block.
             dev = config.get("dev") if isinstance(config.get("dev"), dict) else None
             loopback = bool(dev)
+            source = page + ("/config.json" if name == "main" else f"/ch/{name}/config.json")
             try:
-                published = json.loads(fetch(page + "/config.json", 16384, allow_loopback=loopback))
+                published = json.loads(fetch(source, 16384, allow_loopback=loopback))
+            except urllib.error.HTTPError as exc:
+                if exc.code != 404 or name == "main":
+                    return record("error", retryable=True,
+                                  message="Could not reach the update channel. Check the host's internet connection and try again.")
+                # A merged or closed pull request deletes its channel: keep what is installed.
+                return record("channel-missing", version=running_tag(root) or config["tag"],
+                              message="This update channel no longer exists. The installed version is kept; switch back to main to follow production.")
             except OSError:
                 return record("error", retryable=True,
                               message="Could not reach the update channel. Check the host's internet connection and try again.")
+            if name != "main":
+                channels.validate_document(published, name, page, repo)
             tag = published["release"]
+            version(tag)
             # The running daemon is the truth. An earlier attempt may have switched the
             # installed pointer without completing the runtime handoff; comparing only
             # installation.json would then report "current" forever.
             current = running_tag(root) or config["tag"]
-            if version(tag) <= version(current):
+            if tag == current or not (switching or channels.automatic(name, current, tag)):
                 if config.get("tag") != current:
                     config["tag"] = current
                     atomic_json(root / "installation.json", config)
@@ -143,17 +171,16 @@ def update(*, automatic: bool = False, allow_restart: bool = False) -> dict:
             except OSError:
                 return record("error", retryable=True, version=tag,
                               message="Could not download the release manifest. Check the host's internet connection and try again.")
-            pep = tag[1:].replace("-alpha.", "a").replace("-beta.", "b").replace("-rc.", "rc")
-            name = f"jaunt_host-{pep}-py3-none-any.whl"
-            if manifest.get("schema") != 1 or manifest.get("wheel") != name or not re.fullmatch(r"[a-f0-9]{64}", manifest.get("sha256", "")):
+            wheel_name = f"jaunt_host-{channels.python_version(tag)}-py3-none-any.whl"
+            if manifest.get("schema") != 1 or manifest.get("wheel") != wheel_name or not re.fullmatch(r"[a-f0-9]{64}", manifest.get("sha256", "")):
                 raise ValueError("Invalid release manifest")
             cache = root / "updates"
             cache.mkdir(mode=0o700, exist_ok=True)
-            wheel = cache / name
+            wheel = cache / wheel_name
             if not wheel.exists() or hashlib.sha256(wheel.read_bytes()).hexdigest() != manifest["sha256"]:
                 record("downloading", version=tag)
                 try:
-                    data = fetch(base + "/" + name, 16 * 1024 * 1024, allow_loopback=loopback)
+                    data = fetch(base + "/" + wheel_name, 16 * 1024 * 1024, allow_loopback=loopback)
                 except OSError:
                     return record("error", retryable=True, version=tag,
                                   message="The release download was interrupted. Check the host's internet connection and try again.")
@@ -237,8 +264,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--automatic", action="store_true")
     parser.add_argument("--allow-restart", action="store_true")
+    parser.add_argument("--switch", default="")
     args = parser.parse_args()
-    result = update(automatic=args.automatic, allow_restart=args.allow_restart)
+    result = update(automatic=args.automatic, allow_restart=args.allow_restart, switch=args.switch)
     print(json.dumps(result))
 
 if __name__ == "__main__":

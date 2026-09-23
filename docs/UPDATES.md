@@ -54,7 +54,7 @@ An installation result is retained in the private desktop profile. Failure is di
 
 ## Update channels
 
-A channel lets a person follow the binaries of one pull request under review instead of production. This section is the contract every surface and the channel publisher implement; [`tests/fixtures/update_channels.json`](../tests/fixtures/update_channels.json) is its executable form and `scripts/update_channels.py` its reference implementation. Released clients do not implement channels yet: their version parsers refuse every candidate tag, and tests assert that until each surface adopts the contract.
+A channel lets a person follow the binaries of one pull request under review instead of production. This section is the contract every surface and the channel publisher implement; [`tests/fixtures/update_channels.json`](../tests/fixtures/update_channels.json) is its executable form and `scripts/update_channels.py` its reference implementation. The host implements it (below). Released desktop and Android clients do not yet: their version parsers refuse every candidate tag, and tests assert that until each surface adopts the contract.
 
 **Names.** A channel name matches `[a-z][a-z0-9]{0,31}(_[1-9][0-9]{0,5})?`. `main` is the default and means production. `beta` is reserved for a future public channel. Only a per-pull-request sub-channel `<developer>_<pr>` (for example `moukrea_9`) whose developer part is not reserved can be published. A name is never a URL: it resolves to `<page>/ch/<name>/config.json`, where the Page and repository are those of the official installation (`installation.json` on the host, a single constant in desktop and Android).
 
@@ -69,6 +69,8 @@ A channel lets a person follow the binaries of one pull request under review ins
 **Removed channel.** When a pull request is merged or closed, its tags, prereleases and channel document are deleted. A client whose channel document is missing keeps its installed version, says the channel no longer exists and offers `main`; it does not switch by itself.
 
 **Trust.** Host and desktop verify only a SHA-256 taken from the release itself, so the authority over what a channel installs is the publication trigger: a maintainer label or `workflow_dispatch` on a pull request of the official repository, never code from a fork. Android candidates are signed with the production key, and Android keeps checking the package name and signing certificate.
+
+**Host.** `installation.json` holds `channel` (`main` when absent; the public installer keeps it on reinstall). Settings shows it next to **Check for updates**: **Change channel** takes a sub-channel name and **Return to main** goes back; both call `updates.configure {channel}`, which stores the name and starts the explicit switch at once. The switch is recorded in `update-status.json` (`switch`) only while it is running or deferred, so a deferred switch resumes as a switch; automatic runs never carry it. `jaunt.channels` reimplements the contract for the wheel and is tested against the same fixtures. A missing channel document ends in the `channel-missing` state. `tests/client_update_e2e.py` exercises the switch, the removed channel and the return to `main` through the loopback mirror, without a publisher.
 
 ## Visible progress
 
