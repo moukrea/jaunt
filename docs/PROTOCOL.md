@@ -65,3 +65,13 @@ four-argument collector exchange (absolute interpreter, absolute agent script,
 `exchange`, bounded base64 payload); shell operators and substitutions are
 rejected before authorization. Grant only the specific collector script command
 pattern. No provider credential or prompt is part of the collector exchange.
+
+The receiving host enforces the restriction itself, whatever the requester's
+trust: with `runtime: "resetdeck"` a linked host gets only `agent.rights`,
+`agent.run` and `agent.read`, and `agent.read` only returns runs that same
+requester started since the host last restarted. "Always allow this command" on
+a ResetDeck exchange adds the rule `<interpreter> <agent> exchange *` (paths
+glob-escaped), which covers later payloads of that pair only; another
+interpreter or agent asks again. When that prefix exceeds the 200-character rule
+limit, the approved run proceeds once and no rule is added. `agents.status`
+advertises `services: ["resetdeck"]`, a capability, not a grant.
