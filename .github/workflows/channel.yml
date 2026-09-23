@@ -16,6 +16,9 @@ on:
         type: string
 # One lane per pull request: a replaced pending run is an older head, and a
 # cleanup waits for a publication in progress. Production is never blocked.
+# Pages is never deployed from here: joining jaunt-production-release would let
+# a pending channel job replace a pending production run, so channel pages are
+# requested from auto-release.yml, which rescans both ledgers on every run.
 concurrency:
   group: jaunt-channel-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: false
@@ -81,6 +84,9 @@ jobs:
     needs: [prepare, host, desktop, android]
     if: always() && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,9 +109,16 @@ jobs:
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
+      - name: Publish the channel page under the production lock
+        run: gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
   cleanup:
     if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -119,3 +132,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+      - name: Remove the channel page under the production lock
+        run: gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}

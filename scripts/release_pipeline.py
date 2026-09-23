@@ -42,6 +42,7 @@ ALL = set(COMPONENTS)
 # runner creates therefore carries main's workflow tree, which the calling
 # run on main uses anyway: reusable workflows resolve from the caller's commit.
 WORKFLOWS = '.github/workflows'
+CONTROL = {'scripts/release_pipeline.py', 'scripts/channel_site.py'}
 
 
 def run(*args, cwd=None, data=None, env=None):
@@ -108,8 +109,8 @@ def build_graph(ref):
         if re.search(r'(?:node|python\d*|bash|npm run)\s+["\']?\$', workflow_text):
             raise ValueError(f'Dynamic workflow build command needs an explicit dependency: {workflow}')
         for name in commands(workflow_text):
-            # The coordinator is control-plane code, not shipped product.
-            if name != 'scripts/release_pipeline.py':
+            # The coordinator and the site assembler are control-plane code, not shipped product.
+            if name not in CONTROL:
                 graph.setdefault(name, set()).update(components)
     pkg = json.loads(read_at(ref, 'package.json') or '{}')
     scripts = pkg.get('scripts', {})

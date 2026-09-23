@@ -15,21 +15,23 @@ permissions:
   actions: write
   pages: write
   id-token: write
+  pull-requests: read
 jobs:
   prepare:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.prepare.outputs.publish }}
-      sha: ${{ steps.prepare.outputs.sha }}
-      source: ${{ steps.prepare.outputs.source }}
+      site: ${{ steps.site.outputs.site }}
+      sha: ${{ steps.prepare.outputs.sha || steps.site.outputs.sha }}
+      source: ${{ steps.prepare.outputs.source || steps.site.outputs.source }}
       host: ${{ steps.prepare.outputs.host }}
       desktop: ${{ steps.prepare.outputs.desktop }}
       android: ${{ steps.prepare.outputs.android }}
       relay: ${{ steps.prepare.outputs.relay }}
-      host_tag: ${{ steps.prepare.outputs.host_tag }}
-      desktop_tag: ${{ steps.prepare.outputs.desktop_tag }}
-      android_tag: ${{ steps.prepare.outputs.android_tag }}
+      host_tag: ${{ steps.prepare.outputs.host_tag || steps.site.outputs.host_tag }}
+      desktop_tag: ${{ steps.prepare.outputs.desktop_tag || steps.site.outputs.desktop_tag }}
+      android_tag: ${{ steps.prepare.outputs.android_tag || steps.site.outputs.android_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,6 +57,16 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # channel.yml dispatches this workflow after a candidate or a cleanup: the
+      # same lock then redeploys the last delivered production with the channels.
+      - name: Otherwise resync channel pages
+        id: site
+        if: steps.prepare.outputs.publish != 'true'
+        run: python scripts/channel_site.py plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_AUTO_RELEASE_ENABLED: ${{ vars.JAUNT_AUTO_RELEASE_ENABLED }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
   host:
     needs: prepare
     if: needs.prepare.outputs.host == 'true'
@@ -105,7 +117,7 @@ jobs:
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
   pages:
     needs: [prepare, promote]
-    if: always() && needs.promote.result == 'success'
+    if: always() && (needs.promote.result == 'success' || (needs.prepare.result == 'success' && needs.prepare.outputs.site == 'true'))
     uses: ./.github/workflows/pages.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
@@ -116,7 +128,7 @@ jobs:
     secrets: inherit
   receipt:
     needs: [prepare, host, desktop, android, relay, promote, pages]
-    if: always() && (needs.prepare.outputs.publish == 'true' || needs.prepare.result == 'failure')
+    if: always() && (needs.prepare.outputs.publish == 'true' || needs.prepare.outputs.site == 'true' || needs.prepare.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -127,11 +139,19 @@ jobs:
         with:
           python-version: '3.13'
       - name: Verify delivered Page and acknowledge source
-        if: needs.pages.result == 'success'
+        if: needs.pages.result == 'success' && needs.prepare.outputs.publish == 'true'
         run: python scripts/release_pipeline.py finish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      - name: Verify public channel pages
+        if: needs.pages.result == 'success'
+        run: python scripts/channel_site.py verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNELS: ${{ needs.pages.outputs.channels }}
+          DROPPED: ${{ needs.pages.outputs.dropped }}
           JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
       - name: Retain failed receipt for retry
         if: failure() || needs.pages.result != 'success'
