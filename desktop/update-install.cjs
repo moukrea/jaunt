@@ -8,15 +8,29 @@ const {execFile,spawn}=require('node:child_process');
 const execute=require('node:util').promisify(execFile);
 async function digest(path){const hash=createHash('sha256');for await(const part of createReadStream(path))hash.update(part);return hash.digest('hex');}
 async function command(binary){try{await execute('/usr/bin/which',[binary]);return true;}catch{return false;}}
+// A switch may target a package the manager ranks lower: rpm compares versions itself, since channels have no order of their own.
+async function rpmOperation(payload){
+  const query=async args=>(await execute('/usr/bin/rpm',args,{maxBuffer:100000})).stdout.trim();
+  const [name,target]=(await query(['-qp','--qf','%{NAME} %{VERSION}-%{RELEASE}',payload])).split(' ');
+  let installed;try{installed=await query(['-q','--qf','%{VERSION}-%{RELEASE}',name]);}catch{return 'install';}
+  const order=Number(await query(['--eval',`%{lua: print(rpm.vercmp(${JSON.stringify(installed)},${JSON.stringify(target)}))}`]));
+  return order>0?'downgrade':order===0?'reinstall':'install';
+}
+function systemArguments(kind,payload,operation){
+  if(kind==='deb')return ['install','-y',...(operation==='downgrade'?['--allow-downgrades']:[]),payload];
+  return [operation,'-y','--setopt=localpkg_gpgcheck=0',payload];
+}
 function safeNames(output){for(const name of output.split('\n').filter(Boolean)){if(isAbsolute(name)||name.split('/').includes('..'))throw new Error('Unsafe desktop archive path');}}
 async function install(plan){
-  if(!/^desktop-v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(plan.tag))throw new Error('Invalid desktop update version');
+  if(!/^desktop-v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+(?:\.ch\.(?!(?:main|beta)\.)[a-z][a-z0-9]{0,31}\.[1-9]\d{0,5}\.[1-9]\d{0,5})?)?$/.test(plan.tag))throw new Error('Invalid desktop update version');
   if(await digest(plan.payload)!==plan.digest)throw new Error('Desktop checksum mismatch');
   let binary;
   if(['deb','rpm'].includes(plan.kind)){
     const manager=plan.kind==='deb'?'/usr/bin/apt-get':'/usr/bin/dnf';
     if(!await command(manager))throw new Error(`The system package manager ${manager} is unavailable`);
-    const args=plan.kind==='deb'?['install','-y',plan.payload]:['install','-y','--setopt=localpkg_gpgcheck=0',plan.payload];
+    // Only an explicit channel switch may install a lower package version.
+    const operation=!plan.switch?'install':plan.kind==='deb'?'downgrade':await rpmOperation(plan.payload);
+    const args=systemArguments(plan.kind,plan.payload,operation);
     if(process.getuid?.()===0)await execute(manager,args,{timeout:600000,maxBuffer:1000000});
     else {if(!await command('pkexec'))throw new Error('System installation needs a graphical authorization agent (pkexec).');await execute('/usr/bin/pkexec',[manager,...args],{timeout:600000,maxBuffer:1000000});}
     binary='/usr/bin/jaunt-desktop';
@@ -79,4 +93,4 @@ async function main(file){
   }
 }
 if(require.main===module)main(process.argv[2]).catch(()=>{process.exitCode=1;});
-module.exports={install,safeNames};
+module.exports={install,safeNames,systemArguments};
