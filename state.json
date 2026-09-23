@@ -1,101 +1,49 @@
 {
   "schema": 1,
-  "cursor": "3c114440ff5b8042fddb1ce5db28905b818cc15c",
+  "cursor": "caa16ad8f878b03ca84d66f9d8977545625c8d1e",
   "tags": {
-    "host": "v0.1.0-beta.44",
-    "desktop": "desktop-v0.1.0-beta.33",
-    "android": "android-v0.1.0-beta.31"
+    "host": "v0.1.0-beta.45",
+    "desktop": "desktop-v0.1.0-beta.34",
+    "android": "android-v0.1.0-beta.32"
   },
   "receipts": {
     "host": {
-      "tag": "v0.1.0-beta.44",
-      "sha": "827732063c7402129ea871c4d0e8e76cb18f8931",
-      "url": "https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.44",
+      "tag": "v0.1.0-beta.45",
+      "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+      "url": "https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.45",
       "hashes": {
-        "jaunt_host-0.1.0b44-py3-none-any.whl": "65704c110cafd372dd6c8b725c8aa0c747a3d2f6fb7e8fd4bb07d318c79e1dbd",
-        "host-manifest.json": "e52577b9043a78234564ab98ca7394e8e51147aa6b8982f2684bacef11f0d70c"
+        "jaunt_host-0.1.0b45-py3-none-any.whl": "ede804fca44e89d5ca3938737e313b3a42661b9a538f04e4ac2b50848a5bca4b",
+        "host-manifest.json": "a1948108edcc7fda72ce457a094080150146cb106dcf7e1188b137c68893c46f"
       }
     },
     "desktop": {
-      "tag": "desktop-v0.1.0-beta.33",
-      "sha": "7ab213386519e003a4958436deb5675f9c5f069c",
-      "url": "https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.33",
+      "tag": "desktop-v0.1.0-beta.34",
+      "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+      "url": "https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.34",
       "hashes": {
-        "jaunt-desktop-0.1.0-beta.33-aarch64.rpm": "b2e22b2d214ab9471bafa14ac9976747a8294e2ce067cf952b510f1fbd7986ec",
-        "jaunt-desktop-0.1.0-beta.33-amd64.deb": "a598ac4291d3a59feb0f7de6c139f720cc484308477cf96ac10f61c3c020c7c4",
-        "jaunt-desktop-0.1.0-beta.33-arm64.deb": "5d307d498f3323a2c0b8fcc6ab2d8f5e5153796d6fef7404ff4b6b4bc1af4d6e",
-        "jaunt-desktop-0.1.0-beta.33-arm64.dmg": "e3642fd693046b6d6e028dfd8546e159724d10e8e66a43292bde3b68a5214110",
-        "jaunt-desktop-0.1.0-beta.33-arm64.tar.gz": "17ed8e4e385bc1a904a8d1b4d896d6809c3d2c4ec790fffab0996870b4a5004b",
-        "jaunt-desktop-0.1.0-beta.33-arm64.zip": "399f0f48129eee00ad7c3b0f546ab0c55697aa69576f4432f134b28ae20e55af",
-        "jaunt-desktop-0.1.0-beta.33-x64.dmg": "04544ccd98be4f2cadf8aeb6cc5df99b16f26dad2045a14de7efb2a84bb9631e",
-        "jaunt-desktop-0.1.0-beta.33-x64.tar.gz": "0183a081dc3391640c5cfcb47bc73d7f125954683f863cbd36f36c113f11c962",
-        "jaunt-desktop-0.1.0-beta.33-x64.zip": "50d02e233fc1d87de114f6b1999144c78df076a2ff6ee261d74a8ff0afd9fb60",
-        "jaunt-desktop-0.1.0-beta.33-x86_64.rpm": "4a33cf85ee21ab0e89bb16acede2a1fc5bbc0fbc311aae8c2e5b3f3ec34492f0"
+        "jaunt-desktop-0.1.0-beta.34-aarch64.rpm": "3d38c377655728f164133498f75c12b2b212ab4fbd55170b0d272c9fae3baa9e",
+        "jaunt-desktop-0.1.0-beta.34-amd64.deb": "eb4b5726aa5c87c32e1a25134009522e675920462d6543884418977e862438b4",
+        "jaunt-desktop-0.1.0-beta.34-arm64.deb": "f83044a1e5d963bab266d6940cb4c73ce2cc88ca21734a4b7b7c35369ac4a701",
+        "jaunt-desktop-0.1.0-beta.34-arm64.dmg": "461a56a8b0b3cc361522648f122fac5bfd3aa3638aa96db083f38f49c17cc034",
+        "jaunt-desktop-0.1.0-beta.34-arm64.tar.gz": "17d25c6a8426e229e781e3959cfbdab76cc609b0453c42ef17eae2d2f0189a29",
+        "jaunt-desktop-0.1.0-beta.34-arm64.zip": "8933e42a6a3d897349fbe836e16b392b21663bb503a0710a204fd70d2f71e60a",
+        "jaunt-desktop-0.1.0-beta.34-x64.dmg": "ec11c3d792e3ddb01376621a499d4b2cda683395a543b6fb80015f712337809f",
+        "jaunt-desktop-0.1.0-beta.34-x64.tar.gz": "ed8e52dbc3cb376b5eef658083fdbe66ec7783560764eebe1de687954fce10c7",
+        "jaunt-desktop-0.1.0-beta.34-x64.zip": "8d752f64cb060bb8a017262cf7fefa9f109a0bc7e8505209d5a882bc53dc0a7c",
+        "jaunt-desktop-0.1.0-beta.34-x86_64.rpm": "bfd7a1795f4ca6f82ba55d8f15d5bb8e4e53aec322c5d39d21dd8b8267024135"
       }
     },
     "android": {
-      "tag": "android-v0.1.0-beta.31",
-      "sha": "7ab213386519e003a4958436deb5675f9c5f069c",
-      "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.31",
+      "tag": "android-v0.1.0-beta.32",
+      "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+      "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.32",
       "hashes": {
-        "jaunt-android-v0.1.0-beta.31.apk": "5dc5ef2e89d668cdf13224e05b4352d0b95d6e62f7ae4b83aef3025d72861917",
+        "jaunt-android-v0.1.0-beta.32.apk": "246a504538f25df1c81e6cf3ec44f915c391f74835efff68fc904396372204e2",
         "SIGNING-CERTIFICATE.txt": "9af98b62b5100b05a878a1520d92bbb492c66e580e8175299a34b6123216af44"
       }
     }
   },
-  "pending": {
-    "source": "caa16ad8f878b03ca84d66f9d8977545625c8d1e",
-    "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
-    "tags": {
-      "host": "v0.1.0-beta.45",
-      "desktop": "desktop-v0.1.0-beta.34",
-      "android": "android-v0.1.0-beta.32"
-    },
-    "components": [
-      "android",
-      "desktop",
-      "host"
-    ],
-    "status": "failed",
-    "run": "35813749122",
-    "receipts": {
-      "host": {
-        "tag": "v0.1.0-beta.45",
-        "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
-        "url": "https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.45",
-        "hashes": {
-          "jaunt_host-0.1.0b45-py3-none-any.whl": "ede804fca44e89d5ca3938737e313b3a42661b9a538f04e4ac2b50848a5bca4b",
-          "host-manifest.json": "a1948108edcc7fda72ce457a094080150146cb106dcf7e1188b137c68893c46f"
-        }
-      },
-      "desktop": {
-        "tag": "desktop-v0.1.0-beta.34",
-        "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
-        "url": "https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.34",
-        "hashes": {
-          "jaunt-desktop-0.1.0-beta.34-aarch64.rpm": "3d38c377655728f164133498f75c12b2b212ab4fbd55170b0d272c9fae3baa9e",
-          "jaunt-desktop-0.1.0-beta.34-amd64.deb": "eb4b5726aa5c87c32e1a25134009522e675920462d6543884418977e862438b4",
-          "jaunt-desktop-0.1.0-beta.34-arm64.deb": "f83044a1e5d963bab266d6940cb4c73ce2cc88ca21734a4b7b7c35369ac4a701",
-          "jaunt-desktop-0.1.0-beta.34-arm64.dmg": "461a56a8b0b3cc361522648f122fac5bfd3aa3638aa96db083f38f49c17cc034",
-          "jaunt-desktop-0.1.0-beta.34-arm64.tar.gz": "17d25c6a8426e229e781e3959cfbdab76cc609b0453c42ef17eae2d2f0189a29",
-          "jaunt-desktop-0.1.0-beta.34-arm64.zip": "8933e42a6a3d897349fbe836e16b392b21663bb503a0710a204fd70d2f71e60a",
-          "jaunt-desktop-0.1.0-beta.34-x64.dmg": "ec11c3d792e3ddb01376621a499d4b2cda683395a543b6fb80015f712337809f",
-          "jaunt-desktop-0.1.0-beta.34-x64.tar.gz": "ed8e52dbc3cb376b5eef658083fdbe66ec7783560764eebe1de687954fce10c7",
-          "jaunt-desktop-0.1.0-beta.34-x64.zip": "8d752f64cb060bb8a017262cf7fefa9f109a0bc7e8505209d5a882bc53dc0a7c",
-          "jaunt-desktop-0.1.0-beta.34-x86_64.rpm": "bfd7a1795f4ca6f82ba55d8f15d5bb8e4e53aec322c5d39d21dd8b8267024135"
-        }
-      },
-      "android": {
-        "tag": "android-v0.1.0-beta.32",
-        "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
-        "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.32",
-        "hashes": {
-          "jaunt-android-v0.1.0-beta.32.apk": "246a504538f25df1c81e6cf3ec44f915c391f74835efff68fc904396372204e2",
-          "SIGNING-CERTIFICATE.txt": "9af98b62b5100b05a878a1520d92bbb492c66e580e8175299a34b6123216af44"
-        }
-      }
-    }
-  },
+  "pending": null,
   "history": [
     {
       "source": "f1dfc2f854e602558fb18d9063449cdbc18722c0",
@@ -245,6 +193,59 @@
           "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.31",
           "hashes": {
             "jaunt-android-v0.1.0-beta.31.apk": "5dc5ef2e89d668cdf13224e05b4352d0b95d6e62f7ae4b83aef3025d72861917",
+            "SIGNING-CERTIFICATE.txt": "9af98b62b5100b05a878a1520d92bbb492c66e580e8175299a34b6123216af44"
+          }
+        }
+      }
+    },
+    {
+      "source": "caa16ad8f878b03ca84d66f9d8977545625c8d1e",
+      "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+      "tags": {
+        "host": "v0.1.0-beta.45",
+        "desktop": "desktop-v0.1.0-beta.34",
+        "android": "android-v0.1.0-beta.32"
+      },
+      "components": [
+        "android",
+        "desktop",
+        "host"
+      ],
+      "status": "delivered",
+      "run": "35815314183",
+      "receipts": {
+        "host": {
+          "tag": "v0.1.0-beta.45",
+          "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+          "url": "https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.45",
+          "hashes": {
+            "jaunt_host-0.1.0b45-py3-none-any.whl": "ede804fca44e89d5ca3938737e313b3a42661b9a538f04e4ac2b50848a5bca4b",
+            "host-manifest.json": "a1948108edcc7fda72ce457a094080150146cb106dcf7e1188b137c68893c46f"
+          }
+        },
+        "desktop": {
+          "tag": "desktop-v0.1.0-beta.34",
+          "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+          "url": "https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.34",
+          "hashes": {
+            "jaunt-desktop-0.1.0-beta.34-aarch64.rpm": "3d38c377655728f164133498f75c12b2b212ab4fbd55170b0d272c9fae3baa9e",
+            "jaunt-desktop-0.1.0-beta.34-amd64.deb": "eb4b5726aa5c87c32e1a25134009522e675920462d6543884418977e862438b4",
+            "jaunt-desktop-0.1.0-beta.34-arm64.deb": "f83044a1e5d963bab266d6940cb4c73ce2cc88ca21734a4b7b7c35369ac4a701",
+            "jaunt-desktop-0.1.0-beta.34-arm64.dmg": "461a56a8b0b3cc361522648f122fac5bfd3aa3638aa96db083f38f49c17cc034",
+            "jaunt-desktop-0.1.0-beta.34-arm64.tar.gz": "17d25c6a8426e229e781e3959cfbdab76cc609b0453c42ef17eae2d2f0189a29",
+            "jaunt-desktop-0.1.0-beta.34-arm64.zip": "8933e42a6a3d897349fbe836e16b392b21663bb503a0710a204fd70d2f71e60a",
+            "jaunt-desktop-0.1.0-beta.34-x64.dmg": "ec11c3d792e3ddb01376621a499d4b2cda683395a543b6fb80015f712337809f",
+            "jaunt-desktop-0.1.0-beta.34-x64.tar.gz": "ed8e52dbc3cb376b5eef658083fdbe66ec7783560764eebe1de687954fce10c7",
+            "jaunt-desktop-0.1.0-beta.34-x64.zip": "8d752f64cb060bb8a017262cf7fefa9f109a0bc7e8505209d5a882bc53dc0a7c",
+            "jaunt-desktop-0.1.0-beta.34-x86_64.rpm": "bfd7a1795f4ca6f82ba55d8f15d5bb8e4e53aec322c5d39d21dd8b8267024135"
+          }
+        },
+        "android": {
+          "tag": "android-v0.1.0-beta.32",
+          "sha": "c827295309d0d5868a36b429a6dca1f89e77522c",
+          "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.32",
+          "hashes": {
+            "jaunt-android-v0.1.0-beta.32.apk": "246a504538f25df1c81e6cf3ec44f915c391f74835efff68fc904396372204e2",
             "SIGNING-CERTIFICATE.txt": "9af98b62b5100b05a878a1520d92bbb492c66e580e8175299a34b6123216af44"
           }
         }
