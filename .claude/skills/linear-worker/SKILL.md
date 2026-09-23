@@ -218,11 +218,14 @@ git branch --show-current      # must contain <ID>
 ```
 
 Linear's GitHub integration links the ticket through the branch identifier.
-Status transitions depend on the team's configured PR events: a push alone is
-not proof of *In Progress*, and a draft PR may leave the ticket in *Backlog*.
-Read the actual PR and Linear states after opening the PR and after merging;
-report discrepancies rather than inventing progress. Do not call `move` to
-simulate a transition the integration is expected to perform. If a transition
+Status transitions depend on the team's configured PR events: an opened PR is
+meant to move the ticket to *In Review* and a merge to *Done*, and a draft PR
+may leave it where it was. *In Progress* is not git's to prove: once the team
+stops pointing "PR opened" at it, `verdict`/`ready` write it when you start
+coding (JAU-112). Read the actual PR and Linear states after opening the PR and
+after merging; report discrepancies rather than inventing progress. Never call
+`move`, least of all to simulate a transition the integration is expected to
+perform. If a transition
 is missing, inspect the PR link and configured event before naming its cause.
 
 ### Reserve before the final rebase and CI

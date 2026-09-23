@@ -35,6 +35,7 @@ const CREDENTIALS_FILE = join(STATE_DIR, 'linear-credentials.json');
 const TOKEN_FILE = join(STATE_DIR, 'linear-token.json');
 const LOOP_FILE = join(STATE_DIR, 'linear-loop.json');
 const REVIEW_FILE = join(STATE_DIR, 'linear-review.json');
+const TRIAGE_FILE = join(STATE_DIR, 'linear-triage.json');
 const CLAIMS_DIR = join(STATE_DIR, 'claims');
 const SURFACES_DIR = join(STATE_DIR, 'surfaces');
 
@@ -54,6 +55,16 @@ const DECLINE_EMOJI = new Set(['-1', 'thumbsdown', 'x', 'no_entry']);
 // the only one where the human had something to do was the only one that did
 // not announce itself (JAU-18).
 export const WAITING_STATE = 'Waiting for human';
+
+// The other columns the loop writes, by name (JAU-112). By name because types do
+// not tell them apart: JAU's *Waiting for human* was created by hand as
+// `unstarted`, the same type as *Todo*. Backlog is not analysed, blocked or
+// declined; Todo is analysed, unblocked and forecast — ready to dispatch; In
+// Progress is a worker actually coding, and belongs to the loop only once git
+// no longer writes it (`loopOwnsProgress`). In Review and Done stay git's.
+export const BACKLOG_STATE = 'Backlog';
+export const TODO_STATE = 'Todo';
+export const PROGRESS_STATE = 'In Progress';
 
 // A claim's phase used to be a free-form string nothing ever read, which is how
 // `implementing` came to be a value no code and no skill had ever written. A
@@ -310,6 +321,36 @@ async function resolveTeam() {
   return team;
 }
 
+// One authority per column: the loop writes *In Progress* only when no git
+// automation of the team targets it. Measured 23/09: JAU's "PR opened" event
+// (`start`) still moves tickets to In Progress, and until an administrator
+// points it at In Review (the app cannot), the loop writing the same column
+// would be a second author with no arbitration. Any failure to read the
+// settings answers `false`: git keeps the column, as before JAU-112.
+export function gitLeavesProgress(automations) {
+  if (!Array.isArray(automations)) return false;
+  return !automations.some((a) => a?.state?.name?.toLowerCase() === PROGRESS_STATE.toLowerCase());
+}
+
+let progressOwnerCache = null;
+async function loopOwnsProgress() {
+  progressOwnerCache ||= (async () => {
+    try {
+      const team = await resolveTeam();
+      const data = await graphql(
+        `query($id: String!) {
+          team(id: $id) { gitAutomationStates(first: 50) { nodes { event state { name } } } }
+        }`,
+        { id: team.id },
+      );
+      return gitLeavesProgress(data.team?.gitAutomationStates?.nodes);
+    } catch {
+      return false;
+    }
+  })();
+  return progressOwnerCache;
+}
+
 // Cached like agentUser(): a team's membership does not change inside one run.
 let boardHumansCache = null;
 async function boardHumans() {
@@ -504,11 +545,14 @@ async function markReviewed(identifier, rationale, group) {
 // unprioritised tickets it encodes nothing anyone decided. When every open
 // ticket sits at priority 0, `board().unprioritised` is true and the caller is
 // expected to prioritise before claiming rather than trust this order.
-async function nextIssue() {
-  const { issues } = await listIssues(['unstarted', 'backlog']);
-  const stateRank = (i) => (i.state.type === 'unstarted' ? 0 : 1);
+//
+// Ranked by column name, not type: *Waiting for human* is `unstarted` like Todo,
+// so ranking by type offered a parked ticket as the next one to start (JAU-112).
+// Any other unstarted/backlog column a human adds ranks after Backlog.
+export function rankNext(issues) {
+  const stateRank = (i) => ({ [TODO_STATE]: 0, [BACKLOG_STATE]: 1 })[i.state.name] ?? 2;
   const ranked = issues
-    .filter((i) => blockedBy(i).length === 0)
+    .filter((i) => i.state.name !== WAITING_STATE && blockedBy(i).length === 0)
     .sort(
       (a, b) =>
         stateRank(a) - stateRank(b) ||
@@ -516,6 +560,11 @@ async function nextIssue() {
         a.sortOrder - b.sortOrder,
     );
   return ranked[0] ?? null;
+}
+
+async function nextIssue() {
+  const { issues } = await listIssues(['unstarted', 'backlog']);
+  return rankNext(issues);
 }
 
 // A ticket the agent itself annotated after reviewing it — a comment, a label,
@@ -552,6 +601,7 @@ async function board() {
         if (seen.issueUpdatedAt !== i.updatedAt) return { state: 'changed-since-review', ...known };
         return { state: 'reviewed', ...known };
       })(),
+      id: i.id,
       identifier: i.identifier,
       title: i.title,
       state: i.state.name,
@@ -582,6 +632,86 @@ async function board() {
     needsPass: needsReview.length > 0,
     needsReview,
     tickets,
+  };
+}
+
+// --- triage: Backlog ↔ Todo ------------------------------------------------
+// Todo is the orchestrator's set of dispatch candidates made visible (JAU-112):
+// analysed at the current version, blocked by nothing open, unclaimed, and with
+// a forecast surface declared for that analysis. A surface older than the review
+// belongs to an earlier analysis — a released or declined claim leaves its
+// record behind — and says nothing about whether this one is a candidate.
+//
+// Only the loop writes this pair of columns, so it only undoes what it can
+// explain. A ticket it promoted goes back as soon as it stops being ready. One a
+// human put in Todo is their prioritisation: only a new open blocker takes it
+// back, and the ticket says why.
+export function triageMoves(tickets, { claimed = new Set(), surfaces = new Map(), placed = new Set() } = {}) {
+  const moves = [];
+  const held = [];
+  for (const t of tickets) {
+    if (claimed.has(t.identifier) || ![BACKLOG_STATE, TODO_STATE].includes(t.state)) continue;
+    const surface = surfaces.get(t.identifier);
+    const missing = [];
+    if (t.review?.state !== 'reviewed') missing.push(t.review?.state ?? 'never-reviewed');
+    if (t.blockedBy?.length) missing.push(`bloqué par ${t.blockedBy.join(', ')}`);
+    if (!surface) missing.push('aucun périmètre prévisionnel');
+    else if (t.review?.reviewedAt && !(Date.parse(surface.declaredAt) >= Date.parse(t.review.reviewedAt))) {
+      missing.push('périmètre antérieur à la dernière analyse');
+    }
+    if (t.state === BACKLOG_STATE && !missing.length) {
+      moves.push({ ticket: t.identifier, from: BACKLOG_STATE, to: TODO_STATE, reason: 'analysé, sans blocage, périmètre prévisionnel déclaré' });
+    } else if (t.state === TODO_STATE && missing.length) {
+      const human = !placed.has(t.identifier);
+      if (!human || t.blockedBy?.length) {
+        moves.push({ ticket: t.identifier, from: TODO_STATE, to: BACKLOG_STATE, reason: missing.join(' ; '), ...(human ? { overrides: 'human' } : {}) });
+      } else {
+        held.push({ ticket: t.identifier, reason: `placé en Todo à la main ; ${missing.join(' ; ')}` });
+      }
+    }
+  }
+  return { moves, held };
+}
+
+async function triage() {
+  const state = await board();
+  const claimed = new Set((await listClaims()).map((c) => c.issue));
+  const surfaces = new Map();
+  for (const t of state.tickets) {
+    const surface = await readSurface(t.identifier);
+    if (surface) surfaces.set(t.identifier, surface);
+  }
+  const record = await optionalJson(TRIAGE_FILE) ?? { tickets: {} };
+  // A ticket seen in Backlog is nobody's Todo placement any more, whoever moved it.
+  for (const t of state.tickets) if (t.state !== TODO_STATE) delete record.tickets[t.identifier];
+  const placed = new Set(Object.keys(record.tickets));
+  const { moves, held } = triageMoves(state.tickets, { claimed, surfaces, placed });
+  const done = [];
+  const errors = [];
+  for (const move of moves) {
+    const ticket = state.tickets.find((t) => t.identifier === move.ticket);
+    try {
+      await setState({ id: ticket.id, state: { name: ticket.state } }, move.to);
+      if (move.to === TODO_STATE) record.tickets[move.ticket] = { at: new Date().toISOString() };
+      else delete record.tickets[move.ticket];
+      if (move.overrides) {
+        await addComment(move.ticket,
+          `Remis en **${BACKLOG_STATE}** depuis ${TODO_STATE} : ${move.reason}. Il reviendra en ${TODO_STATE} une fois débloqué.\n\n${expectsLine('none')}`,
+          undefined, { technical: true });
+      }
+      done.push(move);
+    } catch (error) {
+      errors.push({ ...move, error: error.message });
+    }
+  }
+  await atomicJson(TRIAGE_FILE, record);
+  return {
+    moves: done,
+    held,
+    ...(errors.length ? { errors } : {}),
+    // Who writes In Progress right now: `git` until the team's "PR opened"
+    // automation stops targeting it, then `loop` (see loopOwnsProgress).
+    progress: (await loopOwnsProgress()) ? 'loop' : 'git',
   };
 }
 
@@ -783,10 +913,11 @@ async function moveIssue(identifier, stateName) {
   return setState(await getIssue(identifier), stateName);
 }
 
-// Creating the waiting column, once. `started`, not `unstarted`, and the choice
-// is load-bearing on both sides: `next` only ever picks from unstarted/backlog
-// (so a parked ticket can never be re-dispatched while its worker sleeps), and
-// `board` reads started (so it stays visible instead of vanishing off the top).
+// Creating the waiting column, once. Its type no longer matters: JAU's was
+// created by hand as `unstarted`, the type of Todo, so `next` excludes it by name
+// (a parked ticket is never re-dispatched while its worker sleeps) and `board`
+// reads both unstarted and started (it stays visible either way). `started` is
+// kept here only because it sorts the column after In Progress (JAU-112).
 async function ensureWaitingState() {
   const existing = await findState(WAITING_STATE, { optional: true });
   if (existing) {
@@ -821,7 +952,7 @@ async function ensureWaitingState() {
     return {
       created: false,
       reason: error.message,
-      todo: `create a "${WAITING_STATE}" state of type "started" on team ${team.key} by hand: Linear → Team settings → Workflow → add state, position it after "In Progress". Everything else works without it; until then parking is skipped.`,
+      todo: `create a "${WAITING_STATE}" state on team ${team.key} by hand: Linear → Team settings → Workflow → add state, type "started" or "unstarted" (the loop matches it by name). Everything else works without it; until then parking is skipped.`,
     };
   }
   if (!data.workflowStateCreate.success) throw new Error('workflowStateCreate failed');
@@ -1055,8 +1186,9 @@ async function claim(identifier, phase = 'planning', session, runtime) {
 
   // Entering `awaiting-approval` is the moment the ticket stops being the
   // agent's business and becomes the human's, and it is the only transition the
-  // loop is entitled to write — git owns *In Progress* and *Done*, the loop owns
-  // what git cannot see. The claim is already made here on the approval path, so
+  // loop writes on the approval path — git owns *In Review* and *Done*, the loop
+  // owns what git cannot see (JAU-112 adds Todo, and In Progress once git leaves
+  // it; see loopOwnsProgress). The claim is already made here on that path, so
   // parking rides along with it rather than being one more step to forget.
   //
   // `parkedFrom` is the state to come back to. A re-plan claims
@@ -1114,8 +1246,14 @@ async function claim(identifier, phase = 'planning', session, runtime) {
 // All phase writers use this boundary, including direct claims and queue promotion.
 // Restore remotely before committing the local phase; a failed restore leaves the
 // old claim available for retry. Dependencies keep persistence tests off the board.
+//
+// Entering `implementing` also moves the ticket to *In Progress* once the loop
+// owns that column (JAU-112): an approval without a queue, `ready` promoting a
+// queued claim, or a worker claiming it by hand. A test state directory never
+// reads the team's settings, so the column stays git's there.
 export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = getIssue,
-  moveState = setState, unpark = false, onUnpark = () => {} } = {}) {
+  moveState = setState, unpark = false, onUnpark = () => {},
+  ownsProgress = stateDir === STATE_DIR ? loopOwnsProgress : async () => false } = {}) {
   const path = join(stateDir, 'claims', `${record.issue}.json`);
   const previous = await optionalJson(path);
   await guardWaitTransition(stateDir, record, previous);
@@ -1126,14 +1264,16 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
       throw new Error('claim changed during restoration; retry transition');
     }
   };
-  if (previous && previous.claimedAt === record.claimedAt &&
+  const restoring = previous && previous.claimedAt === record.claimedAt &&
       (unpark || (record.phase !== 'awaiting-approval' &&
-        (previous.phase === 'awaiting-approval' || previous.parkedFrom)))) {
+        (previous.phase === 'awaiting-approval' || previous.parkedFrom)));
+  const working = record.phase === 'implementing' && previous?.phase !== 'implementing' && await ownsProgress();
+  if (restoring || working) {
     const issue = await readIssue(record.issue);
     await unchanged();
-    const result = await restoreClaimState(issue, previous, { moveState });
+    const result = await restoreClaimState(issue, previous ?? record, { moveState, working });
     await unchanged();
-    record.parkedFrom = null;
+    if (restoring) record.parkedFrom = null;
     onUnpark(result);
   }
   Object.assign(record, preserveWorkHistory(record, previous));
@@ -1144,12 +1284,12 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
 
 // No guessed fallback: losing the destination while still waiting requires repair,
 // not deletion of the only surviving claim. Already moved issues are left alone.
-export async function restoreClaimState(issue, held, { moveState = setState } = {}) {
+export async function restoreClaimState(issue, held, { moveState = setState, working = false } = {}) {
   if (issue?.identifier !== held.issue || !issue.state?.name) {
     throw new Error('cannot verify current state; preserving claim');
   }
-  if (issue.state.name !== WAITING_STATE) return null;
-  const target = nextClaimState({ currentState: issue.state.name, parkedFrom: held.parkedFrom });
+  const target = nextClaimState({ currentState: issue.state.name, parkedFrom: held.parkedFrom, working });
+  if (issue.state.name !== WAITING_STATE && !target) return null;
   if (!target) throw new Error('cannot restore waiting ticket without parkedFrom; preserving claim');
   const result = await moveState(issue, target, { optional: true });
   if (!result.moved) throw new Error(`cannot restore waiting ticket: ${result.reason}; preserving claim`);
@@ -1243,7 +1383,8 @@ function relatedTo(issue, target) {
 // Explicit injection keeps tests away from the real board and canonical state.
 // No creation retries live here: workers retain IDs, verify the board after an
 // ambiguous create, and finish the relation before requesting release.
-export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveState = setState } = {}) {
+export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveState = setState,
+  ownsProgress = stateDir === STATE_DIR ? loopOwnsProgress : async () => false } = {}) {
   const paths = (id) => {
     if (!issueKey(id)) throw new Error('closure/release requires an issue identifier such as JAU-50');
     return {
@@ -1306,6 +1447,18 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveS
           if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
               JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
           await restoreClaimState(current, claim, { moveState });
+          if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
+              JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
+        }
+        // In Progress written by the loop means "a worker is coding". Released
+        // without a PR (git would have moved it to In Review), nobody is: back
+        // to Backlog, where `triage` decides whether it is ready again (JAU-112).
+        if (issue.state.name === PROGRESS_STATE && await ownsProgress()) {
+          const current = await readIssue(id);
+          if (current?.state?.name === PROGRESS_STATE) {
+            const result = await moveState(current, BACKLOG_STATE, { optional: true });
+            if (!result.moved) throw new Error(`cannot leave ${PROGRESS_STATE}: ${result.reason}; preserving claim`);
+          }
           if (JSON.stringify(await optionalJson(p.claim)) !== JSON.stringify(claim) ||
               JSON.stringify(await optionalJson(p.inventory)) !== JSON.stringify(inventory)) throw new Error('claim or closure changed during restoration; preserving claim');
         }
@@ -1656,7 +1809,13 @@ async function independent(identifier) {
 // decision, and restoring the old state would silently undo it. And
 // `parkedFrom` has to be known: with nothing recorded there is no state to
 // restore, and inventing one would put a second authority on a field git owns.
-export function nextClaimState({ currentState, parkedFrom }) {
+//
+// `working` is the one exception (JAU-112): a worker entering `implementing`
+// while the loop owns *In Progress* goes there, from the waiting column or from
+// the Backlog/Todo a queued claim was restored to. Never from anywhere else — In
+// Review and Done are git's, and a human's own move stays theirs.
+export function nextClaimState({ currentState, parkedFrom, working = false }) {
+  if (working && [WAITING_STATE, BACKLOG_STATE, TODO_STATE].includes(currentState)) return PROGRESS_STATE;
   if (currentState !== WAITING_STATE) return null;
   if (!parkedFrom || parkedFrom === WAITING_STATE) return null;
   return parkedFrom;
@@ -1934,6 +2093,9 @@ const COMMANDS = {
   },
   next: async () => nextIssue(),
   board: async () => board(),
+  // Backlog ↔ Todo from the board, the claims and the forecast surfaces; run by
+  // the orchestrator at the end of its analysis pass (JAU-112). Idempotent.
+  triage: async () => triage(),
   pulse: async () => withRateLimit(await pulse()),
   // Who wrote what the watcher just saw move: `{"JAU-1": "<previous updatedAt>"
   // | null}` in, one verdict per ticket out (JAU-15).
@@ -2194,7 +2356,7 @@ export const COMMAND_FLAGS = {
     attempt: ['runtime', 'session', 'action', 'result', 'evidence', 'deadline'],
     resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket', 'delivered'], ack: ['event', 'evidence'] },
   'sync-activity': ['incremental'], discussion: ['file', 'delivered'],
-  whoami: [], team: [], next: [], board: [], pulse: [], attribute: [],
+  whoami: [], team: [], next: [], board: [], triage: [], pulse: [], attribute: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],
   surface: ['files', 'symbols'], stop: [], 'stop-requested': [], list: [], show: [],
   comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],

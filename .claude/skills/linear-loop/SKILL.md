@@ -201,11 +201,13 @@ review is required on `main`.
 Two consequences for the switch:
 
 - **Branch names always carry the ticket identifier.** That is what makes
-  Linear's GitHub integration move the ticket: push to *In Progress*, merge to
-  *Done*. A branch named without it lands its work and leaves the board saying
-  nothing happened. The loop must never `move` for those two transitions — the
-  one state it does own is ***Waiting for human***, which git has no way of
-  knowing about.
+  Linear's GitHub integration move the ticket: PR opened to *In Review*, merge
+  to *Done*. A branch named without it lands its work and leaves the board
+  saying nothing happened. The loop never `move`s for those two transitions. It
+  owns the rest, one author per column (JAU-112): *Backlog* ↔ *Todo* through
+  `triage`, ***Waiting for human*** through `claim`/`verdict`, and *In Progress*
+  when coding starts — only once the team's "PR opened" automation no longer
+  targets it (`triage` reports `progress: git|loop`).
 - **`status` does not show the landing.** A claim says a ticket is held, not
   whether its PR is open, red, or already merged. What it does show is the
   phase — `planning`, `awaiting-approval`, `queued`, `implementing`, `landing` —
