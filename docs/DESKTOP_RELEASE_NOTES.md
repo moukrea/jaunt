@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.39
+
+- feat(web): fold the bridged sessions list with a chevron (JAU-2) (#121)
+- Source: `f32740aebbf08ef1f2eaf9dc930a519a47656024`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
