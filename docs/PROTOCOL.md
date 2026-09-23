@@ -53,3 +53,25 @@ New pairing text uses the lowercase `jaunt1.` prefix. Updated clients also accep
 Hosts advertising `sessionDirectory: true` accept `session.directory(id)` and the optional `sourceSession` on `session.create`. An explicit nonempty `cwd` takes precedence. The host reads the shell process's current directory on Linux/macOS and falls back to its initial directory if the process has exited or the OS cannot supply it. This introduces no new transport or authorization boundary.
 
 New host update requests return an operation ID, carried through update status records. Clients can distinguish the requested check's result from a previous completed check. Statuses include checking, downloading, verifying, installing, installed, current, deferred and error. An installer error is not reported as waiting unless active shells/transfers actually blocked a non-authorized restart.
+
+### ResetDeck collector service identity
+
+The local owner-only control socket accepts `runtime: "resetdeck", service:
+"resetdeck"` for `agents.hosts`, `agents.run` and `agents.read` without binding the
+service to an interactive AI terminal. It is registered as a separate requester
+on the paired host and still requires enabled agent execution and its own trust
+or command rule. Incoming ResetDeck runs accept only a canonical shell-quoted
+four-argument collector exchange (absolute interpreter, absolute agent script,
+`exchange`, bounded base64 payload); shell operators and substitutions are
+rejected before authorization. Grant only the specific collector script command
+pattern. No provider credential or prompt is part of the collector exchange.
+
+The receiving host enforces the restriction itself, whatever the requester's
+trust: with `runtime: "resetdeck"` a linked host gets only `agent.rights`,
+`agent.run` and `agent.read`, and `agent.read` only returns runs that same
+requester started since the host last restarted. "Always allow this command" on
+a ResetDeck exchange adds the rule `<interpreter> <agent> exchange *` (paths
+glob-escaped), which covers later payloads of that pair only; another
+interpreter or agent asks again. When that prefix exceeds the 200-character rule
+limit, the approved run proceeds once and no rule is added. `agents.status`
+advertises `services: ["resetdeck"]`, a capability, not a grant.

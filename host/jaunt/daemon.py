@@ -9,7 +9,9 @@ import logging
 import os
 import platform
 import base64
+import glob
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -20,7 +22,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import __version__
-from .agents import AgentShells, Approvals, Executor, Policy, requester_key, DURATIONS, FEATURES
+from .agents import AgentShells, Approvals, Executor, Policy, requester_key, DURATIONS, FEATURES, RULE_CHARS
 
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 from .clipboard import Clipboard
@@ -263,6 +265,7 @@ class Host:
         self.executor = Executor(state.root, self.policy)
         self.agent_shells = AgentShells(state.root, self.policy.journal)
         self.agent_handles: dict[str, list] = {}  # local session id -> [(room, shell id, runtime)] opened on linked hosts
+        self.run_owners: dict[str, str] = {}  # run id -> requester, for the service identities that may only read their own runs
         self.known_sessions: set[str] = set()
         self.links = Links(state, {"room": state.data["room"], "name": "host: " + state.data["name"]}, self.link_message)
         self.files = Files(state.root, state.data.get("maxFileBytes", 512 * 1024 * 1024))
@@ -357,6 +360,9 @@ class Host:
         if getattr(peer, "is_host", False) and method not in ("agent.rights", "agent.run", "agent.read", "agent.shell", "agent.sessions", "agent.type", "agent.output", "agent.peers", "agent.message", "ping"):
             # A linked host is a requester, never a user of this machine: it gets the agent RPCs only.
             raise ValueError("Linked hosts may only use the agent methods")
+        if getattr(peer, "is_host", False) and p.get("runtime") == "resetdeck" and method not in self.SERVICE_PEER_METHODS:
+            # Enforced here whatever the requester's trust: a service identity never gets shells, typing or messages.
+            raise ValueError("ResetDeck can only exchange collector data")
         if method == "session.list":
             return self.sessions.list()
         if method == "session.directory":
@@ -634,10 +640,16 @@ class Host:
 
     # ---- shared workspace (open sessions, layouts) -------------------------------
     # ---- agents and machines ---------------------------------------------------------
-    RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+    RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "resetdeck": "ResetDeck"}
+    # Service identities (not AI sessions) and the only methods they may call, locally and on a linked host.
+    SERVICES = ("resetdeck",)
+    SERVICE_METHODS = ("agents.hosts", "agents.run", "agents.read")
+    SERVICE_PEER_METHODS = ("agent.rights", "agent.run", "agent.read")
+    COLLECTOR_PAYLOAD = 200_000
 
     def agents_status(self) -> dict:
-        return {"enabled": self.policy.enabled, "features": self.policy.features(), "requesters": self.policy.table(), "links": self.links.list(),
+        return {"enabled": self.policy.enabled, "features": self.policy.features(), "services": list(self.SERVICES),
+                "requesters": self.policy.table(), "links": self.links.list(),
                 "pending": self.approvals.list(), "log": self.policy.data["log"][-50:], "agentShells": self.agent_shells.list()}
 
     async def agents_configure(self, p: dict) -> dict:
@@ -719,9 +731,15 @@ class Host:
         if level == "ask":
             decision = await self.approvals.ask({"id": key, "name": name}, right, kind, detail)
             if decision == "rule" and kind == "run":
-                # "Always allow this command": the exact command becomes a rule for this requester.
-                self.policy.add_rule(key, detail.get("command", ""))
-                self.policy.journal(kind="rule", requester=key, added=self.policy.normalize(detail.get("command", "")))
+                # "Always allow this command": the exact command becomes a rule for this requester,
+                # or the pattern the command's validation computed (a collector exchange, whatever its payload).
+                rule = detail.get("rulePattern") or detail.get("command", "")
+                if "rulePattern" in detail and len(self.policy.normalize(rule)) > RULE_CHARS:
+                    # Still the approved run, once: never a lost approval, never a silently wider rule.
+                    self.policy.journal(kind="rule", requester=key, skipped=self.policy.normalize(rule)[:200], reason="longer than 200 characters")
+                else:
+                    self.policy.add_rule(key, rule)
+                    self.policy.journal(kind="rule", requester=key, added=self.policy.normalize(rule))
             if decision in ("deny", "expired"):
                 self.policy.journal(kind=kind, requester=key, decision="denied" if decision == "deny" else "expired", **detail)
                 raise ValueError(self.REFUSAL[decision].format(host=self.state.data["name"]))
@@ -849,8 +867,16 @@ class Host:
         command, cwd = str(p.get("command", "")), p.get("cwd")
         timeout = p.get("timeoutSec")
         detail = {"summary": command[:120], "command": command[:2000], "cwd": cwd or "", "timeout": timeout or 60}
+        service = p.get("runtime") in self.SERVICES
+        if service:
+            detail["rulePattern"] = self.collector_rule(command)
+            detail["summary"] = "ResetDeck collector exchange · " + shlex.split(command)[1][:80]
         await self._authorize(key, name, "exec", "run", detail)
         result = await self.executor.run(key, command, cwd if isinstance(cwd, str) and cwd else None, timeout)
+        if service:
+            self.run_owners[result["run"]] = key
+            for old in list(self.run_owners)[:-1000]:
+                del self.run_owners[old]
         self.policy.journal(kind="run", requester=key, command=command[:200], cwd=cwd or "", status=result["status"],
                             exitCode=result["exitCode"], bytes=result["bytes"], run=result["run"], decision=detail.get("decision"), rule=detail.get("rule"))
         return result
@@ -878,10 +904,27 @@ class Host:
             return {"shell": s.id, "closed": True}
         raise ValueError("Unknown shell action")
 
+    @classmethod
+    def collector_rule(cls, command: str) -> str:
+        """The rule covering future exchanges with this interpreter and agent, once `command` is proven to be
+        exactly `shlex.join([absolute interpreter, absolute agent, "exchange", base64])`; anything else is refused."""
+        try:
+            args = shlex.split(command)
+        except ValueError:
+            args = []
+        if (len(args) != 4 or not Path(args[0]).is_absolute() or not Path(args[1]).is_absolute()
+                or args[2] != "exchange" or not re.fullmatch(r"[A-Za-z0-9+/=]+", args[3])
+                or len(args[3]) > cls.COLLECTOR_PAYLOAD or shlex.join(args) != command):
+            raise ValueError("ResetDeck only accepts an encoded collector exchange")
+        # Glob-escaped so `*`, `?` and `[` in the paths stay literal: only the payload is a wildcard.
+        return glob.escape(shlex.join(args[:3])) + " *"
+
     def agent_read(self, peer, p: dict) -> dict:
         key, name = self._requester_of(peer, p)
         if self.policy.level(key, "exec") == "block":
             raise ValueError(f"Refused: {name} is blocked on {self.state.data['name']}")
+        if p.get("runtime") in self.SERVICES and self.run_owners.get(str(p.get("run", ""))) != key:
+            raise ValueError("Unknown run, or its output expired")
         return self.executor.read(str(p.get("run", "")), int(p.get("offset") or 0), int(p.get("limit") or 65536))
 
     async def link_message(self, link, value: dict) -> None:
@@ -894,6 +937,10 @@ class Host:
         runtime = str(p.get("runtime", ""))
         if runtime not in self.RUNTIME_NAMES:
             raise ValueError("Unknown runtime")
+        if runtime in self.SERVICES:
+            if p.get("service") != runtime:
+                raise ValueError("ResetDeck service identity required")
+            return f"service:{runtime}", runtime
         sid = self.bridge.session_for_pid(int(p.get("pid") or 0))
         if not sid and p.get("session") in self.sessions.items:
             sid = str(p["session"])
@@ -905,6 +952,8 @@ class Host:
         if method == "agents.status":
             return self.agents_status()
         sid, runtime = self._caller(p)
+        if runtime in self.SERVICES and method not in self.SERVICE_METHODS:
+            raise ValueError("ResetDeck can only exchange collector data")
         if method in ("agents.hosts", "agents.run", "agents.read", "agents.shell"):
             self._require("exec")
         if method == "agents.hosts":
