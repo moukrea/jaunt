@@ -105,6 +105,7 @@ jobs:
       - run: python tests/scrollback_e2e.py
       - run: python tests/agents_e2e.py
       - run: python tests/agents_ui_e2e.py
+      - run: python tests/bridge_ui_e2e.py
       - run: python tests/i18n_e2e.py
       - run: xvfb-run -a python tests/pwa_e2e.py
       - run: python tests/handoff_e2e.py

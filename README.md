@@ -163,6 +163,7 @@ python tests/flow_control_e2e.py     # Visible-only subscriptions, bounded per-v
 python tests/scrollback_e2e.py       # On-disk host history, lazy loading when scrolling up, local cache serving a reload, disk history off
 python tests/agents_e2e.py           # Two hosts linked by pairing code; an MCP-driven session runs commands on the other under ask / trust / block
 python tests/agents_ui_e2e.py        # Linking from Settings, approval modal answered from the browser, requester table
+python tests/bridge_ui_e2e.py        # Bridged sessions list inside its Settings section, folded and unfolded by its chevron (stand-in runtimes)
 ```
 
 Set `jaunt_BROWSER_EXECUTABLE=/path/to/chromium` to use a system browser. Otherwise run `python -m playwright install chromium`. Tests never change your browser's security policies.
