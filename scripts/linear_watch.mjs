@@ -337,7 +337,10 @@ export async function withoutSelfWrites(events, previous, wakes, read = windows 
   if (!Object.keys(windows).length) return events;
   let verdicts;
   try {
-    ({ verdicts } = await read(windows));
+    let errors;
+    ({ verdicts, errors } = await read(windows));
+    // A failed batch leaves its tickets without a verdict, so they wake; say why.
+    for (const e of errors ?? []) console.error(`attribution failed for ${e.tickets.join(', ')}, waking anyway: ${e.error}`);
   } catch (error) {
     console.error(`attribution failed, waking anyway: ${error.message}`);
     return events;
