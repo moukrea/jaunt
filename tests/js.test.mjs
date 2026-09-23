@@ -970,3 +970,9 @@ test('the channel menu offers main and valid published channels from the officia
  const local={page:'http://127.0.0.1:8000/',repository:'moukrea/jaunt'};
  assert.deepEqual(parseChannelIndex({version:1,...local,channels:[]},local),[{name:'main'}]);
 });
+test('JAU-110 keyboard button hidden outside mobile touch and Android',async()=>{
+ const {readFile}=await import('node:fs/promises'),css=await readFile(new URL('../web/style.css',import.meta.url),'utf8'),app=await readFile(new URL('../web/js/app.mjs',import.meta.url),'utf8');
+ assert.ok(css.includes('body.is-desktop #keyboard-button{display:none}'));
+ assert.ok(css.includes('@media not all and (max-width:760px) and (pointer:coarse){body:not(.is-android) #keyboard-button{display:none}}'));
+ assert.ok(app.includes("document.body.classList.toggle('is-desktop', !!desktop);"));
+});

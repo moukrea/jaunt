@@ -218,3 +218,5 @@ body.is-android .keybar{display:flex}
 .agents-table td.row-actions{width:1%;text-align:right;white-space:nowrap}
 .agents-table .row-action{min-width:28px;min-height:28px;padding:5px;color:var(--faint)}
 .agents-table .row-action:hover{color:var(--danger);background:var(--surface-hover)}
+body.is-desktop #keyboard-button{display:none}
+@media not all and (max-width:760px) and (pointer:coarse){body:not(.is-android) #keyboard-button{display:none}}

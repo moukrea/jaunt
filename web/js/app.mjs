@@ -2128,6 +2128,7 @@ function bindEvents() {
   $('host-settings').onclick = () => setView('host');
   $('host-notifications').onclick = () => { const a = current(); if (a) hostNotifications(a); };
   document.body.classList.toggle('is-android', isAndroid);
+  document.body.classList.toggle('is-desktop', !!desktop);
   for (const id of ['new-session-tab', 'new-session-empty']) $(id).onclick = () => newSession().catch(report);
   $('split-below').onclick = () => {try {arrangePanes('y');} catch(e) {report(e);}};
   $('new-session-folder').onclick = () => browseNewSession().catch(report);
