@@ -45,7 +45,7 @@ async def test_awareness_is_automatic_symmetric_and_project_scoped(host):
     # Nothing changed: no roster re-injection on the next prompt (sober).
     assert (await register(h,'s1','claude','claude-conv-000001','/work/x',event='prompt'))['context']==''
     # A resume/compaction always gets the roster again.
-    assert 'Codex session' in (await register(h,'s1','claude','claude-conv-000001','/work/x',event='compact'))['context']
+    assert 'Codex session' in (await register(h,'s1','claude','claude-conv-000001','/work/x',event='start',source='compact'))['context']
     # A Codex session on an unrelated project is not a collaborator.
     other=await register(h,'s3','codex','codex-thread-00002','/work/y')
     assert 'No Claude Code session is currently working on this project through jaunt' in other['context']
@@ -360,7 +360,7 @@ async def test_roster_names_same_runtime_sessions_it_does_not_bridge(host):
     assert 'Also 1 other Claude Code session(s) open on this project in jaunt terminal(s) "Claude B"' in first['context'] and 'ListAgents' in first['context']
     # Registered or not, a same-runtime session is named once, and never listed as a peer.
     await register(h,'s2','claude','claude-conv-000002','/work/x')
-    again=await register(h,'s1','claude','claude-conv-000001','/work/x',event='compact')
+    again=await register(h,'s1','claude','claude-conv-000001','/work/x',event='start',source='compact')
     assert again['context'].count('Claude B')==1 and 'jaunt_send' not in again['context'].split('Also 1 other')[1].split('\n')[0]
     assert [p['id'] for p in h.bridge.peers_for({'runtime':'claude','session':'s1','conversation':'claude-conv-000001'})['peers']]==[]
     # Codex sees both Claude sessions as peers and no sibling line.
@@ -392,3 +392,89 @@ def test_codex_hook_trust_hash_matches_codex(tmp_path):
     import pytest as _p
     with _p.raises(ValueError):b.trust_codex_hooks(entries,cfg)
     assert cfg.read_text()=='this = = broken\n','an unparsable config is left untouched'
+
+
+CODEX_HOOK_SCHEMAS = json.loads((Path(__file__).parent / 'fixtures/codex_hook_output_schemas.json').read_text())['schemas']
+
+
+def validate_hook_output(value, schema, root=None):
+    """Validate the subset used by the pinned Codex output schemas, offline."""
+    root = schema if root is None else root
+    if '$ref' in schema:
+        target = root
+        for key in schema['$ref'].removeprefix('#/').split('/'):
+            target = target[key]
+        validate_hook_output(value, target, root)
+    for member in schema.get('allOf', []):
+        validate_hook_output(value, member, root)
+    if 'type' in schema:
+        assert type(value) is {'object': dict, 'string': str, 'boolean': bool}[schema['type']]
+    if 'const' in schema:
+        assert value == schema['const']
+    if 'enum' in schema:
+        assert value in schema['enum']
+    if isinstance(value, dict):
+        assert set(schema.get('required', [])) <= value.keys()
+        properties = schema.get('properties', {})
+        if schema.get('additionalProperties') is False:
+            assert value.keys() <= properties.keys(), 'unsupported output property'
+        for key, item in value.items():
+            if key in properties:
+                validate_hook_output(item, properties[key], root)
+
+
+def test_codex_postcompact_rejects_previous_output_offline():
+    old = {'hookSpecificOutput': {'hookEventName': 'PostCompact', 'additionalContext': 'roster'}}
+    with pytest.raises(AssertionError, match='unsupported output property'):
+        validate_hook_output(old, CODEX_HOOK_SCHEMAS['PostCompact'])
+    validate_hook_output({}, CODEX_HOOK_SCHEMAS['PostCompact'])
+
+
+@pytest.mark.parametrize('runtime', ['codex', 'claude'])
+@pytest.mark.parametrize('event,source', [('PostCompact', ''), ('SessionStart', 'compact'), ('UserPromptSubmit', '')])
+def test_hook_output_contract(runtime, event, source, monkeypatch, capsys, tmp_path):
+    from io import StringIO
+    from jaunt import bridge_client
+    calls = []
+    def control(method, params, timeout):
+        calls.append((method, params))
+        return {'enabled': True, 'context': '[jaunt bridge] roster'}
+    monkeypatch.setattr(bridge_client, 'control', control)
+    monkeypatch.setattr(sys, 'stdin', StringIO(json.dumps({'hook_event_name': event, 'source': source,
+        'session_id': 'contract-session', 'cwd': str(tmp_path)})))
+    assert bridge_client.hook_main(runtime) == 0
+    assert calls[0][0] == 'bridge.register'
+    assert calls[0][1]['runtime'] == runtime
+    assert calls[0][1]['event'] == {'PostCompact': 'compact', 'SessionStart': 'start', 'UserPromptSubmit': 'prompt'}[event]
+    assert calls[0][1]['source'] == source
+    output = capsys.readouterr().out
+    if event == 'PostCompact':
+        assert output == ''
+    else:
+        value = json.loads(output)
+        validate_hook_output(value, CODEX_HOOK_SCHEMAS[event])
+        assert value['hookSpecificOutput'] == {'hookEventName': event, 'additionalContext': '[jaunt bridge] roster'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('runtime,other', [('codex', 'claude'), ('claude', 'codex')])
+async def test_postcompact_registers_without_consuming_roster(host, runtime, other):
+    h = host
+    h.sessions.items = {'s1': FakeSession('s1', 'A', 1, '/p', runtime),
+                        's2': FakeSession('s2', 'B', 2, '/p', other)}
+    # A first PostCompact still registers identity and activity, without consuming context.
+    result = await register(h, 's1', runtime, 'session-a', '/p', event='compact')
+    me = h.bridge.participants[f'{runtime}:session-a']
+    assert result['context'] == '' and me.state == 'busy' and me.last_seen > 0
+    assert me.roster_seen == -1
+    await register(h, 's2', other, 'session-b', '/p')
+    assert (await register(h, 's1', runtime, 'session-a', '/p', source='compact'))['context']
+    seen = me.roster_seen
+    await register(h, 's2', other, 'session-b', '/p', event='end')
+    assert h.bridge.version != seen
+    assert (await register(h, 's1', runtime, 'session-a', '/p', event='compact'))['context'] == ''
+    assert me.roster_seen == seen
+    assert (await register(h, 's1', runtime, 'session-a', '/p', event='prompt'))['context']
+    assert (await register(h, 's1', runtime, 'session-a', '/p', event='prompt'))['context'] == ''
+    # A real SessionStart(compact) forces reinjection even with no roster change.
+    assert (await register(h, 's1', runtime, 'session-a', '/p', source='compact'))['context']
