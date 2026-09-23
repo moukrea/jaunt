@@ -24,13 +24,25 @@
 //   history entry of the same write, so the entry the previous pulse already
 //   saw ends just inside the next window. An entry created before the window
 //   and ending less than `STAMP_SKEW_MS` into it is that write, not a new one.
+//
+// And one gap history cannot fill (JAU-111, 23/09): a priority the agent set
+// on a ticket it had created 90 s earlier left no history entry at all, so the
+// bump was `unexplained` and woke the model. The `issueUpdate` response carries
+// the exact `updatedAt` it stamped, and the agent journals it (`stampStore`).
+// A ticket whose current `updatedAt` is one of those stamps was last changed
+// by the agent: that is evidence of its own, and anybody else's trace in the
+// window still outweighs it.
+
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 
 // Newest first whatever orderBy says (see `comments.nodes` in linear_agent).
 // A page this full of changes since the window opened may hide older ones.
 export const ATTRIBUTION_PAGE = 20;
 
 export const ATTRIBUTION_FIELDS = `
-  identifier createdAt creator { id }
+  identifier createdAt updatedAt creator { id }
   history(first: ${ATTRIBUTION_PAGE}) {
     nodes { createdAt updatedAt actorId botActor { id type } relationChanges { type } toStateId toPriority addedLabelIds removedLabelIds toAssigneeId }
   }
@@ -66,8 +78,9 @@ const automatic = h => h.botActor?.type === 'workflow' && !h.actorId && h.relati
 // none is anybody else's; Linear's automatic relation entries weigh neither
 // way. Other authors are returned as found, emoji included, so a caller can
 // weigh a reaction without re-reading the thread; `mine` says whether the agent
-// wrote at all.
-export function selfAuthored(issue, agentId, since) {
+// wrote at all. `stamps` are the `updatedAt` values the agent's own updates of
+// this ticket produced.
+export function selfAuthored(issue, agentId, since, { stamps = [] } = {}) {
   if (!issue) return { self: false, mine: 0, others: [], unexplained: true };
   let mine = 0;
   let automated = 0;
@@ -78,6 +91,9 @@ export function selfAuthored(issue, agentId, since) {
   };
 
   if (since === null) credit('creation', issue.creator?.id, issue.createdAt);
+  // Only the ticket's latest change: an older stamp says nothing of what came after.
+  const current = Date.parse(issue.updatedAt);
+  if (after(issue.updatedAt, since) && stamps.some(s => Date.parse(s) === current)) mine += 1;
   const history = issue.history?.nodes ?? [];
   for (const h of history) {
     if (!after(h.updatedAt, since) || alreadySeen(h, since)) continue;
@@ -156,7 +172,7 @@ export function attributionWindows(events, previous) {
 // busy board cannot build a query past Linear's complexity limit. A batch that
 // fails leaves its tickets without a verdict, which `filterSelf` treats as a
 // reason to wake.
-export async function attribute(windows, { graphql, agentId, batch = 10 }) {
+export async function attribute(windows, { graphql, agentId, batch = 10, stamps = {} }) {
   const ids = Object.keys(windows);
   const verdicts = {};
   const errors = [];
@@ -165,7 +181,7 @@ export async function attribute(windows, { graphql, agentId, batch = 10 }) {
     try {
       const { query, variables } = attributionQuery(chunk);
       const data = await graphql(query, variables);
-      chunk.forEach((id, j) => { verdicts[id] = selfAuthored(data[`t${j}`], agentId, windows[id]); });
+      chunk.forEach((id, j) => { verdicts[id] = selfAuthored(data[`t${j}`], agentId, windows[id], { stamps: stamps[id] ?? [] }); });
     } catch (error) {
       errors.push({ tickets: chunk, error: error.message });
     }
@@ -194,4 +210,53 @@ export function repinSelf(issues, ledger, verdicts) {
     moved.push(i.identifier);
   }
   return moved;
+}
+
+// The journal of the agent's own update stamps, one file per ticket so two
+// `jaunt-linear` processes writing different tickets never contend. A stamp
+// lost to a race costs one wake too many, never a missed one. Only recent
+// stamps can match a window the watcher opens, so the file stays short.
+export const STAMP_KEEP = 20;
+export const STAMP_TTL_MS = 24 * 60 * 60_000;
+const TICKET = /^[A-Z][A-Z0-9]*-\d+$/;
+
+export function pruneStamps(stamps, now = Date.now()) {
+  return [...new Set(stamps)]
+    .filter(s => now - Date.parse(s) < STAMP_TTL_MS)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))
+    .slice(-STAMP_KEEP);
+}
+
+export function stampStore(state, { now = Date.now } = {}) {
+  const dir = join(state, 'self-stamps');
+  const pathOf = identifier => {
+    if (!TICKET.test(identifier ?? '')) throw new Error(`not a ticket identifier: ${identifier}`);
+    return join(dir, `${identifier}.json`);
+  };
+  async function list(identifier) {
+    try { return JSON.parse(await readFile(pathOf(identifier), 'utf8')).stamps ?? []; }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  }
+  return {
+    async record(identifier, updatedAt) {
+      const stamps = pruneStamps([...(await list(identifier).catch(() => [])), updatedAt], now());
+      await mkdir(dir, { recursive: true });
+      const path = pathOf(identifier);
+      const tmp = `${path}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(tmp, JSON.stringify({ stamps }, null, 2), { mode: 0o600 });
+        await rename(tmp, path);
+      } finally { await rm(tmp, { force: true }); }
+      return stamps;
+    },
+    // Per ticket; one unreadable journal costs that ticket its stamps only.
+    async read(identifiers) {
+      const out = {};
+      for (const id of identifiers) {
+        const stamps = pruneStamps(await list(id).catch(() => []), now());
+        if (stamps.length) out[id] = stamps;
+      }
+      return out;
+    },
+  };
 }
