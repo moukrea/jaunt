@@ -71,15 +71,18 @@ class DesktopUpdates {
     catch(error){if(error.status===404)return null;throw error;}
     return channels.validateDocument(document,channel).desktopRelease;
   }
+  // The published channel list offered by the channel menu. The renderer validates it (web/js/channels.mjs);
+  // choosing a name still goes through switchChannel, which validates that channel's own document.
+  async channels(){return JSON.parse(await this.small(OFFICIAL.page+'ch/index.json',1048576));}
   async response(url){
     const response=await this.fetch(url,{cache:'no-store',signal:AbortSignal.timeout(120000)});
     if(!response.ok)throw Object.assign(new Error(`Update download failed (${response.status})`),{status:response.status});
     if(response.url&&!response.url.startsWith('https://'))throw new Error('Updates require HTTPS');
     return response;
   }
-  async small(url){
+  async small(url,limit=65536){
     const response=await this.response(url);let length=0,parts=[];
-    for await(const chunk of response.body){length+=chunk.length;if(length>65536)throw new Error('Invalid update metadata');parts.push(chunk);}
+    for await(const chunk of response.body){length+=chunk.length;if(length>limit)throw new Error('Invalid update metadata');parts.push(chunk);}
     return Buffer.concat(parts).toString('utf8');
   }
   async check(download=true,explicit=false){

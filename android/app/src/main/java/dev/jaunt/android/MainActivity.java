@@ -113,6 +113,7 @@ public class MainActivity extends Activity {
                 case "app.language":Lang.set(p.getString("language"));reply.done(true,null);return;
                 case "app.updates":updater.check(true);reply.done(true,null);return;
                 case "app.channel":reply.done(new JSONObject().put("channel",updater.channel()),null);return;
+                case "app.channels":io.execute(()->{try{reply.done(updater.channelIndex(),null);}catch(Exception e){reply.done(null,Lang.t("Could not read the published channels."));}});return;
                 case "app.channel.set":updater.switchChannel(p.getString("channel"));reply.done(new JSONObject().put("channel",updater.channel()),null);return;
                 case "clipboard.read":{
                     if(!foreground)throw new SecurityException("Open jaunt before reading the clipboard.");

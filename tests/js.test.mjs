@@ -953,3 +953,20 @@ test('telemetry CLI reads released generations offline without a claim, credenti
  const bad=await f.run(['telemetry','../bad']);assert.match(bad.stderr,/identifier/);
  const missing=await f.run(['telemetry','JAU-999']);assert.equal(JSON.parse(missing.stdout).knownUsageSubtotal.costUsd.value,null);
 });
+
+import {OFFICIAL,channelIndexURL,parseChannelIndex,publishable} from '../web/js/channels.mjs';
+test('the channel menu offers main and valid published channels from the official Page only',async()=>{
+ const contract=JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./fixtures/update_channels.json',import.meta.url),'utf8'));
+ for(const name of contract.names.publishable)assert.ok(publishable(name),name);
+ for(const name of [...contract.names.notPublishable,...contract.names.invalid])assert.ok(!publishable(name),name);
+ assert.deepEqual({...OFFICIAL},contract.documents.official);
+ assert.equal(channelIndexURL(OFFICIAL.page),'https://moukrea.github.io/jaunt/ch/index.json');
+ const index={version:1,...OFFICIAL,channels:[{name:'moukrea_9',pr:9,n:2,title:'Fix things'},{name:'moukrea_9',pr:9},{name:'main_3'},{name:'../main'},{name:'dev2_12'},null]};
+ assert.deepEqual(parseChannelIndex(index),[{name:'main'},{name:'moukrea_9',pr:9,title:'Fix things'},{name:'dev2_12',pr:null,title:''}]);
+ assert.deepEqual(parseChannelIndex({...index,channels:[]}),[{name:'main'}]);
+ assert.throws(()=>parseChannelIndex({...index,page:'https://evil.test/'}),/official Page/);
+ assert.throws(()=>parseChannelIndex({...index,repository:'evil/jaunt'}),/official Page/);
+ assert.throws(()=>parseChannelIndex({...index,version:2}),/Invalid channel list/);
+ const local={page:'http://127.0.0.1:8000/',repository:'moukrea/jaunt'};
+ assert.deepEqual(parseChannelIndex({version:1,...local,channels:[]},local),[{name:'main'}]);
+});

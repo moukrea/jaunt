@@ -7,6 +7,7 @@ import {bindTouchScroll} from './touch-scroll.mjs';
 import {desktop, LocalLink} from './desktop.mjs';
 import {leaves, prune, split, themeMode} from './workspace.mjs';
 import {isAndroid, nativeCall, nativeClipboard, nativeSave} from './native.mjs';
+import {OFFICIAL, channelIndexURL, parseChannelIndex, publishable} from './channels.mjs';
 import terminalBundle from '../vendor/xterm.mjs';
 import {Link, parsePairing} from './link.mjs';
 import {Vault} from './vault.mjs';
@@ -20,7 +21,7 @@ import * as push from './push.mjs';
 const {Terminal, FitAddon} = terminalBundle;
 const vault = new Vault(), machines = new Map(), transfers = [];
 let desktopHostAvailable=false;
-let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null, androidChannel=null;
+let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null, androidChannel=null, publishedSite=null;
 let settingsMachine, settingsRequest = 0;
 let selected = null, view = 'terminal', pairedFromURL = '', ctrl = false, alt = false;
 let activeAt = Date.now(), hiddenAt = 0, installedPrompt, applicationStarted = false;
@@ -1768,9 +1769,11 @@ function hostUpdateProgress(a,status){
 }
 function checkHostUpdate(a,allowRestart=false){return followHostUpdate(a,()=>a.link.request('updates.install',{allowRestart}),null,allowRestart);}
 // Changing the channel is the explicit switch: the host reinstalls that channel's release at once.
-function switchHostChannel(a,channel){
+// `accepted` settles once the host answers: the grouped switch waits for every host before this app replaces itself.
+function switchHostChannel(a,channel,accepted={resolve(){},reject(){}}){
   a.info.updates={...a.info.updates,channel};
-  return followHostUpdate(a,()=>a.link.request('updates.configure',{channel}),null,false,()=>switchHostChannel(a,channel));
+  const start=()=>a.link.request('updates.configure',{channel}).then(started=>{accepted.resolve(started);return started;},error=>{accepted.reject(error);throw error;});
+  return followHostUpdate(a,start,null,false,()=>switchHostChannel(a,channel));
 }
 // Host and desktop share one chooser: `switchTo` starts that surface's explicit switch.
 function chooseChannel(switchTo,hint=tr("Its version is installed now, even if it is older than the running one. Automatic updates then follow only this channel.")){
@@ -1778,7 +1781,7 @@ function chooseChannel(switchTo,hint=tr("Its version is installed now, even if i
   const save=async()=>{
     const channel=input.value.trim();
     // The host is the authority on names; this only answers a typo before anything is installed.
-    if(!/^[a-z][a-z0-9]{0,31}_[1-9][0-9]{0,5}$/.test(channel)||/^(main|beta)_/.test(channel))throw new Error(tr('A pull request channel looks like moukrea_9.'));
+    if(!publishable(channel))throw new Error(tr('A pull request channel looks like moukrea_9.'));
     closeModal();await switchTo(channel);
   };
   input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save().catch(error=>reportError(error,'modal'));}};
@@ -1807,6 +1810,72 @@ async function switchDesktopChannel(channel){
   desktopUpdateOperation=activity('desktop-update',tr('Desktop update'));
   desktopUpdateOperation.update({status:tr('Checking published version…')});
   try{desktopUpdateStatus(await desktop.updates('switch',channel));}catch(error){desktopUpdateOperation.fail(error);}
+}
+// The published channel list: the Page itself in a browser; natively elsewhere, since the desktop CSP and the Android WebView forbid that fetch.
+async function publishedChannels(){
+  if(desktop)return parseChannelIndex(await desktop.updates('channels'));
+  if(isAndroid)return parseChannelIndex(await nativeCall('app.channels'));
+  if(!publishedSite)throw new Error(tr('Could not read the published channels.'));
+  const response=await fetch(channelIndexURL(publishedSite.page),{cache:'no-store'});
+  if(!response.ok)throw new Error(tr('Could not read the published channels.'));
+  return parseChannelIndex(await response.json(),publishedSite);
+}
+// Everything one switch reaches: this app when it installs itself, then every host connected directly.
+// A host seen only through another host's agent links is not a target: linked hosts may not change updates.
+function channelTargets(){
+  const targets=[];
+  if(desktop)targets.push({name:tr('This desktop app'),channel:desktopUpdateState?.channel,skip:''});
+  else if(isAndroid)targets.push({name:tr('This Android app'),channel:androidChannel,skip:''});
+  for(const a of machines.values()){
+    const skip=a.link.state!=='online'?tr('Not connected'):!a.info?.updates?.supported?tr('Updates are not managed by the public installer on this host'):hostUpdateJobs.has(a.machine.room)?tr('Update in progress…'):'';
+    targets.push({a,name:hostName(a),channel:a.info?.updates?.channel,skip});
+  }
+  return targets;
+}
+// One menu for every connected element: hosts switch first, then this app, because the desktop closes to install.
+async function switchEverything(){
+  if(isAndroid&&androidChannel===null)androidChannel=(await nativeCall('app.channel')).channel;
+  const select=el('select',{'aria-label':tr('Channel')},el('option',{value:'main',text:tr('Loading published channels…')}));
+  const other=el('input',{value:'',placeholder:'moukrea_9',maxLength:39,autocapitalize:'none',spellcheck:false});
+  const otherField=field(tr('Channel name'),other,tr('A pull request channel looks like moukrea_9.'));otherField.hidden=true;
+  const note=el('p',{class:'modal-copy',text:desktop?tr('Your hosts switch first, then the desktop app installs the channel and reopens.'):isAndroid?tr('Android installs this channel’s build if it is newer than the installed one. Automatic updates then follow only this channel.'):tr('This browser keeps its version: only your hosts change channel.')});
+  select.disabled=true;
+  select.onchange=()=>{otherField.hidden=select.value!=='';if(!otherField.hidden)other.focus();};
+  const fill=channels=>{
+    select.replaceChildren(...channels.map(c=>el('option',{value:c.name,text:c.name==='main'?channelDescription('main'):[c.name,c.pr?'#'+c.pr:'',c.title].filter(Boolean).join(' · ')})),el('option',{value:'',text:tr('Other…')}));
+    select.disabled=false;select.onchange();
+  };
+  publishedChannels().then(fill).catch(error=>{fill([{name:'main'}]);note.textContent=tr('The published channels could not be read: {0}',tr(error.message));});
+  const targets=channelTargets().map(t=>{
+    const box=el('input',{type:'checkbox',checked:!t.skip,disabled:!!t.skip,'aria-label':t.name});
+    const state=el('small',{text:t.skip||channelDescription(t.channel)});
+    return {...t,box,state,row:el('label',{class:'compose-execute'},box,el('span',{},el('strong',{text:t.name}),el('br'),state))};
+  });
+  const run=async()=>{
+    if(select.disabled)throw new Error(tr('Loading published channels…'));
+    const channel=select.value||other.value.trim();
+    if(channel!=='main'&&!publishable(channel))throw new Error(tr('A pull request channel looks like moukrea_9.'));
+    const chosen=targets.filter(t=>t.box.checked);
+    if(!chosen.length)throw new Error(tr('Choose at least one element to switch.'));
+    const hosts=chosen.filter(t=>t.a),self=chosen.find(t=>!t.a);
+    const results=await Promise.allSettled(hosts.map(async t=>{
+      t.state.textContent=tr('Switching…');
+      try{
+        if(hostUpdateJobs.has(t.a.machine.room))throw new Error(tr('Update in progress…'));
+        await new Promise((resolve,reject)=>{switchHostChannel(t.a,channel,{resolve,reject}).catch(reject);});t.state.textContent=tr('Switching · follow it in Activity');}
+      catch(error){t.state.textContent=tr('Not switched: {0}',tr(error.message));throw error;}
+    }));
+    if(results.some(r=>r.status==='rejected')){
+      if(self)self.state.textContent=tr('Not switched: a host refused the change');
+      throw new Error(tr('Some elements did not switch. Their reason is shown next to them.'));
+    }
+    closeModal();
+    if(self&&desktop)await switchDesktopChannel(channel);
+    else if(self&&isAndroid){androidChannel=(await nativeCall('app.channel.set',{channel})).channel;renderSettings();}
+    toast(tr('Switching to {0}.',channel));
+  };
+  modal(tr('Update channel for everything'),el('div',{},field(tr('Channel'),select),otherField,note,...(targets.length?targets.map(t=>t.row):[el('p',{class:'modal-copy',text:tr('No connected host to switch.')})]),
+    el('div',{class:'modal-actions'},button(tr('Cancel'),closeModal),button(tr('Switch and install'),run,'button primary'))));
 }
 async function followHostUpdate(a,start,initial=null,allowRestart=false,retry=()=>checkHostUpdate(a,allowRestart)) {
   const existing=hostUpdateJobs.get(a.machine.room);
@@ -1940,6 +2009,7 @@ function renderSettings() {
     settingsGroup(tr('TERMINAL'), settingsRow(tr('Text size'), tr('Applies to all terminal tabs on this device.'), font),
       settingsRow(tr('Screen reader support'), tr('Enables xterm’s accessible text layer.'), reader),
       el('p', {class: 'settings-notice', text: tr('jaunt shells survive disconnections and compatible host updates. Stopping the host or rebooting the computer still ends ordinary shells. The desktop app and connected clients share the same sessions.')})),
+    settingsGroup(tr('UPDATE CHANNEL'), settingsRow(tr('Switch everything'), desktop || isAndroid ? tr('Moves this app and your connected hosts to one update channel at once.') : tr('Moves your connected hosts to one update channel at once. This browser keeps its version.'), button(tr('Choose channel'), switchEverything))),
     settingsGroup(tr('YOUR MACHINES'), ...machinesSettings(),
       el('p', {class: 'settings-notice', text: tr('Names, icons and order are yours and stay on this device; other devices keep their own. What a machine allows — commands, typing, messages, updates, notifications — is decided on the machine itself, from the gear in its bar.')}))
   ];
@@ -2189,6 +2259,7 @@ async function bootstrap() {
   try {
     const response = await fetch('./config.json', {cache: 'no-store'});
     const config = await response.json();
+    if (typeof config.page === 'string') publishedSite = {page: config.page, repository: config.repository || OFFICIAL.repository};
     if (!isAndroid && /^android-v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(config.androidRelease || '')) {
       androidAPK = `https://github.com/moukrea/jaunt/releases/download/${config.androidRelease}/jaunt-${config.androidRelease}.apk`;
       const apk = el('a', {class: 'button primary', text: tr('Download Android APK'), href: androidAPK});

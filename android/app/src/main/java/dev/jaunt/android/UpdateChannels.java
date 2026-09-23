@@ -7,6 +7,8 @@ import java.util.regex.*;
 /** Update-channel contract (docs/UPDATES.md#update-channels), tested against tests/fixtures/update_channels.json like scripts/update_channels.py. */
 final class UpdateChannels {
     static final String PAGE="https://moukrea.github.io/jaunt/",REPOSITORY="moukrea/jaunt";
+    /** The published channel list; it only offers names, each switch still validates its channel's document. */
+    static final String INDEX=PAGE+"ch/index.json";
     static final int CODE_STEP=1000;
     private static final Map<String,String> PREFIX=new LinkedHashMap<>();
     static{PREFIX.put("host","v");PREFIX.put("desktop","desktop-v");PREFIX.put("android","android-v");}

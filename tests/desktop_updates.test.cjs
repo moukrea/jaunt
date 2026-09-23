@@ -25,6 +25,7 @@ async function fixture(t,{tamper=false,current=false,installed,preferences,docum
  const fetch=async url=>{
   urls.push(url);
   if(url==='https://moukrea.github.io/jaunt/config.json')return new Response(JSON.stringify({desktopRelease:'desktop-v0.1.0-beta.8'}));
+  if(url.endsWith('ch/index.json'))return url in documents?new Response(JSON.stringify(documents[url])):new Response('missing',{status:404});
   if(url.endsWith('config.json'))return url in documents?new Response(JSON.stringify(documents[url])):new Response('missing',{status:404});
   const tag=decodeURIComponent(url.split('/releases/download/')[1].split('/')[0]);
   if(url.endsWith('SHA256SUMS'))return new Response(sha(bytes)+`  jaunt-desktop-${tag.slice(9)}-x64.tar.gz\n`);
@@ -120,6 +121,12 @@ test('only the explicit switch installs a target that is not newer, including a 
  assert.equal((await older.updater.switchChannel('moukrea_9')).state,'ready');assert.equal(older.updater.plan.tag,'desktop-v0.1.0-beta.33.ch.moukrea.9.1');
  const same=await fixture(t,{installed:'0.1.0-beta.8'});assert.equal((await same.updater.switchChannel('main')).state,'current');assert(!same.updater.plan);
  for(const name of ['beta','moukrea','https://evil.test/','../main'])await assert.rejects(()=>updater.switchChannel(name),/Unknown update channel name/);
+});
+test('the channel menu reads the published list from the official Page only',async t=>{
+ const index={version:1,page:official.page,repository:official.repository,channels:[{name:'moukrea_9',pr:9,n:2,title:'Fix things'}]};
+ const {updater,urls}=await fixture(t,{documents:{[official.page+'ch/index.json']:index}});
+ assert.deepEqual(await updater.channels(),index);assert.deepEqual(urls,[official.page+'ch/index.json']);
+ const missing=await fixture(t);await assert.rejects(()=>missing.updater.channels(),/404/);
 });
 test('older preferences and invalid channels fall back to main',async t=>{
  assert.equal((await fixture(t,{preferences:{automatic:false}})).updater.state.channel,'main');
