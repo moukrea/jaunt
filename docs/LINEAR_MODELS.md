@@ -58,3 +58,69 @@ model. `jaunt-linear models check` reads `~/.claude/settings.json` (or
 
 Codex is not covered here: its workers keep their own configuration
 (`JAUNT_CODEX_*`, `~/.codex/config.toml`).
+
+## Per-phase routing
+
+A ticket gets two short **classifier** sessions:
+
+- one before planning, run by `linear_claude.mjs worker`;
+- one after approval, run by `linear_claude.mjs implement`.
+
+Each classifier session:
+
+- uses `roles.classifier`, which stays the same whatever the classifier recommends;
+- has the read-only tools `Read`, `Grep` and `Glob`, no MCP servers and no
+  saved transcript;
+- is capped by `maxBudgetUsd`;
+- sees the ticket, its comments, and for the second evaluation the approved plan
+  (`jaunt-linear plan-read`).
+
+A classifier does not pick a pair. It reports facts: the category from A to D,
+`short`, `criticalInvariant`, `openArchitecture`, `crossSystemDiagnosis`,
+`subtleLogic`, `competingHypotheses`, `hardValidation`, `xhighJustification`
+and `missingInformation`. `decide()` (in `scripts/linear_models.mjs`) turns them
+into a pair:
+
+- **Model:** the category's model. A critical invariant raises the category to
+  at least C. Any trigger of hard reasoning removes A.
+- **Effort:** the category's effort. For a long A phase it is `longEffort`.
+- **`escalation.elevated`:** applies when any of these is established:
+  - a critical invariant;
+  - an open architecture decision;
+  - a diagnosis across systems;
+  - hard validation;
+  - subtle logic together with competing hypotheses.
+- **`escalation.exceptional`:** only when two difficulties are established
+  *and* the classifier gives an explicit justification.
+
+The implementation session is **fresh**. `implement` refuses unless all of
+these hold:
+
+- the current approval is active (`verdict --peek`);
+- the planner is at rest;
+- no implementation session exists yet.
+
+When they hold, it moves the claim's `session` to the new session. The watcher's
+automatic routing then follows the claim's current session. It only keeps the
+old identity for a route still outstanding. Resuming the planner after approval
+is refused.
+
+If a classification fails, the launch falls back to `default`, and the attempt's
+setting source says `classifier failed`. This covers a missing result, a
+refusal, an exceeded budget, and an unreadable ticket. A banned model in the
+classifier's result refuses the launch instead.
+
+`jaunt-linear telemetry <ID>` shows, for each attempt:
+
+- `requested.routing`: the facts, the rule notes, the reasons, and the
+  classifier's own estimated cost and usage;
+- the setting sources (`plan classifier (C)`, `implementation classifier (A)`).
+
+The report adds `classifierCostUsd`, kept separate from worker usage, and
+`counts.implementations`.
+
+This design is a starting policy, not a measured optimum. The first comparisons
+worth making are:
+
+- classifier cost against the worker effort it saves;
+- `medium` against `high` on the phases routed to C and D.

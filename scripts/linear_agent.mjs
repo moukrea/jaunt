@@ -1993,6 +1993,16 @@ const COMMANDS = {
   // resolves its own root, wherever the repo happens to live.
   repo: async () => ROOT,
   workers: async () => workerReports(STATE_DIR),
+  // The implementation session starts fresh: this is its copy of the plan the
+  // human approved, the latest one published for the current claim cycle.
+  'plan-read': async ([id]) => {
+    const held = (await listClaims()).find(c => c.issue === required(id, 'plan-read <ISSUE-ID>'));
+    const receipt = held && await optionalJson(join(lifecyclePaths(STATE_DIR, held).dir, 'publication.json'));
+    if (!receipt || receipt.claimedAt !== held.claimedAt) throw Error(`${id}: no plan published for the current claim`);
+    const data = await graphql('query($id: String!) { document(id: $id) { id title url content updatedAt } }', { id: receipt.document });
+    if (!data.document?.content) throw Error(`${id}: plan document unreadable`);
+    return { ...data.document, publishedAt: receipt.publishedAt };
+  },
   // Imported on use: fixtures that copy this script need not carry the policy.
   models: async ([action, ...rest]) => {
     if (action !== 'check' || rest.length) throw Error('models check');
@@ -2171,7 +2181,7 @@ export const COMMAND_FLAGS = {
   comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],
   attachments: ['out'], uncomment: [],
   create: ['title', 'parent', 'priority', 'expects', 'desc', 'description'],
-  feedback: [], repo: [], workers: [], models: [], telemetry: [], 'routing-thread': [],
+  feedback: [], repo: [], workers: [], models: [], 'plan-read': [], telemetry: [], 'routing-thread': [],
   landing: {
     status: [], acquire: ['runtime', 'session', 'cwd'],
     prepare: ['runtime', 'session'], merge: ['runtime', 'session', 'pr'],
