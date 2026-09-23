@@ -6,7 +6,7 @@
   "channels": {
     "moukrea_104": {
       "pr": 104,
-      "status": "live",
+      "status": "removed",
       "n": 1,
       "candidates": [
         {
@@ -59,7 +59,8 @@
             }
           }
         }
-      ]
+      ],
+      "run": "35831175292"
     }
   }
 }
