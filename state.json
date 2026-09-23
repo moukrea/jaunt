@@ -43,7 +43,20 @@
       }
     }
   },
-  "pending": null,
+  "pending": {
+    "source": "c09f623f68a9e0e956cf4f25fa84bc0c4c069b28",
+    "sha": "827732063c7402129ea871c4d0e8e76cb18f8931",
+    "tags": {
+      "host": "v0.1.0-beta.44",
+      "desktop": "desktop-v0.1.0-beta.33",
+      "android": "android-v0.1.0-beta.31"
+    },
+    "components": [
+      "host"
+    ],
+    "status": "publishing",
+    "run": "35812733155"
+  },
   "history": [
     {
       "source": "f1dfc2f854e602558fb18d9063449cdbc18722c0",
