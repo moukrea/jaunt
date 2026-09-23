@@ -24,6 +24,48 @@ exercised in this browser scenario.
 
 
 
+## Project cost accounting — JAU-73 (2026-09-23)
+
+The 25 focused cost tests pass. The full suite passes all 337 tests with Node's
+`--test-concurrency=1` placed before the test file arguments. Plain `npm test`
+passes 336/337 here: the existing idle-watcher assertion at
+`tests/linear_wakes.test.mjs:159` expects more than five pulses in 1.5 seconds.
+A full archive of the unchanged branch base reproduces exactly that assertion
+(311/312); the isolated watcher test passes. This is the symptom tracked by
+JAU-113, not evidence that the default local suite is green. Source project
+checks and `git diff --check` pass.
+
+Synthetic cases cover cumulative snapshots, forked ancestor headers, missing
+baselines and counter resets, Claude partial/final snapshots, duplicate and
+conflicting evidence, historical Claude attempts after a Codex claim handover,
+wrapper/native overlap, copied classifier records, explicit account mappings,
+dated model/tier/context-band prices, cache-category gaps, subscription coverage,
+currency separation, period boundaries, private persistence, source rotation,
+truncation/deletion, concurrent collector refusal and credential-free CLI use.
+The collector's foreground watch was started and stopped against synthetic
+sources; no production worker was launched or stopped by these tests.
+
+A metadata-only scan of the available local native sources and retained worker
+records was run into a private review directory outside the canonical state.
+At 17:38 UTC it processed 936 files and consolidated 32,274 event identities
+across all projects. Its then-attributable Jaunt subset included 6,452 Claude
+and 1,130 Codex events; excluded overlapping evidence remained visible. The
+immediate second scan reused 931 file projections, reparsed five changing files,
+observed two new events and changed no already observed event counters. These
+are moving observations, not a complete project lifetime or fixed benchmark.
+No transcript bodies, credentials, private session inventory or financial
+receipts are committed as fixtures or evidence.
+
+The available evidence still has missing cumulative baselines, counter resets,
+unsupported/missing usage and no archived Codex directory. No historically
+validated tariff table, payment evidence or account mapping was supplied for
+this local trial. API-equivalent totals, subscription payments and Jaunt's
+allocated monetary cost therefore remain unavailable; client estimates retain
+their separate scopes. Current public pricing was consulted, not backdated.
+The new canonical collector has not been activated. A merge or desktop package
+alone does not establish live collection. See [the cost contract](LINEAR_COSTS.md).
+
+
 ## PR trial artifacts — JAU-24 (2026-09-23)
 
 PR #91's Android run (35796247091) uploaded `android-debug-apk` (3,161,694 bytes,

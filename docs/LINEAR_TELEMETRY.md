@@ -94,3 +94,11 @@ other local fields; the report never emits those. Files use the existing private
 atomic-write mechanism. Malformed archives or attempt identity mismatches fail
 the read rather than inventing a reassuring zero. There is no history backfill,
 automatic deletion policy or retrospective billing lookup.
+
+## Project accounting
+
+[Project development costs](LINEAR_COSTS.md) adds local native-history import,
+continuous collection, dated API-equivalent estimates and separate subscription
+allocation. `telemetry <ID>` keeps its existing worker-only contract. The project
+collector reconciles overlapping native/attempt evidence and uses each historical
+attempt's provider, including after a claim is handed from Claude to Codex.

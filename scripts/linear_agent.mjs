@@ -2189,6 +2189,7 @@ const COMMANDS = {
     if (action !== 'check' || rest.length) throw Error('models check');
     return (await import('./linear_models.mjs')).modelsCheck();
   },
+  costs: async (args, flags) => (await import('./linear_costs.mjs')).costsCommand(ROOT, STATE_DIR, args, flags),
   telemetry: async ([id, ...rest]) => {
     if (rest.length) throw Error('telemetry accepts one issue identifier');
     return telemetryReport(STATE_DIR, id);
@@ -2350,6 +2351,7 @@ const COMMANDS = {
 // Declare options even for commands that accept none. Subcommands have their
 // own sets: prepare must not silently accept merge's --pr, for example.
 export const COMMAND_FLAGS = {
+  costs: { scan: [], report: ['from', 'to', 'format'], status: [], import: ['file'], watch: ['interval'] },
   wait: { read: [], reconcile: [], begin: ['runtime', 'session', 'pr', 'cwd', 'reason', 'owner', 'action', 'resource', 'deadline'],
     decision: ['runtime', 'session'],
     revise: ['runtime', 'session', 'action', 'reason', 'comment', 'deadline'],
