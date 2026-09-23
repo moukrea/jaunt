@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "codes": {
+    "34": 1
+  },
+  "channels": {
+    "moukrea_104": {
+      "pr": 104,
+      "status": "live",
+      "n": 1,
+      "candidates": [
+        {
+          "n": 1,
+          "source": "95cf084bb8854e20bfdfece788a1c08791fe33d4",
+          "sha": "c335d1165fea1a202439be0cdc75b8f2762b65fa",
+          "tags": {
+            "host": "v0.1.0-beta.47.ch.moukrea.104.1",
+            "desktop": "desktop-v0.1.0-beta.36.ch.moukrea.104.1",
+            "android": "android-v0.1.0-beta.34.ch.moukrea.104.1"
+          },
+          "androidCode": 34001,
+          "status": "publishing",
+          "run": "35825531190"
+        }
+      ]
+    }
+  }
+}
