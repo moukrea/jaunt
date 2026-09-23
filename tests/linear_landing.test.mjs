@@ -297,7 +297,7 @@ test('canonical CLI acquire persists landing and status without touching another
   const { copyFile, symlink } = await import('node:fs/promises');
   const f = await fixture(t), a = await f.worker('JAU-1'), b = await f.worker('JAU-2');
   await mkdir(join(f.root, 'scripts'));
-  for (const name of ['linear_waits.mjs', 'linear_activity.mjs', 'linear_agent.mjs', 'linear_landing.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_watch.mjs', 'linear_skills.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(f.root, 'scripts', name));
+  for (const name of ['linear_waits.mjs', 'linear_activity.mjs', 'linear_agent.mjs', 'linear_landing.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs', 'linear_watch.mjs', 'linear_skills.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(f.root, 'scripts', name));
   await symlink(f.stateDir, join(f.root, '.dev-state'));
   const cli = async (...args) => JSON.parse(await run(process.execPath, [join(f.root, 'scripts', 'linear_agent.mjs'), ...args], a.cwd));
   assert.equal((await cli('landing', 'acquire', a.c.issue, '--runtime', 'codex', '--session', a.c.session)).acquired, true);

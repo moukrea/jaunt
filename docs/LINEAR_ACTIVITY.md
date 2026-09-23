@@ -44,8 +44,17 @@ Failures are visible and retryable. Per-ticket errors return `ok: false` with an
 clears. A transient error (Linear 5xx/429, network) is reported only after three
 consecutive polls, as `transient: <status>`, so a passing 503 wakes nobody; other
 errors are reported at once. A global discovery/API failure retains the bounded
-retry policy: three failures, or twenty transient ones. A label change may cause one watcher wake;
-unchanged synchronization performs no label mutations and creates no comments.
+retry policy: three failures, or twenty transient ones. Unchanged synchronization
+performs no label mutations and creates no comments.
+
+The harness's own writes do not wake the model (JAU-15). When the pulse moves,
+the watcher reads back who moved each ticket: issue history (`actorId`, labels,
+relations and states included), comment authors and reaction authors since the
+previous pulse. A ticket's events are dropped only when every such change is the
+agent's; any other author, an unsigned history entry, a change with no trace (a
+deleted comment, a withdrawn reaction) or a failed read wakes as before. Dropped
+events are counted as `suppressed:self-authored` in `jaunt-linear wake status`.
+`board` applies the same rule to `changed-since-review`.
 
 Tracking begins with the first new harness publication or explicit sync. Existing
 comments form a baseline, not a historical unread flood. Existing conversations

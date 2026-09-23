@@ -127,7 +127,7 @@ test('transient activity errors are reported only when they persist', () => {
 async function watchFixture(t, { pulse = "{at:new Date().toISOString(),tickets:{'JAU-1':{u:'1',s:'Backlog',c:'c1',cu:'1'}}}", sync = '{"errors":[]}', worker = 'null', agent = null } = {}) {
   const root = await temporary(t);
   await mkdir(join(root, 'scripts')); await mkdir(join(root, '.dev-state'));
-  for (const name of ['linear_watch.mjs', 'linear_wakes.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
+  for (const name of ['linear_watch.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(root, 'scripts', name));
   await writeFile(join(root, '.dev-state/linear-loop.json'), '{"enabled":true}');
   await writeFile(join(root, 'scripts/linear_skills.mjs'), 'export const skillStore=()=>({wake:async()=>null});');
   await writeFile(join(root, 'scripts/linear_workers.mjs'), `let sent=false;export async function workerWake(){if(sent)return null;sent=true;return ${worker};}`);

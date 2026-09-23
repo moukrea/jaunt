@@ -15,6 +15,7 @@ import { wakeStore } from './linear_wakes.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
 import { connectionPages } from './linear_activity.mjs';
+import { attribute, reviewWindows, repinSelf } from './linear_attribution.mjs';
 import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -505,6 +506,21 @@ async function nextIssue() {
   return ranked[0] ?? null;
 }
 
+// A ticket the agent itself annotated after reviewing it — a comment, a label,
+// a relation — changed without anything new for the analysis pass to weigh,
+// and used to come back as `changed-since-review` (JAU-15). When everything
+// since the pinned version is the agent's, the pin moves to the current one,
+// so the next board does not ask Linear again. Any other author, or a failed
+// read, leaves the ticket changed.
+async function repinSelfChanges(issues, ledger) {
+  const windows = reviewWindows(issues, ledger);
+  if (!Object.keys(windows).length) return;
+  const { verdicts } = await attribute(windows, { graphql, agentId: (await agentUser()).id });
+  if (!repinSelf(issues, ledger, verdicts).length) return;
+  await mkdir(STATE_DIR, { recursive: true });
+  await writeFile(REVIEW_FILE, JSON.stringify(ledger, null, 2));
+}
+
 // The whole open board in one call, with everything needed to decide an order:
 // priorities, blockers, and dependencies named in prose. `unprioritised` is the
 // signal that `next` is about to fall back to sortOrder — an arbitrary sequence
@@ -512,6 +528,8 @@ async function nextIssue() {
 async function board() {
   const { issues } = await listIssues(['unstarted', 'backlog', 'started']);
   const ledger = await readLedger();
+  // Best effort: a board that cannot attribute still answers, as before.
+  await repinSelfChanges(issues, ledger).catch(() => {});
   const tickets = issues
     .map((i) => ({
       review: (() => {
@@ -1867,6 +1885,10 @@ const COMMANDS = {
   next: async () => nextIssue(),
   board: async () => board(),
   pulse: async () => withRateLimit(await pulse()),
+  // Who wrote what the watcher just saw move: `{"JAU-1": "<previous updatedAt>"
+  // | null}` in, one verdict per ticket out (JAU-15).
+  attribute: async ([windows]) => withRateLimit(
+    await attribute(JSON.parse(required(windows, 'attribute <json {ticket: since|null}>')), { graphql, agentId: (await agentUser()).id })),
   reviewed: async ([id, ...words], flags) => {
     return markReviewed(
       required(id, 'reviewed <ISSUE-ID> <why it sits where it sits> [--group <root-cause>]'),
@@ -2100,7 +2122,7 @@ export const COMMAND_FLAGS = {
     attempt: ['runtime', 'session', 'action', 'result', 'evidence', 'deadline'],
     resolve: ['runtime', 'session', 'comment', 'evidence', 'ticket'], ack: ['event', 'evidence'] },
   'sync-activity': ['incremental'], discussion: ['file'],
-  whoami: [], team: [], next: [], board: [], pulse: [],
+  whoami: [], team: [], next: [], board: [], pulse: [], attribute: [],
   reviewed: ['group'], independent: [], claims: [], ready: [],
   surface: ['files', 'symbols'], stop: [], 'stop-requested': [], list: [], show: [],
   comment: ['expects', 'reply'], move: [], priority: [], relate: [], unrelate: [],

@@ -169,6 +169,7 @@ If `loop.enabled` is false, do nothing and do not restart the watcher.
 
 This is the job everything else depends on. `needsPass: true` means at least one
 ticket was never analysed or changed since it was — `needsReview` names them.
+Changes made by the agent alone (its comments, labels, relations) do not count.
 
 Run the pass now; there is nothing else to wait for.
 
