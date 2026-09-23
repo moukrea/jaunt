@@ -90,8 +90,45 @@
             "android": "android-v0.1.0-beta.34.ch.moukrea.107.2"
           },
           "androidCode": 34003,
-          "status": "failed",
-          "run": "35837916342"
+          "status": "delivered",
+          "run": "35848352365",
+          "receipts": {
+            "host": {
+              "tag": "v0.1.0-beta.47.ch.moukrea.107.2",
+              "sha": "a8352066e2c85bf403482a8fbdc3298b446cd1de",
+              "url": "https://github.com/moukrea/jaunt/releases/tag/v0.1.0-beta.47.ch.moukrea.107.2",
+              "hashes": {
+                "jaunt_host-0.1.0b47+ch.moukrea.107.2-py3-none-any.whl": "2a45bd075742e732540debbb4df96ae84a2fc5d049272ff37a4e2e5701a47c1a",
+                "host-manifest.json": "8e22faa7ddf63d9e150e7d91625d2b402c29de5d18af25b7a583f2b029aeb002"
+              }
+            },
+            "desktop": {
+              "tag": "desktop-v0.1.0-beta.36.ch.moukrea.107.2",
+              "sha": "a8352066e2c85bf403482a8fbdc3298b446cd1de",
+              "url": "https://github.com/moukrea/jaunt/releases/tag/desktop-v0.1.0-beta.36.ch.moukrea.107.2",
+              "hashes": {
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-aarch64.rpm": "093dda989d260534bfa8e80483fd2ddecbf709f091eb930c54b274b7ad0c2c45",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-amd64.deb": "11186b739e46b68251791c81f30579535c919cdbd02ff68c21985bc7653c60bb",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-arm64.deb": "643904700a4545ba0c56ea8a0670859b6c309e56f3aba582597272b6d878e246",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-arm64.dmg": "5bb29be4e5e221d4dc3197401731bfd0f782756c59504b704e2480be9b4c0bb1",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-arm64.tar.gz": "79d4e67ed41d6a83f45f39e7872860de98ffa600e02bb371b986b1d6a5ed3125",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-arm64.zip": "356bd4c60bddd9c89561f145a747e338368d0739a8cd7d486eed05d2d04a0c18",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-x64.dmg": "dbec636c431e20464a42e92c40244700604aee57efbe9c9cb324032234f4ab6a",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-x64.tar.gz": "dfacd1d1038071cb907ca7fa66d0283643d6c8900c6fe57cb990cf426886c433",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-x64.zip": "4ecf0e28ec3254175e6b58c29e10c7bf6b17c284b1ec03a3e8c14d9574c19920",
+                "jaunt-desktop-0.1.0-beta.36.ch.moukrea.107.2-x86_64.rpm": "a61c186c7ad98708f709b71fa63adfa2db83c690446f6238c28f962dd0bf72ab"
+              }
+            },
+            "android": {
+              "tag": "android-v0.1.0-beta.34.ch.moukrea.107.2",
+              "sha": "a8352066e2c85bf403482a8fbdc3298b446cd1de",
+              "url": "https://github.com/moukrea/jaunt/releases/tag/android-v0.1.0-beta.34.ch.moukrea.107.2",
+              "hashes": {
+                "jaunt-android-v0.1.0-beta.34.ch.moukrea.107.2.apk": "14942e98dd0663bfb0e6cabaf0c8cd3c2ec179019813d71b67e4c4a6126cfbdd",
+                "SIGNING-CERTIFICATE.txt": "9af98b62b5100b05a878a1520d92bbb492c66e580e8175299a34b6123216af44"
+              }
+            }
+          }
         }
       ]
     }
