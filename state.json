@@ -90,7 +90,7 @@
             "android": "android-v0.1.0-beta.34.ch.moukrea.107.2"
           },
           "androidCode": 34003,
-          "status": "publishing",
+          "status": "failed",
           "run": "35837916342"
         }
       ]
