@@ -62,8 +62,9 @@ export function selfAuthored(issue, agentId, since) {
     let moved = false;
     if (after(c.createdAt, since)) { credit('comment', c.user?.id, c.createdAt); moved = true; }
     else if (after(c.editedAt, since)) { credit('comment-edit', c.user?.id, c.editedAt); moved = true; }
+    const onAgent = Boolean(agentId) && c.user?.id === agentId;
     for (const r of c.reactions ?? []) {
-      if (after(r.createdAt, since)) { credit('reaction', r.user?.id, r.createdAt, { emoji: r.emoji }); moved = true; }
+      if (after(r.createdAt, since)) { credit('reaction', r.user?.id, r.createdAt, { emoji: r.emoji, onAgent }); moved = true; }
     }
     if (moved) commentsMoved += 1;
   }
@@ -79,14 +80,34 @@ export function selfAuthored(issue, agentId, since) {
 // as does every ticket without a verdict: attribution failing means waking.
 const ATTRIBUTABLE = new Set(['ticket-created', 'comment', 'comment-updated', 'state-changed', 'ticket-edited']);
 
+// A reaction decides only as `verdict` reads it: an approval or a refusal, on
+// the agent's side of the thread. Anything else — 👀 as "read", or a 👍 on a
+// human's message — was already consumed by `sync-activity` and has nothing for
+// the model to act on (JAU-89).
+const APPROVE = new Set(['+1', 'thumbsup', '👍', 'white_check_mark', 'rocket', 'tada']);
+const DECLINE = new Set(['-1', 'thumbsdown', '👎', 'x', 'no_entry']);
+export const decisive = r => {
+  const emoji = r.emoji?.replace(/:/g, '');
+  return r.onAgent === true && (APPROVE.has(emoji) || DECLINE.has(emoji));
+};
+
+// Only the events a reaction can produce: on the newest comment it moves `cu`
+// (`comment-updated`), on an older one only the issue (`ticket-edited`).
+const REACTABLE = new Set(['comment-updated', 'ticket-edited']);
+const idleReactions = v => Boolean(v) && !v.unexplained && !v.truncated && v.others?.length > 0
+  && v.others.every(o => o.kind === 'reaction' && !decisive(o));
+
 export function filterSelf(events, verdicts = {}) {
   const kept = [];
   let suppressed = 0;
+  let idle = 0;
   for (const e of events) {
-    if (e.ticket && ATTRIBUTABLE.has(e.type) && verdicts[e.ticket]?.self === true) suppressed += 1;
+    const verdict = e.ticket ? verdicts[e.ticket] : undefined;
+    if (e.ticket && ATTRIBUTABLE.has(e.type) && verdict?.self === true) suppressed += 1;
+    else if (REACTABLE.has(e.type) && idleReactions(verdict)) idle += 1;
     else kept.push(e);
   }
-  return { events: kept, suppressed };
+  return { events: kept, suppressed, idle };
 }
 
 // Which tickets to ask about, with the window each one opens: the previous
