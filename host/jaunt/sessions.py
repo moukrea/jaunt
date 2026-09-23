@@ -35,6 +35,16 @@ WINDOW = 512 * 1024        # ceiling: ~300 ms of full-rate relay output, a WAN v
 WINDOW_START = 128 * 1024  # a new viewer starts here and doubles while it keeps up (slow-start)
 MIN_WINDOW = 32 * 1024     # a viewer that falls behind (slow link or slow parser) restarts from small, fresh slices
 CATCHUP = 128 * 1024  # several full-screen redraws; a phone should not wait for more before it can act
+# A trimmed catch-up starts at the first escape or line start within SAFE_CUT bytes of the cut, so
+# common SGR fragments do not appear as stray "48m" text at the top left. This is a bounded
+# heuristic, not a parser for arbitrary terminal control strings.
+SAFE_CUT = 4 * 1024
+# A trimmed catch-up cannot rebuild the screen of a program that only repaints changed cells
+# (Codex, ratatui): the program is asked to repaint by toggling the PTY width one column and back,
+# REDRAW_TOGGLE seconds apart (Codex ignores a same-size SIGWINCH and misses a toggle under ~5 ms),
+# at most once per REDRAW_INTERVAL seconds per session. The shared geometry never changes.
+REDRAW_TOGGLE = 0.15
+REDRAW_INTERVAL = 2.0
 # PTY reads are coalesced for up to COALESCE seconds (or 64 KiB) before becoming one relay
 # frame per viewer: chatty TUIs write dozens of times per second and the relay caps frames.
 COALESCE = 0.03
@@ -150,6 +160,8 @@ class Session:
     reading: bool = False
     resizing: bool = False
     resize_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    redraw: asyncio.Task | None = None  # pending repaint request after a trimmed catch-up
+    redrawn: float | None = None  # loop time of the last repaint request
     pump: asyncio.Task | None = None
     reaper: asyncio.Task | None = None
     history: Scrollback | None = None  # on-disk scrollback (None when disabled)
@@ -512,10 +524,11 @@ class Sessions:
         start = s.ring[0][0] if s.ring else s.offset
         floor = max(start, s.offset - limit)
         if after < floor:
-            after = floor
+            after = self._clean_start(s, floor)
             await self._safe_send(peer, {"type": "terminal.reset", "id": s.id,
                                         "offset": after, "trimmed": True,
                                         "cols": s.cols, "rows": s.rows})
+            self._request_redraw(s)
         viewer = s.subscribers.get(peer)
         if viewer is not None:
             # Skipped bytes were never sent: only what follows `after` counts as in flight.
@@ -536,6 +549,52 @@ class Sessions:
         viewer = s.subscribers.get(peer)
         if viewer is not None:
             viewer.sent = s.offset
+
+    def _clean_start(self, s: Session, at: int) -> int:
+        """First offset from `at` where a replay can begin: an escape, the start of a line or,
+        failing both within SAFE_CUT bytes, the start of a UTF-8 character."""
+        data = bytearray()
+        for offset, chunk, _, _ in s.ring:
+            end = offset + len(chunk)
+            if end > at:
+                data += chunk[max(at, offset) - offset:]
+                if len(data) >= SAFE_CUT:
+                    break
+        data = data[:SAFE_CUT]
+        found = [i for i in (data.find(b"\x1b"), data.find(b"\n")) if i >= 0]
+        if found:
+            i = min(found)
+            return at + i + (data[i] == 0x0a)
+        i = 0
+        while i < min(len(data), 3) and 0x80 <= data[i] < 0xc0:
+            i += 1
+        return at + i
+
+    def _request_redraw(self, s: Session) -> None:
+        """Ask the program to repaint after a trimmed catch-up (requests are coalesced per session)."""
+        if s.alive and s.fd >= 0 and (s.redraw is None or s.redraw.done()):
+            s.redraw = self.loop.create_task(self._redraw(s))
+
+    async def _redraw(self, s: Session) -> None:
+        if s.redrawn is not None:
+            await asyncio.sleep(max(0.0, s.redrawn + REDRAW_INTERVAL - self.loop.time()))
+        # Serialised with a viewer's resize; the PTY is back at the shared size (read now) on exit.
+        async with s.resize_lock:
+            if not s.alive or s.fd < 0 or self.items.get(s.id) is not s:
+                return
+            s.redrawn = self.loop.time()
+            try:
+                fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", s.rows, s.cols - 1 if s.cols > 2 else s.cols + 1, 0, 0))
+            except OSError:
+                return
+            try:
+                await asyncio.sleep(REDRAW_TOGGLE)
+            finally:
+                if s.fd >= 0:
+                    try:
+                        fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", s.rows, s.cols, 0, 0))
+                    except OSError:
+                        pass
 
     async def _reap(self, s: Session, announce: bool = True) -> None:
         while s.alive:
@@ -782,6 +841,9 @@ class Sessions:
                 await asyncio.wait_for(asyncio.shield(s.reaper), 3)
             except asyncio.TimeoutError:
                 s.reaper.cancel()
+        if s.redraw:
+            s.redraw.cancel()
+            await asyncio.gather(s.redraw, return_exceptions=True)
         self._pause_reader(s)
         if s.fd >= 0:
             os.close(s.fd)
