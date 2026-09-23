@@ -90,7 +90,7 @@ test('recovery rechecks approval, PR, direct prerequisites, identity and stop un
 
 for (const runtime of ['codex', 'claude']) test(`${runtime}: offline crash, durable watchdog wake and one exact-session recovery`, { timeout: 20000 }, async () => temporary(async dir => {
   await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin'));
-  for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+  for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
   await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
   const held = { ...claim, runtime, session: runtime === 'claude' ? 'exact' : null };
   await atomicJson(join(dir, '.dev-state/claims/JAU-999.json'), held);
@@ -368,7 +368,9 @@ test('Claude final invocation usage supersedes message snapshots and zero cost i
 test('setting provenance follows each runtime and records recovery without claiming effective settings', () => {
   const env = { JAUNT_CODEX_MODEL: 'a', JAUNT_CLAUDE_EFFORT: 'high' };
   assert.equal(settingSources('codex', null, {}, env).model, 'runtime environment');
-  assert.equal(settingSources('claude', null, {}, env).model, 'runtime default (not observed)');
+  assert.equal(settingSources('claude', null, {}, env).model, 'jaunt model policy');
+  assert.equal(settingSources('claude', { model: null }, {}, env, 'recovery').model, 'jaunt model policy (recovery)');
+  assert.equal(settingSources('claude', { model: 'claude-opus-5-5' }, {}, env, 'routed-resume').model, 'routed-resume');
   assert.equal(settingSources('codex', { model: 'b' }, { model: 'c' }, env).model, 'explicit option');
   assert.equal(settingSources('codex', { model: 'b' }, {}, env).model, 'saved setting');
   assert.equal(settingSources('codex', { model: null }, {}, env, 'recovery').model, 'recovery');

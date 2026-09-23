@@ -107,6 +107,11 @@ loop and wait for its watcher/watchdog to exit before an explicit takeover.
 Claims, approvals and transcripts are shared; their `runtime` selects how to
 resume them (missing runtime means Claude).
 
+Run `jaunt-linear models check` too. Workers get their model and effort from
+`scripts/linear_model_policy.json` and can never run a banned one, but this
+session was opened by hand: the check says what your own settings would pick.
+`ok: false` means a banned model is configured — report it and do not start.
+
 ```bash
 jaunt-linear loop-on --runtime claude --session "$CLAUDE_SESSION_ID"
 ```
@@ -285,7 +290,9 @@ Include `jaunt-linear workers` when reporting status. Lifecycle files under cano
 suspended and interrupted work. A process heartbeat is not model progress. The
 watchdog also emits `worker-lost` / `worker-recovery-due`; the orchestrator uses the
 runtime-specific `recover` launcher after reconciliation. Retries preserve the
-claim, exact session, worktree and settings. Quota timestamps must be explicit
+claim, exact session, worktree and settings — except that a Claude model the
+policy bans is refused rather than replayed, and a saved empty setting takes
+the policy's pair ([docs/LINEAR_MODELS.md](../../../docs/LINEAR_MODELS.md)). Quota timestamps must be explicit
 ISO timestamps with an offset (structured `retry_at` / `reset_at` / `resets_at`, or
 an ISO timestamp in output), or `resets [Sep 25 at] 7pm (Europe/Paris)` with an
 explicit IANA timezone. Ambiguous/DST or unsupported text uses bounded backoff instead
