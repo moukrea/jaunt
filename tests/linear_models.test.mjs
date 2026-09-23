@@ -238,3 +238,7 @@ test('claude: plan classifier, refused planner resume after approval, fresh impl
     assert.match(stdout, /phases routed/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+test('unparseable classifier output is a visible failed classification, not a crash', async () => {
+  const { parseClassifier } = await import('../scripts/linear_models.mjs');
+  assert.deepEqual(parseClassifier('{"type":"system"}\n{"type":"turn.completed"}'), { failed: 'unparseable classifier output' });
+});

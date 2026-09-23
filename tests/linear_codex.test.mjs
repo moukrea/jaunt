@@ -266,6 +266,7 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
       await writeFile(join(dir, '.agents/skills', skill, 'SKILL.md'), 'fixture instructions');
     }
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
+    await writeFile(join(dir, 'verdict.txt'), 'approved');
     await writeFile(join(dir, '.dev-state/claims/JAU-999.json'), JSON.stringify({ issue: 'JAU-999',
       ...(targetRuntime === 'codex' ? { runtime: 'codex', session: null } : { session: 'exact-claude' }),
       claimedAt: '2026-09-21T00:00:00Z', phase: 'planning' }));
@@ -278,7 +279,7 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
       if(cmd==='claims') console.log('['+readFileSync(state+'/claims/JAU-999.json')+']');
       if(cmd==='workers') console.log(JSON.stringify(await workerReports(state)));
       if(cmd==='stop-requested') console.log('{"stop":false}');
-      if(cmd==='verdict') { if(process.argv[4]!=='--peek') throw Error('approval mutation forbidden'); console.log('{"verdict":"approved"}'); }
+      if(cmd==='verdict') { if(process.argv[4]!=='--peek') throw Error('approval mutation forbidden'); console.log(JSON.stringify({verdict:readFileSync('verdict.txt','utf8').trim()})); }
       if(cmd==='routing-thread') console.log(JSON.stringify({ identifier:'JAU-999',agentId:'agent',state:{type:'started'},comments:[
         {id:'reply',body:'approved',createdAt:'2026-09-22T10:00:00Z',user:{id:'human',email:'human@example.invalid'}}
       ]}));
@@ -313,6 +314,12 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
       claim.session=original.session;claim.phase='awaiting-approval';await writeFile('.dev-state/claims/JAU-999.json',JSON.stringify(claim));
       process.env.JAUNT_LINEAR_ROUTING_OWNER=JSON.stringify(original.owner);
       const e=JSON.stringify({wake:'board-changed',events:[{type:'comment',ticket:'JAU-999'}]});
+      if('${targetRuntime}'==='claude'){
+        // An approved Claude plan is implemented by a fresh session (JAU-37): the router hands it to the orchestrator.
+        const held=await call('route','--event',e);assert.match(held.outcomes[0].reason,/plan approved; start the implementation session/);
+        assert.equal((await readFile('calls.jsonl','utf8')).trim().split('\\n').length,1);
+        await writeFile('verdict.txt','feedback');
+      }
       const routed=await call('route','--event',e);assert.equal(routed.event,null);assert.equal(routed.outcomes[0].outcome,'handled');
       await until(async()=>(await read(path)).attempt!==original.attempt && (await read(path)).endedAt && (await read((await read(path)).eventPath)).delivered);
       const again=await call('route','--event',e);assert.equal(again.event,null);

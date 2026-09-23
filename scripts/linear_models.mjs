@@ -164,7 +164,8 @@ export function classifierArgs(policy = loadPolicy()) {
 }
 // A result is evidence of what ran: a banned model in it is refused outright.
 export function parseClassifier(stdout, policy = loadPolicy()) {
-  const r = JSON.parse(stdout);
+  let r;
+  try { r = JSON.parse(stdout); } catch { return { failed: 'unparseable classifier output' }; }
   const banned = observedBanned({ type: 'result', modelUsage: r.modelUsage }, policy);
   if (banned) throw new Error(`invalid model: ${banned} observed in the classifier is banned by the Jaunt model policy`);
   const classifier = { ...policy.claude.roles.classifier, observedModels: Object.keys(r.modelUsage || {}),

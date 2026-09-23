@@ -329,6 +329,9 @@ A fully handled batch keeps polling; an active worker's reply is saved locally
 and reconsidered on quiet polls. Routing preserves the claim cycle, runtime and
 exact session, and reads `verdict --peek`; the worker still registers approval.
 An interrupted worker only uses guarded recovery, including its existing budget.
+An **approved** Claude plan still `awaiting-approval` is escalated, not resumed:
+its implementation needs a fresh session, which you start with `implement`
+(see §3). The router then follows the claim's new session for later replies.
 
 `routing-escalated` and `routingError` require reconciliation. Inspect the
 reported reason and `.dev-state/routing/` together with the worker lifecycle.
