@@ -140,7 +140,8 @@ def test_prepare_immutable_child_and_resume(repository):
     assert git('rev-parse', pending['sha'] + '^') == source
     assert set(git('diff', '--name-only', source, pending['sha']).splitlines()) <= pipeline.VERSION_FILES
     assert pending['tags'] == {'host': 'v0.1.0-beta.42', 'desktop': 'desktop-v0.1.0-beta.34', 'android': 'android-v0.1.0-beta.32'}
-    assert 'versionCode 32' in pipeline.read_at(pending['sha'], 'android/app/build.gradle')
+    # Spaced production codes (docs/UPDATES.md#update-channels): 31 -> 32000.
+    assert 'versionCode 32000' in pipeline.read_at(pending['sha'], 'android/app/build.gradle')
     assert '0.1.0b42' in pipeline.read_at(pending['sha'], 'host/jaunt/__init__.py')
     assert '0.1.0b42' in pipeline.read_at(pending['sha'], 'pyproject.toml')
     package = json.loads(pipeline.read_at(pending['sha'], 'package-lock.json'))
@@ -275,6 +276,38 @@ def assets(root, files):
     (root / 'SHA256SUMS').write_text(''.join(hashlib.sha256(data).hexdigest() + '  ' + name + '\n' for name, data in files.items()))
 
 
+def test_production_code_is_spaced_above_channel_candidates(repository):
+    # A leftover candidate tag carries base*1000+k; production numbering reads production tags only.
+    candidate = 'android-v0.1.0-beta.31.ch.moukrea.9.1'
+    gradle = Path('android/app/build.gradle')
+    gradle.write_text(gradle.read_text().replace('versionCode 31', 'versionCode 32500'))
+    git('commit', '-am', 'candidate build')
+    git('tag', candidate)
+    git('push', 'origin', candidate)
+    git('reset', '--hard', 'HEAD^')
+    repository['commit']('android/new.java', '// product')
+    pipeline.prepare()
+    pending = pipeline.state_load()[0]['pending']
+    assert pending['tags']['android'] == 'android-v0.1.0-beta.32'
+    assert 'versionCode 32000' in pipeline.read_at(pending['sha'], 'android/app/build.gradle')
+    repository['published'][pending['tags']['android']] = {'sha': pending['sha']}
+    state, old = pipeline.state_load()
+    state['history'].append(state['pending'])
+    state.update(tags=pending['tags'], pending=None, cursor=pending['source'])
+    pipeline.state_save(state, old)
+    git('fetch', 'origin', '--tags')
+    repository['commit']('android/next.java', '// product')
+    pipeline.prepare()
+    assert 'versionCode 33000' in pipeline.read_at(pipeline.state_load()[0]['pending']['sha'], 'android/app/build.gradle')
+
+
+def test_channel_candidate_wheel_is_a_valid_host_asset(tmp_path):
+    wheel = 'jaunt_host-0.1.0b41+ch.moukrea.9.2-py3-none-any.whl'
+    manifest = json.dumps({'wheel': wheel, 'sha256': hashlib.sha256(b'wheel').hexdigest()}).encode()
+    assets(tmp_path, {wheel: b'wheel', 'host-manifest.json': manifest})
+    assert len(pipeline.verify_assets(tmp_path, 'host')) == 2
+
+
 def test_host_assets_exact_inventory_and_hashes(tmp_path):
     wheel = 'jaunt_host-0.1.0b42-py3-none-any.whl'
     data = b'wheel bytes'
@@ -329,7 +362,7 @@ def test_ci_requires_success_for_exact_main_source(monkeypatch):
 def test_release_verify_refuses_wrong_tag_target(repository, monkeypatch):
     # Restore the real verifier; never download assets from a mismatched target.
     verifier = SPEC.loader.get_code('release_pipeline')
-    namespace = {'__name__': 'test_verifier'}
+    namespace = {'__name__': 'test_verifier', '__file__': SPEC.origin}
     exec(verifier, namespace)
     namespace['pages'] = lambda path: [{'tag_name': repository['tags']['host'], 'draft': False}]
     with pytest.raises(ValueError, match='different commit'):

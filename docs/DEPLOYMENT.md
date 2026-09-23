@@ -41,7 +41,9 @@ probe; package publication alone cannot satisfy them.
 
 For affected components the coordinator allocates the next numbered beta tag
 from existing tags, preserves independent host/desktop/Android version series,
-and increases Android `versionCode` beyond the existing tags and source value.
+and spaces Android `versionCode` above the existing production tags and source
+value (`next_production_code`: 31 → 32000, then the next multiple of 1000) so
+that channel candidates of a base always sort below the next release.
 A generated commit has exactly the validated main source as its parent. Only
 version fields, public tag configuration, release notes and `.github/workflows`
 may differ. The workflow tree is copied from current main: GitHub refuses a
@@ -127,8 +129,41 @@ existing release requires investigation and an explicit recovery decision.
 **Merged is not delivered.** Linear's merge integration can close a ticket while
 publication is pending or failed. The worker handover must separately name the
 actual release run and delivery receipt (or the precise blocker). A harness-only
-merge requires no new installable package. Development-channel previews remain
-a separate feature; this workflow publishes the existing production beta channel.
+merge requires no new installable package. This workflow publishes the
+production beta channel; per-pull-request channels have their own publisher.
+
+## Channel candidates
+
+`channel.yml` publishes a pull request's candidate on its update channel
+`<author>_<pr>` ([contract](UPDATES.md#update-channels)). It runs when a maintainer
+(repository role `admin` or `maintain`) applies the `channel` label, on every
+later push while the label stays, or by `workflow_dispatch` with the PR number.
+It runs as `pull_request_target`, so the workflow and `scripts/channel_release.py`
+always come from main. The script checks again, through the API, that the PR is
+open, that its head branch belongs to this repository and who applied the label
+or dispatched. Only then does it build the product from the PR head. A fork is
+never built. The candidates are signed with the production Android key.
+
+`channel_release.py prepare` reserves candidate `n` and the Android counter `k`
+on its own ledger, `jaunt-channel-state`. That ref is separate from
+`jaunt-release-state`, so a channel write can never fail a production lease.
+`k` is shared by every channel on the same production base, so a candidate
+published later is always installable. The script then generates a child of
+the PR head with the candidate versions (host `0.1.0b41+ch.dev.9.2`,
+desktop/Android `0.1.0-beta.N.ch.dev.9.2`, `versionCode` base × 1000 + `k`) and
+main's workflows. It pushes the three candidate tags atomically with the
+reservation. The production host, desktop and Android workflows build and
+publish that commit as prereleases. `publish` accepts a candidate tag only if
+it is reserved on a live channel, and `record` verifies the three releases
+before marking the candidate `delivered`. A failed run is retained; rerun it to
+resume with the same tags. A head that is already published is not published
+again.
+
+When the PR is closed or merged, `cleanup` deletes every prerelease and tag
+`*.ch.<dev>.<pr>.*` and marks the channel `removed`. The operation is safe to
+replay; a reopened PR continues from the next `n`. Runs are serialized per pull
+request (`jaunt-channel-<pr>`) and never wait for production. Channel documents
+and their Pages paths (`ch/<name>/config.json`) are published separately.
 
 ## Required remote acceptance testing
 

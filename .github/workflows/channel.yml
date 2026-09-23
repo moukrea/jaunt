@@ -1,0 +1,121 @@
+name: Channel release
+# Publishes a pull request's candidate on its update channel <developer>_<pr>
+# (docs/UPDATES.md#update-channels) and removes it when the pull request closes.
+# pull_request_target: this file and the control scripts always come from main;
+# only the product is built from the pull request head, after
+# channel_release.py has verified a same-repository head and a maintainer's
+# channel label or dispatch. Candidates are signed with the production key.
+on:
+  pull_request_target:
+    types: [labeled, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+# One lane per pull request: a replaced pending run is an older head, and a
+# cleanup waits for a publication in progress. Production is never blocked.
+concurrency:
+  group: jaunt-channel-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request_target' && github.event.action != 'closed' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'channel') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'channel'))
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.prepare.outputs.publish }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      host: ${{ steps.prepare.outputs.host }}
+      desktop: ${{ steps.prepare.outputs.desktop }}
+      android: ${{ steps.prepare.outputs.android }}
+      host_tag: ${{ steps.prepare.outputs.host_tag }}
+      desktop_tag: ${{ steps.prepare.outputs.desktop_tag }}
+      android_tag: ${{ steps.prepare.outputs.android_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify the trigger and reserve the candidate
+        id: prepare
+        run: python scripts/channel_release.py prepare --pr "$PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+  host:
+    needs: prepare
+    if: needs.prepare.outputs.host == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.host_tag }}
+    secrets: inherit
+  desktop:
+    needs: prepare
+    if: needs.prepare.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.desktop_tag }}
+    secrets: inherit
+  android:
+    needs: prepare
+    if: needs.prepare.outputs.android == 'true'
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.android_tag }}
+    secrets: inherit
+  record:
+    needs: [prepare, host, desktop, android]
+    if: always() && needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify the three prereleases and record the candidate
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        run: python scripts/channel_release.py record --sha "$RELEASE_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      - name: Retain the failed candidate for a rerun
+        if: failure() || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: python scripts/channel_release.py failed --sha "$RELEASE_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+  cleanup:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Delete the channel's prereleases, tags and entry
+        run: python scripts/channel_release.py cleanup --pr "$PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
