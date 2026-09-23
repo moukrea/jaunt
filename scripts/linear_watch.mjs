@@ -330,7 +330,8 @@ export function diff(previous, current) {
 // The agent's own Linear writes — comments, plans, activity labels, relations,
 // created tickets, states it parked — move the pulse like anybody else's, and
 // each one used to cost a model turn that found nothing (JAU-15). The author is
-// read back only for tickets that moved; a failed read keeps every event.
+// read back only for tickets that moved; a failed read keeps every event. A
+// ticket only humans' non-deciding reactions moved (a 👀) is dropped too.
 export async function withoutSelfWrites(events, previous, wakes, read = windows => runAgent('attribute', JSON.stringify(windows))) {
   const windows = attributionWindows(events, previous);
   if (!Object.keys(windows).length) return events;
@@ -343,6 +344,7 @@ export async function withoutSelfWrites(events, previous, wakes, read = windows 
   }
   const kept = filterSelf(events, verdicts);
   if (kept.suppressed) await wakes.note('self-authored', kept.suppressed);
+  if (kept.idle) await wakes.note('idle-reaction', kept.idle);
   return kept.events;
 }
 

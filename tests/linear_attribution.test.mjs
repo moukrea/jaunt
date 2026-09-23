@@ -3,7 +3,7 @@
 // else, nobody identifiable, or a failed read still wakes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selfAuthored, filterSelf, attributionWindows, attributionQuery, attribute, ATTRIBUTION_PAGE, reviewWindows, repinSelf } from '../scripts/linear_attribution.mjs';
+import { selfAuthored, filterSelf, decisive, attributionWindows, attributionQuery, attribute, ATTRIBUTION_PAGE, reviewWindows, repinSelf } from '../scripts/linear_attribution.mjs';
 import { withoutSelfWrites } from '../scripts/linear_watch.mjs';
 
 const ME = 'agent';
@@ -27,7 +27,7 @@ test('the agent alone is self, anybody else is not', () => {
 test('a human reaction on the agent comment is not the agent', () => {
   const v = selfAuthored(issue({ comments: [comment(ME, T(1), [reaction(HUMAN, T(12), 'eyes')])] }), ME, SINCE);
   assert.equal(v.self, false);
-  assert.deepEqual(v.others, [{ kind: 'reaction', userId: HUMAN, at: T(12), emoji: 'eyes' }]);
+  assert.deepEqual(v.others, [{ kind: 'reaction', userId: HUMAN, at: T(12), emoji: 'eyes', onAgent: true }]);
 });
 
 test('only what happened after the window counts', () => {
@@ -65,6 +65,49 @@ test('filterSelf removes only attributable events of self tickets', () => {
   const out = filterSelf(events, { 'JAU-1': { self: true }, 'JAU-2': { self: false } });
   assert.equal(out.suppressed, 2);
   assert.deepEqual(out.events.map(e => `${e.type}:${e.ticket ?? ''}`), ['comment:JAU-2', 'ticket-gone:JAU-1', 'activity-failed:', 'state-changed:JAU-3']);
+});
+
+// JAU-89: a 👀 ("read") was already consumed by sync-activity; only a 👍/👎 on
+// the agent's side of the thread is a decision worth a model turn.
+test('a reaction decides only as an approval or refusal on the agent comment', () => {
+  const on = (user, emoji) => selfAuthored(issue({ comments: [comment(user, T(1), [reaction(HUMAN, T(12), emoji)])] }), ME, SINCE).others[0];
+  assert.equal(decisive(on(ME, '+1')), true);
+  assert.equal(decisive(on(ME, ':thumbsdown:')), true);
+  assert.equal(decisive(on(ME, 'eyes')), false);
+  assert.equal(decisive(on(HUMAN, '+1')), false, 'a 👍 on a human message decides nothing');
+});
+
+test('filterSelf drops tickets only non-deciding reactions moved, and nothing else', () => {
+  const react = (emoji, onAgent = true) => ({ kind: 'reaction', userId: HUMAN, at: T(12), emoji, onAgent });
+  const verdicts = {
+    'JAU-1': { self: false, others: [react('eyes')], unexplained: false },
+    'JAU-2': { self: false, others: [react('eyes'), react('+1', false)], unexplained: false },
+    'JAU-3': { self: false, others: [react('+1')], unexplained: false },
+    'JAU-4': { self: false, others: [react('eyes'), { kind: 'comment-edit', userId: HUMAN, at: T(12) }], unexplained: false },
+    'JAU-5': { self: false, others: [react('eyes')], unexplained: false, truncated: true },
+    'JAU-6': { self: false, others: [], unexplained: true },
+    'JAU-7': { self: false, others: [react('eyes')], unexplained: false },
+  };
+  const events = [
+    { type: 'comment-updated', ticket: 'JAU-1' }, { type: 'ticket-edited', ticket: 'JAU-2' },
+    { type: 'comment-updated', ticket: 'JAU-3' }, { type: 'comment-updated', ticket: 'JAU-4' },
+    { type: 'comment-updated', ticket: 'JAU-5' }, { type: 'comment-updated', ticket: 'JAU-6' },
+    { type: 'state-changed', ticket: 'JAU-7' }, { type: 'comment-updated', ticket: 'JAU-8' },
+  ];
+  const out = filterSelf(events, verdicts);
+  assert.deepEqual([out.suppressed, out.idle], [0, 2]);
+  assert.deepEqual(out.events.map(e => e.ticket), ['JAU-3', 'JAU-4', 'JAU-5', 'JAU-6', 'JAU-7', 'JAU-8']);
+});
+
+test('the watcher drops a 👀 and counts it apart from its own writes', async () => {
+  const notes = [];
+  const wakes = { note: async (reason, n) => notes.push([reason, n]) };
+  const previous = { tickets: { 'JAU-1': { u: T(10) }, 'JAU-2': { u: T(10) } } };
+  const eyes = { self: false, others: [{ kind: 'reaction', userId: HUMAN, at: T(12), emoji: 'eyes', onAgent: true }], unexplained: false };
+  const kept = await withoutSelfWrites([{ type: 'comment-updated', ticket: 'JAU-1' }, { type: 'ticket-edited', ticket: 'JAU-2' }], previous, wakes,
+    async () => ({ verdicts: { 'JAU-1': eyes, 'JAU-2': { self: true } } }));
+  assert.deepEqual(kept, []);
+  assert.deepEqual(notes, [['self-authored', 1], ['idle-reaction', 1]]);
 });
 
 test('windows open at the previous updatedAt, or at creation', () => {
