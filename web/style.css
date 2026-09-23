@@ -60,6 +60,7 @@
 .settings-row>.settings-label{flex:1 1 52%;min-width:160px}
 .settings-row>input:not([type=checkbox]):not([type=range]),.settings-row>textarea{flex:0 1 300px;width:38%;min-width:0;max-width:100%}
 .settings-row>.modal-actions{flex:0 1 auto;margin-top:0}
+.file-menu .settings-row>.button{width:auto}
 @media(max-width:760px){.settings-row>.settings-label{flex-basis:100%;min-width:0}.settings-row>input:not([type=checkbox]):not([type=range]),.settings-row>textarea{flex-basis:100%;width:100%}}
 
 .terminal-restoring .terminal-mount{visibility:hidden}.terminal-restoring:after{content:attr(data-loading-label);position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:12px}
