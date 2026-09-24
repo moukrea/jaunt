@@ -22,20 +22,31 @@ const runtime = value => ['codex', 'claude'].includes(value);
 const roles = ['worker', 'orchestrator', 'subagent', 'classifier', 'unknown'];
 const projects = ['jaunt', 'other', 'unknown'];
 function unique(rows, key, what) { schema(new Set(rows.map(key)).size === rows.length, `duplicate ${what}`); }
-function officialUrl(value) {
+function officialUrl(value, kind = null) {
   try {
     const u = new URL(value);
-    return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash &&
-      ['developers.openai.com', 'platform.openai.com', 'platform.claude.com', 'code.claude.com', 'www.anthropic.com', 'www.openai.com', 'openai.com'].includes(u.hostname);
+    const hosts = { codex: ['developers.openai.com', 'platform.openai.com', 'www.openai.com', 'openai.com', 'help.openai.com', 'learn.chatgpt.com', 'chatgpt.com'],
+      claude: ['platform.claude.com', 'code.claude.com', 'www.anthropic.com', 'support.claude.com', 'claude.com'], tax: ['www.economie.gouv.fr'] };
+    return u.protocol === 'https:' && !u.port && !u.username && !u.password && !u.search && !u.hash &&
+      (kind ? hosts[kind] : [...hosts.codex, ...hosts.claude]).includes(u.hostname);
   } catch { return false; }
 }
+// A retrieval may be known only to the day. Preserve that precision; it never
+// establishes a price's effective period or the start of a subscription.
+const sourceDate = value => time(value) || (typeof value === 'string' && /^\d{4}-\d\d-\d\d$/.test(value) &&
+  Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value ? value : null);
+function validity(value) {
+  if (value === undefined) return;
+  keys(value, ['start', 'end', 'evidence'], 'price validity'); period(value, 'price validity');
+  schema(label(value.evidence), 'price validity evidence required');
+}
 export function validateConfig(input) {
-  keys(input, ['version', 'projectRoots', 'sources', 'mappings', 'rates', 'subscriptions', 'coverage'], 'configuration');
+  keys(input, ['version', 'projectRoots', 'sources', 'mappings', 'rates', 'subscriptions', 'coverage', 'subscriptionCatalog', 'subscriptionScenarios'], 'configuration');
   schema(input.version === 1, 'unsupported configuration version');
   const c = structuredClone(input);
   schema(Array.isArray(c.projectRoots) && c.projectRoots.length > 0 && c.projectRoots.every(p => typeof p === 'string' && isAbsolute(p)), 'projectRoots must be explicit absolute paths');
   c.projectRoots = [...new Set(c.projectRoots.map(p => resolve(p)))];
-  for (const key of ['sources', 'mappings', 'rates', 'subscriptions', 'coverage']) {
+  for (const key of ['sources', 'mappings', 'rates', 'subscriptions', 'coverage', 'subscriptionCatalog', 'subscriptionScenarios']) {
     c[key] ??= []; schema(Array.isArray(c[key]), `${key} must be an array`);
   }
   for (const s of c.sources) {
@@ -80,7 +91,48 @@ export function validateConfig(input) {
     keys(a, ['runtime', 'account', 'start', 'end', 'evidence'], 'coverage attestation');
     schema(runtime(a.runtime) && label(a.account) && label(a.evidence), 'invalid coverage attestation'); period(a, 'coverage');
   }
+  for (const p of c.subscriptionCatalog) {
+    keys(p, ['id', 'runtime', 'plan', 'amount', 'currency', 'cadence', 'channel', 'region', 'source', 'retrievedAt', 'taxStatus', 'taxSource', 'validity'], 'catalog price');
+    schema(label(p.id) && runtime(p.runtime) && label(p.plan) && (p.amount === null || number(p.amount) !== null) && /^[A-Z]{3}$/.test(p.currency), 'invalid catalog price');
+    schema(['month', 'year'].includes(p.cadence) && ['web', 'apple', 'google'].includes(p.channel) && label(p.region), 'catalog cadence, channel and region required');
+    schema(officialUrl(p.source, p.runtime) && sourceDate(p.retrievedAt), 'catalog requires dated official provenance');
+    schema(['excluded', 'included', 'unknown'].includes(p.taxStatus), 'invalid catalog tax status');
+    schema(p.taxStatus === 'unknown' ? p.taxSource === undefined : officialUrl(p.taxSource, p.runtime), 'known tax status requires official tax provenance; unknown status must not imply evidence');
+    validity(p.validity);
+  }
+  unique(c.subscriptionCatalog, p => p.id, 'catalog id');
+  for (const s of c.subscriptionScenarios) {
+    keys(s, ['id', 'catalog', 'comparison', 'assumption', 'basis', 'account', 'start', 'end', 'periodEvidence', 'tax'], 'subscription scenario');
+    schema(label(s.id) && c.subscriptionCatalog.some(p => p.id === s.catalog) && label(s.comparison) && label(s.assumption), 'invalid scenario identity or catalog reference');
+    schema(['published', 'tax-inclusive'].includes(s.basis) && (s.account === undefined || label(s.account)), 'invalid scenario basis or account');
+    if (s.start !== undefined || s.end !== undefined || s.periodEvidence !== undefined) {
+      period(s, 'scenario'); schema(label(s.periodEvidence), 'scenario period evidence required');
+    }
+    if (s.tax !== undefined) {
+      keys(s.tax, ['jurisdiction', 'rate', 'source', 'retrievedAt', 'assumption', 'validity'], 'scenario tax');
+      schema(label(s.tax.jurisdiction) && number(s.tax.rate) !== null && s.tax.rate <= 1 && label(s.tax.assumption), 'invalid scenario tax');
+      schema(officialUrl(s.tax.source, 'tax') && sourceDate(s.tax.retrievedAt), 'tax requires dated official provenance');
+      validity(s.tax.validity);
+      const price = c.subscriptionCatalog.find(p => p.id === s.catalog);
+      schema(price.taxStatus !== 'included', 'tax is already included; a second tax rule is contradictory');
+    }
+  }
+  unique(c.subscriptionScenarios, s => s.id, 'scenario id');
   return c;
+}
+export function publicSubscriptionDefaults() {
+  const retrievedAt = '2026-09-24';
+  const tax = { jurisdiction: 'FR-metropolitan', rate: 0.2, retrievedAt,
+    source: 'https://www.economie.gouv.fr/particuliers/impots-et-fiscalite/gerer-mes-autres-impots-et-taxes/tva-quels-sont-les-taux-de-votre-quotidien',
+    assumption: 'only-if-French-standard-VAT-applies-not-user-location-evidence' };
+  const subscriptionCatalog = [
+    ...[[5, 100], [20, 200]].map(([factor, amount]) => ({ id: `claude-max-${factor}x-usd-20260924`, runtime: 'claude', plan: `Claude-Max-${factor}x`, amount,
+      source: 'https://support.claude.com/en/articles/11049741-what-is-the-max-plan', taxStatus: 'excluded', taxSource: 'https://claude.com/pricing' })),
+    { id: 'chatgpt-pro-20x-usd-20260924', runtime: 'codex', plan: 'ChatGPT-Pro-20x-including-Codex', amount: 200,
+      source: 'https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers', taxStatus: 'unknown' }
+  ].map(p => ({ ...p, currency: 'USD', cadence: 'month', channel: 'web', region: 'public-USD-reference-not-local-quote', retrievedAt }));
+  return { subscriptionCatalog, subscriptionScenarios: subscriptionCatalog.map(p => ({ id: `reference-${p.id}`, catalog: p.id,
+    comparison: 'JAU-73-three-declared-formulas', assumption: 'one-of-each-formula-web-USD-not-observed-payments', basis: 'published', tax: { ...tax } })) };
 }
 export function defaultConfig(root) {
   let roots = [resolve(root)];
@@ -93,7 +145,7 @@ export function defaultConfig(root) {
       { id: 'codex-archive', kind: 'codex', path: join(homedir(), '.codex', 'archived_sessions') },
       { id: 'claude', kind: 'claude', path: join(homedir(), '.claude', 'projects') },
       { id: 'workers', kind: 'attempts', path: join(root, '.dev-state', 'workers') }],
-    mappings: [], rates: [], subscriptions: [], coverage: [] });
+    mappings: [], rates: [], subscriptions: [], coverage: [], ...publicSubscriptionDefaults() });
 }
 async function json(path, absent = null) {
   try { return JSON.parse(await readFile(path, 'utf8')); }
@@ -240,30 +292,76 @@ function summary(events) {
     apiEquivalent: { totals: moneySubtotal(usable.map(e => e.price)), pricedEvents: usable.filter(e => e.price.value !== null).length,
       candidates: usable.length, complete: usable.length > 0 && usable.every(e => e.price.value !== null && !e.partial) } };
 }
+function allocation(events, config, errors, s, reasons = []) {
+  if (!s.account) reasons.push('account-unavailable');
+  if (!s.start || !s.end) reasons.push('period-unavailable');
+  const unavailable = () => ({ value: null, currency: s.currency, kind: 'unavailable', method: 'api-equivalent-share-v1',
+    numerator: null, denominator: null, weightCurrency: null, coverageEvidence: null, reasons });
+  if (!s.account || !s.start || !s.end) return unavailable();
+  const candidates = events.filter(e => e.runtime === s.runtime && (!e.at || (e.at >= s.start && e.from < s.end)));
+  const account = candidates.filter(e => e.account === s.account && !e.excluded);
+  const attestation = config.coverage.find(a => a.runtime === s.runtime && a.account === s.account && a.start <= s.start && a.end >= s.end);
+  if (!attestation) reasons.push('all-project-coverage-not-attested');
+  if (errors.length) reasons.push('source-coverage-gaps');
+  if (!account.length) reasons.push('no-account-usage');
+  if (candidates.some(e => !e.account && !e.excluded)) reasons.push('unmapped-account-usage');
+  if (candidates.some(e => e.account === s.account && e.excluded && e.excluded !== 'native-source-preferred')) reasons.push('ambiguous-account-usage');
+  if (account.some(e => e.project === 'unknown' || e.partial || !e.at || e.from < s.start || e.at >= s.end)) reasons.push('incomplete-project-or-period');
+  if (account.some(e => e.price.value === null)) reasons.push('unpriced-usage');
+  const currencies = new Set(account.filter(e => e.price.value !== null).map(e => e.price.currency));
+  if (currencies.size !== 1) reasons.push('incomparable-price-currencies');
+  const denominator = account.reduce((n, e) => n + (e.price.value || 0), 0);
+  const numerator = account.filter(e => e.project === 'jaunt').reduce((n, e) => n + (e.price.value || 0), 0);
+  if (!(denominator > 0)) reasons.push('zero-or-unavailable-denominator');
+  const value = s.amount * (numerator / denominator);
+  if (!Number.isFinite(denominator) || !Number.isFinite(value)) reasons.push('numeric-overflow');
+  return { value: reasons.length ? null : value, currency: s.currency, kind: reasons.length ? 'unavailable' : 'estimated',
+      method: 'api-equivalent-share-v1', numerator: reasons.length ? null : numerator, denominator: reasons.length ? null : denominator,
+      weightCurrency: currencies.size === 1 ? [...currencies][0] : null, coverageEvidence: attestation?.evidence || null, reasons };
+}
 function allocations(events, config, errors) {
-  return config.subscriptions.map(s => {
-    const candidates = events.filter(e => e.runtime === s.runtime && (!e.at || (e.at >= s.start && e.from < s.end)));
-    const account = candidates.filter(e => e.account === s.account && !e.excluded);
-    const attestation = config.coverage.find(a => a.runtime === s.runtime && a.account === s.account && a.start <= s.start && a.end >= s.end);
-    const reasons = [];
-    if (!attestation) reasons.push('all-project-coverage-not-attested');
-    if (errors.length) reasons.push('source-coverage-gaps');
-    if (!account.length) reasons.push('no-account-usage');
-    if (candidates.some(e => !e.account && !e.excluded)) reasons.push('unmapped-account-usage');
-    if (candidates.some(e => e.account === s.account && e.excluded && e.excluded !== 'native-source-preferred')) reasons.push('ambiguous-account-usage');
-    if (account.some(e => e.project === 'unknown' || e.partial || !e.at || e.from < s.start || e.at >= s.end)) reasons.push('incomplete-project-or-period');
-    if (account.some(e => e.price.value === null)) reasons.push('unpriced-usage');
-    const currencies = new Set(account.filter(e => e.price.value !== null).map(e => e.price.currency));
-    if (currencies.size !== 1) reasons.push('incomparable-price-currencies');
-    const denominator = account.reduce((n, e) => n + (e.price.value || 0), 0);
-    const numerator = account.filter(e => e.project === 'jaunt').reduce((n, e) => n + (e.price.value || 0), 0);
-    if (!(denominator > 0)) reasons.push('zero-or-unavailable-denominator');
-    return { subscription: s.id, account: s.account, runtime: s.runtime, start: s.start, end: s.end,
-      paid: { value: s.amount, currency: s.currency, kind: s.evidenceKind === 'invoice' ? 'invoice-evidence-supplied' : 'user-declared', evidence: s.evidence },
-      allocation: { value: reasons.length ? null : s.amount * numerator / denominator, currency: s.currency, kind: reasons.length ? 'unavailable' : 'estimated',
-        method: 'api-equivalent-share-v1', numerator: reasons.length ? null : numerator, denominator: reasons.length ? null : denominator,
-        weightCurrency: currencies.size === 1 ? [...currencies][0] : null, coverageEvidence: attestation?.evidence || null, reasons } };
+  return config.subscriptions.map(s => ({ subscription: s.id, account: s.account, runtime: s.runtime, start: s.start, end: s.end,
+    paid: { value: s.amount, currency: s.currency, kind: s.evidenceKind === 'invoice' ? 'invoice-evidence-supplied' : 'user-declared', evidence: s.evidence },
+    allocation: allocation(events, config, errors, s) }));
+}
+function cycleEnd(start, cadence) {
+  const d = new Date(start), day = d.getUTCDate();
+  d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + (cadence === 'month' ? 1 : 12));
+  d.setUTCDate(Math.min(day, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()));
+  return d.toISOString();
+}
+const covers = (validity, s) => validity && s.start && s.end && validity.start <= s.start && validity.end >= s.end;
+function publicSubscriptions(events, config, errors, now, from, to) {
+  const catalog = config.subscriptionCatalog.map(p => ({ ...p, kind: 'public-reference',
+    sourceAgeDays: Math.floor((Date.parse(now) - Date.parse(p.retrievedAt)) / 86400000), validity: p.validity || null }));
+  const scenarios = config.subscriptionScenarios.filter(s => !s.start || ((!from || s.end > from) && (!to || s.start < to))).map(s => {
+    const p = catalog.find(p => p.id === s.catalog), grossReasons = [];
+    if (p.amount === null) grossReasons.push('regional-price-unavailable');
+    if (p.taxStatus === 'unknown') grossReasons.push('tax-inclusion-unknown');
+    if (p.taxStatus === 'excluded' && !s.tax) grossReasons.push('applicable-tax-rule-unknown');
+    const gross = grossReasons.length ? null : p.amount * (p.taxStatus === 'excluded' ? 1 + s.tax.rate : 1);
+    if (gross !== null && !Number.isFinite(gross)) grossReasons.push('numeric-overflow');
+    const taxInclusive = { value: grossReasons.length ? null : gross, currency: p.currency, kind: grossReasons.length ? 'unavailable' : 'estimated', reasons: grossReasons };
+    const amount = s.basis === 'published' ? p.amount : taxInclusive.value, reasons = [];
+    if (amount === null) reasons.push('scenario-amount-unavailable');
+    if (!covers(p.validity, s)) reasons.push('catalog-validity-not-established-for-period');
+    if (s.start && s.end !== cycleEnd(s.start, p.cadence)) reasons.push('period-is-not-one-published-cycle');
+    if (s.basis === 'tax-inclusive' && p.taxStatus === 'excluded' && !covers(s.tax?.validity, s)) reasons.push('tax-validity-not-established-for-period');
+    return { ...s, kind: 'public-scenario-estimate', runtime: p.runtime, cadence: p.cadence, account: s.account || null, start: s.start || null, end: s.end || null,
+      published: { value: p.amount, currency: p.currency, taxStatus: p.taxStatus, kind: p.amount === null ? 'unavailable' : 'public-reference' }, taxInclusive,
+      allocation: { ...allocation(events, config, errors, { ...s, runtime: p.runtime, amount, currency: p.currency }, reasons), basis: s.basis } };
   });
+  // Only explicitly named comparisons are additive. Regional alternatives and
+  // currencies must not silently become a universal monthly bill.
+  const comparisons = [...new Set(scenarios.map(s => `${s.comparison}:${s.published.currency}:${s.cadence}`))].map(key => {
+    const [comparison, currency, cadence] = key.split(':'), rows = scenarios.filter(s => s.comparison === comparison && s.published.currency === currency && s.cadence === cadence);
+    const total = field => {
+      const values = rows.map(s => s[field].value), sum = values.reduce((n, v) => n + (v ?? 0), 0), complete = values.every(v => v !== null) && Number.isFinite(sum);
+      return { value: complete ? sum : null, kind: complete ? 'estimated' : 'unavailable', knownEntries: values.filter(v => v !== null).length, entries: rows.length };
+    };
+    return { comparison, currency, cadence, published: total('published'), taxInclusive: total('taxInclusive') };
+  });
+  return { catalog, scenarios, comparisons, scope: 'Dated public comparisons only, not observed payments or historical charges. No currency conversion or automatic proration.' };
 }
 export function buildReport(ledger, config, { from = null, to = null, now = new Date().toISOString() } = {}) {
   config = validateConfig(config); ledgerCheck(ledger);
@@ -288,6 +386,7 @@ export function buildReport(ledger, config, { from = null, to = null, now = new 
     otherProjects: summary(selected.filter(e => e.project === 'other')), unattributed: summary(selected.filter(e => e.project === 'unknown')),
     accounts: grouped(e => `${e.runtime}:${e.account || 'unknown'}`, e => e.project === 'jaunt'),
     subscriptions: allocations(all, config, gaps).filter(s => (!from || s.end > from) && (!to || s.start < to)),
+    publicSubscriptions: publicSubscriptions(all, config, gaps, now, from, to),
     // Raw scoped client estimates are alternatives, never summed across resumes,
     // parents or native events. They can include children absent from token sums.
     reportedEstimates: selected.filter(e => e.reportedEstimate && e.project === 'jaunt').map(e => ({ event: e.id, runtime: e.runtime, at: e.at, session: e.session, ...e.reportedEstimate })),
@@ -296,7 +395,9 @@ export function buildReport(ledger, config, { from = null, to = null, now = new 
       unknownAccounts: selected.filter(e => !e.account && !e.excluded).length,
       limits: ['Deleted or unrecorded history cannot be recovered.', 'Current claim runtime is not historical provider evidence.',
         'Quota resets are not charges.', 'Rate tables require explicit validity evidence; no current price is backdated.',
-        'Other projects remain anonymous; unknown account assignments are not inferred.', 'Scoped client estimates are not invoice measurements.'] },
+        'Other projects remain anonymous; unknown account assignments are not inferred.', 'Scoped client estimates are not invoice measurements.',
+        'Public prices are dated references, not historical payments. Retrieval dates establish no effective period.',
+        'Regional prices and personal tax treatment may be unavailable. Scenario assumptions are not account observations.'] },
     // Hash references permit explicit account/role mappings without exporting
     // raw session identifiers, paths, prompts, replies or tool arguments.
     inventory: selected.map(e => ({ id: e.id, runtime: e.runtime, session: e.session, parent: e.parent, source: e.source, at: e.at, from: e.from,
@@ -308,6 +409,17 @@ export function markdownReport(r) {
   const lines = ['# Jaunt development costs', '', r.scope, '', `Last scan: ${r.lastScanAt || 'never'}`, '',
     '| Runtime | Observed input (all categories) | Observed output | API equivalent (estimate) |', '| --- | ---: | ---: | --- |'];
   for (const [runtime, s] of Object.entries(r.byRuntime)) lines.push(`| ${runtime} | ${show(s.normalized.inputTotal.value)} | ${show(s.normalized.output.value)} | ${s.apiEquivalent.totals.map(x => `${x.value.toFixed(4)} ${x.currency}`).join(', ') || 'unavailable'} (${s.apiEquivalent.pricedEvents}/${s.apiEquivalent.candidates} events priced) |`);
+  lines.push('', '## Public subscription references and scenarios', '', r.publicSubscriptions.scope, '',
+    '| Formula / channel / region | Published amount | Taxes | Retrieved / source age | Official source |', '| --- | --- | --- | --- | --- |');
+  for (const p of r.publicSubscriptions.catalog) lines.push(`| ${p.plan} / ${p.channel} / ${p.region} | ${show(p.amount)} ${p.currency}/${p.cadence} | ${p.taxStatus}${p.taxSource ? ` ([source](${p.taxSource}))` : ''} | ${p.retrievedAt} / ${p.sourceAgeDays} days | [price](${p.source}) |`);
+  if (!r.publicSubscriptions.catalog.length) lines.push('| unavailable | unavailable | unknown | unavailable | unavailable |');
+  for (const s of r.publicSubscriptions.scenarios) {
+    lines.push('', `- Scenario ${s.id}: ${s.assumption}. Account: ${s.account || 'unknown'}; period: ${s.start ? `${s.start}–${s.end}` : 'unknown'}.`,
+      `  Tax-inclusive estimate: ${show(s.taxInclusive.value)} ${s.taxInclusive.currency}/${s.cadence}${s.taxInclusive.reasons.length ? ` (${s.taxInclusive.reasons.join(', ')})` : ''}.`,
+      `  Jaunt allocation (${s.allocation.basis} basis): ${show(s.allocation.value)} ${s.allocation.currency}${s.allocation.reasons.length ? ` (${s.allocation.reasons.join(', ')})` : ''}.`);
+    if (s.tax) lines.push(`  Conditional tax: ${s.tax.jurisdiction}, ${s.tax.rate * 100}%; ${s.tax.assumption}; [official source](${s.tax.source}), retrieved ${s.tax.retrievedAt}.`);
+  }
+  for (const c of r.publicSubscriptions.comparisons) lines.push('', `Comparison ${c.comparison}: published ${show(c.published.value)} ${c.currency}/${c.cadence}; tax-inclusive ${show(c.taxInclusive.value)} ${c.currency}/${c.cadence}. No historical spending inferred.`);
   lines.push('', '## Subscription payments and estimated allocation', '', '| Account | Period | Paid (evidence supplied) | Estimated Jaunt share |', '| --- | --- | --- | --- |');
   for (const s of r.subscriptions) lines.push(`| ${s.account} | ${s.start.slice(0, 10)}–${s.end.slice(0, 10)} | ${s.paid.value} ${s.paid.currency} (${s.paid.kind}) | ${show(s.allocation.value)} ${s.allocation.currency} |`);
   if (!r.subscriptions.length) lines.push('| unknown | unknown | unavailable | unavailable |');
@@ -324,7 +436,8 @@ export async function costsCommand(root, state, args, flags = {}, { signal } = {
     try { input = JSON.parse(await readFile(flags.file, 'utf8')); } catch { throw Error('costs: invalid configuration file'); }
     const config = validateConfig(input);
     await withCostLock(dir, () => privateWrite(configFile, config));
-    return { imported: true, sources: config.sources.length, rates: config.rates.length, subscriptions: config.subscriptions.length };
+    return { imported: true, sources: config.sources.length, rates: config.rates.length, subscriptions: config.subscriptions.length,
+      subscriptionCatalog: config.subscriptionCatalog.length, subscriptionScenarios: config.subscriptionScenarios.length };
   }
   const config = validateConfig(await json(configFile) || defaultConfig(root));
   if (action === 'scan') return scanCosts(dir, config);

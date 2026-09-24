@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readNative, readAttempt, reconcileEvents, identity, projectOf } from '../scripts/linear_cost_sources.mjs';
-import { validateConfig, scanCosts, buildReport, priceEvent, normalized, costsCommand, withCostLock, markdownReport } from '../scripts/linear_costs.mjs';
+import { validateConfig, scanCosts, buildReport, priceEvent, normalized, costsCommand, withCostLock, markdownReport, publicSubscriptionDefaults } from '../scripts/linear_costs.mjs';
 import { parseCommandArgs } from '../scripts/linear_agent.mjs';
 const exec = promisify(execFile);
 const t0 = '2026-09-01T00:00:00.000Z', t1 = '2026-09-01T00:01:00.000Z', t2 = '2026-09-01T00:02:00.000Z';
@@ -29,6 +29,13 @@ const ledger = events => ({ version: 1, files: { ['a'.repeat(64)]: { events, gap
 const rate = (extra = {}) => ({ id: 'test-rate', runtime: 'codex', model: 'observed-model', tier: 'standard', currency: 'USD',
   start: t0, end, retrievedAt: t0, source: 'https://developers.openai.com/api/docs/pricing', evidence: 'synthetic-fixture-not-a-real-tariff',
   minInputTokens: 0, maxInputTokens: 1000000, perMillion: { uncached: 2, cached: 1, output: 10, cacheWrite5m: 3, cacheWrite1h: 4 }, ...extra });
+const catalogPrice = (extra = {}) => ({ id: 'synthetic-price', runtime: 'codex', plan: 'synthetic-formula', amount: 100, currency: 'USD',
+  cadence: 'month', channel: 'web', region: 'synthetic-region', source: 'https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers',
+  retrievedAt: '2026-09-24', taxStatus: 'unknown', ...extra });
+const scenario = (extra = {}) => ({ id: 'synthetic-scenario', catalog: 'synthetic-price', comparison: 'synthetic-comparison',
+  assumption: 'synthetic-fixture-not-an-actual-account', basis: 'published', ...extra });
+const taxRule = (extra = {}) => ({ jurisdiction: 'synthetic-tax-region', rate: 0.2, source: 'https://www.economie.gouv.fr/',
+  retrievedAt: t0, assumption: 'synthetic-rule-not-personal-tax-evidence', ...extra });
 async function temporary(t) { const dir = await mkdtemp(join(tmpdir(), 'jaunt-costs-')); t.after(() => rm(dir, { recursive: true, force: true })); return dir; }
 function attempt(extra = {}) {
   return { issue: 'JAU-7', claimedAt: t0, attempt: '00000000-0000-4000-8000-000000000001', runtime: 'claude', session: 'session',
@@ -146,6 +153,90 @@ test('subscription allocation needs payment, comparable all-project weights and 
   assert.equal(buildReport(ledger([one, two, unknown]), c).subscriptions[0].allocation.value, null);
   c.coverage = []; r = buildReport(ledger([one, two]), c); assert.equal(r.subscriptions[0].allocation.value, null);
   assert.ok(r.subscriptions[0].allocation.reasons.includes('all-project-coverage-not-attested'));
+});
+test('legacy configs keep public arrays empty; dated defaults supply references without inventing payments', () => {
+  assert.deepEqual(config().subscriptionCatalog, []); assert.deepEqual(config().subscriptionScenarios, []);
+  const defaults = publicSubscriptionDefaults(), c = config(defaults);
+  const r = buildReport(ledger([]), c, { now: '2026-09-25T00:00:00.000Z', to: t0 });
+  assert.deepEqual(r.subscriptions, []);
+  assert.equal(r.publicSubscriptions.comparisons[0].published.value, 500);
+  assert.equal(r.publicSubscriptions.comparisons[0].taxInclusive.value, null);
+  assert.deepEqual(r.publicSubscriptions.scenarios.map(s => s.taxInclusive.value), [120, 240, null]);
+  assert.ok(r.publicSubscriptions.catalog.every(p => p.validity === null && p.sourceAgeDays === 1));
+  for (const s of r.publicSubscriptions.scenarios) {
+    assert.equal(s.account, null); assert.equal(s.start, null); assert.equal(s.allocation.value, null);
+    assert.ok(s.allocation.reasons.includes('period-unavailable')); assert.ok(!('paid' in s));
+  }
+  const md = markdownReport(r);
+  assert.match(md, /published 500 USD\/month; tax-inclusive unavailable/);
+  assert.match(md, /https:\/\/support.claude.com/); assert.match(md, /unknown \| unknown \| unavailable/);
+  assert.match(md, /not-user-location-evidence/);
+});
+test('tax-inclusive references stay unchanged and reject contradictory second tax rules', () => {
+  const p = catalogPrice({ taxStatus: 'included', taxSource: 'https://help.openai.com/en/articles/9038389-updating-billing-information-tax-id-and-vat-id' });
+  const c = config({ subscriptionCatalog: [p], subscriptionScenarios: [scenario({ basis: 'tax-inclusive' })] });
+  assert.equal(buildReport(ledger([]), c).publicSubscriptions.scenarios[0].taxInclusive.value, 100);
+  assert.throws(() => config({ ...c, subscriptionScenarios: [scenario({ tax: taxRule() })] }), /already included/);
+  p.taxStatus = 'excluded';
+  assert.equal(buildReport(ledger([]), { ...c, subscriptionCatalog: [p] }).publicSubscriptions.scenarios[0].taxInclusive.value, null);
+});
+test('public regional prices and currencies never come from FX or a partially known comparison sum', () => {
+  const c = config({ subscriptionCatalog: [catalogPrice(), catalogPrice({ id: 'eur', amount: null, currency: 'EUR' }), catalogPrice({ id: 'usd-missing', amount: null })],
+    subscriptionScenarios: [scenario(), scenario({ id: 'eur-scenario', catalog: 'eur' }), scenario({ id: 'missing', catalog: 'usd-missing' })] });
+  const r = buildReport(ledger([]), c).publicSubscriptions;
+  assert.equal(r.comparisons.length, 2);
+  assert.ok(r.comparisons.every(c => c.published.value === null));
+  assert.equal(r.scenarios[1].published.value, null); assert.equal(r.scenarios[1].published.currency, 'EUR');
+  assert.ok(r.scenarios[1].taxInclusive.reasons.includes('regional-price-unavailable'));
+  assert.throws(() => config({ subscriptionCatalog: [catalogPrice({ currency: null })] }), /catalog price/);
+});
+test('scenario allocation reuses paid all-project guards and requires historical price validity for one cycle', () => {
+  const one = native(codexRows()).events[0], two = { ...one, id: 'other', session: identity('codex', 'other'), project: 'other' };
+  const payment = { id: 'payment', runtime: 'codex', account: 'account-a', amount: 100, currency: 'USD', start: t0, end, evidence: 'synthetic-payment', evidenceKind: 'invoice' };
+  const s = scenario({ account: payment.account, start: t0, end, periodEvidence: 'explicit-scenario-period' });
+  const c = config({ rates: [rate()], mappings: [one, two].map(e => ({ runtime: e.runtime, session: e.session, account: payment.account })),
+    subscriptions: [payment], subscriptionCatalog: [catalogPrice()], subscriptionScenarios: [s],
+    coverage: [{ runtime: 'codex', account: payment.account, start: t0, end, evidence: 'all-projects-reviewed' }] });
+  const report = (input = c, events = [one, two]) => buildReport(ledger(events), input);
+  assert.equal(report().subscriptions[0].allocation.value, 50);
+  assert.ok(report().publicSubscriptions.scenarios[0].allocation.reasons.includes('catalog-validity-not-established-for-period'));
+  c.subscriptionCatalog[0].validity = { start: t0, end, evidence: 'synthetic-effective-price-period' };
+  assert.deepEqual(report().publicSubscriptions.scenarios[0].allocation, { ...report().subscriptions[0].allocation, basis: 'published' });
+  for (const input of [{ ...c, coverage: [] }, { ...c, rates: [] }, { ...c, mappings: c.mappings.slice(0, 1) }]) {
+    const r = report(input); assert.equal(r.publicSubscriptions.scenarios[0].allocation.value, null);
+    assert.deepEqual(r.publicSubscriptions.scenarios[0].allocation.reasons, r.subscriptions[0].allocation.reasons);
+  }
+  const shorter = report({ ...c, subscriptionScenarios: [{ ...s, end: t2 }] }).publicSubscriptions.scenarios[0];
+  assert.equal(shorter.allocation.value, null); assert.ok(shorter.allocation.reasons.includes('period-is-not-one-published-cycle'));
+  const missingAccount = { ...s }; delete missingAccount.account;
+  assert.equal(report({ ...c, subscriptionScenarios: [missingAccount] }).publicSubscriptions.scenarios[0].allocation.value, null);
+  const gap = ledger([one, two]); gap.errors.push({ code: 'source-missing' });
+  assert.ok(buildReport(gap, c).publicSubscriptions.scenarios[0].allocation.reasons.includes('source-coverage-gaps'));
+});
+test('tax-inclusive allocations require both the price and tax validity, never just retrieval dates', () => {
+  const e = native(codexRows()).events[0], validity = { start: t0, end, evidence: 'synthetic-validity' };
+  const c = config({ rates: [rate()], mappings: [{ runtime: 'codex', session: e.session, account: 'account' }],
+    coverage: [{ runtime: 'codex', account: 'account', start: t0, end, evidence: 'coverage' }],
+    subscriptionCatalog: [catalogPrice({ validity, taxStatus: 'excluded', taxSource: 'https://help.openai.com/' })],
+    subscriptionScenarios: [scenario({ account: 'account', start: t0, end, periodEvidence: 'period', basis: 'tax-inclusive', tax: taxRule() })] });
+  let s = buildReport(ledger([e]), c).publicSubscriptions.scenarios[0];
+  assert.equal(s.taxInclusive.value, 120); assert.equal(s.allocation.value, null);
+  assert.ok(s.allocation.reasons.includes('tax-validity-not-established-for-period'));
+  c.subscriptionScenarios[0].tax.validity = validity;
+  s = buildReport(ledger([e]), c).publicSubscriptions.scenarios[0]; assert.equal(s.allocation.value, 120);
+});
+test('catalog and tax imports reject ambiguous periods, unsafe or nonofficial provenance and invalid dates', () => {
+  const check = (p = catalogPrice(), s = scenario()) => config({ subscriptionCatalog: [p], subscriptionScenarios: [s] });
+  for (const source of ['https://help.openai.com/?token=SECRET', 'https://user:SECRET@help.openai.com/', 'https://help.openai.com/#SECRET', 'https://help.openai.com.attacker.test/', 'https://www.economie.gouv.fr/']) {
+    assert.throws(() => check(catalogPrice({ source })), /provenance/);
+  }
+  for (const retrievedAt of ['yesterday', '2026-02-30', null]) assert.throws(() => check(catalogPrice({ retrievedAt })), /provenance/);
+  assert.throws(() => check(catalogPrice({ validity: { start: t0, end } })), /evidence/);
+  assert.throws(() => check(catalogPrice({ taxStatus: 'excluded' })), /tax provenance/);
+  assert.throws(() => check(catalogPrice(), scenario({ start: t0 })), /period/);
+  assert.throws(() => check(catalogPrice(), scenario({ tax: taxRule({ source: 'https://example.com/tax' }) })), /provenance/);
+  assert.throws(() => check(catalogPrice(), scenario({ tax: taxRule({ rate: 20 }) })), /scenario tax/);
+  assert.throws(() => config({ subscriptionCatalog: [catalogPrice()], subscriptions: [scenario()] }), /subscription/);
 });
 test('report periods exclude straddling consumption without changing whole-subscription allocation', () => {
   const e = native(codexRows()).events[0]; e.from = t0;

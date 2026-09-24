@@ -21,7 +21,7 @@ Use explicit UTC instants for weekly quota windows, including any observed reset
 boundary. A reset is a consumption boundary, **not a payment**, and is never
 multiplied by a subscription price.
 
-## Four separate quantities
+## Five separate quantities
 
 - **Observed tokens:** known source counters, with source coverage, partial
   samples and exclusions. Codex input includes cached input; Claude input does
@@ -33,6 +33,9 @@ multiplied by a subscription price.
   and an explicitly dated price table. It is not a bill, and only the priced
   subset is summed. Scoped USD estimates reported by clients appear separately,
   without a grand total: session resumes and subagents can overlap their scope.
+- **Public subscription estimates:** dated catalog prices and explicit scenarios,
+  in their published currencies. They do not establish a payment, local checkout
+  price, account identity or subscription start date. Unknown taxes stay unknown.
 - **Subscription payments:** amounts and periods entered with payment evidence
   references. `invoice-evidence-supplied` means the operator supplied that
   provenance, not that this tool authenticated a bank statement. User declarations
@@ -45,6 +48,8 @@ multiplied by a subscription price.
   denominators, unassigned accounts, missing rates and ambiguous overlaps. The
   weight currency need not match the payment currency: the ratio is dimensionless.
   Payments in different currencies are never converted or added together.
+  Public scenarios use the same coverage guards and identify their alternative
+  basis; their allocations must never be added to paid allocations.
 
 Missing subscription data yields an unavailable payment/allocation, not a free
 project. An operator's statement that API spending was zero is not established
@@ -122,12 +127,14 @@ An example with **no assumed tariff, payment or account identity**:
   "mappings": [],
   "rates": [],
   "subscriptions": [],
-  "coverage": []
+  "coverage": [],
+  "subscriptionCatalog": [],
+  "subscriptionScenarios": []
 }
 ```
 
 Mapping entries have `runtime`, exactly one hashed `session` or `event` from the
-private report, and optional `account`, `role`, `project` (`jaunt`, `other`, `unknown`). Multiple
+private report, and optional `account`, `role`, `project` (`jaunt`, `other`, `unknown`).
 Event mappings take precedence over session mappings and also support classifiers
 without native sessions. Claude accounts are never guessed from a formula, directory or quota reset.
 The session reference is SHA-256 of `runtime + ":" + actualSessionId`; native
@@ -148,7 +155,7 @@ Each rate requires:
 - `perMillion`: nonnegative numbers for `uncached`, `cached`, `output`, and when
   applicable `cacheWrite5m`/`cacheWrite1h`. A missing positive category is unpriced.
 
-No tariff is bundled by default. The official [OpenAI price table](https://developers.openai.com/api/docs/pricing)
+No API tariff is bundled by default. The official [OpenAI price table](https://developers.openai.com/api/docs/pricing)
 and [Claude price table](https://platform.claude.com/docs/en/about-claude/pricing)
 were consulted on 2026-09-23. They distinguish cache and processing categories;
 that observation alone does not establish historical validity for every session.
@@ -166,6 +173,93 @@ explicit assertion that all projects for that account/period are covered.
 An assertion does not override detected source gaps. Read the allocation's
 `reasons` when it is unavailable. Reports filtered to a shorter window still
 show whole overlapping subscription periods; there is no arbitrary proration.
+
+## Public prices, currencies and conditional taxes
+
+New default configurations include the following web references, retrieved on
+**2026-09-24**, and one comparison containing one of each formula as requested
+in JAU-73. They are separate from the empty `subscriptions` payment array.
+Existing configurations remain unchanged: omitted `subscriptionCatalog` and
+`subscriptionScenarios` arrays default to empty. The exported
+`publicSubscriptionDefaults()` supplies the reference arrays for an explicit
+configuration update. Imports replace the full configuration, so preserve its
+sources and mappings when adding these arrays. Scans and watch never fetch prices.
+
+| Formula | Published monthly reference | Tax inclusion established |
+| --- | ---: | --- |
+| Claude Max 5x | 100 USD | Excluded |
+| Claude Max 20x | 200 USD | Excluded |
+| ChatGPT Pro 20x, including Codex | 200 USD | Unknown for this reference |
+
+[Anthropic's Max guide](https://support.claude.com/en/articles/11049741-what-is-the-max-plan)
+supplies the two Claude prices; [Claude pricing](https://claude.com/pricing)
+states the tax exclusion. [OpenAI's Pro guide](https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers)
+confirms the $200 tier, Codex inclusion and continued renewal of existing plans;
+the [Pro announcement](https://openai.com/index/introducing-chatgpt-pro/)
+documents $200 monthly. The user's description of the largest Codex subscription
+supports this formula as an inference, not an observation of their account.
+The **500 USD/month published comparison is not a verified tax-inclusive bill
+or a lifetime Jaunt cost**. Credits, promotions, purchase channels and local
+prices can change the amount actually paid.
+
+[OpenAI lists supported billing currencies](https://help.openai.com/en/articles/10421635-multicurrency-billing),
+including EUR, GBP, CHF and CAD, but that list does not supply every local amount.
+[Anthropic's invoice guide](https://support.claude.com/en/articles/16607638-understanding-your-pro-or-max-plan-invoices)
+also explains that an existing subscription's currency may differ from current
+offers. No complete currency-by-country tax-inclusive price grid was established.
+A supported currency without a sourced amount remains unavailable; converting
+USD is not evidence of a localized checkout price. No exchange rate is inferred.
+
+Tax depends on billing circumstances, described by
+[Anthropic](https://support.claude.com/en/articles/12997130-understanding-your-billing-address-and-tax-calculation)
+and [OpenAI](https://help.openai.com/en/articles/9038389-updating-billing-information-tax-id-and-vat-id).
+The default scenarios illustrate the [French metropolitan standard VAT rate of 20%](https://www.economie.gouv.fr/particuliers/impots-et-fiscalite/gerer-mes-autres-impots-et-taxes/tva-quels-sont-les-taux-de-votre-quotidien)
+**only if that jurisdiction and regime apply**. They do not infer residence or
+tax status. With that assumption the two tax-exclusive Claude references become
+120 and 240 USD/month. The OpenAI tax-inclusive amount, and hence the combined
+tax-inclusive total, remain unavailable because tax inclusion in that reference
+is not established. An already tax-inclusive price is retained unchanged and
+rejects an additional tax rule.
+
+`subscriptionCatalog` entries require unique `id`, `runtime`, a `plan` label,
+`amount` (nonnegative or explicitly `null` for an unknown regional price),
+`currency`, `cadence` (`month` or `year`), `channel` (`web`, `apple`, `google`),
+`region`, official HTTPS `source`, `retrievedAt` (ISO instant or exact calendar
+date), and `taxStatus` (`excluded`, `included`, `unknown`). Known tax status needs
+an official `taxSource`; unknown status must omit it. Optional `validity` has
+`start`, `end` and an `evidence` label. Absence of historical validity is valid
+and stays visible; retrieval date is never substituted for it.
+
+Each `subscriptionScenarios` entry references a `catalog` id and requires its
+own unique `id`, explicit `comparison` group, `assumption` label, and allocation
+`basis` (`published` or `tax-inclusive`). A comparison adds exactly its named
+scenario entries, separately by currency and cadence. Put alternatives in
+different groups. A missing amount makes its group's total unavailable rather
+than silently presenting a partial sum. Catalog variants are not automatically
+summed. The JSON and Markdown retain source dates, source age, assumptions and
+unavailable reasons independently of the scan's freshness.
+
+An optional `tax` rule requires `jurisdiction`, fractional `rate` (0–1), official
+`source`, `retrievedAt`, and `assumption`; optional `validity` has the same shape
+as price validity. The currently supported fiscal provenance host is the French
+Economy Ministry; it is not a universal tax engine. Provider sources are limited
+to their named official documentation/help/pricing hosts. Credentials, queries,
+fragments, unofficial hosts and non-HTTPS URLs are refused.
+
+Optional `account`, `start`, `end` and `periodEvidence` permit a scenario allocation
+only when a whole explicit cycle is covered by price validity (and tax validity
+when adding tax). Both period boundaries and its evidence label are required
+together. One cycle means one UTC calendar month/year with the ending day clamped
+to that month's last day. Partial or multiple cycles are unavailable, without
+proration. All paid-allocation guards still apply. The default references have
+no account, period or historical validity, so show monthly estimates without
+inventing historical charges or a Jaunt share. Filtering the report never turns
+an undated scenario into historical evidence.
+
+No personal data is required for this initial public comparison. Actual payment
+history and a reliable Jaunt allocation remain unavailable until corresponding
+evidence, account mappings and all-project coverage exist; this does not block
+the reference comparison or token collection.
 
 ## Persistence, privacy and recovery
 

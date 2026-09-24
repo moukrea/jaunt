@@ -26,6 +26,28 @@ exercised in this browser scenario.
 
 ## Project cost accounting — JAU-73 (2026-09-23)
 
+The approved public-price amendment was validated on 2026-09-24. All 31 focused
+tests pass, including legacy configuration compatibility, separate public and
+paid amounts, missing regional prices, conditional/already-included/unknown
+taxes, dated provenance, historical validity and shared allocation guards.
+Plain `npm test` passes 342/343 before the final landing rebase, with only the
+same JAU-113 idle-watcher pulse assertion below failing. `python3
+scripts/check_project.py` and `git diff --check` pass.
+
+A private scan at 16:22 UTC on 2026-09-24 read 999 retained files. The Jaunt
+subset included 6,452 Claude events (1,818,877,850 normalized input tokens and
+4,497,871 output tokens) and 1,524 Codex events (185,179,960 input and 500,702
+output). The report kept 96 Claude and 47 Codex overlapping/ambiguous events
+excluded. The repeat at 16:24 reused 996 projections, reparsed three changing
+files, observed five new events, and changed no existing counters. The report
+now shows the separately sourced 500 USD/month public comparison. Its combined
+tax-inclusive amount, historical payments and Jaunt monetary allocation remain
+unavailable. The France 20% scenario is conditional, not residence evidence.
+No public reference was inserted into the paid ledger. These observations do
+not establish complete lifetime history or activate the canonical collector.
+
+Initial implementation observations from 2026-09-23:
+
 The 25 focused cost tests pass. The full suite passes all 337 tests with Node's
 `--test-concurrency=1` placed before the test file arguments. Plain `npm test`
 passes 336/337 here: the existing idle-watcher assertion at
