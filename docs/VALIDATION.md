@@ -24,6 +24,70 @@ exercised in this browser scenario.
 
 
 
+## Project cost accounting — JAU-73 (2026-09-23)
+
+The approved public-price amendment was validated on 2026-09-24. All 31 focused
+tests pass, including legacy configuration compatibility, separate public and
+paid amounts, missing regional prices, conditional/already-included/unknown
+taxes, dated provenance, historical validity and shared allocation guards.
+Plain `npm test` passes 342/343 before the final landing rebase, with only the
+same JAU-113 idle-watcher pulse assertion below failing. `python3
+scripts/check_project.py` and `git diff --check` pass.
+
+A private scan at 16:22 UTC on 2026-09-24 read 999 retained files. The Jaunt
+subset included 6,452 Claude events (1,818,877,850 normalized input tokens and
+4,497,871 output tokens) and 1,524 Codex events (185,179,960 input and 500,702
+output). The report kept 96 Claude and 47 Codex overlapping/ambiguous events
+excluded. The repeat at 16:24 reused 996 projections, reparsed three changing
+files, observed five new events, and changed no existing counters. The report
+now shows the separately sourced 500 USD/month public comparison. Its combined
+tax-inclusive amount, historical payments and Jaunt monetary allocation remain
+unavailable. The France 20% scenario is conditional, not residence evidence.
+No public reference was inserted into the paid ledger. These observations do
+not establish complete lifetime history or activate the canonical collector.
+
+Initial implementation observations from 2026-09-23:
+
+The 25 focused cost tests pass. The full suite passes all 337 tests with Node's
+`--test-concurrency=1` placed before the test file arguments. Plain `npm test`
+passes 336/337 here: the existing idle-watcher assertion at
+`tests/linear_wakes.test.mjs:159` expects more than five pulses in 1.5 seconds.
+A full archive of the unchanged branch base reproduces exactly that assertion
+(311/312); the isolated watcher test passes. This is the symptom tracked by
+JAU-113, not evidence that the default local suite is green. Source project
+checks and `git diff --check` pass.
+
+Synthetic cases cover cumulative snapshots, forked ancestor headers, missing
+baselines and counter resets, Claude partial/final snapshots, duplicate and
+conflicting evidence, historical Claude attempts after a Codex claim handover,
+wrapper/native overlap, copied classifier records, explicit account mappings,
+dated model/tier/context-band prices, cache-category gaps, subscription coverage,
+currency separation, period boundaries, private persistence, source rotation,
+truncation/deletion, concurrent collector refusal and credential-free CLI use.
+The collector's foreground watch was started and stopped against synthetic
+sources; no production worker was launched or stopped by these tests.
+
+A metadata-only scan of the available local native sources and retained worker
+records was run into a private review directory outside the canonical state.
+At 17:38 UTC it processed 936 files and consolidated 32,274 event identities
+across all projects. Its then-attributable Jaunt subset included 6,452 Claude
+and 1,130 Codex events; excluded overlapping evidence remained visible. The
+immediate second scan reused 931 file projections, reparsed five changing files,
+observed two new events and changed no already observed event counters. These
+are moving observations, not a complete project lifetime or fixed benchmark.
+No transcript bodies, credentials, private session inventory or financial
+receipts are committed as fixtures or evidence.
+
+The available evidence still has missing cumulative baselines, counter resets,
+unsupported/missing usage and no archived Codex directory. No historically
+validated tariff table, payment evidence or account mapping was supplied for
+this local trial. API-equivalent totals, subscription payments and Jaunt's
+allocated monetary cost therefore remain unavailable; client estimates retain
+their separate scopes. Current public pricing was consulted, not backdated.
+The new canonical collector has not been activated. A merge or desktop package
+alone does not establish live collection. See [the cost contract](LINEAR_COSTS.md).
+
+
 ## PR trial artifacts — JAU-24 (2026-09-23)
 
 PR #91's Android run (35796247091) uploaded `android-debug-apk` (3,161,694 bytes,
