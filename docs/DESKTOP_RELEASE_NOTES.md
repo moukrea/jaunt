@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.41
+
+- fix(files): retain directory navigation during reconnect (JAU-41) (#125)
+- Source: `5d3dd477fb9b787a61599c0552255a3f91450ac2`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
