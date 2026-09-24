@@ -374,6 +374,13 @@ test('a written approval approves, and a cheer after a 👍 keeps it',()=>{
  assert.equal(read([plan,human('a',T(2),'/approve'),human('b',T(3),'attends, change X')],plan).verdict,'feedback','later words win over /approve too');
  assert.equal(read([plan,human('a',T(2),'/decline'),human('b',T(3),'merci')],plan).verdict,'declined');
 });
+test('a release acknowledgment neither approves a plan nor preserves an older approval (JAU-120)',()=>{
+ const plan=agent('plan',T(1));
+ for(const reactions of [[],[thumb(T(2))]]){
+  const result=read([{...plan,reactions},human('h',T(3),'Ah bah voilà un release publiée !')],plan);
+  assert.equal(result.verdict,'feedback');
+ }
+});
 const {pickOwners,subscribersToAdd}=await import('../scripts/linear_agent.mjs');
 // Linear notifies subscribers and nobody else, so a ticket the harness opened
 // with an empty subscriber list announced itself to no one — including the ones

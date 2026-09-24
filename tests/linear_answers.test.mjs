@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readReply, decideAnswer } from '../scripts/linear_answers.mjs';
+import { readReply, decideAnswer, readDiscussionReply } from '../scripts/linear_answers.mjs';
 
 // Every example promised in the approved JAU-80 plan, read exactly as written.
 const cases = {
@@ -27,6 +27,18 @@ for (const [kind, bodies] of Object.entries(cases)) {
     for (const body of bodies) assert.equal(readReply(body), kind, body);
   });
 }
+
+test('discussion acknowledgments do not broaden plan approval (JAU-120)', () => {
+  for (const body of ['Ah bah voilà un release publiée !', 'Ah bah voilà une release publiée !', 'Voilà la release publiée.', 'lu', 'vu', 'merci', 'Bah faut corriger !', "j'approuve"]) {
+    assert.equal(readDiscussionReply(body), 'acknowledgment', body);
+  }
+  for (const body of ['Ah bah voilà un release publiée !', 'Ah bah voilà une release publiée !']) {
+    assert.equal(readReply(body), 'correction', 'the approval reader remains conservative');
+  }
+  for (const body of ['Ah bah voilà un release publiée ! Mais elle ne marche pas.', 'Ah bah voilà une release publiée ! Et Android ?', 'Merci, ajoute le lien.', 'Top, peux-tu expliquer les tests', 'ok mais garde le nom', 'Pourquoi ?', 'Une remarque inconnue', 'Voilà une release publiée, reste le bug']) {
+    assert.equal(readDiscussionReply(body), 'feedback', body);
+  }
+});
 
 test('the newest decisive signal wins and cheers are looked through', () => {
   const at = (s) => `2026-09-23T05:33:${String(s).padStart(2, '0')}.000Z`;

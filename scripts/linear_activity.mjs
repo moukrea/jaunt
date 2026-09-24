@@ -2,8 +2,9 @@
 // by the canonical linear_agent CLI; tests inject an isolated API and state dir.
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { atomicJson, readJson, withWorkerLock } from './linear_workers.mjs';
-import { readReply, decideAnswer } from './linear_answers.mjs';
+import { readReply, decideAnswer, readDiscussionReply } from './linear_answers.mjs';
 
 export const ACTIVITY_LABELS = {
   origin: 'Créé par le harnais', unread: 'Du neuf du harnais', active: 'Discussion active',
@@ -15,7 +16,6 @@ const PLAN_MARKER = '<!-- jaunt-agent:plan -->';
 const READ_EMOJI = new Set(['eyes', '👀', '+1', 'thumbsup', '👍', 'white_check_mark', 'rocket', 'tada', '-1', 'thumbsdown', 'x', 'no_entry']);
 const APPROVE = new Set(['+1', 'thumbsup', '👍', 'white_check_mark', 'rocket', 'tada']);
 const DECLINE = new Set(['-1', 'thumbsdown', 'x', 'no_entry']);
-const ackText = body => /^(?:lu|vu|merci|\/approve|\/decline)[.!\s]*$/i.test(body.trim());
 const iso = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
 const CLOSED = new Set(['completed', 'canceled', 'duplicate']);
 const nonempty = value => typeof value === 'string' && Boolean(value.trim());
@@ -28,6 +28,70 @@ const keyOf = id => { if (!/^[A-Z][A-Z0-9]*-\d+$/.test(id)) throw new Error('inv
 // and the API cut the loop off for an hour on 23/09 (JAU-62).
 export const FULL_SWEEP_MS = 30 * 60_000;
 const human = (user, me) => Boolean(user?.id && user.id !== me && user.email && !/@oauthapp\.linear\.app$/i.test(user.email));
+const contentHash = comment => createHash('sha256').update(comment.body).digest('hex');
+const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+
+function validateResponse(response, bound = true) {
+  const fields = ['status', 'reason', 'comment', 'sourceHash', 'answerHash'];
+  if (!response || typeof response !== 'object' || Array.isArray(response) ||
+      Object.keys(response).some(key => !fields.includes(key)) ||
+      !['pending', 'answered', 'not-required'].includes(response.status)) throw Error('invalid subject response');
+  if (response.status === 'pending') {
+    if (['comment', 'sourceHash', 'answerHash'].some(key => Object.hasOwn(response, key)) ||
+        (Object.hasOwn(response, 'reason') && !nonempty(response.reason))) throw Error('invalid pending response');
+    return;
+  }
+  if (!nonempty(response.reason)) throw Error('response reason required');
+  if (bound && !sha256(response.sourceHash)) throw Error('response source proof required');
+  if (response.status === 'answered') {
+    if (!nonempty(response.comment) || (bound && !sha256(response.answerHash))) throw Error('response answer proof required');
+  } else if (Object.hasOwn(response, 'comment') || Object.hasOwn(response, 'answerHash')) throw Error('not-required response uses its source as evidence');
+}
+
+const humanSource = (comment, me) => comment && !comment.botActor && human(comment.user, me) && iso(comment.createdAt) && nonempty(comment.body);
+const answerPublication = (comment, record, me) => comment && comment.user?.id === me && !comment.botActor &&
+  iso(comment.createdAt) && nonempty(comment.body) && !record.technical.includes(comment.id) &&
+  !comment.body.startsWith(ACK_MARKER) && !comment.body.startsWith(PROVENANCE_MARKER);
+
+function hasCurrentResponse(subject, record, comments, me) {
+  const response = subject.response;
+  if (!response || response.status === 'pending') return false;
+  const source = comments.get(subject.source);
+  if (!humanSource(source, me) || response.sourceHash !== contentHash(source)) return false;
+  if (response.status === 'not-required') return true;
+  const answer = comments.get(response.comment);
+  return response.status === 'answered' && answerPublication(answer, record, me) &&
+    Date.parse(answer.createdAt) > Date.parse(source.createdAt) && response.answerHash === contentHash(answer);
+}
+
+// Only explicit response patches bind evidence, never publish/sync/chronology.
+// A patch echoing old metadata must not certify edited comments anew.
+function bindResponses(record, patch, issue, me) {
+  if (!patch || patch.revision !== record.revision) throw Error('discussion revision changed; read before updating');
+  if (!Array.isArray(patch.subjects)) throw Error('subjects patch required');
+  const subjects = new Map(record.subjects.map(s => [s.key, s]));
+  const comments = new Map(issue.comments.map(c => [c.id, c]));
+  return { ...patch, subjects: patch.subjects.map(item => {
+    if (!Object.hasOwn(item, 'response')) return item;
+    const response = item.response, previous = subjects.get(item.key)?.response;
+    validateResponse(response, false);
+    if (previous && Object.keys(previous).length === Object.keys(response).length &&
+        Object.keys(previous).every(key => previous[key] === response[key])) return item;
+    if (Object.hasOwn(response, 'sourceHash') || Object.hasOwn(response, 'answerHash')) throw Error('response proofs are generated; omit hashes to record a new interpretation');
+    const source = comments.get(item.source);
+    if (!humanSource(source, me)) throw Error('response needs an existing human source comment');
+    if (response.status === 'pending') return item;
+    const bound = { ...response, sourceHash: contentHash(source) };
+    if (response.status === 'answered') {
+      const answer = comments.get(response.comment);
+      if (!answerPublication(answer, record, me) || Date.parse(answer.createdAt) <= Date.parse(source.createdAt)) {
+        throw Error('response needs a later nontechnical agent comment on this ticket');
+      }
+      bound.answerHash = contentHash(answer);
+    }
+    return { ...item, response: bound };
+  }) };
+}
 
 // Connections must be complete before deciding that there is nothing left.
 export async function connectionPages(fetchPage) {
@@ -55,6 +119,7 @@ function validate(record, id) {
         !['open', 'resolved', 'transferred'].includes(s.state) ||
         (s.state !== 'open' && (!nonempty(s.reason) || !nonempty(s.evidence))) ||
         (s.state === 'transferred' && !/^[A-Z][A-Z0-9]*-\d+$/.test(s.ticket || ''))) throw new Error(`${id}: invalid discussion subject`);
+    if (Object.hasOwn(s, 'response')) validateResponse(s.response);
     keys.add(s.key);
   }
   return record;
@@ -78,8 +143,8 @@ export function discussionStore(stateDir) {
 export function observeActivity(record, issue, me) {
   const next = structuredClone(record);
   const subjects = new Map(next.subjects.map(s => [s.key, s]));
-  const add = (key, title, owner, source) => {
-    if (!subjects.has(key)) subjects.set(key, { key, title, owner, source, state: 'open' });
+  const add = (key, title, owner, source, response) => {
+    if (!subjects.has(key)) subjects.set(key, { key, title, owner, source, state: 'open', ...(response && { response }) });
   };
   const comments = issue.comments.filter(c => iso(c.createdAt) && !(record.baseline || []).includes(c.id) && Date.parse(c.createdAt) >= Date.parse(record.since));
   const publications = comments.filter(c => c.user?.id === me && !c.botActor &&
@@ -88,8 +153,7 @@ export function observeActivity(record, issue, me) {
   for (const c of comments) {
     if (!c.botActor && human(c.user, me)) {
       acknowledged = Math.max(acknowledged, Date.parse(c.createdAt));
-      // An approval or a cheer is an answer, not a new question for the worker.
-      if (!ackText(c.body) && readReply(c.body) === 'correction') add(`feedback:${c.id}`, c.body.slice(0, 180), 'worker', c.id);
+      if (readDiscussionReply(c.body) === 'feedback') add(`feedback:${c.id}`, c.body.slice(0, 180), 'worker', c.id, { status: 'pending' });
     }
   }
   for (const c of publications) {
@@ -135,21 +199,22 @@ export function observeActivity(record, issue, me) {
   // every subject still open used to keep it forever (JAU-101). Closing the
   // ticket takes it off, except for a question asked after the closure.
   const closedAt = CLOSED.has(issue.state?.type) ? Date.parse(issue.completedAt || issue.canceledAt || '') : NaN;
-  next.active = pendingQuestions(next, issue, me).some(s => !CLOSED.has(issue.state?.type) ||
-    Date.parse(issue.comments.find(c => c.id === s.source).createdAt) > closedAt);
+  next.active = pendingQuestions(next, issue, me).some(s => {
+    if (!CLOSED.has(issue.state?.type)) return true;
+    const askedAt = Date.parse(issue.comments.find(c => c.id === s.source)?.createdAt || '');
+    // Missing evidence cannot prove that a pending question predates closure.
+    return !Number.isFinite(askedAt) || !Number.isFinite(closedAt) || askedAt > closedAt;
+  });
   return next;
 }
 
-// Open human questions with no agent publication after them. Answering takes
-// the label off but does not resolve the subject: only the ledger does that.
+// An answer belongs to a subject, not to everything earlier on the ticket.
+// Legacy feedback without response evidence remains pending. Explicit response
+// metadata also covers manually split questions with arbitrary stable keys.
 export function pendingQuestions(record, issue, me) {
-  const said = issue.comments.filter(c => c.user?.id === me && !c.botActor && iso(c.createdAt) && !record.technical.includes(c.id) &&
-    !c.body.startsWith(ACK_MARKER) && !c.body.startsWith(PROVENANCE_MARKER)).map(c => Date.parse(c.createdAt));
-  return record.subjects.filter(s => {
-    if (s.state !== 'open' || !s.key.startsWith('feedback:')) return false;
-    const asked = issue.comments.find(c => c.id === s.source);
-    return Boolean(asked) && !said.some(at => at > Date.parse(asked.createdAt));
-  });
+  const comments = new Map(issue.comments.map(c => [c.id, c]));
+  return record.subjects.filter(s => s.state === 'open' && (s.response || s.key.startsWith('feedback:')) &&
+    !hasCurrentResponse(s, record, comments, me));
 }
 
 export function updateSubjects(record, patch, comments) {
@@ -163,7 +228,7 @@ export function updateSubjects(record, patch, comments) {
     const previous = subjects.get(item.key);
     if (previous && (previous.source !== item.source || (previous.ticket && previous.ticket !== item.ticket))) throw new Error('preserve subject source and transfer target');
     if (!previous && item.source !== 'issue' && !comments.some(c => c.id === item.source)) throw new Error('subject source comment not found');
-    subjects.set(item.key, { ...item });
+    subjects.set(item.key, { ...item, ...(!Object.hasOwn(item, 'response') && previous?.response && { response: structuredClone(previous.response) }) });
   }
   next.subjects = [...subjects.values()];
   return validate(next, record.issue);
@@ -313,8 +378,8 @@ export function activityService({ stateDir, graphql, team, agent }) {
         const issue = await readIssue(id);
         if (issue.state?.type !== 'completed') throw new Error(`${id}: ticket is not Done; subjects stay open`);
         const before = await initial(issue), me = (await agent()).id;
-        const kept = new Set(pendingQuestions(observeActivity(before, issue, me), issue, me).map(s => s.key));
-        const next = structuredClone(before), closed = [];
+        const next = observeActivity(before, issue, me), closed = [];
+        const kept = new Set(pendingQuestions(next, issue, me).map(s => s.key));
         for (const s of next.subjects) {
           if (s.state !== 'open' || kept.has(s.key)) continue;
           Object.assign(s, { state: 'resolved', reason: 'Ticket livré et clos', evidence });
@@ -327,7 +392,7 @@ export function activityService({ stateDir, graphql, team, agent }) {
     async update(id, patch) {
       return store.lock(id, async () => {
         const issue = await readIssue(id), before = await initial(issue);
-        const next = updateSubjects(before, patch, issue.comments);
+        const next = updateSubjects(before, bindResponses(before, patch, issue, (await agent()).id), issue.comments);
         for (const s of patch.subjects.filter(s => s.state === 'transferred')) {
           if (s.ticket === id) throw new Error('cannot transfer a subject to itself');
           const target = await graphql(`query($id: String!) { issue(id: $id) { id relations { nodes { type relatedIssue { identifier } } } inverseRelations { nodes { type issue { identifier } } } } }`, { id: s.ticket });

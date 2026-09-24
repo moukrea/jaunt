@@ -612,6 +612,20 @@ through the canonical launcher to record each subject's owner, source and open,
 resolved or transferred disposition. A reply acknowledges previous information;
 it does not resolve every question. Keep ambiguous subjects open for analysis.
 
+For each human question, record a separate `response`: `pending`, `answered`
+with the actual later agent comment ID and a reason, or `not-required` with a
+reason interpreting its source. The launcher binds proof to the observed comment
+bodies; edits or missing evidence make an open question pending again. Use
+arbitrary stable keys to split multiple questions and explicitly qualify the
+automatic aggregate as split. A publication, parent thread or `--reply` alone
+does not answer a subject. An answer does not deliver the promised work.
+
+Legacy feedback stays pending until explicitly reconciled. Omitting `response`
+preserves it; use explicit `pending` to reset it. Echoing saved hashes never
+renews edited evidence: reread the comments and omit hashes when recording a new
+interpretation. Keep ambiguity pending, preserve resolved/transferred history,
+and do not treat a satisfied acknowledgment as plan approval.
+
 Publication opens review/expectation/plan subjects automatically. Separate
 multiple questions when interpreting feedback. Resolve superseded plan subjects
 with the replacement as evidence. Before handover, resolve delivered work with

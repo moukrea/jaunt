@@ -40,6 +40,21 @@ export function readReply(body) {
   return 'correction';
 }
 
+// Discussion acknowledgments do not decide a plan. In particular, making the
+// release acknowledgment neutral in readReply would preserve an earlier thumbs
+// up instead of letting the latest unknown prose stop that approval (JAU-120).
+export function readDiscussionReply(body) {
+  const text = normalise(body).trim();
+  const words = text.replace(/[^a-z0-9'/+]+/g, ' ').trim();
+  const core = words.replace(FILLER, '').trim();
+  // A thank-you/approval followed by a request still needs an answer. Unknown
+  // prose stays feedback; these bounded forms are not a semantic classifier.
+  const request = /(?:^| )(?:peux tu|pourrais tu|pouvez vous|pourriez vous|merci de|explique|ajoute|corrige|modifie|verifie|montre|precise|supprime|renomme|change|garde|conserve|fais|faites)(?= |$)/;
+  if (text.includes('?') || CORRECTION.test(words) || request.test(words)) return 'feedback';
+  if (/^(?:lu|vu)$/.test(core) || /^voila (?:un|une|la) release publiee$/.test(core)) return 'acknowledgment';
+  return readReply(body) === 'correction' ? 'feedback' : 'acknowledgment';
+}
+
 // `signals`: `{ at, kind }` for every human answer after the plan — replies read
 // by `readReply`, 👍/👎 as approve/decline. The newest decisive one wins; neutral
 // messages are looked through. Null when nothing decided anything.

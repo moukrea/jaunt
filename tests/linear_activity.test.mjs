@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { activityService, ACTIVITY_LABELS, ORIGIN_MARKER, connectionPages, discussionStore, observeActivity, updateSubjects } from '../scripts/linear_activity.mjs';
+import { activityService, ACTIVITY_LABELS, ORIGIN_MARKER, connectionPages, discussionStore, observeActivity, pendingQuestions, updateSubjects } from '../scripts/linear_activity.mjs';
 const at = n => new Date(Date.UTC(2026, 8, 22, 1, 0, n)).toISOString();
 const me = { id: 'agent', email: 'agent@oauthapp.linear.app' }, user = { id: 'dev', email: 'dev@example.invalid' };
 const comment = (id, n, body, author = me, reactions = []) => ({ id, createdAt: at(n), body, user: author, reactions });
@@ -41,16 +41,25 @@ test('approval closes only plan decision, not promised work; eyes never approves
   assert.equal(observeActivity(base(), issue([p, comment('h', 4, 'Une correction', user)]), me.id).subjects.find(s => s.key === 'plan:p').state, 'open');
 });
 
-test('the label marks only a human question the agent has not answered yet (JAU-102)', () => {
+test('an unrelated publication cannot answer a question (JAU-120), and questions to the human stay separate (JAU-102)', () => {
   const asked = [comment('a', 1, 'News'), comment('h', 2, 'Pourquoi ?', user)];
   const waiting = observeActivity(base(), issue(asked), me.id);
   assert.equal(waiting.active, true);
-  const answered = observeActivity(waiting, issue([...asked, comment('r', 3, 'Parce que…')]), me.id);
-  assert.equal(answered.active, false, 'an agent reply takes the label off');
-  assert.equal(answered.subjects.find(s => s.key === 'feedback:h').state, 'open', 'but does not resolve the question');
+  const published = observeActivity(waiting, issue([...asked, comment('r', 3, 'CI relancée.')]), me.id);
+  assert.equal(published.active, true, 'chronology is not response evidence');
+  assert.equal(pendingQuestions(published, issue(asked), me.id).length, 1);
   const technical = { ...waiting, technical: ['t'] };
   assert.equal(observeActivity(technical, issue([...asked, comment('t', 3, 'Receipt'), comment('k', 4, '<!-- jaunt-agent:ack -->\nOK')]), me.id).active, true, 'receipts are not answers');
   assert.equal(observeActivity(base(), issue([comment('p', 1, '<!-- jaunt-agent:plan -->\nPlan'), comment('e', 2, '**Attendu de toi :** choisir')]), me.id).active, false, 'questions to the human do not set it');
+});
+
+test('the exact release acknowledgment clears unread without opening a question (JAU-120)', () => {
+  const comments = [comment('a', 1, 'Release publiée'), comment('h', 2, 'Ah bah voilà un release publiée !', user)];
+  const result = observeActivity(base(), issue(comments), me.id);
+  assert.deepEqual([result.unread, result.active, result.subjects.length], [false, false, 0]);
+  comments[1].body += ' Et le correctif Android ?';
+  const edited = observeActivity(result, issue(comments), me.id);
+  assert.equal(edited.active, true); assert.equal(edited.subjects[0].source, 'h');
 });
 
 test('closing the ticket takes the label off, except for a question asked after closure (JAU-101)', () => {
@@ -127,6 +136,142 @@ async function fixture(t, count = 1) {
   const service=activityService({stateDir:dir,graphql,team:async()=>({id:'team'}),agent:async()=>me});
   return {dir,issues,labelList,service,calls,get writes(){return writes;},failLabels(v){failLabels=v;},failRead(v){failRead=v;}};
 }
+
+async function respond(f, key, response) {
+  const r = await f.service.read('JAU-1');
+  const subject = r.subjects.find(s => s.key === key);
+  assert.ok(subject, key);
+  return f.service.update('JAU-1', { revision: r.revision, subjects: [{ ...subject, response }] });
+}
+const pending = (r, i) => pendingQuestions(r, i, me.id).map(s => s.key).sort();
+
+for (const sameRoot of [false, true]) test(`explicit answers cover only their question, with ${sameRoot ? 'a shared root' : 'different roots'}`, async t => {
+  const f = await fixture(t), i = f.issues.get('JAU-1');
+  await f.service.sync('JAU-1');
+  i.comments.push(comment('root', 1, 'News'), { ...comment('a', 2, 'Pourquoi A ?', user), parent: { id: 'root' } },
+    { ...comment('b', 3, 'Pourquoi B ?', user), parent: { id: sameRoot ? 'root' : 'other-root' } });
+  if (!sameRoot) i.comments.push(comment('other-root', 1, 'Other news'));
+  await f.service.sync('JAU-1');
+  await f.service.publish('JAU-1', 'CI relancée.', 'a');
+  const a = await f.service.publish('JAU-1', 'A utilise le protocole existant.', 'a');
+  let r = await f.service.read('JAU-1');
+  assert.deepEqual(pending(r, i), ['feedback:a', 'feedback:b'], 'even --reply is not an interpretation');
+  await respond(f, 'feedback:a', { status: 'answered', comment: a.id, reason: 'Explains A, not B' });
+  r = await f.service.read('JAU-1');
+  assert.deepEqual(pending(r, i), ['feedback:b']); assert.equal(r.active, true);
+  const b = await f.service.publish('JAU-1', 'B sera livré avec le correctif.', 'b');
+  await respond(f, 'feedback:b', { status: 'answered', comment: b.id, reason: 'Explains the delivery of B' });
+  r = await f.service.read('JAU-1');
+  assert.deepEqual(pending(r, i), []); assert.equal(r.active, false); assert.equal(r.unread, true);
+  assert.ok(r.subjects.every(s => s.state === 'open'), 'answering does not deliver promised work');
+  assert.ok(i.labels.nodes.some(l => l.id === 'third-party'));
+});
+
+test('several questions in one comment can be split without special key prefixes', async t => {
+  const f = await fixture(t), i = f.issues.get('JAU-1');
+  await f.service.sync('JAU-1'); i.comments.push(comment('q', 2, 'Pourquoi A ? Et B ?', user)); await f.service.sync('JAU-1');
+  const r = await f.service.read('JAU-1');
+  await f.service.update('JAU-1', { revision: r.revision, subjects: [
+    { ...r.subjects[0], response: { status: 'not-required', reason: 'Split into question-a and question-b below' } },
+    ...['a', 'b'].map(k => ({ key: `question-${k}`, title: `Explain ${k}`, source: 'q', owner: 'worker', state: 'open', response: { status: 'pending' } })),
+  ] });
+  const answer = await f.service.publish('JAU-1', 'Voici A.', 'q');
+  await respond(f, 'question-a', { status: 'answered', comment: answer.id, reason: 'Addresses only A' });
+  assert.deepEqual(pending(await f.service.read('JAU-1'), i), ['question-b']);
+  i.state = { type: 'completed' }; i.completedAt = at(20);
+  const delivered = await f.service.delivered('JAU-1', 'https://example.invalid/pull/1');
+  assert.deepEqual(delivered.kept, ['question-b']); assert.equal(delivered.active, false, 'closed-ticket visibility policy is unchanged');
+});
+
+test('response updates reject absent, unrelated, technical and untrusted evidence without writes', async t => {
+  const f = await fixture(t, 2), i = f.issues.get('JAU-1');
+  await f.service.sync('JAU-1'); i.comments.push(comment('q', 2, 'Pourquoi ?', user)); await f.service.sync('JAU-1');
+  const valid = await f.service.publish('JAU-1', 'Explanation');
+  const technical = await f.service.publish('JAU-1', 'Receipt', undefined, { technical: true });
+  const elsewhere = await f.service.publish('JAU-2', 'Other ticket');
+  i.comments.push(comment('older', 1, 'Old answer'), comment('simultaneous', 2, 'Same time'),
+    comment('human', 4, 'Another human', user), comment('app', 5, 'Other app', { id: 'other', email: 'other@oauthapp.linear.app' }),
+    { ...comment('bot', 6, 'Bot'), botActor: { id: 'bot' } }, comment('ack', 7, '<!-- jaunt-agent:ack -->\nOK'),
+    comment('provenance', 8, '<!-- jaunt-agent:provenance -->\nOrigin'), { ...comment('undated', 9, 'Unknown date'), createdAt: 'invalid' },
+    comment('empty', 9, '  '), comment('unknown-author', 9, 'Unknown author', null));
+  const before = await f.service.read('JAU-1'), writes = f.writes;
+  for (const id of ['missing', elsewhere.id, 'older', 'simultaneous', 'human', 'app', 'bot', 'ack', 'provenance', 'undated', 'empty', 'unknown-author', technical.id]) {
+    await assert.rejects(respond(f, 'feedback:q', { status: 'answered', comment: id, reason: 'Proposed answer' }), /later nontechnical agent comment/, id);
+  }
+  for (const response of [null, {}, { status: 'done' }, { status: 'pending', comment: valid.id },
+    { status: 'answered', comment: valid.id }, { status: 'answered', reason: 'No comment' },
+    { status: 'not-required', reason: ' ' }, { status: 'not-required', reason: 'Ack', comment: valid.id },
+    { status: 'answered', comment: valid.id, reason: 'Forged', sourceHash: '0'.repeat(64), answerHash: '0'.repeat(64) }]) {
+    await assert.rejects(respond(f, 'feedback:q', response), /response|proof/);
+  }
+  await assert.rejects(f.service.update('JAU-1', { revision: before.revision - 1, subjects: [{ ...before.subjects[0], response: { status: 'not-required', reason: 'Old read' } }] }), /revision/);
+  for (const source of ['issue', 'missing', valid.id, 'bot', 'app']) {
+    await assert.rejects(f.service.update('JAU-1', { revision: before.revision, subjects: [{ key: 'manual', title: 'Question', source, owner: 'worker', state: 'open', response: { status: 'not-required', reason: 'Not a human question' } }] }), /human source/);
+  }
+  assert.deepEqual(await f.service.read('JAU-1'), before); assert.equal(f.writes, writes);
+});
+
+test('older subject patches preserve response proof, and echoing proof cannot recertify edited comments', async t => {
+  const f = await fixture(t), i = f.issues.get('JAU-1');
+  await f.service.sync('JAU-1'); i.comments.push(comment('q', 2, 'Pourquoi ?', user)); await f.service.sync('JAU-1');
+  const answer = await f.service.publish('JAU-1', 'Parce que le protocole le demande.');
+  const response = { status: 'answered', comment: answer.id, reason: 'Explains the protocol constraint' };
+  await respond(f, 'feedback:q', response);
+  let r = await f.service.read('JAU-1'); const proof = structuredClone(r.subjects[0].response);
+  const { response: ignored, ...legacy } = r.subjects[0];
+  await f.service.update('JAU-1', { revision: r.revision, subjects: [{ ...legacy, title: 'Clarification tracked by an older client' }] });
+  r = await f.service.read('JAU-1'); assert.deepEqual(r.subjects[0].response, proof); assert.equal(r.active, false);
+  i.comments.find(c => c.id === answer.id).body = 'CI relancée.';
+  await f.service.update('JAU-1', { revision: r.revision, subjects: [r.subjects[0]] });
+  r = await f.service.read('JAU-1'); assert.equal(r.active, true); assert.deepEqual(r.subjects[0].response, proof);
+  i.comments.find(c => c.id === answer.id).body = 'Une explication revue du protocole.';
+  await respond(f, 'feedback:q', { ...response, reason: 'Re-read the edited explanation' });
+  r = await f.service.read('JAU-1'); assert.equal(r.active, false); assert.notEqual(r.subjects[0].response.answerHash, proof.answerHash);
+  await respond(f, 'feedback:q', { status: 'pending', reason: 'Further explanation is needed' });
+  assert.equal((await f.service.read('JAU-1')).active, true);
+});
+
+for (const change of ['source edited', 'answer edited', 'answer deleted', 'source deleted', 'answer author changed', 'answer became technical']) {
+  test(`a stale response stays pending through sync and delivery: ${change}`, async t => {
+    const f = await fixture(t), i = f.issues.get('JAU-1');
+    await f.service.sync('JAU-1'); i.comments.push(comment('q', 2, 'Pourquoi ?', user)); await f.service.sync('JAU-1');
+    const answer = await f.service.publish('JAU-1', 'Explanation');
+    await respond(f, 'feedback:q', { status: 'answered', comment: answer.id, reason: 'Explains the question' });
+    const a = i.comments.find(c => c.id === answer.id), q = i.comments.find(c => c.id === 'q');
+    if (change === 'source edited') q.body += ' Et le second point ?';
+    if (change === 'answer edited') a.body = 'News';
+    if (change === 'answer deleted') i.comments = i.comments.filter(c => c !== a);
+    if (change === 'source deleted') i.comments = i.comments.filter(c => c !== q);
+    if (change === 'answer author changed') a.user = user;
+    if (change === 'answer became technical') a.body = '<!-- jaunt-agent:ack -->\nReceipt';
+    await f.service.publish('JAU-1', 'CI relancée.');
+    const r = await f.service.read('JAU-1'); assert.equal(r.active, true); assert.ok(pending(r, i).includes('feedback:q'));
+    await f.service.sync('JAU-1'); assert.deepEqual(await f.service.read('JAU-1'), r, 'repeated observation is idempotent');
+    i.state = { type: 'completed' }; i.completedAt = at(20);
+    const result = await f.service.delivered('JAU-1', 'https://example.invalid/pull/1');
+    assert.ok(result.kept.includes('feedback:q'));
+    assert.equal(result.active, change === 'source deleted', 'unknown source time cannot prove the pre-closure cutoff');
+  });
+}
+
+test('legacy records keep unanswered feedback and disposition history until explicit reconciliation', async t => {
+  const f = await fixture(t), i = f.issues.get('JAU-1');
+  const q = comment('q', 2, 'Ah bah voilà un release publiée !', user);
+  i.comments.push(q, comment('ordinary', 3, 'CI relancée.'));
+  const legacy = { ...base(), issue: 'JAU-1', subjects: [
+    { key: 'feedback:q', source: 'q', title: q.body, owner: 'worker', state: 'open' },
+    { key: 'closed', source: 'deleted', title: 'Delivered work', owner: 'worker', state: 'resolved', reason: 'Delivered', evidence: 'old-pr' },
+    { key: 'moved', source: 'deleted', title: 'Follow-up', owner: 'JAU-2', state: 'transferred', ticket: 'JAU-2', reason: 'Separate scope', evidence: 'old-ticket' },
+  ] };
+  await discussionStore(f.dir).save(legacy); await f.service.sync('JAU-1');
+  let r = await f.service.read('JAU-1'); assert.equal(r.active, true); assert.equal(r.subjects[0].response, undefined);
+  assert.deepEqual(r.subjects.slice(1), legacy.subjects.slice(1));
+  await respond(f, 'feedback:q', { status: 'not-required', reason: 'Read as a satisfied acknowledgment of the published release, with no request' });
+  r = await f.service.read('JAU-1'); assert.equal(r.active, false); assert.equal(r.subjects[0].state, 'open');
+  assert.deepEqual(r.subjects.slice(1), legacy.subjects.slice(1));
+  q.body += ' Mais le bug persiste.';
+  await f.service.sync('JAU-1'); assert.equal((await f.service.read('JAU-1')).active, true, 'editing an acknowledgment invalidates its old classification');
+});
 
 test('publish repairs partial label failure without duplicating comment or losing other labels',async t=>{
   const f=await fixture(t); f.failLabels(true);
@@ -325,8 +470,9 @@ test('incremental sync reads only tickets that moved, once each, with a periodic
 test('delivery resolves settled subjects with proof, keeps unanswered questions, refuses an open ticket (JAU-101)',async t=>{
   const f=await fixture(t),i=f.issues.get('JAU-1');
   await f.service.publish('JAU-1','<!-- jaunt-agent:plan -->\nPlan');
-  i.comments.push(comment('answered',10,'Pourquoi ?',user));await f.service.publish('JAU-1','Parce que…');
-  i.comments.push(comment('pending',50,'Et ça ?',user));await f.service.sync('JAU-1');
+  i.comments.push(comment('answered',10,'Pourquoi ?',user));const answer=await f.service.publish('JAU-1','Parce que…');
+  await respond(f,'feedback:answered',{status:'answered',comment:answer.id,reason:'Explains the question'});
+  i.comments.push(comment('pending',50,'Et ça ?',user),comment('unrelated',55,'CI relancée.'));await f.service.sync('JAU-1');
   await assert.rejects(f.service.delivered('JAU-1','https://example.invalid/pull/1'),/not Done/);
   i.state={type:'completed'};i.completedAt=at(60);
   await assert.rejects(f.service.delivered('JAU-1',' '),/evidence/);

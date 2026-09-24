@@ -646,3 +646,38 @@ The new direct-claim/release paths were not installed or exercised against the
 live board during validation. Canonical local edits were left untouched.
 A simultaneous human board move and API mutation is not an atomic transaction;
 local generation checks and remote rereads do not provide remote compare-and-set.
+
+## Explicit discussion responses — September 24, 2026 (JAU-120)
+
+On the implementation based on `0beaf69`, the focused discussion, answer-reader
+and CLI/verdict suites passed **120 tests**. The complete npm test list passed
+**358/358** with `--test-concurrency=1`. The normal concurrent `npm test` run
+reported **357/358**, twice: only the existing watcher assertion `pulse > 5`
+after 1.5 seconds failed at `tests/linear_wakes.test.mjs:159`. That test passed
+alone. The matching defect and earlier occurrences were read in
+[JAU-113](https://linear.app/moukrea/issue/JAU-113); the watcher and its test are
+outside this change. `node --check` on both changed scripts,
+`python3 scripts/check_project.py --source`, and `git diff --check` passed.
+These observations precede the final main rebase and CI; they are not a claim
+about a later head's checks.
+
+Offline fixtures reproduce the exact release acknowledgment from JAU-66 without
+opening feedback, and retain the question after an unrelated “CI relancée.”
+publication. They cover different threads, multiple questions in one thread,
+split subjects from one comment, partial answers, explicit no-response reasons,
+and work that remains open after an answer. Invalid, missing, empty, technical,
+cross-ticket or wrongly attributed response evidence is rejected. Edits and
+deletions invalidate the saved proof; older patches preserve response metadata
+without renewing it, and explicit pending patches reopen the response wait.
+Legacy open feedback stays pending until reviewed, with resolved/transferred
+history preserved. Delivery keeps unanswered subjects, including split questions;
+the known pre-closure label cutoff remains intact. Approval, unread labels,
+third-party labels, waits and revision checks also passed their regressions.
+
+Fixtures use temporary state and an injected Linear API. No new response schema
+was written to production, no live historical discussion was reclassified, and
+no human answer was simulated. The canonical launcher still required separate
+activation at this validation point. The approved amended plan explicitly
+exempts this development-harness change from a product-channel trial: product
+packages do not contain the harness. Hashes check the observed comment bodies;
+the worker remains responsible for whether an answer addresses its subject.
