@@ -7,22 +7,32 @@ from browser_e2e import Harness,ROOT,terminal_command,scrollback,until
 # A diff-rendering TUI (like Codex/ratatui): it paints the whole screen once, repaints it only when
 # the size it reads changes, and otherwise writes truecolor updates to one row.
 DIFF_TUI=r'''
-import os,sys,signal,time,pathlib
+import os,sys,signal,time,pathlib,select,tty
 go,pidf,done=map(pathlib.Path,sys.argv[1:4])
-out=sys.stdout.buffer;C=b'\x1b[38;2;45;47;48m';R=b'\x1b[0m';size=None;winch=False
+out=sys.stdout.buffer;C=b'\x1b[38;2;45;47;48m';R=b'\x1b[0m';size=None;winch=False;large=len(sys.argv)>4
+if large:tty.setcbreak(0)
 def full():
     global size
     size=os.get_terminal_size(1);cols,rows=size
     s=b'\x1b[0m\x1b[H\x1b[2J'+C+b'HEADER-PROOF'+R
     if go.exists():s+=b' REPAINT-PROOF'
     for r in range(2,rows):s+=b'\x1b[%d;1H'%r+C+b'body row %02d'%r+R
-    out.write(s+b'\x1b[%d;1H'%rows+C+b'FOOTER-PROOF'+R+b'\x1b[%d;1H'%(rows//2));out.flush()
+    if large:
+        # A styled full screen exceeds the slow viewer's 16 KiB catch-up even on mobile.
+        s=b'\x1b[0m\x1b[H\x1b[2J'
+        for row in range(1,rows+1):s+=b'\x1b[%d;1H'%row+(C+bytes([65+row%26]))*(cols-1)
+        # Let the host observe more than one PTY read during the repaint.
+        out.write(s[:1024]);out.flush();time.sleep(.04);out.write(s[1024:]+R);out.flush()
+        with pidf.with_suffix('.sizes').open('a') as f:f.write(f'{cols}x{rows}\n')
+    else:out.write(s+b'\x1b[%d;1H'%rows+C+b'FOOTER-PROOF'+R+b'\x1b[%d;1H'%(rows//2));out.flush()
 def onwinch(*_):
     global winch;winch=True
 signal.signal(signal.SIGWINCH,onwinch)
 pidf.write_text(str(os.getpid()));full()
 def idle():
     global winch
+    if large and select.select([0],[],[],0)[0]:
+        os.read(0,1);out.write(b'\x1b[H\x1b[2JINPUT-PROOF');out.flush();pidf.with_suffix('.input').touch()
     if winch:
         winch=False
         if os.get_terminal_size(1)!=size:full()
@@ -61,6 +71,74 @@ async def hidden_burst_repaints(page,h):
     for name in ('Diff TUI','Other tab'):
         await page.locator('#list-sessions').click();await page.locator('#modal .settings-row').filter(has_text=name).get_by_role('button',name='Terminate',exact=True).click();await page.get_by_role('button',name='Terminate session',exact=True).click();await asyncio.sleep(.3)
     print('PASS hidden diff-rendering tab repaints after a trimmed catch-up, without resize or stray escape text')
+
+async def slow_repaint_is_stable(browser):
+    """A phone's delayed ACK must not resize a quiet TUI every two seconds (JAU-64)."""
+    h=Harness();errors=[]
+    try:
+        context=await browser.new_context(viewport={'width':390,'height':780},is_mobile=True,has_touch=True)
+        try:
+            page=await context.new_page();page.on('pageerror',lambda error:errors.append(str(error)))
+            await page.goto(h.pair()['url']);await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=15000)
+            await page.evaluate("""async()=>{
+                const {Link}=await import('./js/link.mjs');
+                const send=Link.prototype.send,dispatch=Link.prototype.dispatchEvent;
+                const timers=new Map(),latest=new Map();window.redrawProbe={acks:0,resets:0};
+                Link.prototype.send=function(value){
+                    if(value.type!=='terminal.ack')return send.call(this,value);
+                    if(value.id===window.redrawProbe.id)window.redrawProbe.acks++;
+                    latest.set(value.id,value);
+                    if(!timers.has(value.id))timers.set(value.id,setTimeout(()=>{
+                        timers.delete(value.id);send.call(this,latest.get(value.id)).catch(()=>{});
+                    },350));
+                    return Promise.resolve();
+                };
+                Link.prototype.dispatchEvent=function(event){
+                    if(event.detail?.type==='terminal.reset'&&event.detail.id===window.redrawProbe.id)window.redrawProbe.resets++;
+                    return dispatch.call(this,event);
+                };
+            }""")
+            async def shell(name):
+                await page.locator('#new-session-folder').click();await page.get_by_label('Session name').fill(name)
+                await page.get_by_label('Working directory').fill(str(h.work))
+                await page.locator('#modal').get_by_role('button',name='Create shell',exact=True).click()
+                await expect(page.locator('#modal')).not_to_be_visible()
+            await shell('Slow redraw')
+            session=lambda:next(s for s in json.loads(h.cli('status'))['sessions'] if s['name']=='Slow redraw')
+            initial=session();await page.evaluate('(id)=>window.redrawProbe.id=id',initial['id'])
+            fixture=h.work/'large_tui.py';fixture.write_text(DIFF_TUI)
+            go,pidf,done=h.work/'large.go',h.work/'large.pid',h.work/'large.done';sizes_file=pidf.with_suffix('.sizes')
+            await terminal_command(page,'python3 '+shlex.join([str(fixture),str(go),str(pidf),str(done),'large']))
+            await until(lambda:sizes_file.exists());await asyncio.sleep(.5)
+            initial=session();pid=int(pidf.read_text())
+            await shell('Other');await asyncio.sleep(.5)
+            go.touch();await until(lambda:done.exists());await asyncio.sleep(.2)
+            await page.locator('#tabs').get_by_role('tab',name='Slow redraw',exact=False).click()
+            states=[]
+            for _ in range(12):
+                await asyncio.sleep(1);current=session()
+                states.append({'offset':current['offset'],'resets':await page.evaluate('window.redrawProbe.resets')})
+            sizes=sizes_file.read_text().splitlines();probe=await page.evaluate('window.redrawProbe')
+            rows=page.locator('.terminal-container:not([hidden]) .xterm-rows')
+            report={'viewport':[390,780],'ackDelayMs':350,'programSizes':sizes,'states':states,
+                    'probe':probe,'pageErrors':errors,'renderedRows':await rows.inner_text()}
+            (ROOT/'test-results/slow-viewer-redraw.json').write_text(json.dumps(report,indent=2))
+            await page.screenshot(path=str(ROOT/'test-results/slow-viewer-stable.png'))
+            cols,lines=initial['cols'],initial['rows']
+            assert sizes==[f'{cols}x{lines}',f'{cols-1}x{lines}',f'{cols}x{lines}'],('Repeated real PTY resize',report)
+            assert probe['resets']>=2 and probe['acks']>2,'Exercise attach and ACK-driven trimmed replay'
+            assert all(state==states[2] for state in states[2:]),('Quiet TUI kept producing output or resetting',report)
+            assert not errors and current['id']==initial['id'] and int(pidf.read_text())==pid
+            os.kill(pid,0)
+            # Missing rows after the bounded replay remain JAU-118; assert stability here,
+            # and independently prove that real keyboard input still reaches the same TUI.
+            await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.type('x')
+            await until(lambda:pidf.with_suffix('.input').exists())
+            await expect(rows).to_contain_text('INPUT-PROOF',timeout=10000)
+            await page.screenshot(path=str(ROOT/'test-results/slow-viewer-input.png'))
+            print('PASS slow mobile viewer settles after one attach redraw, with no ACK/resize loop and working input')
+        finally:await context.close()
+    finally:h.close()
 async def main():
     h=Harness()
     try:
@@ -113,6 +191,7 @@ async def main():
             await page.reload();await page.locator('#settings-button').click();await expect(page.get_by_label('Color theme')).to_have_value('light')
             await page.get_by_label('Color theme').select_option('dark');await page.locator('[data-view=terminal]').first.click()
             await hidden_burst_repaints(page,h)
+            await slow_repaint_is_stable(browser)
             for name,setting in [('claude','CLAUDE_CONFIG_DIR'),('codex','CODEX_HOME')]:
                 executable=shutil.which(name)
                 if not executable:continue # Optional installed programs, core fixture is always required.

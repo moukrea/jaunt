@@ -1,5 +1,42 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Stop the ACK/redraw feedback loop — JAU-64 (2026-09-24)
+
+The new regressions failed against the released behavior before the fix. A real
+100 × 40 PTY shared by fast and slow viewers repeatedly changed width without
+input or another attach. Mobile Chromium (390 × 780, ACKs delayed by 350 ms)
+observed seven 42 → 41 → 42 round trips and eight resets in twelve seconds after
+a single hidden-output burst. The output kept growing although the fixture only
+repainted when its actual PTY size changed.
+
+With redraw requests limited to trimmed attaches, all 19 shared-session tests
+pass. The real PTY test observes one width round trip, then stable output and
+reset counts across three further redraw intervals. The fast viewer has no
+reset; both viewers receive subsequent input output from the same live session.
+The mobile scenario observes one round trip, two initial resets and an unchanged
+offset across all twelve one-second samples. Real keyboard input then reaches
+the same TUI and renders `INPUT-PROOF`, with no JavaScript errors. The JSON report
+and visually inspected captures are `test-results/slow-viewer-redraw.json`,
+`slow-viewer-stable.png` and `slow-viewer-input.png`; CI includes them in
+`browser-evidence`.
+
+The original small-redraw hidden-tab scenario still restores its header, repaint
+marker and footer. The terminal-render suite also passes scrolling, keyboard
+viewport changes, themes and isolated unauthenticated Claude/Codex startup.
+All 24 main browser scenarios and four flow-control checks pass. `pytest -q`
+passes 410 tests. The first `npm test` run passes all 343; a later run passes
+342/343, missing the unchanged idle-watcher pulse-count deadline at
+`tests/linear_wakes.test.mjs:159` (the JAU-113 symptom recorded below). Both
+Miniflare relay tests pass after installing the worktree's missing Node
+dependencies. Project and whitespace checks pass.
+
+The stable large-redraw capture still lacks its first rows: a 16 KiB catch-up
+cannot restore that entire screen. JAU-118 tracks that separate limitation.
+These observations do not validate a physical Android device or an authenticated
+long-running agent conversation. The requested Android trial must identify and
+accept the published channel candidate before this correction merges to main;
+that trial has not occurred at this validation point.
+
 ## Offline file navigation — JAU-41 (2026-09-23)
 
 The real browser/loopback relay/host scenario passed after killing the relay,

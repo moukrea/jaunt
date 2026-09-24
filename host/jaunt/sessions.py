@@ -39,10 +39,12 @@ CATCHUP = 128 * 1024  # several full-screen redraws; a phone should not wait for
 # common SGR fragments do not appear as stray "48m" text at the top left. This is a bounded
 # heuristic, not a parser for arbitrary terminal control strings.
 SAFE_CUT = 4 * 1024
-# A trimmed catch-up cannot rebuild the screen of a program that only repaints changed cells
+# A trimmed attach cannot rebuild the screen of a program that only repaints changed cells
 # (Codex, ratatui): the program is asked to repaint by toggling the PTY width one column and back,
 # REDRAW_TOGGLE seconds apart (Codex ignores a same-size SIGWINCH and misses a toggle under ~5 ms),
-# at most once per REDRAW_INTERVAL seconds per session. The shared geometry never changes.
+# at most once per REDRAW_INTERVAL seconds per session. ACK-driven catch-up must not request
+# another repaint: its output can overflow a slow viewer's window and sustain a resize loop.
+# The shared geometry never changes.
 REDRAW_TOGGLE = 0.15
 REDRAW_INTERVAL = 2.0
 # PTY reads are coalesced for up to COALESCE seconds (or 64 KiB) before becoming one relay
@@ -515,10 +517,11 @@ class Sessions:
             if viewer.sent - viewer.acked > viewer.window // 2:
                 return  # still digesting what it was sent; wait for a later acknowledgement
             # Catch up with the freshest slice only: what this viewer can render before the next one.
+            # Do not request a repaint here: it can overflow this window and provoke another ACK.
             await self._send_from(peer, s, viewer.sent, limit=max(MIN_WINDOW // 2, viewer.window // 2))
             viewer.behind = False
 
-    async def _send_from(self, peer: str, s: Session, after: int, limit: int = CATCHUP) -> None:
+    async def _send_from(self, peer: str, s: Session, after: int, limit: int = CATCHUP, *, redraw_on_trim: bool = False) -> None:
         """Send the stream from `after` to the head, at most `limit` bytes (older output is
         skipped after a reset). Caller holds s.lock. Marks the viewer as sent to the head."""
         start = s.ring[0][0] if s.ring else s.offset
@@ -528,7 +531,8 @@ class Sessions:
             await self._safe_send(peer, {"type": "terminal.reset", "id": s.id,
                                         "offset": after, "trimmed": True,
                                         "cols": s.cols, "rows": s.rows})
-            self._request_redraw(s)
+            if redraw_on_trim:
+                self._request_redraw(s)
         viewer = s.subscribers.get(peer)
         if viewer is not None:
             # Skipped bytes were never sent: only what follows `after` counts as in flight.
@@ -571,7 +575,7 @@ class Sessions:
         return at + i
 
     def _request_redraw(self, s: Session) -> None:
-        """Ask the program to repaint after a trimmed catch-up (requests are coalesced per session)."""
+        """Ask the program to repaint after a trimmed attach (requests are coalesced per session)."""
         if s.alive and s.fd >= 0 and (s.redraw is None or s.redraw.done()):
             s.redraw = self.loop.create_task(self._redraw(s))
 
@@ -647,7 +651,7 @@ class Sessions:
                 await self._safe_send(peer, {"type": "terminal.reset", "id": s.id,
                                             "offset": start, "trimmed": start > 0,
                                             "cols": s.ring[0][2] if s.ring else s.cols, "rows": s.ring[0][3] if s.ring else s.rows})
-            await self._send_from(peer, s, after, limit=min(CATCHUP, s.subscribers[peer].window))
+            await self._send_from(peer, s, after, limit=min(CATCHUP, s.subscribers[peer].window), redraw_on_trim=True)
             await self._safe_send(peer, {"type": "terminal.geometry", "id": s.id,
                                         "cols": s.cols, "rows": s.rows, "activeView": s.active_view,
                                         "viewers": list(s.viewers.values())})
