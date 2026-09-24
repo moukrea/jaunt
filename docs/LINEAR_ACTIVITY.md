@@ -8,7 +8,7 @@ for human questions still waiting for an agent answer.
 | --- | --- | --- |
 | Créé par le harnais | Created by the harness; a provenance comment repeats the supplied reason/origin | Permanent |
 | Du neuf du harnais | A meaningful agent publication has not been acknowledged | A human reply acknowledges preceding publications; 👀 or an approve/decline reaction acknowledges the target and older publications |
-| Discussion active | An open human question (`feedback:` subject) with no agent publication after it | An agent publication after the question, or the ticket's closure (Done, Canceled, Duplicate) unless the question was asked after it |
+| Discussion active | An open human question with no current explicit response evidence | Record an answer or a reason no response is required for each question; closing the ticket (Done, Canceled, Duplicate) hides pre-closure questions without discarding them |
 
 The labels are shared by the ticket, not separate inboxes for each developer.
 Opening a ticket or reading a notification is not an observable acknowledgment.
@@ -18,17 +18,23 @@ are exempt. A delayed provenance repair represents the creation event, not fresh
 unread information. Other applications and missing/unknown authors cannot clear
 unread state; human attribution requires a non-app email on the API user.
 
-`Waiting for human` retains its existing approval semantics. Answering a
-question takes the label off without resolving its subject: only the ledger
-does that (JAU-102). Silence, `--expects none`, worker exit, or release of a
-claim never resolves subjects; delivery does, with proof (below).
+`Waiting for human` retains its existing approval semantics. Recording a
+question's answer removes its response wait without delivering the work it
+requests (JAU-102). Another question can still keep the label active. Silence,
+`--expects none`, worker exit, or release of a claim never resolves subjects;
+delivery does, with proof (below).
 Approval resolves the plan decision only; promised implementation remains open.
 New human prose opens a review subject automatically. Exact `lu`, `vu`, `merci`,
 `/approve`, and `/decline` acknowledgments do not create another review subject,
 nor do the written approvals and cheers `scripts/linear_answers.mjs` recognises
-(« j'approuve », « go », « Bah faut corriger ! »): the plan decision reads them
-exactly as `verdict` does (JAU-80).
-The worker interprets actual questions and records their individual dispositions.
+(« j'approuve », « go », « Bah faut corriger ! »). The discussion reader also
+recognises the satisfied acknowledgment « Ah bah voilà un release publiée ! »
+and its « une release » variant (JAU-120). An appended question or correction
+still opens feedback. Unknown prose stays pending for interpretation; this is a
+bounded classifier, not general semantic understanding. This separate reader
+does not change `readReply`, `verdict` or plan approval: release satisfaction
+does not approve a plan or preserve an older approval. The worker interprets
+actual questions and records their individual responses and work dispositions.
 
 ## Automatic synchronization and recovery
 
@@ -110,9 +116,12 @@ jaunt-linear discussion JAU-34 --file /tmp/subjects.json
       "title": "Explain the remaining validation",
       "owner": "worker",
       "source": "comment-id",
-      "state": "resolved",
-      "reason": "Answered with the observed result",
-      "evidence": "reply-comment-id or verified result URL"
+      "state": "open",
+      "response": {
+        "status": "answered",
+        "comment": "answer-comment-id",
+        "reason": "Explains the observed result and the remaining validation"
+      }
     }
   ]
 }
@@ -124,6 +133,45 @@ entry requires a reason and evidence. Record distinct questions separately, with
 who owes the next action and when in the title/reason and human-facing message.
 An unknown or ambiguous question remains open; the code does not infer semantic
 completion from prose. Read the new revision before another update.
+
+`response` is independent of the work disposition `state`. Newly observed human
+feedback starts with `{"status":"pending"}`. For each question, the worker reads
+the full conversation and records one of:
+
+| Response | Required evidence | Effect while the subject is open |
+| --- | --- | --- |
+| `pending` | Optional nonempty `reason` | An answer is still owed |
+| `answered` | `comment`: a later, nontechnical comment by this agent on this ticket; nonempty `reason` explaining which question it answers | Removes this question's response wait while both comments still match the recorded proof |
+| `not-required` | Nonempty `reason` interpreting the human source, for example an acknowledgment or an aggregate replaced by split questions | Removes this question's response wait while its source still matches the recorded proof |
+
+The launcher checks the source is an existing human comment and generates
+`sourceHash` and, for an answer, `answerHash` from the observed bodies. Do not
+invent hashes or use a URL instead of the answer comment ID. Missing, deleted,
+edited or untrusted evidence leaves an open question pending again; sync keeps
+the last declaration for audit and checks its proof on every observation. A
+technical receipt, publication date, shared thread, parent ID or `--reply` alone
+never establishes that a question was answered. « CI relancée. » therefore
+cannot hide an earlier « Pourquoi ? » without an explicit interpretation.
+
+Omitting `response` in a subject patch preserves the saved metadata for older
+clients. To reopen a response wait, explicitly set `{"status":"pending"}`;
+`null` is invalid. Echoing saved proof does not renew it after an edit. To record
+a new interpretation, reread both comments and submit the response without
+hashes so the launcher can bind fresh evidence. Response patches use the same
+revision check and lock as work dispositions; no new CLI flags are needed.
+
+When a comment contains several questions, create separate subjects with stable
+keys, the same human `source` and individual `response` fields. Keys need no
+`feedback:` prefix. Explicitly mark the automatic aggregate `not-required`, with
+a reason identifying those split keys; otherwise it still waits for a response.
+Associate each answer only with the questions it covers. An acknowledgment mixed
+with a request does not excuse that request. These are worker responsibilities,
+not instructions for humans to maintain labels or a registry.
+
+Legacy open `feedback:` entries without `response` stay pending. No old
+publication is retroactively treated as an answer, and a known old acknowledgment
+is not silently reclassified: reread it and submit an explicit revision-checked
+`not-required` interpretation. Resolved and transferred history is preserved.
 
 A `transferred` entry also requires a `ticket` with a verified `related` link.
 The target receives a stable open subject before the source can close. Retrying
@@ -137,13 +185,17 @@ When replanning, resolve the superseded decision/work with the new plan as
 explicit evidence. On delivery, resolve each completed item individually and
 transfer actual leftovers. Read-only `discussion`, `show`, `pulse`, and
 `verdict --peek` do not synchronize labels. An empty/open-free ledger can still
-have unread information: the final handover stays active until acknowledged.
+have unread information: the final handover stays unread until acknowledged.
 
 Delivery closes what a merged PR settles (JAU-101). `cleanup <ID> --pr <n>`
 resolves every remaining open subject of the Done ticket with the PR URL as
 evidence, after the claim is released; a failure there is reported with its
 retry and does not restore the claim. A human question the agent never answered
-stays open and is listed under `kept`, never buried. For tickets cleaned up
+stays open and is listed under `kept`, including split subjects and stale or
+missing proof. This uses the same pending-response calculation as the active
+label; the closed-ticket visibility cutoff does not erase those questions.
+If a pending source is missing or its time unknown, the code cannot establish
+that it predates closure and retains the active label. For tickets cleaned up
 before this rule, the same operation runs by hand and refuses a ticket that is
 not Done or a PR that is not merged:
 
