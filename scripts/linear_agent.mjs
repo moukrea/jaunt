@@ -14,6 +14,7 @@ import { skillStore } from './linear_skills.mjs';
 import { wakeStore } from './linear_wakes.mjs';
 import { landingStore, assertLandingAdmission, assertLandingReleased } from './linear_landing.mjs';
 import { WAIT_PHASE, guardWaitTransition, assertWaitResolved, waitStore, promoteWaitQueue } from './linear_waits.mjs';
+import { VALIDATION_PHASE, validationRequirement, validationStore, readValidation, guardValidationTransition, assertValidationResolved, channelCandidate, checkThread } from './linear_validation.mjs';
 import { connectionPages } from './linear_activity.mjs';
 import { readReply, decideAnswer } from './linear_answers.mjs';
 import { attribute, reviewWindows, repinSelf, stampStore } from './linear_attribution.mjs';
@@ -76,14 +77,15 @@ export const PROGRESS_STATE = 'In Progress';
 // staying `awaiting-approval` would put *Waiting for human* on a ticket where
 // the human is done (the exact confusion JAU-18 removed), and going straight to
 // `implementing` is the race this phase avoids.
-export const PHASES = ['planning', 'awaiting-approval', 'queued', 'implementing', 'landing', WAIT_PHASE];
+export const PHASES = ['planning', 'awaiting-approval', 'queued', 'implementing', 'landing', WAIT_PHASE, VALIDATION_PHASE];
 
 // The phases that actually hold the working tree. `planning` reads, greps and
 // surveys; `awaiting-approval` is a session that finished its turn; `queued` is
-// waiting for one of these two to release. None of them can collide with
+// waiting for a holder to release. None of those phases can collide with
 // anything, and comparing a candidate against them is how a board with one
 // parked worker refused to dispatch anything else for sixteen hours (JAU-46).
-export const CONTENDING_PHASES = ['implementing', 'landing'];
+// A validation wait retains its unmerged source surface while releasing only FIFO.
+export const CONTENDING_PHASES = ['implementing', 'landing', VALIDATION_PHASE];
 
 export const contendingClaims = (claims) =>
   (claims ?? []).filter((c) => CONTENDING_PHASES.includes(c?.phase));
@@ -753,6 +755,77 @@ async function addComment(identifier, body, parent, options) {
   return (await activity()).publish(identifier, body, parent, options);
 }
 
+// Full instruction evidence, including edits to comments older than this claim.
+export async function readValidationThread(id, query = graphql) {
+  let issue;
+  const comments = await connectionPages(async cursor => {
+    const data = await query(`query($id: String!, $cursor: String) { issue(id: $id) {
+      id identifier title description updatedAt state { name type }
+      comments(first: 100, after: $cursor) { nodes {
+        id body createdAt updatedAt parent { id } botActor { id } user { id name email }
+        reactions { emoji createdAt user { id name email } }
+      } pageInfo { hasNextPage endCursor } }
+    } }`, { id, cursor });
+    if (data.issue?.identifier !== id) throw Error('validation issue not found');
+    if (issue && (data.issue.title !== issue.title || data.issue.description !== issue.description || data.issue.updatedAt !== issue.updatedAt)) throw Error('validation issue changed during pagination');
+    issue ||= data.issue;
+    return data.issue.comments;
+  });
+  return checkThread({ ...issue, description: issue.description ?? '', comments }, id);
+}
+
+export function channelDelivery({
+  gh = async args => JSON.parse((await exec('gh', args, { cwd: ROOT })).stdout),
+  fetchJson = async url => { const r = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(30000) }); if (!r.ok) throw Error(`channel HTTP ${r.status}`); return r.json(); },
+} = {}) {
+  return async pr => {
+    const repo = await gh(['repo', 'view', '--json', 'url']);
+    if (repo.url !== 'https://github.com/moukrea/jaunt') throw Error('channel must belong to the official repository');
+    const page = (await gh(['api', 'repos/{owner}/{repo}/pages'])).html_url;
+    if (page !== 'https://moukrea.github.io/jaunt/') throw Error('unexpected public channel Page');
+    const file = await gh(['api', 'repos/{owner}/{repo}/contents/state.json?ref=jaunt-channel-state']);
+    if (file.encoding !== 'base64' || !file.content) throw Error('channel ledger unreadable');
+    const state = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+    const name = `${pr.author?.login?.toLowerCase()}_${pr.number}`;
+    if (!/^[a-z][a-z0-9]{0,31}_[1-9][0-9]{0,5}$/.test(name)) throw Error('invalid channel name');
+    const candidate = channelCandidate(state, pr, await fetchJson(new URL('ch/index.json', page).href),
+      await fetchJson(new URL(`ch/${name}/config.json`, page).href), { repository: 'moukrea/jaunt', page });
+    const build = await gh(['api', `repos/{owner}/{repo}/git/commits/${candidate.sha}`]);
+    if (build.sha !== candidate.sha || build.parents?.length !== 1 || build.parents[0].sha !== candidate.source) throw Error('candidate build is not a child of PR source');
+    return candidate;
+  };
+}
+
+async function validation() {
+  const me = await agentUser();
+  return validationStore({ stateDir: STATE_DIR, agentId: me.id, readThread: readValidationThread,
+    readPlan: async c => {
+      const receipt = await optionalJson(join(lifecyclePaths(STATE_DIR, c).dir, 'publication.json'));
+      if (!receipt?.document) return receipt;
+      const data = await graphql('query($id: String!) { document(id: $id) { content } }', { id: receipt.document });
+      return { ...receipt, content: data.document?.content };
+    },
+    planVerdict: (issue, plan, comments) => readAnswer(issue, plan, new Date(plan.createdAt), comments, me.id),
+    readPr: async number => {
+      if (!/^\d+$/.test(String(number))) throw Error('validation requires a PR number');
+      return JSON.parse((await exec('gh', ['pr', 'view', String(number), '--json', 'number,state,author,headRefName,headRefOid,baseRefName,isCrossRepository'], { cwd: ROOT })).stdout);
+    }, readCandidate: channelDelivery(),
+    readReviewer: async id => (await graphql('query($id: String!) { user(id: $id) { id name email } }', { id })).user,
+    publish: addComment, persistClaim: writeClaim,
+    park: c => claim(c.issue, VALIDATION_PHASE, c.session, c.runtime),
+    assertCanWait: c => landingStore({ root: ROOT }).assertCanWait(c.issue, c),
+    releaseLanding: (c, reason) => landingStore({ root: ROOT }).release(c.issue, c, reason),
+    syncDiscussion: async (v, { evidence, superseded = false }) => {
+      const service = await activity(), result = await service.sync(v.issue);
+      if (!result.ok) throw Error('validation discussion sync failed');
+      const record = await service.read(v.issue), ids = [v.request.post.id, v.request.decision?.id, v.request.feedback?.id];
+      const subjects = record.subjects.filter(s => ids.includes(s.source) && s.state === 'open').map(s => ({ ...s,
+        state: 'resolved', reason: superseded ? 'Candidate request superseded after review' : 'Candidate trial answered by the requested human', evidence }));
+      if (subjects.length) await service.update(v.issue, { revision: record.revision, subjects });
+    },
+  });
+}
+
 // Explicitly fetch each tracked ticket, including old Done issues outside pulse's
 // first page. Complete comment history is required before consuming a decision.
 export async function readWaitThread(id, query = graphql) {
@@ -1183,6 +1256,7 @@ async function claim(identifier, phase = 'planning', session, runtime) {
   const identity = claimIdentity(existing, session, runtime);
   // Refuse forbidden post-merge transitions before parking or notifying Linear.
   if (existing) await guardWaitTransition(STATE_DIR, { ...existing, ...identity, phase }, existing);
+  if (existing) await guardValidationTransition(STATE_DIR, { ...existing, ...identity, phase }, existing);
 
   // Entering `awaiting-approval` is the moment the ticket stops being the
   // agent's business and becomes the human's, and it is the only transition the
@@ -1197,7 +1271,7 @@ async function claim(identifier, phase = 'planning', session, runtime) {
   let parkedFrom = existing?.parkedFrom ?? null;
   let parking = null;
   let notified = null;
-  if (phase === 'awaiting-approval') {
+  if (['awaiting-approval', VALIDATION_PHASE].includes(phase)) {
     // Parking and notifying are the same event seen from two sides, but they are
     // not conditional on each other, so this sits outside the state guard below
     // rather than inside it. A workspace whose app cannot create the waiting
@@ -1257,6 +1331,7 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
   const path = join(stateDir, 'claims', `${record.issue}.json`);
   const previous = await optionalJson(path);
   await guardWaitTransition(stateDir, record, previous);
+  await guardValidationTransition(stateDir, record, previous);
   if (record.phase === 'landing') await assertLandingAdmission(stateDir, record, previous);
   if (previous && previous.claimedAt !== record.claimedAt) throw new Error('claim cycle changed; retry transition');
   const unchanged = async () => {
@@ -1265,8 +1340,8 @@ export async function writeClaim(record, { stateDir = STATE_DIR, readIssue = get
     }
   };
   const restoring = previous && previous.claimedAt === record.claimedAt &&
-      (unpark || (record.phase !== 'awaiting-approval' &&
-        (previous.phase === 'awaiting-approval' || previous.parkedFrom)));
+      (unpark || (!['awaiting-approval', VALIDATION_PHASE].includes(record.phase) &&
+        (['awaiting-approval', VALIDATION_PHASE].includes(previous.phase) || previous.parkedFrom)));
   const working = record.phase === 'implementing' && previous?.phase !== 'implementing' && await ownsProgress();
   if (restoring || working) {
     const issue = await readIssue(record.issue);
@@ -1417,6 +1492,7 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveS
         if (!claim) return { released: false, reason: 'no claim held' };
         if (!claim.claimedAt || claim.issue !== id) throw new Error('invalid claim; refusing release');
         await assertWaitResolved(stateDir, claim);
+        await assertValidationResolved(stateDir, claim);
         await assertLandingReleased(stateDir, id);
         const issue = await readIssue(id);
         if (issue?.identifier !== id || !issue.state?.type) throw new Error('cannot verify origin; preserving claim');
@@ -1491,6 +1567,7 @@ export function closureStore({ stateDir = STATE_DIR, readIssue = getIssue, moveS
 async function readyToImplement(identifier) {
   const held = (await listClaims()).find((c) => c.issue === identifier);
   if (!held) return { ticket: identifier, ready: false, reason: 'no claim held' };
+  if (held.phase === VALIDATION_PHASE || (await readValidation(STATE_DIR, held))?.state === 'waiting') return { ticket: identifier, ready: false, phase: held.phase, reason: 'candidate validation pending' };
   if (CONTENDING_PHASES.includes(held.phase)) {
     return { ticket: identifier, ready: true, phase: held.phase, note: 'already writing' };
   }
@@ -1850,6 +1927,7 @@ export async function registerAnswer(issue, answer, held, plan, comments, agentI
   // Old plan approval and new feedback route to the retained owner; neither can
   // restart code that has already merged or erase a delivery obligation.
   if (held.phase === WAIT_PHASE) return { phase: WAIT_PHASE, note: 'reconcile external wait; plan verdict does not authorize its action' };
+  if (held.phase === VALIDATION_PHASE) return { phase: VALIDATION_PHASE, note: 'plan approval cannot validate a candidate' };
 
   // The phase finally says what the session is doing, because something now
   // writes it: approved means the worker codes, feedback means it plans again.
@@ -1890,6 +1968,11 @@ export async function registerAnswer(issue, answer, held, plan, comments, agentI
 }
 
 async function verdict(identifier, { peek = false } = {}) {
+  const currentClaim = (await listClaims()).find(c => c.issue === identifier);
+  if (currentClaim && currentClaim.phase !== WAIT_PHASE &&
+      (currentClaim.phase === VALIDATION_PHASE || (await readValidation(STATE_DIR, currentClaim))?.request)) {
+    return (await validation()).decision(identifier, currentClaim, { peek });
+  }
   const issue = await getIssue(identifier);
   const me = await agentUser();
   const isAgent = (c) => c.user?.id === me.id;
@@ -2211,7 +2294,7 @@ const COMMANDS = {
     throw new Error('unknown wait action');
   },
   landing: async ([action, id, ...rest], flags) => {
-    const store = landingStore({ root: ROOT });
+    const store = landingStore({ root: ROOT, verifyValidation: async (c, p) => (await validation()).verify(c, p) });
     if (action === 'status' && !id && !rest.length) return store.status();
     if (rest.length) throw new Error('unknown landing argument');
     const who = { runtime: flags.runtime, session: flags.session };
@@ -2232,6 +2315,16 @@ const COMMANDS = {
     if (action === 'record') return store.stackRecord(id, who, flags.cwd || process.cwd(), flags.parent, flags.base);
     if (action === 'rebase') return store.stackRebase(id, who, flags.pr);
     throw new Error('stack record|rebase <ID> --runtime <runtime> --session <actual-id>');
+  },
+  validation: async ([action, id, ...rest], flags) => {
+    if (rest.length) throw Error('unexpected validation argument');
+    required(id, 'validation read|review|begin|decision <ID>');
+    const store = await validation(), who = { runtime: flags.runtime, session: flags.session };
+    if (action === 'read') return store.read(id);
+    if (action === 'review') return store.review(id, who, { pr: flags.pr, snapshot: flags.snapshot, reason: flags.reason, comment: flags.comment });
+    if (action === 'begin') return store.begin(id, who, { reviewer: flags.reviewer, procedure: flags.procedure, expected: flags.expected });
+    if (action === 'decision') return store.decision(id, who, { peek: flags.peek === true });
+    throw Error('unknown validation action');
   },
   cleanup: async ([id], flags) => {
     required(id, 'cleanup <ID> --pr <number>');
@@ -2318,6 +2411,9 @@ const COMMANDS = {
     );
     const body = words.join(' ') || (await readStdin());
     const summary = required(flags.summary, '--summary <text> (the digest a human reads)');
+    const trial = validationRequirement(flags.validation, flags['validation-reason']);
+    const scope = await getIssue(issue);
+    const scopeHash = hash(JSON.stringify({ title: scope.title, description: scope.description ?? '' }));
     // "sur ce commentaire" was an instruction the code no longer needs and the
     // human kept failing anyway: a reaction is now read anywhere on the agent's
     // side of the thread (JAU-36). Asking them to aim taught a rule that was
@@ -2335,11 +2431,20 @@ const COMMANDS = {
     // parent it lands at the root and the conversation splits in two.
     const comment = await addComment(
       issue,
-      `${PLAN_MARKER}\n${summary.trim()}\n\n📄 **Plan détaillé :** ${doc.url}\n\n${expectsLine(expects)}`,
+      `${PLAN_MARKER}\n${summary.trim()}\n\nValidation avant fusion : ${trial.required === 'required' ? 'essai humain du candidat requis' : 'essai de canal non requis'} — ${trial.reason}\n\n📄 **Plan détaillé :** ${doc.url}\n\n${expectsLine(expects)}`,
       flags.reply,
     );
     const held = (await listClaims()).find(c => c.issue === issue);
-    if (held) await atomicJson(join(lifecyclePaths(STATE_DIR, held).dir, 'publication.json'), { claimedAt: held.claimedAt, document: doc.id, hash: hash(body), publishedAt: new Date().toISOString() });
+    if (held) {
+      // Preserve returned IDs even if the verification read fails; never blindly republish.
+      const path = join(lifecyclePaths(STATE_DIR, held).dir, 'publication.json');
+      const receipt = { claimedAt: held.claimedAt, document: doc.id, comment: comment.id, hash: hash(body), scopeHash, validation: trial, publishedAt: new Date().toISOString() };
+      await atomicJson(path, receipt);
+      const thread = await readValidationThread(issue), posted = thread.comments.find(c => c.id === comment.id);
+      const data = await graphql('query($id: String!) { document(id: $id) { content } }', { id: doc.id });
+      if (!posted || typeof data.document?.content !== 'string') throw Error('plan published but verification incomplete; preserve returned publication IDs');
+      await atomicJson(path, { ...receipt, commentHash: hash(posted.body), documentHash: hash(data.document.content) });
+    }
     return { document: doc, comment };
   },
   'refresh-token': async () => {
@@ -2351,6 +2456,8 @@ const COMMANDS = {
 // Declare options even for commands that accept none. Subcommands have their
 // own sets: prepare must not silently accept merge's --pr, for example.
 export const COMMAND_FLAGS = {
+  validation: { read: [], review: ['runtime', 'session', 'pr', 'snapshot', 'reason', 'comment'],
+    begin: ['runtime', 'session', 'reviewer', 'procedure', 'expected'], decision: ['runtime', 'session', 'peek'] },
   costs: { scan: [], report: ['from', 'to', 'format'], status: [], import: ['file'], watch: ['interval'] },
   wait: { read: [], reconcile: [], begin: ['runtime', 'session', 'pr', 'cwd', 'reason', 'owner', 'action', 'resource', 'deadline'],
     decision: ['runtime', 'session'],
@@ -2381,7 +2488,7 @@ export const COMMAND_FLAGS = {
   'skills-ack': ['runtime', 'session', 'fingerprint'],
   claim: ['session', 'runtime'], closure: ['file'], release: ['reason'],
   verdict: ['peek'], 'ensure-waiting-state': [],
-  plan: ['summary', 'expects', 'reply', 'title'], 'refresh-token': [],
+  plan: ['summary', 'expects', 'reply', 'title', 'validation', 'validation-reason'], 'refresh-token': [],
 };
 
 // Parse once, before invoking a handler (stdin, credentials and writes included).

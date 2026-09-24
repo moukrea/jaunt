@@ -282,8 +282,12 @@ async function worker(id, options, resume, runtime = 'codex', recover = false, r
     const cwd = await realpath(options.cwd || prior.cwd);
     const branch = (await run('git', ['branch', '--show-current'], { cwd })).trim();
     if (!branch.includes(id)) throw new Error('worker branch must contain its ticket identifier');
-    // An approved plan is implemented by a fresh session, never by its planner.
+    // Initial Claude plans get a fresh implementer; a retained candidate trial
+    // and its replacement plans belong to that exact implementation session.
+    const { readValidation } = await import('./linear_validation.mjs');
+    const retainedValidation = await readValidation(STATE, held);
     if (runtime === 'claude' && resume && !recover && held.phase === 'awaiting-approval' &&
+        !retainedValidation &&
         (await agent('verdict', id, '--peek')).verdict === 'approved') throw new Error(`${id}: plan approved; start the implementation session with: implement ${id}`);
     const routing = runtime === 'claude' && !resume && !recover && !routed && !options.model && !options.effort
       ? await planRouting(id, cwd, 'plan') : null;
@@ -336,6 +340,8 @@ async function implement(id, options) {
   return withWorkerLock(STATE, id, async () => {
     const held = (await agent('claims')).find(c => c.issue === id);
     if (!held || runtimeOf(held) !== 'claude') throw new Error(`${id} needs a claude claim`);
+    const { readValidation } = await import('./linear_validation.mjs');
+    if (await readValidation(STATE, held)) throw new Error(`${id} retains candidate validation; resume its exact implementation session`);
     if (!['awaiting-approval', 'queued', 'implementing'].includes(held.phase)) throw new Error(`${id} is in phase ${held.phase}, not an approved plan`);
     if ((await agent('stop-requested', id)).stop) throw new Error(`${id}: stop requested`);
     const evidence = await currentAttempt(STATE, held);

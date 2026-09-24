@@ -76,7 +76,7 @@ test('claude: the real adapter launches an explicit pair and stops a worker whos
   const dir = await mkdtemp(join(tmpdir(), 'jaunt-models-'));
   try {
     await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin'));
-    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_validation.mjs', 'linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await atomicJson(join(dir, '.dev-state/claims/JAU-999.json'), { issue: 'JAU-999', claimedAt: '2026-09-23T00:00:00Z', runtime: 'claude', session: 'exact', phase: 'implementing' });
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
@@ -174,7 +174,7 @@ test('claude: plan classifier, refused planner resume after approval, fresh impl
   const dir = await mkdtemp(join(tmpdir(), 'jaunt-phases-'));
   try {
     await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin'));
-    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_validation.mjs', 'linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await atomicJson(join(dir, '.dev-state/claims/JAU-999.json'), { issue: 'JAU-999', claimedAt: '2026-09-23T00:00:00Z', runtime: 'claude', session: 'planner', phase: 'planning' });
     await writeFile(join(dir, 'verdict.json'), '{"verdict":"pending"}');

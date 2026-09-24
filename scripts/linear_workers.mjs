@@ -83,7 +83,7 @@ export function workerHealth(claim, record, { now = Date.now(), identity = ident
   }
   if (child === 'unknown' && !(record.spawnFailed || record.childExited)) return { state: 'unknown', reason: 'child identity/exit not established' };
   if (wrapper === 'unknown' && !record.endedAt) return { state: 'unknown', reason: 'wrapper identity unknown' };
-  if (['awaiting-approval', 'queued', 'awaiting-external'].includes(claim.phase)) return { state: 'resting', reason: claim.phase };
+  if (['awaiting-approval', 'queued', 'awaiting-external', 'awaiting-validation'].includes(claim.phase)) return { state: 'resting', reason: claim.phase };
   if (record.cancelled) return { state: ['owner-closed', 'state-unreadable'].includes(record.cancelled) ? 'interrupted' : 'suspended', reason: record.cancelled };
   if (record.endedAt && record.code === 0 && !record.failure) return { state: 'finished', reason: 'reconcile normal completion before resuming' };
   return { state: 'interrupted', reason: record.failure?.kind || 'process exited unexpectedly' };
@@ -186,6 +186,11 @@ export async function workerReports(state, { now = Date.now(), identity = identi
     try {
       progress = waitProgress(await readWait(state, claim), now);
       if (claim.phase === 'awaiting-external' && !progress) throw Error('external phase has no current wait evidence');
+      if (claim.phase === 'awaiting-validation') {
+        const { readValidation, validationProgress } = await import('./linear_validation.mjs');
+        progress = validationProgress(await readValidation(state, claim));
+        if (!progress) throw Error('validation phase has no current evidence');
+      }
     }
     catch (error) { progress = { state: 'error', error: error.message }; }
     reports.push({ issue: claim.issue, runtime: runtimeOf(claim), phase: claim.phase, ...health, attempt: record?.attempt,

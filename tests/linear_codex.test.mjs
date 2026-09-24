@@ -154,7 +154,7 @@ test('CLI adapter arms once, records a real worker ID, resumes it and stops poll
     await mkdir(join(dir, 'scripts'));
     await mkdir(join(dir, 'bin'));
     await mkdir(join(dir, '.dev-state'));
-    for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_validation.mjs', 'linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     await writeFile(join(dir, '.dev-state/linear-loop.json'), '{"enabled":true}');
     await writeFile(join(dir, 'scripts/linear_agent.mjs'), `
@@ -252,14 +252,14 @@ test('runtime settings never leak Codex model defaults into Claude and recovery 
   assert.throws(() => claudeArgs({ session: 'exact', effort: 'high', prompt: 'continue' }), /explicit model and effort/);
 });
 
-for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launches exact ${targetRuntime} session through real adapter locks (offline)`, { timeout: 25000 }, async () => {
+for (const targetRuntime of ['codex', 'claude']) for (const scenario of ['awaiting-approval', 'awaiting-validation', 'replacement-plan']) test(`automatic routing launches exact ${targetRuntime} ${scenario} session through real adapter locks (offline)`, { timeout: 25000 }, async () => {
   const { copyFile, mkdir, writeFile, chmod } = await import('node:fs/promises');
   const { promisify } = await import('node:util');
   const { execFile } = await import('node:child_process');
   const exec = promisify(execFile), dir = await mkdtemp(join(tmpdir(), 'jaunt-route-cli-'));
   try {
     await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin')); await mkdir(join(dir, '.dev-state/claims'), { recursive: true });
-    for (const name of ['linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_waits.mjs', 'linear_skills.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+    for (const name of ['linear_validation.mjs', 'linear_routing.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_waits.mjs', 'linear_skills.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
     await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
     for (const skill of ['linear-loop', 'linear-orchestrator']) {
       await mkdir(join(dir, '.agents/skills', skill), { recursive: true });
@@ -311,10 +311,15 @@ for (const targetRuntime of ['codex', 'claude']) test(`automatic routing launche
       // the owner's pass takes it before the next one can leave.
       await wakeStore(process.cwd()+'/.dev-state').take();
       const original=await read(path),claim=await read('.dev-state/claims/JAU-999.json');
-      claim.session=original.session;claim.phase='awaiting-approval';await writeFile('.dev-state/claims/JAU-999.json',JSON.stringify(claim));
+      claim.session=original.session;claim.phase='${scenario === 'replacement-plan' ? 'awaiting-approval' : scenario}';await writeFile('.dev-state/claims/JAU-999.json',JSON.stringify(claim));
+      if('${scenario}'==='replacement-plan') {
+        claim.runtime='${targetRuntime}';await writeFile('.dev-state/claims/JAU-999.json',JSON.stringify(claim));
+        await (await import('node:fs/promises')).mkdir('.dev-state/validations',{recursive:true});
+        await writeFile('.dev-state/validations/JAU-999.json',JSON.stringify({...claim,version:1,state:'correcting',snapshot:'reviewed',plan:{validation:{required:'required'}},head:'a'.repeat(40),pr:1,history:[]}));
+      }
       process.env.JAUNT_LINEAR_ROUTING_OWNER=JSON.stringify(original.owner);
       const e=JSON.stringify({wake:'board-changed',events:[{type:'comment',ticket:'JAU-999'}]});
-      if('${targetRuntime}'==='claude'){
+      if('${targetRuntime}'==='claude' && '${scenario}'==='awaiting-approval'){
         // An approved Claude plan is implemented by a fresh session (JAU-37): the router hands it to the orchestrator.
         const held=await call('route','--event',e);assert.match(held.outcomes[0].reason,/plan approved; start the implementation session/);
         assert.equal((await readFile('calls.jsonl','utf8')).trim().split('\\n').length,1);

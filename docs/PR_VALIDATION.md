@@ -4,8 +4,9 @@ A reviewer must be able to try the change under review, and see the screen a
 visual check was about, without building anything. The worker that owns the PR
 prepares this; checkouts, builds and setup are its job, not the reviewer's.
 
-This is a one-off trial of one PR head. It is not a release channel: channels
-(JAU-26) and automatic releases after merge (JAU-30) are separate.
+Each plan declares whether a human trial through the PR update channel is
+required. An explicit, approved harness/docs exemption uses technical checks.
+Debug artifacts are useful evidence; they do not replace a required channel trial.
 
 ## Worker recipe
 
@@ -20,7 +21,8 @@ This is a one-off trial of one PR head. It is not a release channel: channels
 4. Comment on the ticket when the PR opens, then update the same thread once
    artifacts are verified, before merging: version (PR, commit), platform, short
    procedure, expected result, checks actually done, limits. Use
-   `--expects none` unless the plan named a human decision.
+   `--expects none` for technical information. Publish a required human trial
+   with `validation begin`, which states the action and records the candidate.
 
 Artifacts expire (14 days for the APK, the repository default otherwise),
 and downloading them requires a GitHub login with read access to the repository. Link the run
@@ -28,7 +30,49 @@ page (`https://github.com/moukrea/jaunt/actions/runs/<run-id>`), where the
 artifact list is at the bottom. An expired artifact is re-created by re-running
 the workflow for the same commit; never offer a link you have not opened.
 
-This adds no human approval before merge: green CI remains the gate.
+## Required channel trials
+
+The canonical launcher records `--validation required|not-required` and
+`--validation-reason` with the approved plan. Missing legacy metadata fails
+closed. Product fixes propose a human trial; a documented harness/docs exemption
+must be explicitly approved as part of the plan.
+
+After the worker reads the complete Linear thread, `validation review` records
+its displayed snapshot and reason. It never changes the approved requirement.
+An exemption also binds the ticket title and description at plan publication;
+a scope edit requires another approved classification. The worker interprets
+comment meaning, including relayed instructions, and explains its handling in
+the review reason. A snapshot proves which text was reviewed, not that this
+interpretation was correct.
+For a required trial, use the existing [channel publisher](DEPLOYMENT.md#channel-candidates),
+then `validation begin` with the requested human's Linear ID, procedure and
+expected result. The CLI verifies the current delivered candidate, the public
+index and channel document, the PR source head and generated build SHA. Public
+`releaseSource` names the PR source; the candidate build SHA is a different commit.
+The guard trusts the publisher's delivered receipt for asset checksums and tag
+integrity; it does not redownload package bytes or detect out-of-band asset/tag
+mutation after delivery.
+
+The worker's request identifies the exact candidate and links the trial. The
+requested human replies **testé et validé** in that thread after testing, or
+**refusé** / feedback. Plan approval, reactions, bots, silence and debug builds
+cannot supply this receipt. The receipt records an attributed human declaration,
+not independent observation of a physical-device test.
+
+`awaiting-validation` preserves the branch, session and source surface, and
+releases only the landing FIFO after a verified request. API failures and
+ambiguous merge attempts preserve evidence. The same worker consumes the current
+decision and reacquires the FIFO. A new head/candidate needs another trial.
+
+Both before child retargeting and immediately before merge, the mandatory guard
+rechecks current instructions (including edits), the approved requirement and
+candidate acceptance. Linear and GitHub have no shared atomic transaction; an
+edit arriving after the final read cannot be guaranteed to cancel an in-flight
+merge request. Green CI remains necessary. An already verified MERGED attempt
+can be reconciled after its channel has been cleaned up.
+
+The following artifact paths remain useful for technical inspection. A worker
+must not present them as satisfying a required channel trial.
 
 ## Trial paths
 
