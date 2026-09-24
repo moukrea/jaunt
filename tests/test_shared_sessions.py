@@ -362,7 +362,7 @@ async def test_redraw_serializes_with_activity_and_restores_on_cancel(tmp_path,m
     finally:await sessions.shutdown()
 
 @pytest.mark.asyncio
-async def test_slow_viewer_ack_requests_redraw_after_trim(tmp_path,monkeypatch):
+async def test_slow_viewer_ack_never_requests_redraw_after_trim(tmp_path,monkeypatch):
     from jaunt.sessions import Session,MIN_WINDOW
     from jaunt.crypto import unb64
     events=[];requested=[]
@@ -377,10 +377,93 @@ async def test_slow_viewer_ack_requests_redraw_after_trim(tmp_path,monkeypatch):
     s.subscribers['view']=viewer
     monkeypatch.setattr(sessions,'_request_redraw',lambda session:requested.append(session.id))
     await sessions.ack('view',s.id,0)
-    assert requested==[s.id]
+    assert requested==[], 'An ACK must not start another full repaint and overflow its own window'
     reset=events[0];assert reset['type']=='terminal.reset' and reset['trimmed']
     outputs=[e for e in events if e['type']=='terminal.output']
     assert outputs[0]['offset']==reset['offset']
     assert unb64(outputs[0]['data']).startswith(b'\x1b')
     assert sum(len(unb64(e['data'])) for e in outputs)<=MIN_WINDOW//2
     assert viewer.sent==s.offset and not viewer.behind
+
+@pytest.mark.asyncio
+async def test_slow_viewer_repaint_does_not_resize_shared_pty_repeatedly(tmp_path,monkeypatch):
+    """A large fragmented repaint must not feed an ACK/redraw loop into either viewer."""
+    import fcntl,shlex,struct,sys,termios
+    from jaunt.sessions import WINDOW,MIN_WINDOW,REDRAW_INTERVAL
+    from jaunt.crypto import unb64
+    monkeypatch.setenv('SHELL','/bin/sh')
+    fixture=tmp_path/'tui.py'
+    fixture.write_text(r'''
+import os,sys,time,signal,pathlib,select,tty
+root=pathlib.Path(sys.argv[1]);out=sys.stdout.buffer;dirty=False;size=None
+tty.setcbreak(0)
+def paint():
+    global size
+    size=os.get_terminal_size(1);cols,rows=size
+    data=b'\x1b[0m\x1b[H\x1b[2J'
+    for row in range(1,rows+1):
+        data+=b'\x1b[%d;1H'%row+(b'\x1b[38;2;45;47;48mX'*(cols-1))
+    out.write(data[:1024]);out.flush();time.sleep(.04)
+    out.write(data[1024:]+b'\x1b[0m');out.flush()
+    with (root/'sizes').open('a') as f:f.write(f'{cols}x{rows}\n')
+def resized(*_):
+    global dirty;dirty=True
+signal.signal(signal.SIGWINCH,resized);paint();(root/'ready').touch()
+while not (root/'go').exists():time.sleep(.01)
+out.write(b'\x1b[12;1H\x1b[38;2;45;47;48mDELTA\x1b[0m'*16000);out.flush()
+(root/'done').touch()
+while True:
+    if select.select([0],[],[],.01)[0]:
+        os.read(0,1);out.write(b'\x1b[HINPUT-PROOF');out.flush();(root/'input').touch()
+    if dirty:
+        dirty=False
+        if os.get_terminal_size(1)!=size:paint()
+''')
+    events=[];latest={};received={'fast':bytearray(),'slow':bytearray()};sizes=[];box={};tasks=[]
+    real_ioctl=fcntl.ioctl
+    def ioctl(fd,request,*args):
+        if request==termios.TIOCSWINSZ and fd==box.get('fd'):
+            rows,cols=struct.unpack('HHHH',args[0])[:2];sizes.append((cols,rows))
+        return real_ioctl(fd,request,*args)
+    monkeypatch.setattr(fcntl,'ioctl',ioctl)
+    async def send(peer,event):
+        events.append((peer,event['type']))
+        if event['type']=='terminal.output':
+            chunk=unb64(event['data']);latest[peer]=event['offset']+len(chunk);received[peer].extend(chunk)
+    async def noop():pass
+    sessions=Sessions(send,noop,tmp_path)
+    async def wait_for(check):
+        async with asyncio.timeout(10):
+            while not check():await asyncio.sleep(.01)
+    async def acknowledge(peer,delay,sid):
+        while True:
+            await asyncio.sleep(delay)
+            if peer in latest:await sessions.ack(peer,sid,latest.pop(peer))
+    try:
+        info=await sessions.create({'cwd':str(tmp_path),'cols':100,'rows':40});s=sessions.get(info['id']);box['fd']=s.fd
+        await sessions.write(s.id,(shlex.join([sys.executable,str(fixture),str(tmp_path)])+'\n').encode())
+        await wait_for(lambda:(tmp_path/'ready').exists());await asyncio.sleep(.1)
+        await sessions.attach('fast',{'id':s.id,'after':s.offset});s.subscribers['fast'].window=WINDOW
+        await sessions.activity('fast',s.id,{'cols':100,'rows':40})
+        tasks.append(asyncio.create_task(acknowledge('fast',.005,s.id)))
+        (tmp_path/'go').touch();await wait_for(lambda:(tmp_path/'done').exists());await asyncio.sleep(.2)
+        await sessions.attach('slow',{'id':s.id,'after':0})
+        tasks.append(asyncio.create_task(acknowledge('slow',.35,s.id)))
+        await wait_for(lambda:len(sizes)>=2);await asyncio.sleep(1)
+        assert s.subscribers['slow'].window==MIN_WINDOW, 'The repaint must exercise slow-viewer overflow'
+        assert events.count(('slow','terminal.reset'))>=2, 'The redraw must reach ACK-driven trimmed catch-up'
+        settled_offset=s.offset;settled_resets=events.count(('slow','terminal.reset'))
+        # Keep ACKs running across several production-rate redraw intervals, without input or reattach.
+        await asyncio.sleep(3*REDRAW_INTERVAL+.25)
+        assert sizes==[(99,40),(100,40)], ('Repeated PTY resizes without user activity',sizes)
+        assert (tmp_path/'sizes').read_text().splitlines()==['100x40','99x40','100x40']
+        assert s.offset==settled_offset and events.count(('slow','terminal.reset'))==settled_resets
+        assert events.count(('fast','terminal.reset'))==0
+        assert (s.cols,s.rows,s.active_view)==(100,40,'fast') and s.alive
+        await sessions.write(s.id,b'x')
+        await wait_for(lambda:all(b'INPUT-PROOF' in data for data in received.values()))
+        assert (tmp_path/'input').exists() and sessions.get(s.id) is s and s.alive
+    finally:
+        for task in tasks:task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
+        await sessions.shutdown()
