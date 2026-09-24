@@ -195,7 +195,7 @@ async function pairMachine(value) {
 }
 function makeMachine(machine) {
   const a = {machine, link: null, info: null, sessions: [], terms: new Map(), active: machine.lastSession || '',
-    path: machine.lastPath || '~', pathDraft: null, listing: null, listingVersion: 0, remoteClipboard: '', fileError: ''};
+    path: machine.lastPath || '~', pathDraft: null, pendingPath: null, listing: null, listingVersion: 0, remoteClipboard: '', fileError: ''};
   a.link = machine.local && desktop ? new LocalLink(machine) : new Link(machine, persist); machines.set(machine.room, a);
   a.link.addEventListener('status', () => {
     for (const t of a.terms.values()) {
@@ -444,6 +444,8 @@ function renderMachines() {
 }
 function render() {
   if (!vault.data) return;
+  // Leaving Files cancels deferred navigation, including for unselected hosts.
+  if (view !== 'files') for (const host of machines.values()) host.pendingPath = null;
   const a = current(); scopeActivity(a?.machine.room || null); renderMachines(); renderConnection();
   if (settingsOpen() && settingsMachine !== a) refreshSettings();
   if (view === 'host' && !a) view = 'settings';
@@ -465,6 +467,7 @@ function render() {
   if (a) layoutPanes(a);
   syncSubscriptions();
   if (a) {
+    if (view === 'files') renderFiles(a);
     renderTabs(a);
     const s = a.sessions.find(s => s.id === a.active), t = activeTerm(a);
     $('rename-session').hidden = !s;
@@ -1044,12 +1047,15 @@ function renameSession(a = online(), s = a.sessions.find(s => s.id === a.active)
   modal(tr('Rename terminal'), el('div', {}, field(tr('Name'), input), el('div', {class: 'modal-actions'}, button(tr('Cancel'), closeModal), button(tr('Save'), save, 'button primary')))); input.focus(); input.select();
 }
 
-async function listFiles(a, path = a.path, append = false) {
+async function listFiles(a, path = a.pendingPath ?? a.path, append = false) {
   if (a.link.state !== 'online') throw new Error('Files are available when the host is connected.');
   const version = ++a.listingVersion;
   // Remember navigation intent before the reply: a concurrent refresh must use
   // the requested folder, not the previously rendered folder.
-  if (arguments.length > 1 && !append) a.pathDraft = null;
+  if (!append && (arguments.length > 1 || a.pendingPath !== null)) {
+    a.pathDraft = null; a.pendingPath = null;
+    if (current() === a) renderFileStatus(a);
+  }
   a.path = path;
   const result = await a.link.request('files.list', {path, hidden: $('show-hidden').checked,
     offset: append ? a.listing?.next || 0 : 0, limit: 100});
@@ -1059,11 +1065,16 @@ async function listFiles(a, path = a.path, append = false) {
   await persist();
   if (current() === a && version === a.listingVersion) renderFiles(a);
 }
-function renderFiles(a) {
-  if (!a.listing) { $('file-list').replaceChildren(el('p', {class: 'modal-copy', text: tr('Loading files…')})); return; }
+function renderFileStatus(a) {
   const result = a.listing;
-  $('file-path').value = a.pathDraft ?? result.path;
-  $('file-status').textContent = `${result.entries.length} / ${result.total} items · ${size(result.free)} free${result.truncated ? ' · first 5,000 entries only' : ''}`;
+  $('file-status').textContent = a.pendingPath !== null ? tr('{0} will open when the connection returns.', a.pendingPath)
+    : result ? `${result.entries.length} / ${result.total} items · ${size(result.free)} free${result.truncated ? ' · first 5,000 entries only' : ''}` : '';
+}
+function renderFiles(a) {
+  const result = a.listing;
+  $('file-path').value = a.pathDraft ?? result?.path ?? a.path;
+  renderFileStatus(a);
+  if (!result) { $('file-list').replaceChildren(el('p', {class: 'modal-copy', text: tr('Loading files…')})); return; }
   const rows = result.entries.map(entry => {
     const path = result.path.replace(/\/$/, '') + '/' + entry.name;
     const main = button('', () => entry.directory ? listFiles(a, path) : fileMenu(a, entry, path), 'file-entry');
@@ -2134,8 +2145,21 @@ function bindEvents() {
   $('new-session-folder').onclick = () => browseNewSession().catch(report);
   $('rename-session').onclick = () => { try { renameSession(); } catch(e) { report(e); } };
   $('close-files').onclick = () => setView('terminal');
-  $('file-path').oninput = () => { if (current()) current().pathDraft = $('file-path').value; };
-  $('file-path-form').onsubmit = e => { e.preventDefault(); listFiles(online(), $('file-path').value).catch(report); };
+  $('file-path').oninput = () => {
+    const a = current(); if (!a) return;
+    a.pathDraft = $('file-path').value;
+    if (a.pendingPath !== null && a.pendingPath !== a.pathDraft) { a.pendingPath = null; renderFiles(a); }
+  };
+  $('file-path-form').onsubmit = e => {
+    e.preventDefault(); const a = current(); if (!a) return;
+    const path = $('file-path').value;
+    if (a.link.state !== 'online') {
+      // A deferred directory read is never terminal input or a persisted action.
+      a.pendingPath = path; a.pathDraft = path; ++a.listingVersion;
+      renderFiles(a); return;
+    }
+    listFiles(a, path).catch(report);
+  };
   $('file-up').onclick = () => { const a = current(); if (a?.listing) listFiles(a, a.listing.parent).catch(report); };
   $('file-refresh').onclick = () => { if (current()) listFiles(current()).catch(report); };
   $('show-hidden').onchange = () => { if (current()) listFiles(current()).catch(report); };

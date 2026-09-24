@@ -1,5 +1,28 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Offline file navigation — JAU-41 (2026-09-23)
+
+The real browser/loopback relay/host scenario passed after killing the relay,
+submitting a directory path, and reconnecting: the requested directory's witness
+file appeared and the input matched its path. The same scenario verified that
+editing the field or leaving Files cancels the deferred read, and that the latest
+submission replaces an earlier one. It observes the actual encrypted listing
+reply after reconnection, not just the cached list. The pending message was
+visually checked in `test-results/offline-file-navigation.png`; CI publishes this
+capture in `browser-evidence`. No terminal input replay was added.
+
+`pytest -q` passed 396 tests; `npm run test:relay` passed both Miniflare tests;
+`tests/i18n_e2e.py` passed all six languages. The new message and its path
+placeholder survived `prepare-web` in all six catalogs; the source catalogs in
+`host/jaunt/locales` also carry the key because preparation copies them to web. Syntax, project and whitespace checks
+passed. Two full parallel JavaScript runs passed 310/312 tests: the unchanged
+watcher tests at `tests/linear_wakes.test.mjs:154` and `:244` missed their fixed
+poll-count deadlines. That file passed all 15 tests in isolation; all 312 JavaScript tests passed when
+the same package test list ran with Node `--test-concurrency=1`. Desktop native
+host reconnection and a multi-host pending request were reviewed in code, not
+exercised in this browser scenario.
+
+
 
 ## PR trial artifacts — JAU-24 (2026-09-23)
 

@@ -96,12 +96,8 @@ async def terminal_command(page,text):
     await page.locator('.terminal-container:not([hidden]) textarea').focus();await page.keyboard.type(text);await page.keyboard.press('Enter')
 
 async def open_folder(page,path,contains,timeout=30000):
-    # Opening the Files view starts its own listing of the remembered path. A path typed
-    # into that in-flight request is dropped whenever the link is mid-handshake, and
-    # nothing ever re-lists it, so the stale listing wins for good. Wait for the view to
-    # settle on a complete listing first, then navigate: a state, not an instant.
-    # #file-status is the proof a listing came back; only renderFiles writes its
-    # "N / M items · … free" counter, which is deliberately not translated.
+    # Wait for the initial listing before testing a separate explicit navigation.
+    # The counter proves a real reply arrived; pending offline status is distinct.
     await expect(page.locator('#file-status')).to_contain_text('items',timeout=timeout)
     await page.get_by_label('Directory path').fill(str(path));await page.get_by_label('Directory path').press('Enter')
     await expect(page.locator('#file-list')).to_contain_text(contains,timeout=timeout)
@@ -214,6 +210,50 @@ async def main():
         await until(lambda:(h.work/filename).exists());assert (h.work/filename).read_bytes()==payload
         passed('in-flight upload resumes after abrupt relay loss, final bytes verified')
         await expect(page.locator('#file-list')).to_contain_text(filename,timeout=30000);passed('multi-chunk binary/Unicode upload with exact byte comparison')
+        # A submitted directory read survives reconnection; edits and leaving Files cancel it.
+        for cancel in ('edit', 'leave', None):
+            h.kill_relay()
+            await expect(page.locator('#connection span')).not_to_have_text('Encrypted',timeout=10000)
+            await page.get_by_label('Directory path').fill(str(h.work/'superseded'))
+            await page.get_by_label('Directory path').press('Enter')
+            await page.get_by_label('Directory path').fill(str(target))
+            await page.get_by_label('Directory path').press('Enter')
+            await expect(page.locator('#file-status')).to_have_text(str(target)+' will open when the connection returns.')
+            await expect(page.locator('#file-list')).to_contain_text(filename)
+            if cancel == 'edit':
+                await page.get_by_label('Directory path').fill(str(h.work/'unsubmitted'))
+                await expect(page.locator('#file-status')).not_to_contain_text('will open')
+            elif cancel == 'leave':
+                await page.locator('[data-view="terminal"]').first.click()
+                await page.locator('[data-view="files"]').first.click()
+                await expect(page.locator('#file-status')).not_to_contain_text('will open')
+            else:
+                await page.screenshot(path=str(OUT/'offline-file-navigation.png'))
+            await page.evaluate("""async () => {
+              const {Link} = await import('./js/link.mjs');
+              const original = Link.prototype.request;
+              window.__resumedListing = null;
+              window.__restoreReconnectListing = () => { Link.prototype.request = original; };
+              Link.prototype.request = async function(method, ...args) {
+                const result = await original.call(this, method, ...args);
+                if (method === 'files.list') window.__resumedListing = result.path;
+                return result;
+              };
+            }""")
+            h.restart_relay()
+            await expect(page.locator('#connection span')).to_have_text('Encrypted',timeout=30000)
+            await page.wait_for_function('() => window.__resumedListing !== null',timeout=30000)
+            assert await page.evaluate('window.__resumedListing') == str(h.work if cancel else target)
+            await page.evaluate('window.__restoreReconnectListing()')
+            await expect(page.locator('#file-status')).to_contain_text('items',timeout=30000)
+            await expect(page.locator('#file-list')).to_contain_text(filename if cancel else 'navigation-proof.txt',timeout=30000)
+            if cancel:
+                await expect(page.locator('#file-list')).not_to_contain_text('navigation-proof.txt')
+            else:
+                await expect(page.get_by_label('Directory path')).to_have_value(str(target))
+                await expect(page.locator('#file-status')).not_to_contain_text('will open')
+            await open_folder(page,h.work,'proof.txt')
+        passed('offline directory navigation replays latest intent; editing or leaving Files cancels it')
         await page.get_by_label('Actions for '+filename,exact=True).click()
         async with page.expect_download(timeout=15000) as capture:await page.locator('#modal').get_by_role('button',name='Download',exact=True).click()
         received=await capture.value;assert Path(await received.path()).read_bytes()==payload;passed('download bytes identical to uploaded file')

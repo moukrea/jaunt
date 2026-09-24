@@ -1138,5 +1138,6 @@
   "{0}: {1} → {2}{3}": "{0}: {1} → {2}{3}",
   "~/notes": "~/notizen",
   "~/project": "~/projekt",
-  "↓ Latest": "↓ Neueste"
+  "↓ Latest": "↓ Neueste",
+  "{0} will open when the connection returns.": "{0} wird geöffnet, sobald die Verbindung wiederhergestellt ist."
 }
