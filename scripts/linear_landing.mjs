@@ -39,7 +39,8 @@ export async function assertLandingReleased(stateDir, id) {
   if ((await landingState(stateDir)).queue.some(item => item.issue === id)) throw new Error('release the landing reservation before releasing the claim');
 }
 
-export function landingStore({ root, stateDir = join(root, '.dev-state'), run = runDefault, now = () => new Date().toISOString() }) {
+export function landingStore({ root, stateDir = join(root, '.dev-state'), run = runDefault, now = () => new Date().toISOString(),
+  verifyValidation = async () => { throw Error('human validation verifier unavailable; merge refused'); } }) {
   const file = join(stateDir, 'landing.json');
   const lock = action => withWorkerLock(stateDir, 'LANDING-0', action);
   const git = (args, cwd = root) => run('git', args, cwd);
@@ -83,7 +84,7 @@ export function landingStore({ root, stateDir = join(root, '.dev-state'), run = 
   }
   async function pr(number) {
     if (!/^\d+$/.test(String(number))) throw new Error('a PR number is required');
-    return gh(['pr', 'view', String(number), '--json', 'number,state,headRefName,headRefOid,baseRefName,baseRefOid,mergeCommit,isCrossRepository,statusCheckRollup,mergeStateStatus']);
+    return gh(['pr', 'view', String(number), '--json', 'number,state,author,headRefName,headRefOid,baseRefName,baseRefOid,mergeCommit,isCrossRepository,statusCheckRollup,mergeStateStatus']);
   }
   function matchesPr(p, entry) {
     if (p.isCrossRepository !== false || p.headRefName !== entry.branch || p.baseRefName !== 'main') throw new Error('PR does not match reserved repository branch/base');
@@ -123,6 +124,14 @@ export function landingStore({ root, stateDir = join(root, '.dev-state'), run = 
   }
   return {
     status,
+    async assertCanWait(id, who) {
+      return lock(async () => {
+        const c = await held(id, who), state = await landingState(stateDir);
+        await enabled(id);
+        const entry = state.queue.find(e => e.issue === id);
+        if (entry && (!same(c, entry) || entry.mergeAttempted)) throw Error('reconcile attempted merge/reservation before waiting for validation');
+      });
+    },
     async verifyMerged(id, who, number, cwd) {
       return lock(async () => {
         const c = await held(id, who), state = await landingState(stateDir);
@@ -188,6 +197,7 @@ export function landingStore({ root, stateDir = join(root, '.dev-state'), run = 
         if (!sha(entry.prepared?.head) || p.headRefOid !== entry.prepared.head || await mainHead() !== entry.prepared.base) throw new Error('head/main changed or not prepared; rebase, prepare, test and push again');
         if (p.mergeStateStatus !== 'CLEAN') throw new Error('PR is not clean/mergeable');
         checks(p);
+        await verifyValidation(c, p);
         entry.pr = p.number;
         entry.children ||= [];
         for (const child of await children(entry.branch)) {
@@ -211,6 +221,8 @@ export function landingStore({ root, stateDir = join(root, '.dev-state'), run = 
         await owner(id, who, state);
         p = await pr(number); matchesPr(p, entry); checks(p);
         if (p.state !== 'OPEN' || p.mergeStateStatus !== 'CLEAN' || p.headRefOid !== entry.prepared.head || await mainHead() !== entry.prepared.base) throw new Error('PR/main changed during preparation');
+        entry.validation = await verifyValidation(c, p);
+        await owner(id, who, state);
         entry.mergeAttempted = now(); await save(state);
         let rejected = false;
         try { await run('gh', ['pr', 'merge', String(number), '--squash', '--match-head-commit', entry.prepared.head], root); }

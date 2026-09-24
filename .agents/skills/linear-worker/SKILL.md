@@ -105,6 +105,7 @@ while you are planning or waiting for approval.
 
 ```bash
 jaunt-linear plan <ID> --summary "<3-6 lignes, en français>" \
+  --validation required --validation-reason "<why this change needs a product trial>" \
   --expects "approuver (👍 sur n'importe quel commentaire du fil) ou répondre des corrections" \
   < plan.md
 jaunt-linear claim <ID> awaiting-approval --session "$CODEX_THREAD_ID" --runtime codex
@@ -198,10 +199,10 @@ The claim now reads `implementing` — `verdict` set it. That phase is the answe
 to "is this session waiting on me or working?", so if you ever reach here
 without having read a verdict, say so with
 `jaunt-linear claim <ID> implementing --session "$CODEX_THREAD_ID" --runtime codex`. The
-six phases are `planning`, `awaiting-approval`, `queued`, `implementing`,
-`landing` and guarded `awaiting-external`; anything else is refused.
+seven phases are `planning`, `awaiting-approval`, `queued`, `implementing`,
+`landing`, guarded `awaiting-validation` and guarded `awaiting-external`; anything else is refused.
 
-Only `implementing` and `landing` hold the working tree, and that is what the
+`implementing`, `landing` and `awaiting-validation` hold the source surface, and that is what the
 dispatch gate compares against. It is also why reaching here in phase `queued`
 means writing anyway would be the collision the queue exists to prevent: ask
 `jaunt-linear ready <ID>` first, and implement only on `ready: true`.
@@ -315,8 +316,8 @@ gh pr checks <n> --watch
 
 The required contexts are `lint` and `test`. `test` runs no test of its own: it
 fails unless `host`, `browser-and-relay` and `installer-fedora` all succeed, so
-`test` being red only tells you to look at the job underneath it. No human review
-is required — green is the entire gate.
+`test` being red only tells you to look at the job underneath it. These checks
+are necessary. A required human trial of the current channel candidate must also have a verified acceptance receipt before merge.
 
 ### Make the PR tryable
 
@@ -326,9 +327,77 @@ finish and you have downloaded and checked the artifacts, update that thread
 before merging with the exact run links, the platform, a short procedure, the
 expected result, what you verified and the limits. A visual check links a
 published capture of the screen concerned. `--expects none` unless the plan
-named a human decision: this is no new approval gate. Recipes, artifact names
+named a human decision: a required channel trial uses the separate candidate
+request below. Recipes, artifact names
 and the desktop sandbox limitation are in
 [docs/PR_VALIDATION.md](../../../docs/PR_VALIDATION.md).
+
+### Record the trial requirement and candidate decision
+
+Every plan explicitly declares `--validation required|not-required` and
+`--validation-reason "<reason>"`. Product corrections propose `required`. A
+harness/docs exemption is stated in the visible digest and approved with the
+plan; it is never inferred from silence or added as a merge flag. Legacy plans
+without this metadata require an explicit amended plan, preserving their branch
+and receipts. A failed publication verification retains its returned IDs: inspect
+and reconcile them before attempting another publication.
+
+After opening the PR and publishing its technical validation information, read
+`jaunt-linear validation read <ID>`. Read the complete returned thread, including
+edits and relayed instructions, then record the exact displayed snapshot:
+
+```sh
+jaunt-linear validation review <ID> --pr <n> --snapshot <snapshot> \
+  --reason "<how the current instructions are satisfied>" --runtime codex --session "$CODEX_THREAD_ID"
+```
+
+This records instruction review, not human acceptance, and cannot change the
+approved requirement. New instructions that change the plan require replanning. An exemption is bound
+to the plan-time ticket title and description: changing that scope requires a
+new approved classification. Interpreting prose, including relayed instructions,
+remains the worker's responsibility; the recorded reason must explain its handling.
+For a required trial, prepare the existing PR channel using
+[docs/DEPLOYMENT.md](../../../docs/DEPLOYMENT.md#channel-candidates), verify the
+candidate, and publish the request through:
+
+```sh
+jaunt-linear validation begin <ID> --reviewer <Linear-human-id> \
+  --procedure "<short trial procedure>" --expected "<expected result>" \
+  --runtime codex --session "$CODEX_THREAD_ID"
+```
+
+The CLI verifies the delivered candidate and public channel, publishes the request
+once, enters guarded `awaiting-validation`, and explicitly releases the landing
+turn. It refuses an unresolved attempted merge before parking. On partial failure,
+keep the request and reservation evidence; retry the same command after inspection.
+No private worktree harness may perform these operations against canonical state.
+
+The human replies **testé et validé** in that request's thread after testing,
+**refusé**, or describes the problem. Only the identified requested human can
+accept that candidate. A plan approval, a reaction, a bot, another thread, silence,
+and a recovery event cannot accept it. Stop the turn while awaiting this reply.
+
+The source surface remains held during this wait; independent tickets can use
+the released FIFO. `ready` and direct claims cannot consume the wait. On resume,
+register the actual session without changing phase, read `verdict` (which selects
+the candidate decision in this phase), and read the current validation record.
+`validation decision <ID> --runtime codex --session "$CODEX_THREAD_ID"` records an exact
+acceptance and restores the previous PR state. `--peek` is read-only. Feedback
+or changed instructions need `validation review` with the fresh snapshot, reason,
+and `--comment <latest-feedback-id>` when correcting a trial reply. It archives
+the old request; a replacement never inherits its acceptance. A replacement plan
+may reply inside the old feedback thread. Both runtimes resume the existing
+implementation session after its approval, including Claude.
+
+Reacquire landing, rebase, prepare and run checks before merging. A changed head
+requires a new delivered candidate and a new human trial. `landing merge` reads
+Linear and the current candidate both before retargeting children and immediately
+before the merge request. Missing, changed or unreadable evidence refuses without
+removing FIFO/branch evidence. Reconciliation of an already recorded, verified
+MERGED attempt does not require the channel removed by post-merge cleanup.
+
+The new guard must be activated in the canonical launcher by the supervisor;
+a merged PR alone does not demonstrate activation. Report the actual state.
 
 ### A red CI: read it before you name it
 
@@ -356,7 +425,8 @@ jaunt-linear landing merge <ID> --pr <n> --runtime codex --session "$CODEX_THREA
 ```
 
 The command verifies the current owner, stop/loop flag, prepared head and main,
-PR branch/base, and successful lint/test checks. It inventories all open child
+PR branch/base, successful lint/test checks, current instructions and the
+approved trial requirement/receipt. It inventories all open child
 PRs targeting this branch with pagination, persists their heads and original
 bases before editing, retargets them to main, and verifies each before merging.
 A changed/closed child or failed API read blocks the parent. It rechecks for

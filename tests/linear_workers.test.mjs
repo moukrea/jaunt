@@ -21,7 +21,7 @@ test('liveness never mistakes silence, live children, resting or other generatio
   assert.equal(health(claim, { ...record, childExited: false }, i => i?.pid === 10 ? 'alive' : 'gone').state, 'suspect');
   assert.equal(health(claim, { ...record, child: null, childExited: false }).state, 'interrupted'); // injected confirmed gone
   assert.equal(health(claim, { ...record, childExited: false }, () => 'unknown').state, 'unknown');
-  for (const phase of ['queued', 'awaiting-approval']) assert.equal(health({ ...claim, phase }, record).state, 'resting');
+  for (const phase of ['queued', 'awaiting-approval', 'awaiting-validation']) assert.equal(health({ ...claim, phase }, record).state, 'resting');
   assert.equal(health(claim, { ...record, code: 0 }).state, 'finished');
   assert.equal(health(claim, { ...record, cancelled: 'owner-closed' }).state, 'interrupted');
   assert.equal(health(claim, { ...record, cancelled: 'loop-off' }).state, 'suspended');
@@ -90,7 +90,7 @@ test('recovery rechecks approval, PR, direct prerequisites, identity and stop un
 
 for (const runtime of ['codex', 'claude']) test(`${runtime}: offline crash, durable watchdog wake and one exact-session recovery`, { timeout: 20000 }, async () => temporary(async dir => {
   await mkdir(join(dir, 'scripts')); await mkdir(join(dir, 'bin'));
-  for (const name of ['linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
+  for (const name of ['linear_validation.mjs', 'linear_routing.mjs', 'linear_skills.mjs', 'linear_codex.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_claude.mjs', 'linear_waits.mjs', 'linear_models.mjs', 'linear_model_policy.json']) await copyFile(new URL('../scripts/' + name, import.meta.url), join(dir, 'scripts', name));
   await copyFile(process.execPath, join(dir, 'bin/codex-fixture'));
   const held = { ...claim, runtime, session: runtime === 'claude' ? 'exact' : null };
   await atomicJson(join(dir, '.dev-state/claims/JAU-999.json'), held);

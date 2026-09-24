@@ -39,8 +39,8 @@ async function fixture(t) {
   f.run = e => f.store().drainPendingRoutes(e || event);
   return f;
 }
-for (const verdict of ['approved', 'declined', 'feedback']) test(`${verdict} routes to exact worker without registering approval or owner wake`, async t => {
-  const f = await fixture(t); f.verdict = { verdict };
+for (const phase of ['awaiting-approval', 'awaiting-validation']) for (const verdict of ['approved', 'declined', 'feedback']) test(`${phase} ${verdict} routes to exact worker without registering approval or owner wake`, async t => {
+  const f = await fixture(t); f.claim.phase = phase; f.verdict = { verdict };
   assert.equal((await f.run()).event, null);
   assert.deepEqual(f.launched.binding, bindingOf(f.claim));
   assert.equal(f.launches, 1);
@@ -74,8 +74,8 @@ test('newer human correction and reaction replacement change fingerprints, own w
   assert.equal(f.verdict.verdict, 'feedback');
   assert.equal((await f.run()).event, null);
 });
-for (const verdict of ['pending', 'no-plan']) test(`${verdict} never becomes an implementation approval`, async t => {
-  const f = await fixture(t); f.verdict = { verdict };
+for (const phase of ['awaiting-approval', 'awaiting-validation']) for (const verdict of ['pending', 'no-plan']) test(`${phase} ${verdict} never becomes an implementation approval`, async t => {
+  const f = await fixture(t); f.claim.phase = phase; f.verdict = { verdict };
   assert.ok((await f.run()).event); assert.equal(f.launches, 0);
 });
 for (const field of ['session', 'claimedAt', 'runtime']) test(`deferred route never migrates to changed ${field}`, async t => {

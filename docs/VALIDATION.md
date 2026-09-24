@@ -1,5 +1,35 @@
 # jaunt — delivery validated on September 14, 2026
 
+## Human channel validation before merge — JAU-119 (2026-09-24)
+
+The implementation run passed all 375 JavaScript tests with Node
+`--test-concurrency=1`. Plain `npm test` passed 374/375: the unchanged watcher
+assertion `pulse > 5` after 1.5 seconds at `tests/linear_wakes.test.mjs:159`
+failed, matching the recorded JAU-113 symptom. After adding the final withdrawn
+acceptance regression, all 43 focused validation/landing tests passed. The final
+376-test tree also passed sequentially and in the push CI. A later regression
+covering session registration for a new claim cycle passed with all 44 focused
+validation/landing tests, while refusing reuse of the old cycle's receipt.
+Project and whitespace checks passed.
+
+Temporary-state fixtures exercised exact candidate acceptance, source/build SHA
+separation, paginated comments and edits, changed/exempt plan scope, missing or
+stale approvals, wrong humans/threads, unavailable APIs, lost publication
+responses, partial parking/FIFO/decision operations, superseded discussion
+subjects, and verified MERGED recovery after channel cleanup. The landing tests
+observed no child retarget on the first refusal and no merge on a refusal after
+retargeting. Real launcher subprocesses with offline model/Linear adapters
+resumed the exact Codex and Claude sessions for candidate replies and replacement
+plans; initial Claude plan approval still selects a fresh implementation session.
+
+These tests did not perform a live human channel trial or activate the canonical
+launcher. The guard trusts the publisher's delivered asset receipts and freshly
+checks its ledger, public selection and build parent; it does not redownload
+package bytes. The worker still interprets prose instructions and records that
+interpretation in its review reason. Linear and GitHub have no atomic shared
+transaction, so an edit after the final read cannot cancel a merge already in
+flight. This harness-only change produces no installable product package.
+
 ## Offline file navigation — JAU-41 (2026-09-23)
 
 The real browser/loopback relay/host scenario passed after killing the relay,

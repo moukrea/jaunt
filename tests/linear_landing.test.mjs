@@ -53,7 +53,7 @@ async function fixture(t) {
     if (args[1] === 'list') return JSON.stringify([...f.prs.values()].filter(p => p.state === 'OPEN' && p.headRefName === args[args.indexOf('--head') + 1]).map(p => ({ number: p.number })));
     throw Error(`unhandled mock ${args.join(' ')}`);
   };
-  f.store = landingStore({ root, stateDir, run: f.runner });
+  f.store = landingStore({ verifyValidation: async () => ({ fixture: true }), root, stateDir, run: f.runner });
   f.worker = async (id, from = 'main') => {
     const cwd = join(dir, id), branch = `agent/${id}`;
     await git('worktree', 'add', '-b', branch, cwd, from);
@@ -70,6 +70,31 @@ async function fixture(t) {
 async function reserve(f, w) { return f.store.acquire(w.c.issue, w.who, w.cwd); }
 async function prepare(f, w) { await reserve(f, w); return f.store.prepare(w.c.issue, w.who); }
 
+test('merge cannot omit validation and checks it again after child retargeting', async t => {
+  for (const failedAt of [0, 1, 2]) {
+    const f = await fixture(t), w = await f.worker('JAU-119');
+    f.pr(119, w); f.pr(120, { branch: 'agent/JAU-120' }, { baseRefName: w.branch }); f.children = [120];
+    let reads = 0;
+    const check = async () => { if (++reads === failedAt) throw Error('Linear/candidate changed or unavailable'); return { receipt: 'verified' }; };
+    f.store = landingStore({ root: f.root, stateDir: f.stateDir, run: f.runner, ...(failedAt ? { verifyValidation: check } : {}) });
+    await prepare(f, w);
+    await assert.rejects(f.store.merge(w.c.issue, w.who, 119), /validation verifier|Linear\/candidate/);
+    assert.equal(f.prs.get(120).baseRefName, failedAt === 2 ? 'main' : w.branch);
+    assert.equal(f.calls.some(a => a[1] === 'merge'), false);
+    assert.equal((await f.store.status()).owner.issue, w.c.issue);
+    assert.equal((await landingState(f.stateDir)).queue[0].mergeAttempted, undefined);
+  }
+});
+test('ambiguous attempts cannot enter human wait; verified MERGED reconciliation needs no new candidate', async t => {
+  const f = await fixture(t), w = await f.worker('JAU-119'); f.pr(119, w); await prepare(f, w);
+  f.mergeReadFailure = true; await assert.rejects(f.store.merge(w.c.issue, w.who, 119), /lost read/);
+  await assert.rejects(f.store.assertCanWait(w.c.issue, w.who), /attempted merge/);
+  f.mergeReadFailure = false;
+  const noVerifier = landingStore({ root: f.root, stateDir: f.stateDir, run: f.runner });
+  assert.equal((await noVerifier.merge(w.c.issue, w.who, 119)).merged, 119);
+  assert.equal(f.calls.filter(a => a[1] === 'merge').length, 1);
+});
+
 test('post-merge admission verifies durable merge, exact clean head and main ancestry without reserving publication', async t => {
   const f = await fixture(t), a = await f.worker('JAU-1');
   f.pr(1, a);
@@ -78,7 +103,7 @@ test('post-merge admission verifies durable merge, exact clean head and main anc
     if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'merge') f.prs.get(1).mergeCommit.oid = f.base;
     return result;
   };
-  f.store = landingStore({ root: f.root, stateDir: f.stateDir, run: runner });
+  f.store = landingStore({ verifyValidation: async () => ({ fixture: true }), root: f.root, stateDir: f.stateDir, run: runner });
   await assert.rejects(f.store.verifyMerged('JAU-1', a.who, 1, a.cwd), /history/);
   await prepare(f, a);
   await assert.rejects(f.store.verifyMerged('JAU-1', a.who, 1, a.cwd), /reservation/);
@@ -101,7 +126,7 @@ test('durable FIFO, identity, claim admission and phase refresh survive CLI life
   await assert.rejects(writeClaim({ ...a.c, phase: 'landing' }, { stateDir: f.stateDir }), /landing acquire/);
   assert.equal((await reserve(f, a)).acquired, true);
   assert.equal((await reserve(f, b)).acquired, false);
-  const again = landingStore({ root: f.root, stateDir: f.stateDir, run: f.runner });
+  const again = landingStore({ verifyValidation: async () => ({ fixture: true }), root: f.root, stateDir: f.stateDir, run: f.runner });
   assert.equal((await again.acquire(a.c.issue, a.who, a.cwd)).position, 1);
   await writeClaim({ ...a.c, phase: 'landing' }, { stateDir: f.stateDir });
   await assert.rejects(f.store.prepare(b.c.issue, b.who), /held by JAU-1/);
@@ -281,7 +306,7 @@ test('changed children and a stop during retargeting prevent the parent merge', 
   const f = await fixture(t), a = await f.worker('JAU-1'); await prepare(f, a); f.pr(10, a);
   f.pr(11, { branch: 'agent/JAU-11' }, { baseRefName: a.branch }); f.children = [11];
   const runner = f.runner;
-  f.store = landingStore({ root: f.root, stateDir: f.stateDir, run: async (cmd, args, cwd) => {
+  f.store = landingStore({ verifyValidation: async () => ({ fixture: true }), root: f.root, stateDir: f.stateDir, run: async (cmd, args, cwd) => {
     const result = await runner(cmd, args, cwd);
     if (cmd === 'gh' && retarget(args)) await atomicJson(join(f.stateDir, 'claims', 'JAU-1.stop'), { reason: 'changed dependency' });
     return result;
@@ -297,7 +322,7 @@ test('canonical CLI acquire persists landing and status without touching another
   const { copyFile, symlink } = await import('node:fs/promises');
   const f = await fixture(t), a = await f.worker('JAU-1'), b = await f.worker('JAU-2');
   await mkdir(join(f.root, 'scripts'));
-  for (const name of ['linear_waits.mjs', 'linear_activity.mjs', 'linear_answers.mjs', 'linear_agent.mjs', 'linear_landing.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs', 'linear_watch.mjs', 'linear_skills.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(f.root, 'scripts', name));
+  for (const name of ['linear_validation.mjs', 'linear_waits.mjs', 'linear_activity.mjs', 'linear_answers.mjs', 'linear_agent.mjs', 'linear_landing.mjs', 'linear_workers.mjs', 'linear_telemetry.mjs', 'linear_wakes.mjs', 'linear_attribution.mjs', 'linear_watch.mjs', 'linear_skills.mjs']) await copyFile(new URL(`../scripts/${name}`, import.meta.url), join(f.root, 'scripts', name));
   await symlink(f.stateDir, join(f.root, '.dev-state'));
   const cli = async (...args) => JSON.parse(await run(process.execPath, [join(f.root, 'scripts', 'linear_agent.mjs'), ...args], a.cwd));
   assert.equal((await cli('landing', 'acquire', a.c.issue, '--runtime', 'codex', '--session', a.c.session)).acquired, true);
@@ -320,7 +345,7 @@ test('valid JSON corruption cannot erase a durable owner', async t => {
 test('explicit GitHub refusal after main moves permits same-owner rebase and prepare', async t => {
   const f = await fixture(t), a = await f.worker('JAU-1'); await prepare(f, a); const p = f.pr(10, a);
   let reject = true;
-  const store = landingStore({ root: f.root, stateDir: f.stateDir, run: async (cmd, args, cwd) => {
+  const store = landingStore({ verifyValidation: async () => ({ fixture: true }), root: f.root, stateDir: f.stateDir, run: async (cmd, args, cwd) => {
     if (cmd === 'gh' && args[1] === 'merge' && reject) {
       await writeFile(join(f.root, 'external.txt'), 'external merge\n'); await f.git('add', '.'); await f.git('commit', '-m', 'external');
       f.remoteMain = (await f.git('rev-parse', 'HEAD')).trim();

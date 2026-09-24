@@ -92,7 +92,7 @@ declined, feedback) takes it out. Nobody calls `move` for either: both ride on
 `claim` and `verdict`, which the approval path already runs. It is matched by
 name, never by type: JAU's was created as `unstarted`, like *Todo*.
 `jaunt-linear board` lists these tickets under `waitingOnHuman`. That list covers
-parked plans, not every human decision. Backlog arbitration, testing and
+parked plans and candidate trials, not every human decision. Backlog arbitration, testing and
 decisions after delivery may also need a human answer. Descriptions and comments
 must name the actual action and when it is needed, independently of the column;
 use `--expects none` only when no human action is currently requested.
@@ -280,6 +280,27 @@ recovery or known quota cooldown in that runtime defers it. Other runtimes remai
 independent. The owner must stay alive and the loop enabled; reopening an authorized
 loop reconciles pending work. No service is installed outside that lifetime.
 
+### Reconcile candidate validation before merge
+
+`awaiting-validation` is a human trial of an unmerged PR, distinct from plan
+approval and post-merge `awaiting-external`. Keep its exact worker/session and
+source surface. The worker journals its request and explicitly releases only
+the landing FIFO, so independent tickets can land. No timeout or recovery event
+validates a candidate. Do not call `ready` or replace the implementation session.
+
+Read `validation read <ID>` and `verdict --peek`. In this phase the verdict is the
+candidate decision, never the old plan approval. Route acceptance, refusal and
+feedback to the same worker for both runtimes; Claude does not start a fresh
+implementation session for this reply or for an approved replacement plan after
+candidate feedback. An API failure preserves the obligation.
+A partial publication/phase/FIFO operation is reconciled by the original worker.
+An unresolved merge attempt must be reconciled before entering a human wait.
+
+A new PR head or candidate requires another exact trial. An explicit approved
+plan exemption still needs current instruction review. Legacy metadata grants
+no exemption. Activate the merged guard in the canonical launcher separately,
+with local changes preserved; until then report the old guard as still running.
+
 ### Reconcile external waits independently of process health
 
 `awaiting-external` retains the original claim/session, transcript, closure and
@@ -423,8 +444,8 @@ files, are serialised however idle the machine is.
 **A held ticket is not a busy one.** The gate answers two different questions
 against two different lists, and the reply shows both. `against` is every claim,
 and it drives the dependency tests — a blocker still blocks while its worker
-sleeps. `contending` is only the claims in `implementing` or `landing`, the two
-phases that hold the working tree, and it is the only list the change-surface
+sleeps. `contending` includes `implementing`, `landing` and `awaiting-validation`,
+the phases that retain a source surface, and it is the only list the change-surface
 test compares against.
 
 So a worker parked in `awaiting-approval` no longer stops you dispatching
