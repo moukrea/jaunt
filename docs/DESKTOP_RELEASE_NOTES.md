@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.41.ch.moukrea.127.1
+
+- channel moukrea_127 candidate 1
+- Source: `d36e8d0dc693ca61fa21664bc591a9cf95b716cc`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).

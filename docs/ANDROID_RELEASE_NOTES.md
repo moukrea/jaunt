@@ -1,3 +1,8 @@
+# jaunt android 0.1.0-beta.39.ch.moukrea.127.1
+
+- channel moukrea_127 candidate 1
+- Source: `d36e8d0dc693ca61fa21664bc591a9cf95b716cc`.
+
 # jaunt Android 0.1.0-beta.31 (versionCode 31)
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
