@@ -30,7 +30,10 @@ export async function readValidation(stateDir, c) {
   return v;
 }
 export async function guardValidationTransition(stateDir, c, previous) {
-  if (previous?.claimedAt === c.claimedAt && !same(c, previous) && await readJson(file(stateDir, c.issue))) throw Error('validation owner cannot change through claim');
+  if (previous?.claimedAt === c.claimedAt && !same(c, previous)) {
+    const saved = await readJson(file(stateDir, c.issue));
+    if (saved && (!iso(saved.claimedAt) || saved.claimedAt === c.claimedAt)) throw Error('validation owner cannot change through claim');
+  }
   const v = await readValidation(stateDir, c);
   const refresh = previous && same(c, previous) && c.phase === previous.phase;
   if (!refresh && c.phase === VALIDATION_PHASE && (!v?.request?.post?.id || v.state !== 'waiting')) throw Error('use validation begin with a published candidate request');

@@ -182,6 +182,15 @@ test('identity, loop and API failures refuse while preserving the saved request'
   f.dependencies.readThread = async () => { throw Error('API unavailable'); }; await assert.rejects(f.verify(), /API unavailable/);
   assert.deepEqual(await f.record(), saved);
 });
+test('a new claim cycle can register its session but cannot reuse an old receipt', async t => {
+  const f = await fixture(t); await f.review(); await f.begin(); await f.accept();
+  const next = { ...f.claim, phase: 'planning', claimedAt: '2026-09-25T00:00:00Z', session: null };
+  await atomicJson(join(f.stateDir, 'claims/JAU-119.json'), next);
+  await writeClaim({ ...next, session: 'next-exact-session' }, { stateDir: f.stateDir });
+  assert.equal((await f.current()).session, 'next-exact-session');
+  assert.equal(await readValidation(f.stateDir, await f.current()), null);
+  await assert.rejects(f.store().verify(await f.current(), f.pr), /not reviewed/);
+});
 test('lost publication response is recovered by marker and never blindly duplicated', async t => {
   const f = await fixture(t); await f.review(); f.losePublish = true;
   await assert.rejects(f.begin(), /lost create/); assert.equal(f.releases, 0);

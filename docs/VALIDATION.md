@@ -6,8 +6,11 @@ The implementation run passed all 375 JavaScript tests with Node
 `--test-concurrency=1`. Plain `npm test` passed 374/375: the unchanged watcher
 assertion `pulse > 5` after 1.5 seconds at `tests/linear_wakes.test.mjs:159`
 failed, matching the recorded JAU-113 symptom. After adding the final withdrawn
-acceptance regression, all 43 focused validation/landing tests passed. Project
-and whitespace checks passed.
+acceptance regression, all 43 focused validation/landing tests passed. The final
+376-test tree also passed sequentially and in the push CI. A later regression
+covering session registration for a new claim cycle passed with all 44 focused
+validation/landing tests, while refusing reuse of the old cycle's receipt.
+Project and whitespace checks passed.
 
 Temporary-state fixtures exercised exact candidate acceptance, source/build SHA
 separation, paginated comments and edits, changed/exempt plan scope, missing or
