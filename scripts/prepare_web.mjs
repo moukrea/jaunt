@@ -29,10 +29,29 @@ await fs.writeFile(path.join(web,'vendor/lucide-all.mjs'),allIcons.outputFiles[0
 const brands = await build({stdin:{contents:"export {default as claude} from 'meteor-icons/icons/claude'; export {default as openai} from 'meteor-icons/icons/openai'; export {default as github} from 'meteor-icons/icons/github';",resolveDir:root},bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,write:false});
 await fs.writeFile(path.join(web,'vendor/meteor.mjs'),brands.outputFiles[0].contents);
 await fs.copyFile(path.join(root,'node_modules/meteor-icons/LICENSE'),path.join(web,'vendor/LICENSE-meteor.txt'));
-const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/xterm'; import {FitAddon} from '@xterm/addon-fit'; export default {Terminal, FitAddon};", resolveDir: root}, bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false});
+const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/xterm'; import {FitAddon} from '@xterm/addon-fit'; import {WebglAddon} from '@xterm/addon-webgl'; export default {Terminal, FitAddon, WebglAddon};", resolveDir: root}, bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false});
 await fs.writeFile(path.join(web, 'vendor/xterm.mjs'), terminal.outputFiles[0].contents);
 await fs.copyFile(path.join(root, 'node_modules/@xterm/xterm/css/xterm.css'), path.join(web, 'vendor/xterm.css'));
-await fs.writeFile(path.join(web, 'vendor/LICENSE-xterm.txt'), await fs.readFile(path.join(root, 'node_modules/@xterm/xterm/LICENSE'), 'utf8') + '\n' + await fs.readFile(path.join(root, 'node_modules/@xterm/addon-fit/LICENSE'), 'utf8'));
+await fs.writeFile(path.join(web, 'vendor/LICENSE-xterm.txt'), (await Promise.all(['xterm','addon-fit','addon-webgl'].map(name => fs.readFile(path.join(root, `node_modules/@xterm/${name}/LICENSE`), 'utf8')))).join('\n'));
+// Terminal font: JetBrains Mono (SIL OFL 1.1), latin + latin-ext, regular and bold.
+// Other scripts and symbols fall back to the system monospace stack; block and
+// box-drawing characters are drawn by xterm's WebGL renderer, not the font.
+const fontsource = path.join(root, 'node_modules/@fontsource/jetbrains-mono');
+await fs.mkdir(path.join(web, 'vendor/fonts'), {recursive: true});
+let fontCss = '/* JetBrains Mono, SIL Open Font License 1.1. See LICENSE-jetbrains-mono.txt. */\n';
+for (const weight of [400, 700]) {
+  const css = await fs.readFile(path.join(fontsource, `${weight}.css`), 'utf8');
+  for (const subset of ['latin-ext', 'latin']) {
+    const file = `jetbrains-mono-${subset}-${weight}-normal.woff2`;
+    const face = css.split('@font-face').find(block => block.includes(`/${file})`));
+    const range = face?.match(/unicode-range:\s*([^;]+);/)?.[1];
+    if (!range) throw new Error(`Missing ${file} in @fontsource/jetbrains-mono`);
+    await fs.copyFile(path.join(fontsource, 'files', file), path.join(web, 'vendor/fonts', file));
+    fontCss += `@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:${weight};font-display:swap;src:url(./fonts/${file}) format('woff2');unicode-range:${range};}\n`;
+  }
+}
+await fs.writeFile(path.join(web, 'vendor/jetbrains-mono.css'), fontCss);
+await fs.copyFile(path.join(fontsource, 'LICENSE'), path.join(web, 'vendor/LICENSE-jetbrains-mono.txt'));
 const pkg = JSON.parse(await fs.readFile(path.join(root, 'node_modules/jsqr/package.json'), 'utf8'));
 if (pkg.version !== '1.4.0') throw new Error('Unexpected jsQR version; review before changing the pin.');
 const source = await fs.readFile(path.join(root, 'node_modules/jsqr/dist/jsQR.js'), 'utf8');
@@ -62,7 +81,7 @@ await fs.writeFile(path.join(web, 'config.json'), JSON.stringify(config, null, 2
 async function walk(dir) { const out=[]; for (const f of await fs.readdir(dir,{withFileTypes:true})) { const p=path.join(dir,f.name); if(f.isDirectory())out.push(...await walk(p)); else out.push(p); } return out; }
 await fs.mkdir(path.join(web,'locales'),{recursive:true});
 for(const name of await fs.readdir(path.join(root,'host/jaunt/locales')))if(name.endsWith('.json'))await fs.copyFile(path.join(root,'host/jaunt/locales',name),path.join(web,'locales',name));
-const files = (await walk(web)).filter(f => (/\.(?:mjs|css|html|png|webmanifest)$/.test(f)||f.includes(path.sep+'locales'+path.sep))).sort();
+const files = (await walk(web)).filter(f => (/\.(?:mjs|css|html|png|webmanifest|woff2)$/.test(f)||f.includes(path.sep+'locales'+path.sep))).sort();
 const hash = createHash('sha256'); for (const f of files) { hash.update(path.relative(web,f)); hash.update(await fs.readFile(f)); }
 const assets = ['./', ...files.map(f=>'./'+path.relative(web,f).split(path.sep).join('/'))];
 const sw = await fs.readFile(path.join(web,'sw.js'),'utf8');

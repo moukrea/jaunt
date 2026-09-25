@@ -18,7 +18,8 @@ import {$, el, button, toast, reportError, clearError, clearFeedback, modal, clo
 import {scan} from './qr.mjs';
 import * as push from './push.mjs';
 
-const {Terminal, FitAddon} = terminalBundle;
+const {Terminal, FitAddon, WebglAddon} = terminalBundle;
+const TERMINAL_FONT = '"JetBrains Mono", ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace';
 const vault = new Vault(), machines = new Map(), transfers = [];
 let desktopHostAvailable=false;
 let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null, androidChannel=null, publishedSite=null;
@@ -570,13 +571,18 @@ function createTerm(a, session) {
   const closePane=button('',()=>closeChoice(closePane,a,[session.id]),'icon-button','close');
   closePane.setAttribute('aria-label',tr('Close {0}',session.name));
   node.append(el('div',{class:'pane-caption'},el('span',{class:'pane-symbol'},icon(sessionIcon(session),15)),title,undock,closePane));
-  const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: 'ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace', lineHeight: 1.18,
+  const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: TERMINAL_FONT, lineHeight: 1.18,
     cursorBlink: true, cursorStyle: 'bar', scrollback: isMobile() ? 20000 : 50000, allowProposedApi: true, convertEol: false,
     screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
     linkHandler: {activate: (_event, uri) => { try { const u = new URL(uri); if (['https:', 'http:'].includes(u.protocol)) window.open(u.href, '_blank', 'noopener,noreferrer'); } catch {} }},
     theme: {background: '#111314', foreground: '#d9dfd3', cursor: '#e7a246', selectionBackground: '#455342', black: '#151918', brightBlack: '#70786f', red: '#d8897c', green: '#a3c391', yellow: '#e7bc73', blue: '#88adcb', magenta: '#c59bc7', cyan: '#8fc5bf', white: '#dbe0d3', brightWhite: '#f1f3eb'}});
   const mount = el('div',{class:'terminal-mount'});node.append(mount);
   const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
+  // WebGL draws block and box-drawing glyphs itself so they tile across cells
+  // regardless of font and line height; on failure or context loss (browsers
+  // cap live WebGL contexts) the terminal keeps the DOM renderer. Automated
+  // browsers keep the DOM renderer: the e2e suites read its rendered rows.
+  if (!navigator.webdriver) try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer */ }
   bindTouchScroll(mount,term);
   const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false, renderedStart: null, rebuilding: false, pendingOutput: []};
   a.terms.set(session.id, t);
@@ -2275,6 +2281,9 @@ async function bootstrap() {
   if (!window.isSecureContext || !crypto.subtle) throw new Error('jaunt requires HTTPS, or localhost for development. Do not open index.html directly.');
   bindEvents(); viewport();
   if(desktop){desktopHostAvailable=(await desktop.capabilities()).localHost;desktop.onFrame(message=>{if(message.type==='desktop.update'){desktopUpdateStatus(message);return;}if(message.type==='desktop.open')openNotification(message.host,message.session);});desktop.updates('status').then(desktopUpdateStatus).catch(report);}
+  // xterm measures its cell size when a terminal opens: load the bundled font
+  // first, without ever holding the workspace back for long.
+  await Promise.race([Promise.all(['400', '700'].map(w => document.fonts?.load(`${w} 14px "JetBrains Mono"`))).catch(() => {}), new Promise(done => setTimeout(done, 1500))]);
   await vault.load();
   if (vault.locked) { $('lock-screen').hidden = false; }
   else await resumeWorkspace();
