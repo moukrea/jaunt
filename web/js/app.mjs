@@ -259,7 +259,9 @@ function handleMessage(a, message) {
     const epoch=t.outputEpoch;
     renderTerminal(a,t,() => {if(t.outputEpoch!==epoch)return;resizeTerminal(t, message.cols, message.rows);
       if(t.term.element)t.term.element.style.height=t.ownsSize?'100%':t.node.querySelector('.xterm-screen').getBoundingClientRect().height+'px';
-      updateGeometryLabel(a, t);});
+      updateGeometryLabel(a, t);
+      if(t.term.buffer.active.viewportY===0 && t.term.buffer.active.baseY>0)loadEarlierSoon(a,t);
+    });
   } else if (message.type === 'terminal.reset') {
     const t = a.terms.get(message.id); if (!t) return;
     invalidateHistory(t);clearTimeout(t.ackTimer);t.ackTimer=null;const epoch=++t.outputEpoch;
@@ -698,6 +700,7 @@ async function attachTerm(a, t) {
     if (a === current() && visibleSessions(a).includes(t.session.id) && !document.hidden) claimSize(a, t);
     if(!t.scrollAnchor || t.scrollAnchor.bottom)t.term.scrollToBottom();
     rememberScroll(t);
+    if(t.term.buffer.active.viewportY===0 && t.term.buffer.active.baseY>0)loadEarlierSoon(a,t);
     requestAnimationFrame(()=>t.node.classList.remove('terminal-restoring'));
 
   })();
@@ -795,7 +798,7 @@ function loadEarlierSoon(a, t) {
   const epoch=t.historyEpoch,generation=a.link.generation,buffer=t.term.buffer.active;
   t.loadEarlierTimer = setTimeout(() => {
     t.loadEarlierTimer = 0;
-    if(epoch===t.historyEpoch && generation===a.link.generation && buffer===t.term.buffer.active)loadEarlier(a, t).catch(error => reportHost(a, error));
+    if(epoch===t.historyEpoch && generation===a.link.generation && buffer===t.term.buffer.active && buffer.viewportY===0 && buffer.baseY>0)loadEarlier(a, t).catch(error => reportHost(a, error));
   }, 200);
 }
 async function loadEarlier(a, t) {
@@ -901,6 +904,7 @@ function claimSize(a, t) {
     const d = t.fit.proposeDimensions(); if (!d) return;
     if(owned && d.cols===t.term.cols && d.rows===t.term.rows)return;
     resizeTerminal(t, d.cols, d.rows);
+    if(t.term.buffer.active.viewportY===0 && t.term.buffer.active.baseY>0)loadEarlierSoon(a,t);
     a.link.send({type: 'terminal.resize', id: t.session.id, ...d}).catch(error=>reportHost(a,error));
   } catch { /* Retry after layout. */ }
 }

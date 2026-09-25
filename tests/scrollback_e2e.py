@@ -84,6 +84,20 @@ async def tui_history_regressions(browser,h):
   await f.fresh(f.history,f.start);t.term.scrollToTop();api.loadEarlierSoon(a,t);
   f.output('\x1b[?1049hALT-REMAINS');await api.drainTerminal(t);await new Promise(r=>setTimeout(r,260));
   check(t.term.buffer.active.type==='alternate' && f.reads===0,'old normal timer loaded alternate history');pass('delayed history rejected after alternate entry');
+  for(const kind of ['geometry','local resize','attachment']){
+   await f.fresh(f.history,f.start);
+   if(kind==='local resize')t.term.resize(t.term.cols,t.term.rows-2);
+   t.term.scrollToTop();api.rememberScroll(t);api.loadEarlierSoon(a,t);
+   if(kind==='geometry')f.message({type:'terminal.geometry',cols:t.term.cols,rows:t.term.rows,activeView:a.peer,viewers:[]});
+   if(kind==='local resize')api.claimSize(a,t); // No simulated geometry echo.
+   if(kind==='attachment'){t.session.activeView=a.peer;await api.attachTerm(a,t);}
+   await api.drainTerminal(t);
+   for(let i=0;i<50 && t.renderedStart>0;i++)await f.wait();
+   check(t.renderedStart===0,kind+' left an earlier-history request stranded at the top');
+  }
+  await f.fresh(f.history,f.start);t.term.scrollToTop();api.loadEarlierSoon(a,t);t.term.scrollToBottom();
+  await new Promise(r=>setTimeout(r,260));check(f.reads===0,'leaving the top still loaded earlier history');
+  pass('top-of-history retries follow geometry, resize and attach, but stop when the reader leaves');
   for(const kind of ['output','generation','detach','reset']){
    await f.fresh(f.history,f.start);let release;f.hold=new Promise(r=>release=r);const old=api.loadEarlier(a,t);
    if(kind==='output')f.output('LIVE-ONCE\r\n');
@@ -208,6 +222,6 @@ async def main():
    await A.get_by_label('Keep terminal history on disk').check();await until(lambda:(h.state/'scrollback'/sid).exists() or True)
    print('PASS turning disk history off deletes the files on the host')
    await asyncio.wait_for(tui_history_regressions(b,h),timeout=60)
-   await b.close();print('5 scrollback checks and 11 TUI/history checks passed.')
+   await b.close();print('5 scrollback checks and 12 TUI/history checks passed.')
  finally:h.close()
 if __name__=='__main__':asyncio.run(main())

@@ -9,7 +9,7 @@ intercepted response. Its temporary host stream is detached before controlled
 cache/parser experiments; outbound input is intercepted. No existing PTY,
 authenticated conversation, browser profile or Android installation was used.
 
-The five existing scrollback checks and eleven TUI/history checks passed. SGR
+The five existing scrollback checks and twelve TUI/history checks passed. SGR
 and legacy mouse reports retain the touch location, the no-mouse alternate
 buffer still emits an arrow, and normal-buffer inertia stops on alternate entry.
 A delayed normal history timer cannot enter an alternate TUI. Held cache reads
@@ -19,6 +19,16 @@ bytes, attachment and geometry follow the historical write in order. Historical
 DSR replies and unavailable user input produce no terminal input; fresh DSR
 replies still work. Live bytes appear once, and attachment uses the parsed
 offset, including a reset during initial cached attachment.
+
+An additional real-xterm regression reproduced a stranded request: a same-size
+geometry notification canceled the earlier-history timer while the viewport
+remained at the top, where another `scrollToTop` produced no new event. Geometry,
+local resize without a server echo, and attachment now retry a still-current
+top-of-history request. The timer rechecks the viewport, so leaving the top
+cancels the attempt. All three retry cases and that cancellation passed. The
+public-channel setup check that led to this regression first exceeded its
+eight-second history wait, then passed without code changes; the controlled
+regression establishes the cancellation defect independently of network timing.
 
 Visible normal-buffer anchors survived queued geometry with both zero and
 100 ms smooth scrolling, and `390×780 → 390×460 → 390×780` viewport changes
