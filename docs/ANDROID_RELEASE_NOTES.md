@@ -1,3 +1,8 @@
+# jaunt android 0.1.0-beta.43
+
+- feat(web): use JuliaMono as the terminal font (#134)
+- Source: `a00758453702b80a170cb7f7a66df0c9f7c0ef67`.
+
 # jaunt Android 0.1.0-beta.31 (versionCode 31)
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
