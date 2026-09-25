@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.43
+
+- fix(web): use full JetBrains Mono, Unicode 11 widths and line height 1 (#132)
+- Source: `68b4ff3ec1f8af90951a73d2230a79607e4d682d`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
