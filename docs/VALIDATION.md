@@ -1,5 +1,55 @@
 # jaunt — delivery validated on September 14, 2026
 
+## TUI touch and history reconstruction — JAU-124 (2026-09-25)
+
+The approved client correction was tested on the `99a0c52` baseline. Synthetic
+ANSI fixtures in `tests/scrollback_e2e.py` load the actual application and vendored
+xterm in a fresh Chromium page. Test exports are appended only to that page's
+intercepted response. Its temporary host stream is detached before controlled
+cache/parser experiments; outbound input is intercepted. No existing PTY,
+authenticated conversation, browser profile or Android installation was used.
+
+The five existing scrollback checks and eleven TUI/history checks passed. SGR
+and legacy mouse reports retain the touch location, the no-mouse alternate
+buffer still emits an arrow, and normal-buffer inertia stops on alternate entry.
+A delayed normal history timer cannot enter an alternate TUI. Held cache reads
+cannot replace newer output after reset, detach or a connection-generation
+change. A deliberately suspended xterm parser proves that reset, later live
+bytes, attachment and geometry follow the historical write in order. Historical
+DSR replies and unavailable user input produce no terminal input; fresh DSR
+replies still work. Live bytes appear once, and attachment uses the parsed
+offset, including a reset during initial cached attachment.
+
+Visible normal-buffer anchors survived queued geometry with both zero and
+100 ms smooth scrolling, and `390×780 → 390×460 → 390×780` viewport changes
+during reconstruction. An explicit size claim waits for parsing and remains
+effective. Disposed terminals reject pending cache completion. The synthetic
+anchor capture is `test-results/tui-history-anchor.png`. Node regressions also
+cover context cancellation, old-operation cleanup, parsed ACKs, overlapping or
+canceled resize frames, and interrupted input chunks that are not replayed.
+
+Local checks: the complete npm test list passed **402/402** with
+`--test-concurrency=1`; **409 pytest tests**, **24 browser scenarios**, the
+terminal-render suite, **4 flow-control checks**, and **2 Miniflare relay tests**
+passed. Project checks and `git diff --check` passed. The earlier default
+concurrent `npm test` run reported **400/401**, with only the existing
+`pulse > 5` watcher assertion at `tests/linear_wakes.test.mjs:159` failing.
+That observed failure matches [JAU-113](https://linear.app/moukrea/issue/JAU-113)
+and remains outside this client correction; sequential success does not turn
+the concurrent result green. These are local observations, not a PR CI or
+candidate acceptance receipt.
+
+The laboratory used Chromium `149.0.7827.55`, Playwright `1.61.0`, Node
+`25.5.0` and Python `3.14.2`. The terminal-render suite opened isolated,
+unconfigured Claude/Codex welcome screens, with no model invocation. These
+versions and fixtures do not identify the user's installed software. Actual
+Android/host/CLI versions remain a question solely in JAU-64. Native IME,
+physical touch, rotation and the reported Claude behavior remain unverified;
+the temporary input-disabled phase also needs the approved Android trial.
+Historical bytes still lack parser snapshots and a geometry timeline. This
+change does not claim exact reconstruction of arbitrary old TUI state or a
+result for the separate, unmerged PR127/JAU-118 work.
+
 ## Human channel validation before merge — JAU-119 (2026-09-24)
 
 The implementation run passed all 375 JavaScript tests with Node

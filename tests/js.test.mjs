@@ -984,3 +984,147 @@ test('JAU-110 keyboard button hidden outside mobile touch and Android',async()=>
  assert.ok(css.includes('@media not all and (max-width:760px) and (pointer:coarse){body:not(.is-android) #keyboard-button{display:none}}'));
  assert.ok(app.includes("document.body.classList.toggle('is-desktop', !!desktop);"));
 });
+
+import {bindTouchScroll} from '../web/js/touch-scroll.mjs';
+function touchFixture() {
+ const saved=Object.fromEntries(['document','WheelEvent','requestAnimationFrame','cancelAnimationFrame'].map(k=>[k,globalThis[k]]));
+ const frames=new Map(),wheels=[],lines=[];let frameId=0,change,context=1;
+ globalThis.document={hidden:false};
+ globalThis.WheelEvent=class extends Event {constructor(type,o){super(type,o);for(const k of ['deltaY','deltaMode','clientX','clientY'])this[k]=o[k]??0;}};
+ globalThis.requestAnimationFrame=fn=>{frames.set(++frameId,fn);return frameId;};
+ globalThis.cancelAnimationFrame=id=>frames.delete(id);
+ const node=new EventTarget();node.isConnected=true;
+ const screen={getBoundingClientRect:()=>({height:240}),dispatchEvent:e=>wheels.push(e)};node.querySelector=()=>screen;
+ const normal={type:'normal'},alternate={type:'alternate'};
+ const term={rows:24,buffer:{active:normal,onBufferChange:fn=>{change=fn;return {dispose(){change=null;}};}},scrollLines:n=>lines.push(n)};
+ const binding=bindTouchScroll(node,term,()=>context);
+ return {node,term,wheels,lines,frames,normal,alternate,
+  context(v){context=v;},buffer(value){term.buffer.active=value;change?.();},
+  fire(type,x,y){const e=new Event(type,{cancelable:true});e.touches=type==='touchend'?[]:[{clientX:x,clientY:y}];node.dispatchEvent(e);},
+  tick(){const batch=[...frames.values()];frames.clear();for(const fn of batch)fn(performance.now()+16);},binding,
+  close(){binding.dispose();for(const [key,value] of Object.entries(saved)){if(value===undefined)delete globalThis[key];else globalThis[key]=value;}}
+ };
+}
+test('JAU-124 alternate touch wheels retain position and direction',()=>{
+ const f=touchFixture();try{
+  f.buffer(f.alternate);f.fire('touchstart',150,180);f.fire('touchmove',150,110);f.fire('touchmove',160,155);f.fire('touchend');
+  assert.deepEqual(f.wheels.map(e=>[e.clientX,e.clientY,e.deltaY]),[[150,110,70],[160,155,-45]]);
+  assert.deepEqual(f.lines,[]);assert.equal(f.frames.size,0,'alternate gestures have no synthetic inertia');
+ }finally{f.close();}
+});
+test('JAU-124 normal inertia never becomes input in another buffer or view',()=>{
+ for(const change of ['buffer','context','hidden','removed','cancel']){
+  const f=touchFixture();try{
+   f.fire('touchstart',150,180);f.fire('touchmove',150,110);f.fire('touchend');assert.ok(f.lines.length);
+   if(change==='buffer'){f.buffer(f.alternate);f.buffer(f.normal);}
+   if(change==='context')f.context(2);
+   if(change==='hidden')document.hidden=true;
+   if(change==='removed')f.node.isConnected=false;
+   if(change==='cancel')f.binding.cancel();
+   const before=f.lines.length;f.tick();assert.equal(f.lines.length,before,change);assert.deepEqual(f.wheels,[]);assert.equal(f.frames.size,0);
+  }finally{f.close();}
+ }
+});
+test('JAU-124 disposed touch binding removes listeners and pending frames',()=>{
+ const f=touchFixture();try{
+  f.fire('touchstart',150,180);f.fire('touchmove',150,110);f.fire('touchend');f.binding.dispose();
+  const before=f.lines.length;f.fire('touchstart',150,180);f.fire('touchmove',150,50);f.tick();assert.equal(f.lines.length,before);
+ }finally{f.close();}
+});
+test('JAU-124 synchronous wheel cancellation does not resume the old gesture',()=>{
+ const f=touchFixture();try{
+  f.buffer(f.alternate);f.node.querySelector().dispatchEvent=()=>{f.binding.cancel();return true;};
+  f.fire('touchstart',150,180);f.fire('touchmove',150,110);f.fire('touchmove',150,50);f.fire('touchend');
+  assert.equal(f.frames.size,0);assert.deepEqual(f.lines,[]);
+ }finally{f.close();}
+});
+
+async function historyFixture() {
+ const source=await (await import('node:fs/promises')).readFile(new URL('../web/js/app.mjs',import.meta.url),'utf8');
+ const errors=[],classes=new Set(),writes=[],buffer={type:'normal',length:24,baseY:20,viewportY:0};
+ let release;const held=new Promise(r=>release=r),bytes=new TextEncoder().encode('fixture history');
+ const scrollback={flush:()=>held,read:async(_key,lo,hi)=>bytes.slice(lo,hi)};
+ const node={classList:{add:x=>classes.add(x),remove:x=>classes.delete(x)},dataset:{}};
+ const term={cols:80,rows:24,options:{scrollback:1000},buffer:{active:buffer},reset:()=>writes.push('reset'),write:(b,cb)=>{writes.push(b);cb();}};
+ const t={session:{id:'fixture',retained:0},node,term,attached:true,outputEpoch:0,historyEpoch:0,offset:bytes.length,renderedOffset:bytes.length,renderedEpoch:0,renderedStart:5};
+ const a={terms:new Map([['fixture',t]]),link:{generation:1,state:'online'}};
+ const functions=source.slice(source.indexOf('function renderTerminal('),source.indexOf('function updateGeometryLabel('));
+ const api=new Function('scrollback','cacheKey','wantsStream','updateTermInput','ackOutput','rememberScroll','reportHost','tr',functions+';return {loadEarlier,loadEarlierSoon,invalidateHistory,renderTerminal,drainTerminal};')(
+  scrollback,()=> 'synthetic:fixture',()=>a.link.state==='online'&&!node.hidden,()=>{},()=>{},()=>{},(_a,e)=>errors.push(e),x=>x);
+ return {a,t,api,release,writes,classes,errors};
+}
+test('JAU-124 history fetch cannot reset a changed terminal snapshot',async()=>{
+ for(const change of ['generation','buffer','geometry','output','reset','detached','removed']){
+  const f=await historyFixture(),{a,t,api}=f;const loading=api.loadEarlier(a,t);
+  if(change==='generation')a.link.generation++;
+  if(change==='buffer')t.term.buffer.active={type:'alternate'};
+  if(change==='geometry')t.term.rows++;
+  if(change==='output')t.offset++;
+  if(change==='reset')t.outputEpoch++;
+  if(change==='detached')t.attached=false;
+  if(change==='removed')a.terms.delete(t.session.id);
+  f.release();await loading;assert.deepEqual(f.writes,[],change);assert.equal(t.historyLoad,null);
+ }
+});
+test('JAU-124 old history completion leaves its successor owned',async()=>{
+ const f=await historyFixture(),old=f.api.loadEarlier(f.a,f.t);
+ f.api.invalidateHistory(f.t);const newer={};f.t.historyLoad=newer;f.classes.add('terminal-loading');
+ f.release();await old;assert.equal(f.t.historyLoad,newer);assert.ok(f.classes.has('terminal-loading'));
+});
+test('JAU-124 render ordering fences reset and survives an earlier rejection',async()=>{
+ const f=await historyFixture(),events=[];let release;
+ const held=new Promise(resolve=>release=resolve);
+ const first=f.api.renderTerminal(f.a,f.t,async()=>{events.push('parse');await held;events.push('parsed');});
+ const reset=f.api.renderTerminal(f.a,f.t,()=>events.push('reset'));
+ await Promise.resolve();assert.deepEqual(events,['parse']);release();await Promise.all([first,reset]);assert.deepEqual(events,['parse','parsed','reset']);
+ await assert.rejects(f.api.renderTerminal(f.a,f.t,()=>{throw Error('synthetic parser error');}));
+ await f.api.renderTerminal(f.a,f.t,()=>events.push('next'));await f.api.drainTerminal(f.t);
+ assert.equal(events.at(-1),'next');assert.equal(f.errors.length,1);
+});
+test('JAU-124 ACKs use parsed offsets and reject stale stream or view contexts',async()=>{
+ const source=await (await import('node:fs/promises')).readFile(new URL('../web/js/app.mjs',import.meta.url),'utf8');
+ const body=source.slice(source.indexOf('function ackOutput('),source.indexOf('// xterm.reset()'));
+ for(const change of ['none','reset','generation','history','detached','removed','unparsed']){
+  let fire;const sent=[],t={session:{id:'fixture'},offset:200,renderedOffset:120,renderedEpoch:1,outputEpoch:1,attached:true};
+  const a={info:{flowControl:true},terms:new Map([['fixture',t]]),link:{generation:2,state:'online',send:async m=>sent.push(m)}};
+  const ack=new Function('setTimeout',body+';return ackOutput;')(fn=>{fire=fn;return 1;});ack(a,t);
+  if(change==='reset')t.outputEpoch++;
+  if(change==='generation')a.link.generation++;
+  if(change==='history')t.historyReplay={};
+  if(change==='detached')t.attached=false;
+  if(change==='removed')a.terms.delete('fixture');
+  if(change==='unparsed')t.renderedEpoch=0;
+  fire();assert.deepEqual(sent,change==='none'?[{type:'terminal.ack',id:'fixture',offset:120}]:[],change);
+ }
+});
+test('JAU-124 overlapping and canceled resizes restore scroll settings without stale frames',async()=>{
+ const source=await (await import('node:fs/promises')).readFile(new URL('../web/js/app.mjs',import.meta.url),'utf8');
+ const body=source.slice(source.indexOf('function finishResize('),source.indexOf('function claimSize('));
+ for(const cancel of [false,true]){
+  const frames=[],lines=[],term={cols:80,rows:24,options:{smoothScrollDuration:100},buffer:{active:{baseY:100}},
+   resize(cols,rows){this.cols=cols;this.rows=rows;},scrollToLine:n=>lines.push(n),refresh(){}};
+  const t={term,scrollAnchor:{bottom:false,line:50}};
+  const api=new Function('invalidateHistory','rememberScroll','requestAnimationFrame',body+';return {resizeTerminal,finishResize};')(()=>{},()=>{},fn=>frames.push(fn));
+  api.resizeTerminal(t,80,12);api.resizeTerminal(t,80,18);assert.equal(term.options.smoothScrollDuration,0);
+  if(cancel)api.finishResize(t);const before=lines.length;frames.forEach(fn=>fn());
+  assert.equal(term.options.smoothScrollDuration,100);assert.equal(t.resizing,false);
+  assert.equal(lines.length-before,cancel?0:1,'only the latest valid frame may restore its anchor');
+ }
+});
+test('JAU-124 an interrupted input send does not replay its remaining chunks',async()=>{
+ const source=await (await import('node:fs/promises')).readFile(new URL('../web/js/app.mjs',import.meta.url),'utf8');
+ const body=source.slice(source.indexOf('async function sendInput('),source.indexOf('async function insertText('));
+ const sendInput=new Function('claimSize','utf8','b64',body+';return sendInput;')(()=>{},s=>new TextEncoder().encode(s),b=>Buffer.from(b).toString('base64'));
+ for(const change of ['history','generation','detached']){
+  let release;const held=new Promise(r=>release=r),sent=[];
+  const t={session:{id:'fixture',alive:true},attached:true,term:{cols:80,rows:24}};
+  const a={link:{generation:1,state:'online',send:async m=>{sent.push(m);if(sent.length===1)await held;}}};
+  const pending=sendInput(a,t,'x'.repeat(20000));
+  if(change==='history')t.historyReplay={};
+  if(change==='generation')a.link.generation++;
+  if(change==='detached')t.attached=false;
+  release();await assert.rejects(pending,/not ready/);assert.equal(sent.length,1);
+  t.historyReplay=null;t.attached=true;await sendInput(a,t,'fresh');
+  assert.equal(sent.length,2);assert.equal(Buffer.from(sent[1].data,'base64').toString(),'fresh');
+ }
+});

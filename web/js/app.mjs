@@ -57,7 +57,7 @@ async function applyHostWorkspace(a, w) {
   if (w.active && a.sessions.some(s => s.id === w.active)) a.active = w.active;
   if (!a.machine.openSessions.includes(a.active)) a.active = a.machine.openSessions[0] || '';
   a.machine.layout = a.machine.layouts.find(tree => leaves(tree).includes(a.active)) || (a.active ? {id: a.active} : null);
-  for (const [id, t] of a.terms) if (!a.machine.openSessions.includes(id)) { if (t.attached && a.link.state === 'online') await a.link.request('session.detach', {id}).catch(() => {}); t.term.dispose(); t.node.remove(); a.terms.delete(id); }
+  for (const [id, t] of a.terms) if (!a.machine.openSessions.includes(id)) { if (t.attached && a.link.state === 'online') await a.link.request('session.detach', {id}).catch(() => {}); disposeTerm(t); a.terms.delete(id); }
   a.machine.lastSession = a.active; a.wsSent = workspaceSignature(a);
   await vault.save();
 }
@@ -199,7 +199,7 @@ function makeMachine(machine) {
   a.link = machine.local && desktop ? new LocalLink(machine) : new Link(machine, persist); machines.set(machine.room, a);
   a.link.addEventListener('status', () => {
     for (const t of a.terms.values()) {
-      if (a.link.state !== 'online') t.attached = false;
+      if (a.link.state !== 'online') { invalidateHistory(t); t.attached = false; }
       updateTermInput(a, t);
     }
     if(a.link.state==='online'){a.connectionError='';clearError('connection');clearError('host-'+a.machine.room);}
@@ -243,7 +243,7 @@ function syncSessions(a) {
   a.knownSessions = [...alive];
   for (const [id, t] of a.terms) {
     const s = a.sessions.find(s => s.id === id);
-    if (!s) { t.term.dispose(); t.node.remove(); a.terms.delete(id); }
+    if (!s) { disposeTerm(t); a.terms.delete(id); }
     else { t.session = s; updateTermInput(a, t); }
   }
   if(a.machine.openSessions) a.machine.openSessions = a.machine.openSessions.filter(id=>a.sessions.some(s=>s.id===id));
@@ -253,16 +253,23 @@ function handleMessage(a, message) {
   if (message.type === 'sessions') { a.sessions = message.sessions; syncSessions(a); render(); }
   else if (message.type === 'terminal.geometry') {
     const t = a.terms.get(message.id); if (!t) return;
+    invalidateHistory(t);
     Object.assign(t.session, message); t.ownsSize = message.activeView === a.peer;
     // Serialize geometry with xterm's asynchronous output parser, including replay.
-    t.term.write('', () => {resizeTerminal(t, message.cols, message.rows);
+    const epoch=t.outputEpoch;
+    renderTerminal(a,t,() => {if(t.outputEpoch!==epoch)return;resizeTerminal(t, message.cols, message.rows);
       if(t.term.element)t.term.element.style.height=t.ownsSize?'100%':t.node.querySelector('.xterm-screen').getBoundingClientRect().height+'px';
       updateGeometryLabel(a, t);});
   } else if (message.type === 'terminal.reset') {
     const t = a.terms.get(message.id); if (!t) return;
-    t.scrollAnchor?.marker?.dispose();t.scrollAnchor=null;
-    t.term.reset(); t.offset = message.offset; t.trimmed = message.trimmed; t.renderedStart = message.offset;
-    if (message.cols && message.rows) t.term.resize(message.cols, message.rows);
+    invalidateHistory(t);clearTimeout(t.ackTimer);t.ackTimer=null;const epoch=++t.outputEpoch;
+    t.offset = message.offset; t.trimmed = message.trimmed; t.renderedStart = message.offset;
+    renderTerminal(a,t,()=>{
+      if(t.outputEpoch!==epoch)return;
+      finishResize(t);t.scrollAnchor?.marker?.dispose();t.scrollAnchor=null;
+      t.term.reset();t.renderedOffset=message.offset;t.renderedEpoch=epoch;
+      if (message.cols && message.rows) t.term.resize(message.cols, message.rows);
+    });
   } else if (message.type === 'terminal.output') {
     const t = a.terms.get(message.id); if (!t) return;
     const raw = unb64(message.data), expected = t.offset ?? message.offset;
@@ -274,8 +281,17 @@ function handleMessage(a, message) {
     if (skip >= raw.length) return;
     t.offset = message.offset + raw.length;
     scrollback.put(cacheKey(a, t.session.id), message.offset + skip, raw.subarray(skip));
-    if (t.rebuilding) { t.pendingOutput.push(raw.subarray(skip)); return; }
-    t.term.write(raw.subarray(skip), () => ackOutput(a, t));
+    // Cache assembly is read-only. New output makes its snapshot obsolete; only
+    // the short parser commit holds later output behind the per-terminal queue.
+    if(t.historyLoad && !t.historyReplay)invalidateHistory(t);
+    const epoch=t.outputEpoch,end=t.offset;
+    renderTerminal(a,t,async()=>{
+      if(t.outputEpoch!==epoch)return;
+      await new Promise(resolve=>t.term.write(raw.subarray(skip),resolve));
+      if(t.outputEpoch===epoch){t.renderedOffset=end;t.renderedEpoch=epoch;ackOutput(a,t);
+        if(t.term.buffer.active.viewportY===0 && t.term.buffer.active.baseY>0)loadEarlierSoon(a,t);
+      }
+    });
   } else if (message.type === 'terminal.exit') {
     const t = a.terms.get(message.id); if (t) { t.session.alive = false; updateTermInput(a, t); }
     render();
@@ -577,15 +593,16 @@ function createTerm(a, session) {
     theme: {background: '#111314', foreground: '#d9dfd3', cursor: '#e7a246', selectionBackground: '#455342', black: '#151918', brightBlack: '#70786f', red: '#d8897c', green: '#a3c391', yellow: '#e7bc73', blue: '#88adcb', magenta: '#c59bc7', cyan: '#8fc5bf', white: '#dbe0d3', brightWhite: '#f1f3eb'}});
   const mount = el('div',{class:'terminal-mount'});node.append(mount);
   const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
-  bindTouchScroll(mount,term);
-  const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false, renderedStart: null, rebuilding: false, pendingOutput: []};
+  const t = {session, node, term, fit, offset: null, renderedOffset: null, renderedEpoch: 0, outputEpoch: 0, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false, renderedStart: null};
   a.terms.set(session.id, t);
+  t.touchScroll=bindTouchScroll(mount,term,()=>t.attached && !t.historyReplay && wantsStream(a,t) ? a.link.generation : null);
+  term.buffer.onBufferChange(()=>{invalidateHistory(t);finishResize(t);t.scrollAnchor?.marker?.dispose();t.scrollAnchor=null;});
   term.onScroll(() => {
     if (term.buffer.active.viewportY === 0 && term.buffer.active.baseY > 0) loadEarlierSoon(a, t);
     const d=fit.proposeDimensions();
     // Browser layout changes can reset xterm's viewport before its PTY resize.
     // Only record deliberate scrolling at the last committed dimensions.
-    if(t.attached && !t.replaying && !t.resizing && d?.cols===term.cols && d?.rows===term.rows) rememberScroll(t);
+    if(t.attached && !t.replaying && !t.historyReplay && !t.resizing && d?.cols===term.cols && d?.rows===term.rows) rememberScroll(t);
   });
 
   const area = node.querySelector('textarea');
@@ -594,12 +611,12 @@ function createTerm(a, session) {
   let initialFit = false;
   term.onRender(() => { if (!initialFit && !node.hidden) { initialFit = true; requestAnimationFrame(fitActive); } });
   term.onData(data => {
-    if (!t.attached || a.link.state !== 'online' || (a.info?.sharedViews && !t.ownsSize)) return;
+    if (!t.attached || t.historyReplay || a.link.state !== 'online' || (a.info?.sharedViews && !t.ownsSize)) return;
     if (ctrl && data.length === 1) { data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 31); ctrl = false; }
     if (alt) { data = '\x1b' + data; alt = false; }
     updateModifiers(); sendInput(a, t, data).catch(error=>reportHost(a,error));
   });
-  term.onBinary(data => { if (t.attached && (!a.info?.sharedViews || t.ownsSize)) a.link.send({type: 'terminal.input', id: session.id, data: b64(Uint8Array.from(data, c => c.charCodeAt(0) & 255))}).catch(error=>reportHost(a,error)); });
+  term.onBinary(data => { if (t.attached && !t.historyReplay && a.link.state==='online' && (!a.info?.sharedViews || t.ownsSize)) a.link.send({type: 'terminal.input', id: session.id, data: b64(Uint8Array.from(data, c => c.charCodeAt(0) & 255))}).catch(error=>reportHost(a,error)); });
   node.addEventListener('pointerdown', () => { a.active = session.id; claimSize(a, t); renderTabs(a); }, {capture: true});
   node.addEventListener('keydown', () => claimSize(a, t), {capture: true});
   // ResizeObserver only resizes the controlling view. Passive views retain shared geometry.
@@ -635,7 +652,7 @@ function createTerm(a, session) {
   return t;
 }
 function updateTermInput(a, t) {
-  const disabled = !!a.creating || a.link.state !== 'online' || !t.session.alive || !t.attached;
+  const disabled = !!a.creating || a.link.state !== 'online' || !t.session.alive || !t.attached || !!t.historyReplay;
   t.term.options.disableStdin = disabled;
   const area = t.node.querySelector('textarea');
   if (area) area.disabled = disabled;
@@ -644,22 +661,37 @@ async function attachTerm(a, t) {
   if (a.link.state !== 'online') return;
   const generation = a.link.generation;
   if (t.attaching?.generation === generation) return t.attaching.promise;
+  invalidateHistory(t);clearTimeout(t.ackTimer);t.ackTimer=null;
   t.attached = false; t.replaying=true; t.node.classList.add('terminal-restoring');t.node.dataset.loadingLabel=tr('Restoring shell…');updateTermInput(a, t);
   const promise = (async () => {
+    await drainTerminal(t);
+    if(t.disposed || generation!==a.link.generation || a.terms.get(t.session.id)!==t)return;
+    // Reconcile the receive cursor with parsed output before choosing `after`.
+    t.offset=t.renderedOffset;
     // Cache first: what this device already rendered for this session (last 128 KiB) is shown
     // at once and the host only sends what follows; the network cost of a resume is the delta.
     if (t.offset == null) {
+      const epoch=t.outputEpoch;
       const cached = await scrollback.tail(cacheKey(a, t.session.id), 128 * 1024).catch(() => null);
-      if (generation !== a.link.generation || !a.terms.has(t.session.id)) return;
-      if (cached) { t.term.reset(); t.term.write(cached.bytes); t.offset = cached.end; t.renderedStart = cached.start; }
+      if (t.disposed || generation !== a.link.generation || a.terms.get(t.session.id)!==t) return;
+      if (cached) { await renderTerminal(a,t,async()=>{
+        if(t.outputEpoch!==epoch || generation!==a.link.generation)return;
+        finishResize(t);t.term.reset();await new Promise(resolve=>t.term.write(cached.bytes,resolve));
+        if(t.outputEpoch!==epoch)return;
+        t.renderedOffset=cached.end;t.renderedEpoch=epoch;
+        if(generation===a.link.generation){t.offset=cached.end;t.renderedStart=cached.start;}
+      }); }
     }
+    await drainTerminal(t);
+    if(t.disposed || generation!==a.link.generation || a.terms.get(t.session.id)!==t || a.link.state!=='online')return;
+    t.offset=t.renderedOffset;
     if (t.renderedStart == null) t.renderedStart = t.offset;
     const info = await a.link.request('session.attach', {id: t.session.id, after: t.offset});
     if (info && typeof info.retained === 'number') t.session.retained = info.retained;
     // xterm writes are asynchronous: drain replay before allowing parser responses/input.
-    if(generation!==a.link.generation || !a.terms.has(t.session.id))return;
-    await new Promise(resolve => t.term.write('', resolve));
-    if (generation !== a.link.generation || a.link.state !== 'online') return;
+    if(t.disposed || generation!==a.link.generation || a.terms.get(t.session.id)!==t)return;
+    await drainTerminal(t);
+    if (t.disposed || generation !== a.link.generation || a.link.state !== 'online' || a.terms.get(t.session.id)!==t) return;
     t.generation = generation; t.attached = true; t.replaying=false;updateTermInput(a, t);
     ackOutput(a, t);
     t.ownsSize = !a.info?.sharedViews || t.session.activeView === a.peer;
@@ -712,45 +744,83 @@ function applySubscriptions() {
     const live = t.attached && t.generation === h.link.generation;
     if (wanted && !live && !t.attaching) attachTerm(h, t).catch(error => reportHost(h, error));
     else if (!wanted && live && !t.attaching && !t.detaching && h.link.state === 'online') {
-      t.detaching = true; t.attached = false; updateTermInput(h, t);
+      invalidateHistory(t);t.detaching = true; t.attached = false; updateTermInput(h, t);
       h.link.request('session.detach', {id: t.session.id}).catch(() => {}).finally(() => { t.detaching = false; syncSubscriptions(); });
     }
   }
 }
 function ackOutput(a, t) {
   if (!a.info?.flowControl || t.ackTimer) return;
+  const epoch=t.outputEpoch,generation=a.link.generation;
   t.ackTimer = setTimeout(() => {
     t.ackTimer = null;
-    if (a.link.state === 'online' && t.attached && a.terms.get(t.session.id) === t) a.link.send({type: 'terminal.ack', id: t.session.id, offset: t.offset}).catch(() => {});
+    if (a.link.state === 'online' && t.attached && !t.historyReplay && epoch===t.outputEpoch && t.renderedEpoch===epoch && generation===a.link.generation && t.renderedOffset!=null && a.terms.get(t.session.id) === t) a.link.send({type: 'terminal.ack', id: t.session.id, offset: t.renderedOffset}).catch(() => {});
   }, 50);
+}
+// xterm.reset() does not discard its asynchronous write queue. All destructive
+// changes must follow the write they supersede, including a history commit.
+function renderTerminal(a,t,run) {
+  const next=(t.rendering || Promise.resolve()).then(()=>{
+    if(!t.disposed && a.terms.get(t.session.id)===t)return run();
+  });
+  t.rendering=next.catch(error=>reportHost(a,error));
+  return next;
+}
+async function drainTerminal(t) {
+  let pending;
+  do {pending=t.rendering;await pending;} while(pending!==t.rendering);
+}
+function invalidateHistory(t) {
+  t.historyEpoch=(t.historyEpoch||0)+1;
+  clearTimeout(t.loadEarlierTimer);t.loadEarlierTimer=0;t.historyLoad=null;
+  t.touchScroll?.cancel();
+  if(!t.historyReplay)t.node.classList.remove('terminal-loading');
+}
+function disposeTerm(t) {
+  invalidateHistory(t);finishResize(t);t.disposed=true;clearTimeout(t.ackTimer);
+  t.touchScroll?.dispose();t.term.dispose();t.node.remove();
+}
+function historyContext(a,t) {
+  return !t.disposed && a.terms.get(t.session.id)===t && t.attached && !t.replaying &&
+    !t.historyReplay && wantsStream(a,t) && t.term.buffer.active.type==='normal';
 }
 function restoring(a) { return !!a && [...a.terms.values()].some(t => t.attaching); }
 // Lazy scrollback: reaching the top of what is rendered loads an earlier slice (cache first, then
-// the host's on-disk history), and the terminal is rebuilt with the longer stream while the
-// viewport keeps the same distance from the bottom. Output arriving meanwhile is queued.
+// the host's on-disk history). Fetching never interrupts live output. Only a still-current
+// snapshot may rebuild the parser; later stream events follow that commit in rendering order.
 const EARLIER_STEP = 512 * 1024;
 let historyFetches = 0;
 function loadEarlierSoon(a, t) {
-  if (t.loadEarlierTimer || t.rebuilding || !t.attached) return;
-  t.loadEarlierTimer = setTimeout(() => { t.loadEarlierTimer = 0; loadEarlier(a, t).catch(error => reportHost(a, error)); }, 200);
+  if (t.loadEarlierTimer || t.historyLoad || !historyContext(a,t)) return;
+  const epoch=t.historyEpoch,generation=a.link.generation,buffer=t.term.buffer.active;
+  t.loadEarlierTimer = setTimeout(() => {
+    t.loadEarlierTimer = 0;
+    if(epoch===t.historyEpoch && generation===a.link.generation && buffer===t.term.buffer.active)loadEarlier(a, t).catch(error => reportHost(a, error));
+  }, 200);
 }
 async function loadEarlier(a, t) {
   const retained = t.session.retained ?? 0;
-  if (t.rebuilding || !t.attached || t.renderedStart == null || t.renderedStart <= retained || a.link.state !== 'online') return;
+  if (t.historyLoad || !historyContext(a,t) || t.renderedStart == null || t.renderedStart <= retained) return;
   if (t.term.buffer.active.length >= t.term.options.scrollback) return; // xterm keeps no more lines anyway
   const key = cacheKey(a, t.session.id), head = t.offset;
   let want = Math.max(retained, t.renderedStart - EARLIER_STEP);
-  t.rebuilding = true; t.pendingOutput = []; t.node.classList.add('terminal-loading'); t.node.dataset.loadingLabel = tr('Loading earlier output…');
+  const op={epoch:t.outputEpoch,historyEpoch:t.historyEpoch,generation:a.link.generation,cols:t.term.cols,rows:t.term.rows,start:t.renderedStart};
+  const current=()=>t.historyLoad===op && historyContext(a,t) && t.outputEpoch===op.epoch && t.historyEpoch===op.historyEpoch &&
+    a.link.generation===op.generation && t.term.cols===op.cols && t.term.rows===op.rows && t.renderedStart===op.start && t.offset===head;
+  t.historyLoad=op;t.node.classList.add('terminal-loading'); t.node.dataset.loadingLabel = tr('Loading earlier output…');
   try {
     await scrollback.flush(key);
+    if(!current())return;
     // Assemble [want, head): cached pieces stay local, the rest comes from the host in bounded requests.
     const parts = []; let cursor = head;
     while (cursor > want) {
       const lo = Math.max(want, cursor - 48 * 1024); // one relay frame per reply
       let piece = await scrollback.read(key, lo, cursor);
+      if(!current())return;
       if (!piece) {
         historyFetches++;
         const reply = await a.link.request('session.history', {id: t.session.id, before: cursor, limit: cursor - lo});
+        if(!current())return;
         if (typeof reply.retained === 'number') t.session.retained = reply.retained;
         piece = unb64(reply.data);
         if (!piece.length || reply.offset >= cursor) { want = cursor; break; } // nothing older is available
@@ -762,14 +832,33 @@ async function loadEarlier(a, t) {
     if (want >= t.renderedStart) return;
     const total = parts.reduce((n, p) => n + p.length, 0), bytes = new Uint8Array(total); let at = 0;
     for (const p of parts) { bytes.set(p, at); at += p.length; }
-    const b = t.term.buffer.active, fromBottom = b.baseY - b.viewportY;
-    t.term.reset();
-    await new Promise(resolve => t.term.write(bytes, resolve));
-    for (const late of t.pendingOutput) await new Promise(resolve => t.term.write(late, resolve));
-    t.pendingOutput = []; t.renderedStart = want;
-    t.term.scrollToLine(Math.max(0, t.term.buffer.active.baseY - fromBottom));
-    ackOutput(a, t);
-  } finally { t.rebuilding = false; t.node.classList.remove('terminal-loading'); for (const late of t.pendingOutput) t.term.write(late); t.pendingOutput = []; }
+    await renderTerminal(a,t,async()=>{
+      // Earlier output may itself still be in xterm's parser at fetch completion.
+      // This fence runs after it, so both byte head and actual buffer mode are known.
+      if(!current() || t.renderedEpoch!==op.epoch || t.renderedOffset!==head)return;
+      const b=t.term.buffer.active,fromBottom=b.baseY-b.viewportY;
+      t.historyReplay=op;updateTermInput(a,t);t.touchScroll?.cancel();
+      finishResize(t);t.scrollAnchor?.marker?.dispose();t.scrollAnchor=null;
+      const smooth=t.term.options.smoothScrollDuration;t.term.options.smoothScrollDuration=0;
+      t.term.reset();t.renderedStart=want;
+      try {
+        await new Promise(resolve=>t.term.write(bytes,resolve));
+        // A reset may already have advanced the stream epoch, but it cannot run
+        // its parser reset until this write is complete. Never restore over it.
+        if(!t.disposed && a.terms.get(t.session.id)===t && t.outputEpoch===op.epoch && t.term.cols===op.cols && t.term.rows===op.rows && t.term.buffer.active.type==='normal'){
+          t.term.scrollToLine(Math.max(0,t.term.buffer.active.baseY-fromBottom));
+          rememberScroll(t);
+        }
+      } finally {
+        if(t.historyReplay===op)t.historyReplay=null;
+        if(!t.disposed){t.term.options.smoothScrollDuration=smooth;updateTermInput(a,t);}
+      }
+      ackOutput(a,t);
+    });
+  } finally {
+    if(t.historyLoad===op)t.historyLoad=null;
+    if(!t.historyLoad && !t.historyReplay)t.node.classList.remove('terminal-loading');
+  }
 }
 function updateGeometryLabel(a, t) {
   if (a !== current() || a.active !== t.session.id) return;
@@ -782,21 +871,30 @@ function rememberScroll(t) {
   t.scrollAnchor={bottom:b.viewportY>=b.baseY,line:b.viewportY,
     marker:b.type==='normal' && b.viewportY<b.baseY ? t.term.registerMarker(b.viewportY-b.baseY-b.cursorY) : null};
 }
+function finishResize(t) {
+  t.resizeGeneration=(t.resizeGeneration||0)+1;t.resizing=false;
+  if(t.resizeSmooth!==undefined){t.term.options.smoothScrollDuration=t.resizeSmooth;delete t.resizeSmooth;}
+}
 function resizeTerminal(t, cols, rows) {
   if(t.term.cols===cols && t.term.rows===rows)return;
-  if(t.replaying){t.term.resize(cols,rows);return;}
+  invalidateHistory(t);
+  if(t.replaying){finishResize(t);t.term.resize(cols,rows);return;}
   if(!t.scrollAnchor)rememberScroll(t);
   const anchor=t.scrollAnchor, generation=(t.resizeGeneration||0)+1;t.resizeGeneration=generation;t.resizing=true;
-  const smooth=t.term.options.smoothScrollDuration;t.term.options.smoothScrollDuration=0;
+  t.resizeSmooth??=t.term.options.smoothScrollDuration;t.term.options.smoothScrollDuration=0;
   t.term.resize(cols, rows);
   const restore=()=>{
     t.term.scrollToLine(anchor.bottom ? t.term.buffer.active.baseY : anchor.marker && !anchor.marker.isDisposed ? anchor.marker.line : anchor.line);
     t.term.refresh(0,t.term.rows-1);
   };
-  restore();requestAnimationFrame(()=>{if(t.resizeGeneration!==generation)return;restore();t.resizing=false;t.term.options.smoothScrollDuration=smooth;rememberScroll(t);});
+  restore();requestAnimationFrame(()=>{if(t.resizeGeneration!==generation)return;restore();finishResize(t);rememberScroll(t);});
 }
 function claimSize(a, t) {
   if (!t.attached || a.link.state !== 'online' || t.node.hidden) return;
+  if(t.historyReplay){
+    if(!t.sizePending){t.sizePending=true;t.rendering.finally(()=>{t.sizePending=false;if(!t.disposed && wantsStream(a,t))claimSize(a,t);});}
+    return;
+  }
   const owned=t.ownsSize; t.ownsSize = true;
   if(t.term.element)t.term.element.style.height='100%';
   try {
@@ -896,13 +994,19 @@ async function undockPane(a,id) {
   await selectSession(a,id);
 }
 async function sendInput(a, t, text) {
+  if(t.historyReplay)throw new Error('Wait for earlier output to finish loading.');
   if (a.link.state !== 'online' || !t.session.alive || !t.attached) throw new Error('This terminal is not ready for input.');
   claimSize(a, t);
   const bytes = utf8(text);
-  for (let i = 0; i < bytes.length; i += 8192) await a.link.send({type: 'terminal.input', id: t.session.id, active: true, cols: t.term.cols, rows: t.term.rows, data: b64(bytes.subarray(i, i + 8192))});
+  const generation=a.link.generation;
+  for (let i = 0; i < bytes.length; i += 8192) {
+    if(t.historyReplay || !t.attached || a.link.state!=='online' || a.link.generation!==generation)throw new Error('This terminal is not ready for input.');
+    await a.link.send({type: 'terminal.input', id: t.session.id, active: true, cols: t.term.cols, rows: t.term.rows, data: b64(bytes.subarray(i, i + 8192))});
+  }
 }
 async function insertText(a, t, text) {
   if (!t) throw new Error('Open a shell before pasting.');
+  if(t.historyReplay)throw new Error('Wait for earlier output to finish loading.');
   if (utf8(text).length > 1024 * 1024) throw new Error('Paste is limited to 1 MiB. Upload a file for larger content.');
   if (a.link.state !== 'online' || !t.attached) throw new Error('Wait for the terminal to reconnect before pasting.');
   // Do not allow clipboard text to terminate bracketed paste or smuggle terminal controls.
@@ -1011,7 +1115,7 @@ async function closeView(a, id) {
   a.machine.layout = prune(a.machine.layout,new Set(a.machine.openSessions));
   a.machine.layouts = (a.machine.layouts||[]).map(tree=>prune(tree,new Set(a.machine.openSessions))).filter(Boolean);
   const t=a.terms.get(id);
-  if(t){if(t.attached)await a.link.request('session.detach',{id});t.term.dispose();t.node.remove();a.terms.delete(id);}
+  if(t){if(t.attached)await a.link.request('session.detach',{id});disposeTerm(t);a.terms.delete(id);}
   if(a.active===id)a.active=a.machine.openSessions[0]||'';
   a.machine.layout=a.machine.layouts.find(tree=>leaves(tree).includes(a.active))||null;
   a.machine.lastSession=a.active;await persist();render();
@@ -2076,7 +2180,7 @@ async function manageDevices(a) {
 function forgetMachine(a) {
   confirmAction(tr('Forget this machine?'), tr('This removes its key locally. It does not terminate shells or revoke other browsers. To revoke this saved identity on the host, use Authorized devices first.'), tr('Forget'), async () => {
     if (isAndroid) await nativeCall('notifications.disable', {room: a.machine.room});
-    a.link.stop(); for (const t of a.terms.values()) { t.term.dispose(); t.node.remove(); }
+    a.link.stop(); for (const t of a.terms.values()) { disposeTerm(t); }
     for (const id of a.knownSessions || []) scrollback.purge(cacheKey(a, id)).catch(() => {});
     machines.delete(a.machine.room); vault.data.machines = vault.data.machines.filter(m => m.room !== a.machine.room);
     if (selected === a.machine.room) selected = [...machines.keys()][0] || null;
@@ -2086,7 +2190,7 @@ function forgetMachine(a) {
 async function lockWorkspace() {
   if (!vault.protected || !vault.data) return;
   closeModal(); drawer(); clearActivity(); clearFeedback();hostUpdateJobs.clear();
-  for (const a of machines.values()) { a.link.stop('Locked'); for (const t of a.terms.values()) { t.term.dispose(); t.node.remove(); } }
+  for (const a of machines.values()) { a.link.stop('Locked'); for (const t of a.terms.values()) { disposeTerm(t); } }
   for (const t of transfers) if (!t.done) t.controller.abort();
   machines.clear(); transfers.length = 0;
   $('machine-list').replaceChildren(); $('tabs').replaceChildren(); $('file-list').replaceChildren(); $('settings-content').replaceChildren(); $('transfer-list').replaceChildren(); $('toasts').replaceChildren();
