@@ -18,7 +18,7 @@ import {$, el, button, toast, reportError, clearError, clearFeedback, modal, clo
 import {scan} from './qr.mjs';
 import * as push from './push.mjs';
 
-const {Terminal, FitAddon, WebglAddon} = terminalBundle;
+const {Terminal, FitAddon, WebglAddon, Unicode11Addon} = terminalBundle;
 const TERMINAL_FONT = '"JetBrains Mono", ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace';
 const vault = new Vault(), machines = new Map(), transfers = [];
 let desktopHostAvailable=false;
@@ -571,13 +571,16 @@ function createTerm(a, session) {
   const closePane=button('',()=>closeChoice(closePane,a,[session.id]),'icon-button','close');
   closePane.setAttribute('aria-label',tr('Close {0}',session.name));
   node.append(el('div',{class:'pane-caption'},el('span',{class:'pane-symbol'},icon(sessionIcon(session),15)),title,undock,closePane));
-  const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: TERMINAL_FONT, lineHeight: 1.18,
+  const term = new Terminal({fontSize: prefs().fontSize || 14, fontFamily: TERMINAL_FONT, lineHeight: 1,
     cursorBlink: true, cursorStyle: 'bar', scrollback: isMobile() ? 20000 : 50000, allowProposedApi: true, convertEol: false,
     screenReaderMode: !!prefs().screenReader, scrollOnUserInput: true, smoothScrollDuration: isMobile() ? 0 : 100, rescaleOverlappingGlyphs: true,
     linkHandler: {activate: (_event, uri) => { try { const u = new URL(uri); if (['https:', 'http:'].includes(u.protocol)) window.open(u.href, '_blank', 'noopener,noreferrer'); } catch {} }},
     theme: {background: '#111314', foreground: '#d9dfd3', cursor: '#e7a246', selectionBackground: '#455342', black: '#151918', brightBlack: '#70786f', red: '#d8897c', green: '#a3c391', yellow: '#e7bc73', blue: '#88adcb', magenta: '#c59bc7', cyan: '#8fc5bf', white: '#dbe0d3', brightWhite: '#f1f3eb'}});
   const mount = el('div',{class:'terminal-mount'});node.append(mount);
   const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
+  // Unicode 11 widths (emoji take two cells), as modern terminals and the
+  // programs running in them assume; xterm defaults to Unicode 6.
+  term.loadAddon(new Unicode11Addon()); term.unicode.activeVersion = '11';
   // WebGL draws block and box-drawing glyphs itself so they tile across cells
   // regardless of font and line height; on failure or context loss (browsers
   // cap live WebGL contexts) the terminal keeps the DOM renderer. Automated
