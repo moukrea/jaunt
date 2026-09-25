@@ -580,8 +580,9 @@ function createTerm(a, session) {
   const fit = new FitAddon(); term.loadAddon(fit); term.open(mount);
   // WebGL draws block and box-drawing glyphs itself so they tile across cells
   // regardless of font and line height; on failure or context loss (browsers
-  // cap live WebGL contexts) the terminal keeps the DOM renderer.
-  try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer */ }
+  // cap live WebGL contexts) the terminal keeps the DOM renderer. Automated
+  // browsers keep the DOM renderer: the e2e suites read its rendered rows.
+  if (!navigator.webdriver) try { const webgl = new WebglAddon(); webgl.onContextLoss(() => webgl.dispose()); term.loadAddon(webgl); } catch { /* DOM renderer */ }
   bindTouchScroll(mount,term);
   const t = {session, node, term, fit, offset: null, attached: false, attaching: null, repairing: false, generation: -1, ownsSize: false, renderedStart: null, rebuilding: false, pendingOutput: []};
   a.terms.set(session.id, t);
