@@ -1,0 +1,4 @@
+/* JuliaMono 0.63.2, SIL Open Font License 1.1. See LICENSE-juliamono.txt. */
+@font-face{font-family:'JuliaMono';font-style:normal;font-weight:400;font-display:swap;src:url(./fonts/JuliaMono-Regular.woff2) format('woff2');}
+@font-face{font-family:'JuliaMono';font-style:normal;font-weight:700;font-display:swap;src:url(./fonts/JuliaMono-Bold.woff2) format('woff2');}
+@font-face{font-family:'Symbols Nerd Font Mono';font-style:normal;font-weight:400;font-display:swap;src:url(./fonts/SymbolsNerdFontMono-Regular.woff2) format('woff2');unicode-range:U+E000-F8FF,U+F0000-FFFFD;}

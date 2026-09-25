@@ -19,7 +19,7 @@ import {scan} from './qr.mjs';
 import * as push from './push.mjs';
 
 const {Terminal, FitAddon, WebglAddon, Unicode11Addon} = terminalBundle;
-const TERMINAL_FONT = '"JetBrains Mono", "Symbols Nerd Font Mono", ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace';
+const TERMINAL_FONT = '"JuliaMono", "Symbols Nerd Font Mono", ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace';
 const vault = new Vault(), machines = new Map(), transfers = [];
 let desktopHostAvailable=false;
 let androidAPK = "", desktopRelease = "", desktopUpdateState=null, desktopUpdateOperation=null, androidChannel=null, publishedSite=null;
@@ -2286,7 +2286,7 @@ async function bootstrap() {
   if(desktop){desktopHostAvailable=(await desktop.capabilities()).localHost;desktop.onFrame(message=>{if(message.type==='desktop.update'){desktopUpdateStatus(message);return;}if(message.type==='desktop.open')openNotification(message.host,message.session);});desktop.updates('status').then(desktopUpdateStatus).catch(report);}
   // xterm measures its cell size when a terminal opens: load the bundled font
   // first, without ever holding the workspace back for long.
-  await Promise.race([Promise.all([...['400', '700'].map(w => document.fonts?.load(`${w} 14px "JetBrains Mono"`)), document.fonts?.load('14px "Symbols Nerd Font Mono"', '\ue0a0')]).catch(() => {}), new Promise(done => setTimeout(done, 1500))]);
+  await Promise.race([Promise.all([...['400', '700'].map(w => document.fonts?.load(`${w} 14px "JuliaMono"`)), document.fonts?.load('14px "Symbols Nerd Font Mono"', '\ue0a0')]).catch(() => {}), new Promise(done => setTimeout(done, 1500))]);
   await vault.load();
   if (vault.locked) { $('lock-screen').hidden = false; }
   else await resumeWorkspace();

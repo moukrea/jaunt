@@ -33,16 +33,17 @@ const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/
 await fs.writeFile(path.join(web, 'vendor/xterm.mjs'), terminal.outputFiles[0].contents);
 await fs.copyFile(path.join(root, 'node_modules/@xterm/xterm/css/xterm.css'), path.join(web, 'vendor/xterm.css'));
 await fs.writeFile(path.join(web, 'vendor/LICENSE-xterm.txt'), (await Promise.all(['xterm','addon-fit','addon-webgl','addon-unicode11'].map(name => fs.readFile(path.join(root, `node_modules/@xterm/${name}/LICENSE`), 'utf8')))).join('\n'));
-// Terminal font: JetBrains Mono 2.304 (SIL OFL 1.1). The complete official web
-// fonts (arrows, geometric shapes, block elements) are committed unmodified in
-// web/vendor/fonts from JetBrainsMono-2.304.zip
-// (https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304) and pinned here.
-const fonts = {'JetBrainsMono-Regular.woff2': [400, 'a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2'], 'JetBrainsMono-Bold.woff2': [700, 'c503cc5ec5f8b2c7666b7ecda1adf44bd45f2e6579b2eba0fc292150416588a2']};
-let fontCss = '/* JetBrains Mono 2.304, SIL Open Font License 1.1. See LICENSE-jetbrains-mono.txt. */\n';
+// Terminal font: JuliaMono 0.63.2 (SIL OFL 1.1, Reserved Font Name). It covers every
+// symbol Claude Code draws (⏺ ⎿ ⏵ ⏸ ✶ ✻ …), unlike the other free monospace fonts.
+// The official web fonts are committed unmodified in web/vendor/fonts from
+// JuliaMono-webfonts.tar.gz (https://github.com/cormullion/juliamono/releases/tag/v0.63.2)
+// and pinned here; the Reserved Font Name forbids subsetting them under this name.
+const fonts = {'JuliaMono-Regular.woff2': [400, 'cd371c92e94978a6888b71e89a4b57f443604ad63595150511ceb7d5c354b857'], 'JuliaMono-Bold.woff2': [700, '9ffd596514e31ba6317fffbf367c51c4ff93f2a68a1499c3e80ac9309dcd68fa']};
+let fontCss = '/* JuliaMono 0.63.2, SIL Open Font License 1.1. See LICENSE-juliamono.txt. */\n';
 for (const [file, [weight, sha]] of Object.entries(fonts)) {
   const digest = createHash('sha256').update(await fs.readFile(path.join(web, 'vendor/fonts', file))).digest('hex');
   if (digest !== sha) throw new Error(`Unexpected ${file}; review before changing the pin.`);
-  fontCss += `@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:${weight};font-display:swap;src:url(./fonts/${file}) format('woff2');}\n`;
+  fontCss += `@font-face{font-family:'JuliaMono';font-style:normal;font-weight:${weight};font-display:swap;src:url(./fonts/${file}) format('woff2');}\n`;
 }
 // Icon fallback: Nerd Fonts 3.5.1 "Symbols Nerd Font Mono" (MIT; icon set licenses
 // in LICENSE-nerd-fonts-symbols.txt), SymbolsNerdFontMono-Regular.ttf from
@@ -52,7 +53,7 @@ for (const [file, [weight, sha]] of Object.entries(fonts)) {
 const symbols = 'SymbolsNerdFontMono-Regular.woff2', symbolsSha = '953396d1070eb9af0aad1deba46b922ab3de307435f9c88a9b33408066ca4590';
 if (createHash('sha256').update(await fs.readFile(path.join(web, 'vendor/fonts', symbols))).digest('hex') !== symbolsSha) throw new Error(`Unexpected ${symbols}; review before changing the pin.`);
 fontCss += `@font-face{font-family:'Symbols Nerd Font Mono';font-style:normal;font-weight:400;font-display:swap;src:url(./fonts/${symbols}) format('woff2');unicode-range:U+E000-F8FF,U+F0000-FFFFD;}\n`;
-await fs.writeFile(path.join(web, 'vendor/jetbrains-mono.css'), fontCss);
+await fs.writeFile(path.join(web, 'vendor/terminal-fonts.css'), fontCss);
 const pkg = JSON.parse(await fs.readFile(path.join(root, 'node_modules/jsqr/package.json'), 'utf8'));
 if (pkg.version !== '1.4.0') throw new Error('Unexpected jsQR version; review before changing the pin.');
 const source = await fs.readFile(path.join(root, 'node_modules/jsqr/dist/jsQR.js'), 'utf8');
