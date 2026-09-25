@@ -44,6 +44,14 @@ for (const [file, [weight, sha]] of Object.entries(fonts)) {
   if (digest !== sha) throw new Error(`Unexpected ${file}; review before changing the pin.`);
   fontCss += `@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:${weight};font-display:swap;src:url(./fonts/${file}) format('woff2');}\n`;
 }
+// Icon fallback: Nerd Fonts 3.5.1 "Symbols Nerd Font Mono" (MIT; icon set licenses
+// in LICENSE-nerd-fonts-symbols.txt), SymbolsNerdFontMono-Regular.ttf from
+// NerdFontsSymbolsOnly.zip repackaged as WOFF2 with fontTools. Scoped to the
+// private-use planes, so the browser fetches it only when an icon is drawn and
+// it never replaces emoji or regular symbols.
+const symbols = 'SymbolsNerdFontMono-Regular.woff2', symbolsSha = '953396d1070eb9af0aad1deba46b922ab3de307435f9c88a9b33408066ca4590';
+if (createHash('sha256').update(await fs.readFile(path.join(web, 'vendor/fonts', symbols))).digest('hex') !== symbolsSha) throw new Error(`Unexpected ${symbols}; review before changing the pin.`);
+fontCss += `@font-face{font-family:'Symbols Nerd Font Mono';font-style:normal;font-weight:400;font-display:swap;src:url(./fonts/${symbols}) format('woff2');unicode-range:U+E000-F8FF,U+F0000-FFFFD;}\n`;
 await fs.writeFile(path.join(web, 'vendor/jetbrains-mono.css'), fontCss);
 const pkg = JSON.parse(await fs.readFile(path.join(root, 'node_modules/jsqr/package.json'), 'utf8'));
 if (pkg.version !== '1.4.0') throw new Error('Unexpected jsQR version; review before changing the pin.');
