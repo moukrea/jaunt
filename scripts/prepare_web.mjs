@@ -29,29 +29,22 @@ await fs.writeFile(path.join(web,'vendor/lucide-all.mjs'),allIcons.outputFiles[0
 const brands = await build({stdin:{contents:"export {default as claude} from 'meteor-icons/icons/claude'; export {default as openai} from 'meteor-icons/icons/openai'; export {default as github} from 'meteor-icons/icons/github';",resolveDir:root},bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,write:false});
 await fs.writeFile(path.join(web,'vendor/meteor.mjs'),brands.outputFiles[0].contents);
 await fs.copyFile(path.join(root,'node_modules/meteor-icons/LICENSE'),path.join(web,'vendor/LICENSE-meteor.txt'));
-const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/xterm'; import {FitAddon} from '@xterm/addon-fit'; import {WebglAddon} from '@xterm/addon-webgl'; export default {Terminal, FitAddon, WebglAddon};", resolveDir: root}, bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false});
+const terminal = await build({stdin: {contents: "import {Terminal} from '@xterm/xterm'; import {FitAddon} from '@xterm/addon-fit'; import {WebglAddon} from '@xterm/addon-webgl'; import {Unicode11Addon} from '@xterm/addon-unicode11'; export default {Terminal, FitAddon, WebglAddon, Unicode11Addon};", resolveDir: root}, bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false});
 await fs.writeFile(path.join(web, 'vendor/xterm.mjs'), terminal.outputFiles[0].contents);
 await fs.copyFile(path.join(root, 'node_modules/@xterm/xterm/css/xterm.css'), path.join(web, 'vendor/xterm.css'));
-await fs.writeFile(path.join(web, 'vendor/LICENSE-xterm.txt'), (await Promise.all(['xterm','addon-fit','addon-webgl'].map(name => fs.readFile(path.join(root, `node_modules/@xterm/${name}/LICENSE`), 'utf8')))).join('\n'));
-// Terminal font: JetBrains Mono (SIL OFL 1.1), latin + latin-ext, regular and bold.
-// Other scripts and symbols fall back to the system monospace stack; block and
-// box-drawing characters are drawn by xterm's WebGL renderer, not the font.
-const fontsource = path.join(root, 'node_modules/@fontsource/jetbrains-mono');
-await fs.mkdir(path.join(web, 'vendor/fonts'), {recursive: true});
-let fontCss = '/* JetBrains Mono, SIL Open Font License 1.1. See LICENSE-jetbrains-mono.txt. */\n';
-for (const weight of [400, 700]) {
-  const css = await fs.readFile(path.join(fontsource, `${weight}.css`), 'utf8');
-  for (const subset of ['latin-ext', 'latin']) {
-    const file = `jetbrains-mono-${subset}-${weight}-normal.woff2`;
-    const face = css.split('@font-face').find(block => block.includes(`/${file})`));
-    const range = face?.match(/unicode-range:\s*([^;]+);/)?.[1];
-    if (!range) throw new Error(`Missing ${file} in @fontsource/jetbrains-mono`);
-    await fs.copyFile(path.join(fontsource, 'files', file), path.join(web, 'vendor/fonts', file));
-    fontCss += `@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:${weight};font-display:swap;src:url(./fonts/${file}) format('woff2');unicode-range:${range};}\n`;
-  }
+await fs.writeFile(path.join(web, 'vendor/LICENSE-xterm.txt'), (await Promise.all(['xterm','addon-fit','addon-webgl','addon-unicode11'].map(name => fs.readFile(path.join(root, `node_modules/@xterm/${name}/LICENSE`), 'utf8')))).join('\n'));
+// Terminal font: JetBrains Mono 2.304 (SIL OFL 1.1). The complete official web
+// fonts (arrows, geometric shapes, block elements) are committed unmodified in
+// web/vendor/fonts from JetBrainsMono-2.304.zip
+// (https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304) and pinned here.
+const fonts = {'JetBrainsMono-Regular.woff2': [400, 'a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2'], 'JetBrainsMono-Bold.woff2': [700, 'c503cc5ec5f8b2c7666b7ecda1adf44bd45f2e6579b2eba0fc292150416588a2']};
+let fontCss = '/* JetBrains Mono 2.304, SIL Open Font License 1.1. See LICENSE-jetbrains-mono.txt. */\n';
+for (const [file, [weight, sha]] of Object.entries(fonts)) {
+  const digest = createHash('sha256').update(await fs.readFile(path.join(web, 'vendor/fonts', file))).digest('hex');
+  if (digest !== sha) throw new Error(`Unexpected ${file}; review before changing the pin.`);
+  fontCss += `@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:${weight};font-display:swap;src:url(./fonts/${file}) format('woff2');}\n`;
 }
 await fs.writeFile(path.join(web, 'vendor/jetbrains-mono.css'), fontCss);
-await fs.copyFile(path.join(fontsource, 'LICENSE'), path.join(web, 'vendor/LICENSE-jetbrains-mono.txt'));
 const pkg = JSON.parse(await fs.readFile(path.join(root, 'node_modules/jsqr/package.json'), 'utf8'));
 if (pkg.version !== '1.4.0') throw new Error('Unexpected jsQR version; review before changing the pin.');
 const source = await fs.readFile(path.join(root, 'node_modules/jsqr/dist/jsQR.js'), 'utf8');
