@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.44
+
+- feat(web): add Nerd Fonts symbols as the terminal icon fallback (#133)
+- Source: `d839507ae3b581275e9c506416a26956860aeed9`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).

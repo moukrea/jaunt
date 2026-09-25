@@ -1,3 +1,8 @@
+# jaunt android 0.1.0-beta.42
+
+- feat(web): add Nerd Fonts symbols as the terminal icon fallback (#133)
+- Source: `d839507ae3b581275e9c506416a26956860aeed9`.
+
 # jaunt Android 0.1.0-beta.31 (versionCode 31)
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
