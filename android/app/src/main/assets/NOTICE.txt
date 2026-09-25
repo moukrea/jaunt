@@ -6,7 +6,7 @@ ZXing and ZXing Android Embedded: Apache License 2.0 — https://github.com/zxin
 OkHttp and Okio: Apache License 2.0 — https://github.com/square/okhttp and https://github.com/square/okio
 Kotlin standard library and JetBrains annotations: Apache License 2.0 — https://github.com/JetBrains/kotlin and https://github.com/JetBrains/java-annotations
 
-The bundled web interface also includes jsQR (Apache-2.0) and xterm.js (MIT); their full license texts are in assets/jaunt/vendor/.
+The bundled web interface also includes jsQR (Apache-2.0), xterm.js (MIT) and the JetBrains Mono font (SIL OFL 1.1); their full license texts are in assets/jaunt/vendor/.
 Source and complete pinned dependency inventory: https://github.com/moukrea/jaunt
 
 MIT License
