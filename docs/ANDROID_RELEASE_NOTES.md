@@ -1,3 +1,8 @@
+# jaunt android 0.1.0-beta.40
+
+- fix(web): render block glyphs with WebGL and bundle JetBrains Mono (#131)
+- Source: `613d591134ceee6748e9dfb8e764290ee4e08aac`.
+
 # jaunt Android 0.1.0-beta.31 (versionCode 31)
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).

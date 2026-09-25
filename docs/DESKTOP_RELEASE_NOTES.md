@@ -1,3 +1,8 @@
+# jaunt desktop 0.1.0-beta.42
+
+- fix(web): render block glyphs with WebGL and bundle JetBrains Mono (#131)
+- Source: `613d591134ceee6748e9dfb8e764290ee4e08aac`.
+
 # jaunt desktop 0.1.0-beta.33
 
 - Bundles the beta.41 interface (settings sections contained and foldable, level and revoke from the requester row).
