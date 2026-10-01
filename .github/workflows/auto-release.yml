@@ -1,0 +1,234 @@
+name: Automatic release
+# The release queue of the private source, publishing here: releases, Pages and the relay. The
+# ledger (jaunt-release-state, jaunt-channel-state) and the release tags stay in the source, written
+# with the ledger deploy key; control code is source main, one commit for the whole run (prepare's
+# `control` output). A run starts after a green "CI main <commit>" run, every hour, or by hand.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      site_only:
+        description: 'Only redeploy the last delivered production site (publishes nothing)'
+        type: boolean
+        default: false
+# This lock spans prepare, ALL builds, promotion and public verification.
+# Pending notifications may be replaced; prepare scans the durable Git queue.
+concurrency:
+  group: jaunt-production-release
+  cancel-in-progress: false
+permissions: {}
+env:
+  JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+  JAUNT_RELEASE_TARGET: main
+  JAUNT_CI_MODE: dispatch
+  JAUNT_WORKFLOWS_DIR: .dist/.github/workflows
+  JAUNT_AUTHORITY_FLAGS: '1'
+  # Set to "ready" once android-signer-check.yml printed match / relay-secrets.yml probed the relay.
+  JAUNT_ANDROID_READY: ${{ vars.JAUNT_ANDROID_AUTHORITY == 'ready' }}
+  JAUNT_RELAY_READY: ${{ vars.JAUNT_RELAY_AUTHORITY == 'ready' }}
+jobs:
+  prepare:
+    # A completed CI run counts only when it is this repository's own CI dispatched for a commit of
+    # source main: never a run from a fork, another event or another workflow file.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'workflow_dispatch' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+        startsWith(github.event.workflow_run.display_title, 'CI main ')))
+    runs-on: ubuntu-latest
+    environment: ledger
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      publish: ${{ steps.prepare.outputs.publish }}
+      site: ${{ steps.site.outputs.site }}
+      control: ${{ steps.control.outputs.sha }}
+      sha: ${{ steps.prepare.outputs.sha || steps.site.outputs.sha }}
+      source: ${{ steps.prepare.outputs.source || steps.site.outputs.source }}
+      host: ${{ steps.prepare.outputs.host }}
+      desktop: ${{ steps.prepare.outputs.desktop }}
+      android: ${{ steps.prepare.outputs.android }}
+      relay: ${{ steps.prepare.outputs.relay }}
+      host_tag: ${{ steps.prepare.outputs.host_tag || steps.site.outputs.host_tag }}
+      desktop_tag: ${{ steps.prepare.outputs.desktop_tag || steps.site.outputs.desktop_tag }}
+      android_tag: ${{ steps.prepare.outputs.android_tag || steps.site.outputs.android_tag }}
+    steps:
+      # The ledger key may push to the source: this job runs control code only and installs nothing.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_LEDGER_KEY }}
+          ref: main
+          fetch-depth: 0
+      - id: control
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # This repository's workflows: what each component's build reads (JAUNT_WORKFLOWS_DIR).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: .dist
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Verify publication credentials before touching tags
+        if: ${{ !inputs.site_only }}
+        run: python scripts/release_pipeline.py preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      - name: Prepare oldest unpublished source or resume immutable receipt
+        id: prepare
+        if: ${{ !inputs.site_only }}
+        run: python scripts/release_pipeline.py prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_AUTO_RELEASE_ENABLED: ${{ vars.JAUNT_AUTO_RELEASE_ENABLED }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      # After a delivery or on request (site_only: the last delivered production, unconditionally),
+      # the same lock redeploys the site with the live channels.
+      - name: Otherwise resync channel pages
+        id: site
+        if: steps.prepare.outputs.publish != 'true'
+        run: |
+          if [ "$SITE_ONLY" = true ]; then python scripts/channel_site.py plan --force; else python scripts/channel_site.py plan; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE_ONLY: ${{ inputs.site_only }}
+          JAUNT_AUTO_RELEASE_ENABLED: ${{ vars.JAUNT_AUTO_RELEASE_ENABLED }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+  host:
+    needs: prepare
+    if: needs.prepare.outputs.host == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.host_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  desktop:
+    needs: prepare
+    if: needs.prepare.outputs.desktop == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.desktop_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  android:
+    needs: prepare
+    if: needs.prepare.outputs.android == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.android_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  relay:
+    needs: prepare
+    if: needs.prepare.outputs.relay == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/relay.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  promote:
+    needs: [prepare, host, desktop, android, relay]
+    if: always() && needs.prepare.outputs.publish == 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    environment: ledger
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_LEDGER_KEY }}
+          ref: ${{ needs.prepare.outputs.control }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: python scripts/release_pipeline.py promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+  pages:
+    needs: [prepare, promote]
+    if: always() && (needs.promote.result == 'success' || (needs.prepare.result == 'success' && needs.prepare.outputs.site == 'true'))
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      source: ${{ needs.prepare.outputs.source }}
+      host_tag: ${{ needs.prepare.outputs.host_tag }}
+      desktop_tag: ${{ needs.prepare.outputs.desktop_tag }}
+      android_tag: ${{ needs.prepare.outputs.android_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  receipt:
+    needs: [prepare, host, desktop, android, relay, promote, pages]
+    if: always() && (needs.prepare.outputs.publish == 'true' || needs.prepare.outputs.site == 'true' || needs.prepare.result == 'failure')
+    runs-on: ubuntu-latest
+    environment: ledger
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_LEDGER_KEY }}
+          ref: ${{ needs.prepare.outputs.control || 'main' }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Verify delivered Page and acknowledge source
+        if: needs.pages.result == 'success' && needs.prepare.outputs.publish == 'true'
+        run: python scripts/release_pipeline.py finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      - name: Verify public channel pages
+        if: needs.pages.result == 'success'
+        run: python scripts/channel_site.py verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNELS: ${{ needs.pages.outputs.channels }}
+          DROPPED: ${{ needs.pages.outputs.dropped }}
+          JAUNT_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      # Only the publisher marks the source's pending receipt failed: until automatic publication
+      # is enabled here, the source's own queue may be publishing it.
+      - name: Retain failed receipt for retry
+        if: (failure() || needs.pages.result != 'success') && vars.JAUNT_AUTO_RELEASE_ENABLED == 'true'
+        run: python scripts/release_pipeline.py failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: needs.pages.result != 'success'
+        run: exit 1

@@ -1,0 +1,130 @@
+name: Android APK
+# Called by auto-release.yml only. The build signs in the `release` environment (restricted to main,
+# the only holder of ANDROID_*) and keeps no key; the publisher, outside that environment, keeps
+# the read key (it reads the ledger and the tag in the source) and installs nothing.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      control:
+        description: Source main commit whose control scripts this run uses
+        required: true
+        type: string
+    secrets:
+      SOURCE_READ_KEY:
+        required: true
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      # The bundled web configuration names no relay: devices get it from a host's pairing code.
+      - run: npm ci && npm run prepare-web
+      - name: Test native protocol, lint and build APK
+        run: android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+      # An APK signed by another key cannot update installed apps: they would have to be
+      # uninstalled, which loses their pairings. The signer is pinned below, not in a variable.
+      - name: Sign the immutable Android release
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          jaunt_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          jaunt_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_SIGNER_SHA256: ${{ vars.ANDROID_SIGNER_SHA256 }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          export jaunt_ANDROID_KEYSTORE="$RUNNER_TEMP/jaunt-release.jks"
+          trap 'rm -f "$jaunt_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$jaunt_ANDROID_KEYSTORE"
+          chmod 600 "$jaunt_ANDROID_KEYSTORE"
+          python3 - <<'PY'
+          import os,re
+          version=re.search(r"versionName '([^']+)'",open('android/app/build.gradle').read())[1]
+          assert os.environ['TAG']=='android-v'+version, 'Tag/version mismatch'
+          PY
+          android/gradlew -p android :app:assembleRelease :app:lintRelease --no-daemon
+          mkdir -p android-release
+          cp android/app/build/outputs/apk/release/app-release.apk "android-release/jaunt-$TAG.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "android-release/jaunt-$TAG.apk" > android-release/SIGNING-CERTIFICATE.txt
+          # Android installs an update only over the same signer, and the app refuses any other:
+          # never publish an APK signed by anything but the established key. The pin lives here, not in a
+          # variable anyone with variable access could move: ANDROID_SIGNER_SHA256 may only restate it.
+          SIGNER=0c94f35fe68a30eb155c4aa5b9003f633b5b4884f191c54f84bdeeec956348fe
+          if [ -n "${ANDROID_SIGNER_SHA256:-}" ] && [ "$ANDROID_SIGNER_SHA256" != "$SIGNER" ]; then
+            echo "::error::ANDROID_SIGNER_SHA256 differs from the pinned signer $SIGNER"
+            exit 1
+          fi
+          if ! grep -qx 'Number of signers: 1' android-release/SIGNING-CERTIFICATE.txt \
+            || ! grep -qxF "Signer #1 certificate SHA-256 digest: $SIGNER" android-release/SIGNING-CERTIFICATE.txt; then
+            echo "::error::APK signer mismatch: expected one signer with certificate SHA-256 $SIGNER"
+            grep -E '^(Number of signers|Signer #[0-9]+ certificate SHA-256 digest):' android-release/SIGNING-CERTIFICATE.txt || true
+            exit 1
+          fi
+          (cd android-release && sha256sum -- *.apk SIGNING-CERTIFICATE.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-release
+          path: android-release/
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+      JAUNT_RELEASE_TARGET: main
+    steps:
+      # Kept key: publish reads the release ledger and fetches the tag from the source.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .control
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: android-release
+          path: android-release
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Publish or resume the frozen draft assets
+        run: python .control/scripts/release_pipeline.py publish --directory android-release --component android --tag "$RELEASE_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}

@@ -1,0 +1,3 @@
+# jaunt
+
+This repository serves the jaunt web app at [moukrea.github.io/jaunt](https://moukrea.github.io/jaunt/) and its downloads on the [releases](https://github.com/moukrea/jaunt/releases) page: the host installer and packages, the desktop app and the Android APK. The source code is private: the workflows here build jaunt from it and publish the result. jaunt is a preview for invited testers and is not supported: there is no warranty, no support, and issues and pull requests are not accepted here. See [SECURITY.md](SECURITY.md) for the security model and [LICENSE](LICENSE) for the terms of use.

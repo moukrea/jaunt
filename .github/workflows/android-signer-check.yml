@@ -1,0 +1,53 @@
+name: Android signer check
+# Owner tool: proves that the release environment's keystore is the one installed apps were signed
+# with (an APK from another key cannot update them) before any release is signed with it. Prints
+# match or mismatch (or that ANDROID_SIGNER_SHA256 contradicts the pin), nothing else: no
+# certificate, alias or password.
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: android-signer-check
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions: {}
+    steps:
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compare the keystore's signer with the published one
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_SIGNER_SHA256: ${{ vars.ANDROID_SIGNER_SHA256 }}
+        run: |
+          set -euo pipefail
+          # The same pin as android.yml: ANDROID_SIGNER_SHA256 may only restate it, never move it.
+          SIGNER=0c94f35fe68a30eb155c4aa5b9003f633b5b4884f191c54f84bdeeec956348fe
+          if [ -n "${ANDROID_SIGNER_SHA256:-}" ] && [ "$ANDROID_SIGNER_SHA256" != "$SIGNER" ]; then
+            echo "::error::ANDROID_SIGNER_SHA256 differs from the pinned signer $SIGNER"
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/jaunt-signer-check.jks"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          # The alias is compared inside awk (ENVIRON), so it never reaches a command line;
+          # keytool prints fingerprints as colon-separated uppercase hexadecimal, labels in English.
+          actual=$(keytool -J-Duser.language=en -list -v -keystore "$keystore" -storepass:env ANDROID_STORE_PASSWORD 2>/dev/null | awk '
+            /^Alias name: / { alias = tolower(substr($0, 13)) }
+            alias == tolower(ENVIRON["ANDROID_KEY_ALIAS"]) && /^[[:space:]]*SHA256: / && !found { sub(/^[[:space:]]*SHA256: /, ""); print; found = 1 }' \
+            | tr -d ':' | tr 'A-F' 'a-f') || actual=''
+          if [ -n "$actual" ] && [ "$actual" = "$SIGNER" ]; then
+            echo match
+          else
+            echo mismatch
+            exit 1
+          fi

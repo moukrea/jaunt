@@ -1,0 +1,123 @@
+name: Mirror releases
+# Owner tool: copies published releases of another repository here, byte for byte, under the same
+# tag, name, notes and asset names, so every download URL a device knows keeps working once this
+# repository is moukrea/jaunt. For each tag: read the source release and its files by id (tag views
+# sometimes list no files), download them from their public URLs, check SHA256SUMS, stage a draft
+# here, compare every staged file by id, publish, check again. A release already published here is
+# only verified; a leftover draft is deleted and staged again. At most 40 tags per run: a 3-file
+# tag costs about 15 to 25 API calls, and the workflow token has 1,000 an hour.
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'Public repository to copy from (owner/name)'
+        required: true
+      tags:
+        description: 'Tags to copy, separated by spaces or commas (1 to 40)'
+        required: true
+permissions: {}
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+jobs:
+  mirror:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: write
+    steps:
+      - name: Copy, verify and publish each release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM: ${{ inputs.from }}
+          TAGS: ${{ inputs.tags }}
+        run: |
+          set -euo pipefail
+          to=$GITHUB_REPOSITORY
+          [[ "$FROM" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "from: owner/name expected"; exit 1; }
+          [ "${FROM,,}" != "${to,,}" ] || { echo "from names this repository"; exit 1; }
+          read -r -a tags <<< "$(printf '%s' "$TAGS" | tr ',\n\t' '   ')"
+          [ "${#tags[@]}" -ge 1 ] && [ "${#tags[@]}" -le 40 ] || { echo "Give 1 to 40 tags"; exit 1; }
+          for t in "${tags[@]}"; do [[ "$t" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$ ]] || { echo "Invalid tag: $t"; exit 1; }; done
+          [ -z "$(printf '%s\n' "${tags[@]}" | sort | uniq -d)" ] || { echo "Duplicate tags"; exit 1; }
+          work=$RUNNER_TEMP/mirror
+          mkdir -p "$work"
+          gh api --paginate "repos/$FROM/releases?per_page=100" --jq '.[] | select(.draft == false) | [.tag_name, .id] | @tsv' > "$work/from.tsv"
+          gh api --paginate "repos/$to/releases?per_page=100" --jq '.[] | [.tag_name, .id, .draft] | @tsv' > "$work/to.tsv"
+          # id<TAB>name<TAB>size<TAB>state of a release's files, from the id view.
+          files() { gh api --paginate "repos/$1/releases/$2/assets?per_page=100" --jq '.[] | [.id, .name, .size, .state] | @tsv'; }
+          # The names of a directory's files, sorted; with their SHA-256: two copies are equal when these are.
+          names() { find "$1" -maxdepth 1 -type f -printf '%f\n' | sort; }
+          sums() { (cd "$1" && sha256sum -- * | sort -k 2); }
+          # Downloads every file of release $2 of this repository, by id, into $3.
+          fetch_here() {
+            mkdir -p "$3"
+            files "$to" "$2" > "$3.tsv"
+            [ -s "$3.tsv" ] || { echo "$1: the release here lists no files"; return 1; }
+            while IFS=$'\t' read -r id name size state; do
+              [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] && [ "$state" = uploaded ] || { echo "$1: unexpected file here: $name ($state)"; return 1; }
+              gh api -H 'Accept: application/octet-stream' "repos/$to/releases/assets/$id" > "$3/$name"
+              [ "$(stat -c %s "$3/$name")" = "$size" ] || { echo "$1: $name is incomplete here"; return 1; }
+            done < "$3.tsv"
+          }
+          for t in "${tags[@]}"; do
+            echo "::group::$t"
+            dir=$work/$t
+            source=$dir/source
+            mkdir -p "$source"
+            sid=$(awk -F'\t' -v t="$t" '$1 == t { print $2 }' "$work/from.tsv")
+            [[ "$sid" =~ ^[0-9]+$ ]] || { echo "$t: no single published release in $FROM"; exit 1; }
+            gh api "repos/$FROM/releases/$sid" > "$dir/release.json"
+            files "$FROM" "$sid" > "$dir/source.tsv"
+            [ -s "$dir/source.tsv" ] || { echo "$t: the source release lists no files"; exit 1; }
+            while IFS=$'\t' read -r id name size state; do
+              [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || { echo "$t: unexpected file name: $name"; exit 1; }
+              [ "$state" = uploaded ] || { echo "$t: $name is not uploaded"; exit 1; }
+              curl -fsSL --retry 3 -o "$source/$name" "https://github.com/$FROM/releases/download/$t/$name"
+              [ "$(stat -c %s "$source/$name")" = "$size" ] || { echo "$t: $name has another size than listed"; exit 1; }
+            done < "$dir/source.tsv"
+            [ -f "$source/SHA256SUMS" ] || { echo "$t: no SHA256SUMS"; exit 1; }
+            (cd "$source" && sha256sum --strict --quiet -c SHA256SUMS)
+            # SHA256SUMS covers every other file, and nothing else.
+            diff <(cut -d ' ' -f 3- "$source/SHA256SUMS" | sort) <(names "$source" | grep -vx SHA256SUMS) \
+              || { echo "$t: SHA256SUMS does not list exactly the other files"; exit 1; }
+            published=$(awk -F'\t' -v t="$t" '$1 == t && $3 == "false" { print $2 }' "$work/to.tsv")
+            if [ -n "$published" ]; then
+              # Already here: verify its files against the source's, through their public URLs.
+              files "$to" "$published" | cut -f 2 | sort > "$dir/here.txt"
+              diff "$dir/here.txt" <(names "$source") || { echo "$t: published here with other files"; exit 1; }
+              mkdir -p "$dir/public"
+              while read -r name; do curl -fsSL --retry 3 -o "$dir/public/$name" "https://github.com/$to/releases/download/$t/$name"; done < "$dir/here.txt"
+              diff <(sums "$source") <(sums "$dir/public") || { echo "$t: published here with other bytes"; exit 1; }
+              echo "$t: already published here, identical"
+              echo "::endgroup::"
+              continue
+            fi
+            # A draft has no tag yet: one left by an interrupted run is replaced.
+            awk -F'\t' -v t="$t" '$1 == t && $3 == "true" { print $2 }' "$work/to.tsv" | while read -r draft; do
+              gh api -X DELETE "repos/$to/releases/$draft"
+            done
+            jq -j '.body // ""' "$dir/release.json" > "$dir/notes.md"
+            title=$(jq -r '.name // ""' "$dir/release.json")
+            pre=()
+            [ "$(jq -r '.prerelease' "$dir/release.json")" = true ] && pre=(--prerelease)
+            gh release create "$t" --repo "$to" --target main --draft "${pre[@]}" --latest=false --title "$title" --notes-file "$dir/notes.md" "$source"/*
+            did=''
+            for _ in 1 2 3 4 5 6; do
+              did=$(gh release view "$t" --repo "$to" --json databaseId,isDraft --jq 'select(.isDraft) | .databaseId' 2>/dev/null || true)
+              [ -n "$did" ] && break
+              sleep 5
+            done
+            [[ "$did" =~ ^[0-9]+$ ]] || { echo "$t: the new draft was not found"; exit 1; }
+            fetch_here "$t" "$did" "$dir/draft"
+            diff <(sums "$source") <(sums "$dir/draft") || { echo "$t: the draft differs from the source"; exit 1; }
+            gh api -X PATCH "repos/$to/releases/$did" -F draft=false -f make_latest=false --jq '.tag_name' > "$dir/tag.txt"
+            [ "$(cat "$dir/tag.txt")" = "$t" ] || { echo "$t: published under another tag"; exit 1; }
+            state=$(gh api "repos/$to/releases/$did" --jq '[.draft, .tag_name] | @tsv')
+            [ "$state" = "false"$'\t'"$t" ] || { echo "$t: not published as expected"; exit 1; }
+            files "$to" "$did" | cut -f 2 | sort > "$dir/here.txt"
+            diff "$dir/here.txt" <(names "$source") || { echo "$t: published with other files"; exit 1; }
+            echo "$t: copied, verified and published"
+            echo "::endgroup::"
+          done

@@ -1,0 +1,108 @@
+name: Host release
+# Called by auto-release.yml only. The build runs the release commit's own code and dependencies with
+# a read-only key it does not keep; the publisher installs nothing, so the read key it keeps (the
+# publisher reads the ledger and the tag in the source) never meets third-party code.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      control:
+        description: Source main commit whose control scripts this run uses
+        required: true
+        type: string
+    secrets:
+      SOURCE_READ_KEY:
+        required: true
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      # The coordinator's own tests are control plane, validated by main CI; they
+      # must not block a frozen release commit that carries older copies of them.
+      - run: pytest -q --ignore=tests/test_release_pipeline.py
+        env:
+          PYTEST_ADDOPTS: --tb=line
+      - run: python scripts/build_release.py
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .control
+          persist-credentials: false
+      - name: Require the tag's version in the package
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - "$TAG" <<'PY'
+          import sys,tomllib
+          from packaging.version import Version
+          # The trusted copy maps production and channel candidate tags to PEP 440.
+          sys.path.insert(0,'.control/scripts')
+          import update_channels
+          configured=tomllib.load(open('pyproject.toml','rb'))['project']['version']
+          assert Version(update_channels.python_version(sys.argv[1]))==Version(configured), 'Tag/package version mismatch'
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: host-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+      JAUNT_RELEASE_TARGET: main
+    steps:
+      # Kept key: publish reads the release ledger and fetches the tag from the source.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+      - name: Read trusted resumable publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .control
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: host-release
+          path: dist
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Publish or resume the frozen draft assets
+        run: python .control/scripts/release_pipeline.py publish --directory dist --component host --tag "$RELEASE_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}

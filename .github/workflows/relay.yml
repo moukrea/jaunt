@@ -1,0 +1,66 @@
+name: Relay
+# Called by auto-release.yml only, when a release changes relay/.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      control:
+        description: Source main commit whose control scripts this run uses
+        required: true
+        type: string
+    secrets:
+      SOURCE_READ_KEY:
+        required: true
+permissions: {}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: relay-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: npm ci
+      # Includes the configuration guard (tests/relay_config.test.mjs): a wrangler.jsonc that would
+      # drop or rename the Durable Objects, and every registration with them, never deploys.
+      - run: npm test && npm run test:relay
+      - name: Require deployment authority
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Deploy Worker and Durable Object
+        run: npx --no-install wrangler deploy --config relay/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: pip install 'aiohttp>=3.11,<4'
+      - name: Read trusted publication probe
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .control
+          persist-credentials: false
+      - run: python .control/scripts/release_pipeline.py relay-probe
+        env:
+          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
+          # One of the Worker's RELAY_KEYS, kept only for this probe.
+          JAUNT_RELAY_KEY: ${{ secrets.JAUNT_RELAY_PROBE_KEY }}
+          # 1 once the relay is closed: a deploy that would reopen registration fails here.
+          JAUNT_RELAY_EXPECT_REQUIRED: ${{ vars.JAUNT_RELAY_KEY_REQUIRED }}

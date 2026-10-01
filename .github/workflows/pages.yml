@@ -1,0 +1,250 @@
+name: Pages
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      source:
+        required: true
+        type: string
+      host_tag:
+        required: true
+        type: string
+      desktop_tag:
+        required: true
+        type: string
+      android_tag:
+        required: true
+        type: string
+      control:
+        description: Source main commit whose control scripts this run uses
+        required: true
+        type: string
+    secrets:
+      SOURCE_READ_KEY:
+        required: true
+    outputs:
+      channels:
+        description: ch/index.json entries actually deployed
+        value: ${{ jobs.publish.outputs.channels }}
+      dropped:
+        description: Live channels whose candidate web could not be deployed
+        value: ${{ jobs.publish.outputs.dropped }}
+# One site, redeployed whole: production at the root and ch/<name>/ for each live
+# channel. Only auto-release.yml calls this, under jaunt-production-release.
+# Control code always comes from the run's source main commit (.control), never
+# from the production or candidate commit deployed.
+permissions: {}
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  channels:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      channels: ${{ steps.select.outputs.channels }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      # Kept key: select reads the channel ledger in the source. Nothing is installed here.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .control
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Read the live channels under the production lock
+        id: select
+        working-directory: .control
+        run: python scripts/channel_site.py select
+        env:
+          GH_TOKEN: ${{ github.token }}
+  # Candidate code runs here only: no secret, no Pages authority, no stored credential.
+  channel-web:
+    needs: channels
+    if: needs.channels.outputs.count != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.channels.outputs.channels) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ matrix.channel.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run prepare-web
+        env:
+          jaunt_PRODUCTION: '1'
+          jaunt_RELEASE_TAG: ${{ matrix.channel.tags.host }}
+          jaunt_ANDROID_RELEASE_TAG: ${{ matrix.channel.tags.android }}
+          jaunt_DESKTOP_RELEASE_TAG: ${{ matrix.channel.tags.desktop }}
+          jaunt_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: channel-web-${{ matrix.channel.name }}
+          path: web
+          retention-days: 1
+  publish:
+    needs: [channels, channel-web]
+    # A failed candidate web never blocks production: it is dropped and reported.
+    if: ${{ !cancelled() && needs.channels.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    outputs:
+      channels: ${{ steps.assemble.outputs.channels }}
+      dropped: ${{ steps.assemble.outputs.dropped }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: npm ci
+      - run: npm run prepare-web
+        env:
+          jaunt_PRODUCTION: '1'
+          jaunt_RELEASE_TAG: ${{ inputs.host_tag }}
+          jaunt_ANDROID_RELEASE_TAG: ${{ inputs.android_tag }}
+          jaunt_DESKTOP_RELEASE_TAG: ${{ inputs.desktop_tag }}
+          jaunt_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+      # Every client checks update documents against moukrea/jaunt and the page it knows, whatever
+      # repository builds them (this one may still be named jaunt-dist).
+      - name: Bind the public Page to its verified source
+        env:
+          RELEASE_SOURCE: ${{ inputs.source }}
+          PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+        run: |
+          python - <<'PYCONFIG'
+          import json,os,pathlib,re
+          source=os.environ['RELEASE_SOURCE']
+          assert re.fullmatch('[0-9a-f]{40}',source)
+          page=os.environ['PAGE_URL'].rstrip('/')+'/'
+          assert page.startswith('https://')
+          p=pathlib.Path('web/config.json')
+          value=json.loads(p.read_text());value.update(releaseSource=source,repository='moukrea/jaunt',page=page)
+          p.write_text(json.dumps(value,indent=2)+'\n')
+          PYCONFIG
+      - run: python scripts/check_project.py
+      # Main's release tooling: it reads release files by id (JAU-108).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .control
+          persist-credentials: false
+      - name: Require published host assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).release")
+          python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern host-manifest.json --pattern SHA256SUMS --pattern 'jaunt_host-*.whl' --directory /tmp/jaunt-release
+          python - <<'PYVERIFY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('/tmp/jaunt-release')
+          manifest=json.loads((root/'host-manifest.json').read_text())
+          name=manifest['wheel']
+          assert pathlib.Path(name).name==name
+          assert hashlib.sha256((root/name).read_bytes()).hexdigest()==manifest['sha256']
+          rows=(root/'SHA256SUMS').read_text().splitlines()
+          assert len(rows)==2
+          verified=set()
+          for row in rows:
+              digest,filename=row.split('  ',1)
+              assert filename in {name,'host-manifest.json'}
+              assert hashlib.sha256((root/filename).read_bytes()).hexdigest()==digest
+              verified.add(filename)
+          assert verified=={name,'host-manifest.json'}
+          PYVERIFY
+      - name: Require published Android assets when advertised
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).androidRelease || ''")
+          if [ -n "$TAG" ]; then
+            python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern '*.apk' --pattern SHA256SUMS --pattern SIGNING-CERTIFICATE.txt --directory /tmp/jaunt-android-release
+            python3 - <<'PYANDROID'
+          import hashlib,pathlib
+          root=pathlib.Path('/tmp/jaunt-android-release')
+          rows=(root/'SHA256SUMS').read_text().splitlines()
+          assert len(rows)==2
+          seen=set()
+          for row in rows:
+              digest,name=row.split('  ',1)
+              assert pathlib.Path(name).name==name and (name.endswith('.apk') or name=='SIGNING-CERTIFICATE.txt')
+              assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest
+              seen.add(name)
+          assert len(seen)==2 and 'SIGNING-CERTIFICATE.txt' in seen
+          PYANDROID
+          fi
+      - name: Require verified published desktop archive when advertised
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(node -p "JSON.parse(require('fs').readFileSync('web/config.json')).desktopRelease || ''")
+          if [ -n "$TAG" ]; then
+            python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern '*-x64.tar.gz' --pattern SHA256SUMS --directory /tmp/jaunt-desktop-release
+            python3 - <<'PYDESKTOP'
+          import hashlib,pathlib
+          root=pathlib.Path('/tmp/jaunt-desktop-release')
+          archive,=root.glob('*-x64.tar.gz')
+          checks=dict(row.split('  ',1)[::-1] for row in (root/'SHA256SUMS').read_text().splitlines())
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
+          PYDESKTOP
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.channel-web.result != 'skipped'
+        continue-on-error: true
+        with:
+          pattern: channel-web-*
+          path: .channel-webs
+      - name: Place channel pages and publish their list
+        id: assemble
+        run: python .control/scripts/channel_site.py assemble --site web --webs .channel-webs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNELS: ${{ needs.channels.outputs.channels }}
+      # Which repository serves the Page, for the migration's checks; outside the service worker's cache.
+      - run: printf 'dist\n' > web/pages-origin.txt
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      # What actions/upload-pages-artifact v3.0.1 does, inline: it calls upload-artifact by tag,
+      # which a repository requiring actions pinned to a commit refuses.
+      - name: Archive the site for Pages
+        run: tar --dereference --hard-dereference --directory web -cvf "$RUNNER_TEMP/artifact.tar" --exclude=.git --exclude=.github .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        id: deployment

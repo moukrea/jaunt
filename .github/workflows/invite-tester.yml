@@ -1,0 +1,62 @@
+name: Invite a tester
+# Owner tool: create, list or revoke a tester invite on the relay. Job logs and summaries are public,
+# so the script prints no key and no tester name: create and list are encrypted with age to the
+# repository variable OWNER_PUBLIC_KEY (an age or SSH public key) and refused without it; revoke
+# prints the id only. The inputs are read from the event file by the script, never interpolated
+# into a command.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'create, list or revoke'
+        type: choice
+        options: [list, create, revoke]
+        default: list
+      name:
+        description: "create: the tester's name (not printed; still run metadata, so a first name or a pseudonym)"
+        required: false
+        default: ''
+      max_hosts:
+        description: 'create: how many machines the key may register (1-100)'
+        required: false
+        default: '10'
+      id:
+        description: 'revoke: the invite id (inv-...)'
+        required: false
+        default: ''
+      forget_hosts:
+        description: 'revoke: also forget and disconnect the hosts that key registered'
+        type: boolean
+        default: false
+permissions: {}
+concurrency:
+  group: invite-tester
+  cancel-in-progress: false
+jobs:
+  invite:
+    # Only from the default branch; RELAY_ADMIN_KEY lives in the relay-admin environment,
+    # restricted to that branch.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: relay-admin
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Install age
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+      - name: Create, list or revoke
+        env:
+          JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
+          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
+          OWNER_PUBLIC_KEY: ${{ vars.OWNER_PUBLIC_KEY }}
+        run: python scripts/invite_tester.py github

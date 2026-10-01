@@ -1,0 +1,235 @@
+name: CI
+# Tests one commit of the private source (moukrea/jaunt-src), started by hand or by the release
+# queue: gh workflow run ci.yml -f sha=<commit> -f kind=pr -f pr=<number>, or -f kind=main for a
+# commit of source main. "CI main <commit>" runs are what the queue accepts before publishing that
+# commit. Logs are public: pytest prints one line per failure.
+run-name: CI ${{ inputs.kind }} ${{ inputs.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      kind:
+        description: 'main: a commit of source main (the release queue waits for it); pr: a proposed change'
+        type: choice
+        options: [pr, main]
+        default: pr
+      pr:
+        description: 'pr: the change number, so a newer run of the same change replaces an older one'
+        required: false
+        default: ''
+permissions: {}
+concurrency:
+  group: ci-${{ inputs.kind }}-${{ inputs.pr || inputs.sha }}
+  cancel-in-progress: ${{ inputs.kind == 'pr' }}
+env:
+  PYTEST_ADDOPTS: --tb=line
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+          KIND: ${{ inputs.kind }}
+          PR: ${{ inputs.pr }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+          [[ "$KIND" == main || "$KIND" == pr ]] || { echo "kind must be main or pr"; exit 1; }
+          [[ -z "$PR" || "$PR" =~ ^[1-9][0-9]{0,6}$ ]] || { echo "pr must be a number"; exit 1; }
+  lint:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: npm ci
+      - run: npm run prepare-web
+      - run: python scripts/check_project.py
+  test:
+    runs-on: ubuntu-latest
+    needs: [host, browser-and-relay, installer-fedora, windows]
+    if: always()
+    permissions: {}
+    steps:
+      - name: Require every real test suite to succeed
+        env:
+          HOST_RESULT: ${{ needs.host.result }}
+          BROWSER_RELAY_RESULT: ${{ needs.browser-and-relay.result }}
+          FEDORA_RESULT: ${{ needs.installer-fedora.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          test "$HOST_RESULT" = success
+          test "$BROWSER_RELAY_RESULT" = success
+          test "$FEDORA_RESULT" = success
+          test "$WINDOWS_RESULT" = success
+  installer-fedora:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        fedora: ['43', '44']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: Install the public wheel with the candidate installer on Fedora
+        env:
+          FEDORA_VERSION: ${{ matrix.fedora }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" \
+            -e jaunt_NO_SERVICE=1 -e jaunt_SKIP_PAIR=1 -e jaunt_RELAY_URL=wss://relay.invalid \
+            "fedora:$FEDORA_VERSION" bash -c '
+              set -euo pipefail
+              cat /etc/fedora-release
+              cat /src/install.sh | bash
+              expected=$(/root/.local/share/jaunt/runtime/current/bin/python -c "import json,urllib.request; print(json.load(urllib.request.urlopen(\"https://moukrea.github.io/jaunt/config.json\", timeout=30))[\"release\"])")
+              /root/.local/share/jaunt/runtime/current/bin/python -c "import json; from pathlib import Path; assert json.loads((Path.home()/\".local/share/jaunt/installation.json\").read_text())[\"tag\"] == \"$expected\""
+              /root/.local/bin/jaunt --version
+              /root/.local/bin/jaunt stop
+            '
+      - name: Install with curl isolated from the installer temporary directory
+        if: matrix.fedora == '44'
+        run: python3 tests/installer_namespace_e2e.py
+      - name: Install with full temporary storage and recover from curl write errors
+        if: matrix.fedora == '44'
+        run: python3 tests/installer_storage_e2e.py
+  host:
+    needs: guard
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: pytest -q
+      - run: python scripts/build_release.py
+  windows:
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: pytest -q -rA tests/test_windows.py tests/test_screen.py tests/test_termstate.py
+      - run: python tests/windows_install_e2e.py
+  browser-and-relay:
+    # About twenty real browser, desktop and installer suites run in sequence here.
+    needs: guard
+    timeout-minutes: 35
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: npm ci
+      - run: npm run prepare-web
+      - run: python scripts/check_project.py
+      - run: npm test
+      - run: npm run test:relay
+      # scripts/invite_tester.py against the local Worker (skipped by the host job, which has no npm packages).
+      - run: python -m pytest -q tests/test_invite_tester.py
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_e2e.py
+      - run: xvfb-run -a python tests/shared_workspace_e2e.py
+      - run: xvfb-run -a python tests/desktop_download_e2e.py
+      - run: python tests/feedback_e2e.py
+      - run: python tests/terminal_render_e2e.py
+      - run: python tests/workspace_usability_e2e.py
+      - run: python tests/workspace_sync_e2e.py
+      - run: python tests/latency_e2e.py
+      - run: python tests/flow_control_e2e.py
+      - run: python tests/scrollback_e2e.py
+      - run: python tests/mobile_scroll_e2e.py
+      - run: python tests/history_geometry_e2e.py
+      - run: python tests/restart_e2e.py
+      - run: python tests/tab_switch_e2e.py
+      - run: python tests/remote_paste_e2e.py
+      - run: python tests/artifacts_e2e.py
+      - run: python tests/artifact_runtime_e2e.py
+      - run: python tests/rich_view_e2e.py
+      - run: python tests/rich_control_e2e.py
+      - run: python tests/rich_codex_e2e.py
+      - run: python tests/rich_parity_e2e.py
+      - run: python tests/webgl_render_e2e.py
+      - run: python tests/android_download_e2e.py
+      - run: python tests/agents_e2e.py
+      - run: python tests/agents_ui_e2e.py
+      - run: python tests/bridge_ui_e2e.py
+      - run: python tests/i18n_e2e.py
+      - run: xvfb-run -a python tests/pwa_e2e.py
+      - run: python tests/handoff_e2e.py
+      - run: python tests/browser_e2e.py
+        env:
+          jaunt_E2E_RELAY: workerd
+      - run: python scripts/build_release.py
+      - run: python tests/installer_e2e.py
+      - run: python tests/client_update_e2e.py
+      # The legacy host fixture is a release of this repository (mirrored from the source's own).
+      - name: Download the public legacy host fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+        run: python scripts/release_pipeline.py download --tag v0.1.0-beta.10 --pattern '*.whl' --pattern 'host-manifest.json' --pattern 'SHA256SUMS' --directory "$RUNNER_TEMP/legacy-host"
+      - name: Verify legacy restart protection and explicit migration
+        env:
+          jaunt_LEGACY_RELEASE_DIR: ${{ runner.temp }}/legacy-host
+        run: python tests/installer_e2e.py
