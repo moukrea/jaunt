@@ -78,6 +78,20 @@ jobs:
           test "$BROWSER_RELAY_RESULT" = success
           test "$FEDORA_RESULT" = success
           test "$WINDOWS_RESULT" = success
+  # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
+  # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
+  # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
+  release:
+    needs: [lint, test]
+    if: inputs.kind == 'main' && success()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start the release queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run auto-release.yml --repo "$GITHUB_REPOSITORY" --ref main
   installer-fedora:
     needs: guard
     runs-on: ubuntu-latest

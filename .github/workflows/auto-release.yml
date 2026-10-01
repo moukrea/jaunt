@@ -139,8 +139,9 @@ jobs:
       ref: ${{ needs.prepare.outputs.sha }}
       tag: ${{ needs.prepare.outputs.android_tag }}
       control: ${{ needs.prepare.outputs.control }}
-    secrets:
-      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+    # Its build reads an environment's secrets (Android signing / Cloudflare), which GitHub hands to a
+    # called workflow only through inherit; the repository-level secrets inherited are SOURCE_READ_KEY.
+    secrets: inherit
   relay:
     needs: prepare
     if: needs.prepare.outputs.relay == 'true'
@@ -150,8 +151,9 @@ jobs:
     with:
       ref: ${{ needs.prepare.outputs.sha }}
       control: ${{ needs.prepare.outputs.control }}
-    secrets:
-      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+    # Its build reads an environment's secrets (Android signing / Cloudflare), which GitHub hands to a
+    # called workflow only through inherit; the repository-level secrets inherited are SOURCE_READ_KEY.
+    secrets: inherit
   promote:
     needs: [prepare, host, desktop, android, relay]
     if: always() && needs.prepare.outputs.publish == 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
@@ -188,8 +190,8 @@ jobs:
       desktop_tag: ${{ needs.prepare.outputs.desktop_tag }}
       android_tag: ${{ needs.prepare.outputs.android_tag }}
       control: ${{ needs.prepare.outputs.control }}
-    secrets:
-      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+    # Like every called workflow with an environment job: inherit (only SOURCE_READ_KEY is repository-level).
+    secrets: inherit
   receipt:
     needs: [prepare, host, desktop, android, relay, promote, pages]
     if: always() && (needs.prepare.outputs.publish == 'true' || needs.prepare.outputs.site == 'true' || needs.prepare.result == 'failure')
