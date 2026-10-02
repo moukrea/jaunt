@@ -171,7 +171,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -e . -r requirements-dev.txt
-      - run: pytest -q -rA tests/test_windows.py tests/test_screen.py tests/test_termstate.py
+      - run: pytest -q -rA tests/test_windows.py tests/test_screen.py tests/test_termstate.py tests/test_direct.py
       - run: python tests/windows_install_e2e.py
   browser-and-relay:
     # About twenty real browser, desktop and installer suites run in sequence here.
@@ -205,16 +205,20 @@ jobs:
       - run: python tests/browser_e2e.py
       - run: xvfb-run -a python tests/shared_workspace_e2e.py
       - run: xvfb-run -a python tests/desktop_download_e2e.py
+      - run: xvfb-run -a python tests/desktop_artifacts_e2e.py
       - run: python tests/feedback_e2e.py
       - run: python tests/terminal_render_e2e.py
       - run: python tests/workspace_usability_e2e.py
       - run: python tests/workspace_sync_e2e.py
       - run: python tests/latency_e2e.py
       - run: python tests/flow_control_e2e.py
+      - run: python tests/direct_e2e.py
       - run: python tests/scrollback_e2e.py
       - run: python tests/mobile_scroll_e2e.py
       - run: python tests/history_geometry_e2e.py
       - run: python tests/restart_e2e.py
+      - run: python tests/host_crash_e2e.py
+      - run: python tests/host_systemd_e2e.py
       - run: python tests/tab_switch_e2e.py
       - run: python tests/remote_paste_e2e.py
       - run: python tests/artifacts_e2e.py
