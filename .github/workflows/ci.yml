@@ -63,7 +63,7 @@ jobs:
       - run: python scripts/check_project.py
   test:
     runs-on: ubuntu-latest
-    needs: [host, browser-and-relay, installer-fedora, windows]
+    needs: [host, browser-and-relay, installer-fedora, windows, desktop-agent]
     if: always()
     permissions: {}
     steps:
@@ -73,11 +73,13 @@ jobs:
           BROWSER_RELAY_RESULT: ${{ needs.browser-and-relay.result }}
           FEDORA_RESULT: ${{ needs.installer-fedora.result }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
+          DESKTOP_AGENT_RESULT: ${{ needs.desktop-agent.result }}
         run: |
           test "$HOST_RESULT" = success
           test "$BROWSER_RELAY_RESULT" = success
           test "$FEDORA_RESULT" = success
           test "$WINDOWS_RESULT" = success
+          test "$DESKTOP_AGENT_RESULT" = success
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -154,6 +156,49 @@ jobs:
       - run: pip install -e . -r requirements-dev.txt
       - run: pytest -q
       - run: python scripts/build_release.py
+  desktop-agent:
+    # The native desktop agent (agent/desktop, docs/DESKTOP.md), not shipped yet: built and
+    # smoke-tested on each platform it targets by the source's own agent/desktop/ci.sh, so its build
+    # steps change with the source, not here. A commit without that script passes at once.
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-latest
+            platform: macos-universal
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: crate
+        shell: bash
+        run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo "No desktop agent in this commit"; fi
+      - if: steps.crate.outputs.present == 'true'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: bash agent/desktop/ci.sh "$PLATFORM"
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-agent-${{ matrix.platform }}
+          path: dist/desktop-agent/
+          if-no-files-found: error
+          retention-days: 1
   windows:
     needs: guard
     runs-on: windows-latest
