@@ -1,7 +1,8 @@
 name: Host release
-# Called by auto-release.yml only. The build runs the release commit's own code and dependencies with
-# a read-only key it does not keep; the publisher installs nothing, so the read key it keeps (the
-# publisher reads the ledger and the tag in the source) never meets third-party code.
+# Called by auto-release.yml only. The builds (the desktop agent per platform, then the wheel) run the
+# release commit's own code and dependencies with a read-only key they do not keep; the publisher
+# installs nothing, so the read key it keeps (the publisher reads the ledger and the tag in the
+# source) never meets third-party code.
 on:
   workflow_call:
     inputs:
@@ -20,7 +21,50 @@ on:
         required: true
 permissions: {}
 jobs:
+  agent:
+    # The desktop agent ships with the host (docs/DESKTOP.md, "Shipping"): built, tested and
+    # smoke-tested per platform by the release commit's own agent/desktop/ci.sh (release mode), so
+    # its build steps change with the source. A commit without that script ships no agent.
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - os: windows-latest
+            platform: windows-x86_64
+          - os: macos-latest
+            platform: macos-universal
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - id: crate
+        shell: bash
+        run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo "No desktop agent in this commit"; fi
+      - if: steps.crate.outputs.present == 'true'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: bash agent/desktop/ci.sh "$PLATFORM" release
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: host-agent-${{ matrix.platform }}
+          path: dist/agent-release/
+          if-no-files-found: error
+          retention-days: 1
   build:
+    needs: agent
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,7 +87,18 @@ jobs:
       - run: pytest -q --ignore=tests/test_release_pipeline.py
         env:
           PYTEST_ADDOPTS: --tb=line
-      - run: python scripts/build_release.py
+      - id: crate
+        run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; fi
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: host-agent-*
+          path: dist-agents
+          merge-multiple: true
+      # A source with the agent publishes it for every platform (build_release.py refuses one missing).
+      - env:
+          AGENTS: ${{ steps.crate.outputs.present }}
+        run: if [ "$AGENTS" = true ]; then python scripts/build_release.py --agents dist-agents; else python scripts/build_release.py; fi
       - name: Read trusted resumable publisher
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

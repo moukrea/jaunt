@@ -157,9 +157,10 @@ jobs:
       - run: pytest -q
       - run: python scripts/build_release.py
   desktop-agent:
-    # The native desktop agent (agent/desktop, docs/DESKTOP.md), not shipped yet: built and
-    # smoke-tested on each platform it targets by the source's own agent/desktop/ci.sh, so its build
-    # steps change with the source, not here. A commit without that script passes at once.
+    # The native desktop agent (agent/desktop, docs/DESKTOP.md), which the host release ships: built
+    # as released and tested on each platform it targets by the source's own agent/desktop/ci.sh (the
+    # release's job agent runs the same script), so its build steps change with the source, not
+    # here. A commit without that script passes at once.
     needs: guard
     strategy:
       fail-fast: false

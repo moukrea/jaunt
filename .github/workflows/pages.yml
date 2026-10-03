@@ -175,15 +175,22 @@ jobs:
           name=manifest['wheel']
           assert pathlib.Path(name).name==name
           assert hashlib.sha256((root/name).read_bytes()).hexdigest()==manifest['sha256']
+          # The desktop agents (from the release that ships them) are listed with their manifest
+          # hashes; the publisher verified their bytes (release_pipeline.verify_assets).
+          agents={a['file']:a['sha256'] for a in (manifest.get('desktopAgent') or {}).values()}
+          assert all(pathlib.Path(f).name==f for f in agents)
           rows=(root/'SHA256SUMS').read_text().splitlines()
-          assert len(rows)==2
+          assert len(rows)==2+len(agents)
           verified=set()
           for row in rows:
               digest,filename=row.split('  ',1)
-              assert filename in {name,'host-manifest.json'}
-              assert hashlib.sha256((root/filename).read_bytes()).hexdigest()==digest
+              assert filename in {name,'host-manifest.json',*agents}
+              if filename in agents:
+                  assert digest==agents[filename]
+              else:
+                  assert hashlib.sha256((root/filename).read_bytes()).hexdigest()==digest
               verified.add(filename)
-          assert verified=={name,'host-manifest.json'}
+          assert verified=={name,'host-manifest.json',*agents}
           PYVERIFY
       - name: Require published Android assets when advertised
         env:
