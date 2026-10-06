@@ -287,6 +287,9 @@ jobs:
       - run: python tests/agents_e2e.py
       - run: python tests/agents_ui_e2e.py
       - run: python tests/agentshome_e2e.py
+      # A suite newer than some merges still in the release queue (which runs main CI on them with
+      # this workflow) runs only where the source has it.
+      - run: if [ -f tests/agentshome_ui_e2e.py ]; then python tests/agentshome_ui_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/bridge_ui_e2e.py
       - run: python tests/i18n_e2e.py
       - run: xvfb-run -a python tests/pwa_e2e.py
