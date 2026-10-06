@@ -119,9 +119,11 @@ jobs:
             "fedora:$FEDORA_VERSION" bash -c '
               set -euo pipefail
               cat /etc/fedora-release
+              # The release the site announces before the install: one may be published meanwhile
+              # (scripts/installed_release.py accepts that one or this one, nothing else).
+              curl -fsS --retry 3 -o /var/tmp/config-before.json https://moukrea.github.io/jaunt/config.json
               cat /src/install.sh | bash
-              expected=$(/root/.local/share/jaunt/runtime/current/bin/python -c "import json,urllib.request; print(json.load(urllib.request.urlopen(\"https://moukrea.github.io/jaunt/config.json\", timeout=30))[\"release\"])")
-              /root/.local/share/jaunt/runtime/current/bin/python -c "import json; from pathlib import Path; assert json.loads((Path.home()/\".local/share/jaunt/installation.json\").read_text())[\"tag\"] == \"$expected\""
+              /root/.local/share/jaunt/runtime/current/bin/python /src/scripts/installed_release.py --before /var/tmp/config-before.json
               /root/.local/bin/jaunt --version
               /root/.local/bin/jaunt stop
             '
