@@ -123,7 +123,14 @@ jobs:
               # (scripts/installed_release.py accepts that one or this one, nothing else).
               curl -fsS --retry 3 -o /var/tmp/config-before.json https://moukrea.github.io/jaunt/config.json
               cat /src/install.sh | bash
-              /root/.local/share/jaunt/runtime/current/bin/python /src/scripts/installed_release.py --before /var/tmp/config-before.json
+              # A source from before scripts/installed_release.py (the release queue tests older merges with
+              # this workflow) checks the release announced after the install, as it used to.
+              if [ -f /src/scripts/installed_release.py ]; then
+                /root/.local/share/jaunt/runtime/current/bin/python /src/scripts/installed_release.py --before /var/tmp/config-before.json
+              else
+                expected=$(/root/.local/share/jaunt/runtime/current/bin/python -c "import json,urllib.request; print(json.load(urllib.request.urlopen(\"https://moukrea.github.io/jaunt/config.json\", timeout=30))[\"release\"])")
+                /root/.local/share/jaunt/runtime/current/bin/python -c "import json; from pathlib import Path; assert json.loads((Path.home()/\".local/share/jaunt/installation.json\").read_text())[\"tag\"] == \"$expected\""
+              fi
               /root/.local/bin/jaunt --version
               /root/.local/bin/jaunt stop
             '
