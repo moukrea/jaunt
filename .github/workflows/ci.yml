@@ -120,15 +120,17 @@ jobs:
               set -euo pipefail
               cat /etc/fedora-release
               # The release the site announces before the install: one may be published meanwhile
-              # (scripts/installed_release.py accepts that one or this one, nothing else).
-              curl -fsS --retry 3 -o /var/tmp/config-before.json https://moukrea.github.io/jaunt/config.json
+              # (scripts/installed_release.py accepts that one or this one, or the one a CDN edge
+              # still caches, nothing else). Pages fetches retry for up to 2 min: a release redeploys it.
+              curl -fsS --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 120 --connect-timeout 10 --max-time 30 -o /var/tmp/config-before.json https://moukrea.github.io/jaunt/config.json
               cat /src/install.sh | bash
               # A source from before scripts/installed_release.py (the release queue tests older merges with
               # this workflow) checks the release announced after the install, as it used to.
               if [ -f /src/scripts/installed_release.py ]; then
                 /root/.local/share/jaunt/runtime/current/bin/python /src/scripts/installed_release.py --before /var/tmp/config-before.json
               else
-                expected=$(/root/.local/share/jaunt/runtime/current/bin/python -c "import json,urllib.request; print(json.load(urllib.request.urlopen(\"https://moukrea.github.io/jaunt/config.json\", timeout=30))[\"release\"])")
+                curl -fsS --retry 10 --retry-delay 5 --retry-all-errors --retry-max-time 120 --connect-timeout 10 --max-time 30 -o /var/tmp/config-after.json https://moukrea.github.io/jaunt/config.json
+                expected=$(/root/.local/share/jaunt/runtime/current/bin/python -c "import json; print(json.load(open(\"/var/tmp/config-after.json\"))[\"release\"])")
                 /root/.local/share/jaunt/runtime/current/bin/python -c "import json; from pathlib import Path; assert json.loads((Path.home()/\".local/share/jaunt/installation.json\").read_text())[\"tag\"] == \"$expected\""
               fi
               /root/.local/bin/jaunt --version
