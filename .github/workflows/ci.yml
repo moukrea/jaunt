@@ -296,6 +296,8 @@ jobs:
       # A suite newer than some merges still in the release queue (which runs main CI on them with
       # this workflow) runs only where the source has it.
       - run: if [ -f tests/agentshome_ui_e2e.py ]; then python tests/agentshome_ui_e2e.py; else echo 'Not in this source'; fi
+      # A service's questions on the desktop app of the host's own computer (Electron, its local connection).
+      - run: if [ -f tests/agentsworld_desktop_e2e.py ]; then xvfb-run -a python tests/agentsworld_desktop_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/bridge_ui_e2e.py
       - run: python tests/i18n_e2e.py
       # The interface's scale at every step, desktop and phone; the desktop app's window zoom (its own Xvfb).
