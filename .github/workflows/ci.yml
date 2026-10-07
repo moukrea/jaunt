@@ -186,7 +186,10 @@ jobs:
           - os: macos-latest
             platform: macos-universal
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # The longest platform (linux-x86_64) took 16 to 26 min in October 2026. The source's ci.sh
+    # bounds each command it runs, but older merges' ci.sh does not, so the step has its own limit.
+    # The upload then still runs, so a timed-out step leaves its logs (dist/desktop-agent/*.log).
+    timeout-minutes: 50
     permissions:
       contents: read
     steps:
@@ -201,15 +204,16 @@ jobs:
         run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo "No desktop agent in this commit"; fi
       - if: steps.crate.outputs.present == 'true'
         shell: bash
+        timeout-minutes: 40
         env:
           PLATFORM: ${{ matrix.platform }}
         run: bash agent/desktop/ci.sh "$PLATFORM"
-      - if: steps.crate.outputs.present == 'true'
+      - if: always() && steps.crate.outputs.present == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-agent-${{ matrix.platform }}
           path: dist/desktop-agent/
-          if-no-files-found: error
+          if-no-files-found: ${{ job.status == 'success' && 'error' || 'warn' }}
           retention-days: 1
   windows:
     needs: guard
