@@ -307,6 +307,7 @@ jobs:
       - run: if [ -f tests/richline_e2e.py ] && grep -q 'the handlers come first' tests/rich_view_e2e.py; then python tests/richline_e2e.py; else echo 'Not in this source'; fi
       # The agents of a Claude Code session in the rich view: newer than some merges of the release queue.
       - run: if [ -f tests/rich_agents_e2e.py ]; then python tests/rich_agents_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_workflows_e2e.py ]; then python tests/rich_workflows_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/webgl_render_e2e.py
       - run: python tests/android_download_e2e.py
       - run: python tests/agents_e2e.py
