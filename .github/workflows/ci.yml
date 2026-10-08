@@ -247,9 +247,10 @@ jobs:
       - run: pytest -q -rA tests/test_windows.py tests/test_screen.py tests/test_termstate.py tests/test_direct.py
       - run: python tests/windows_install_e2e.py
   browser-and-relay:
-    # About twenty real browser, desktop and installer suites run in sequence here.
+    # About twenty real browser, desktop and installer suites run in sequence here (28 to 30 minutes
+    # in the runs of 2026-10-08; richline_e2e.py adds about two).
     needs: guard
-    timeout-minutes: 35
+    timeout-minutes: 40
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -300,6 +301,10 @@ jobs:
       - run: python tests/rich_control_e2e.py
       - run: python tests/rich_codex_e2e.py
       - run: python tests/rich_parity_e2e.py
+      # The rich view's status line. Newer than some merges of the release queue, and from before the
+      # stand-in claude took its signal handlers first (tests/rich_view_e2e.py): older sources run it
+      # as a race, so it runs only where the source has that.
+      - run: if [ -f tests/richline_e2e.py ] && grep -q 'the handlers come first' tests/rich_view_e2e.py; then python tests/richline_e2e.py; else echo 'Not in this source'; fi
       # The agents of a Claude Code session in the rich view: newer than some merges of the release queue.
       - run: if [ -f tests/rich_agents_e2e.py ]; then python tests/rich_agents_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/webgl_render_e2e.py
