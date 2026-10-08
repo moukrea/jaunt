@@ -110,10 +110,18 @@ jobs:
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           ref: ${{ inputs.sha }}
           persist-credentials: false
-      - name: Install the public wheel with the candidate installer on Fedora
+      - name: Install the candidate release with the candidate installer on Fedora, from a copy of the site
         env:
           FEDORA_VERSION: ${{ matrix.fedora }}
         run: |
+          # The site and the release served here (tests/release_site.py): nothing changes while the
+          # test runs, and the installed release must be exactly the one announced.
+          if [ -f tests/installer_fedora_e2e.py ]; then
+            python3 tests/installer_fedora_e2e.py --fedora "$FEDORA_VERSION"
+            exit 0
+          fi
+          # A source from before tests/installer_fedora_e2e.py (the release queue tests older merges
+          # with this workflow): the public release from the live site, as it used to.
           docker run --rm -v "$PWD:/src:ro" \
             -e jaunt_NO_SERVICE=1 -e jaunt_SKIP_PAIR=1 -e jaunt_RELAY_URL=wss://relay.invalid \
             "fedora:$FEDORA_VERSION" bash -c '
@@ -136,6 +144,10 @@ jobs:
               /root/.local/bin/jaunt --version
               /root/.local/bin/jaunt stop
             '
+      - name: The public release from the live site (report only, never gating)
+        if: matrix.fedora == '44'
+        continue-on-error: true
+        run: if [ -f tests/installer_live_smoke.py ]; then python3 tests/installer_live_smoke.py; else echo 'Checked above for this source.'; fi
       - name: Install with curl isolated from the installer temporary directory
         if: matrix.fedora == '44'
         run: python3 tests/installer_namespace_e2e.py
