@@ -315,7 +315,9 @@ jobs:
       - run: if [ -f tests/rich_mod_e2e.py ]; then python tests/rich_mod_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_reload_e2e.py ]; then python tests/rich_reload_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_agent_actions_e2e.py ]; then python tests/rich_agent_actions_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_workflow_actions_e2e.py ]; then python tests/rich_workflow_actions_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_notify_e2e.py ]; then python tests/rich_notify_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_workflow_actions_ui_e2e.py ]; then python tests/rich_workflow_actions_ui_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/webgl_render_e2e.py
       - run: python tests/android_download_e2e.py
       - run: python tests/agents_e2e.py
