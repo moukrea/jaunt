@@ -320,6 +320,7 @@ jobs:
       # An AI session opening a shell of the owner's (jaunt open): the question on the paired browser, the tab, the journal.
       - run: if [ -f tests/agent_open_e2e.py ]; then python tests/agent_open_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_workflow_actions_ui_e2e.py ]; then python tests/rich_workflow_actions_ui_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_history_e2e.py ]; then python tests/rich_history_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/webgl_render_e2e.py
       - run: python tests/android_download_e2e.py
       - run: python tests/agents_e2e.py
