@@ -308,6 +308,14 @@ jobs:
       # The agents of a Claude Code session in the rich view: newer than some merges of the release queue.
       - run: if [ -f tests/rich_agents_e2e.py ]; then python tests/rich_agents_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_workflows_e2e.py ]; then python tests/rich_workflows_e2e.py; else echo 'Not in this source'; fi
+      # The Claude Code mod and the agents' actions, tasks and notifications. The first two run a stand-in claude; the others drive a real
+      # throwaway Claude Code and skip at once (exit 0) on a runner without it or its credentials.
+      - run: if [ -f tests/rich_agent_actions_ui_e2e.py ]; then python tests/rich_agent_actions_ui_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_agents_tasks_e2e.py ]; then python tests/rich_agents_tasks_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_mod_e2e.py ]; then python tests/rich_mod_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_reload_e2e.py ]; then python tests/rich_reload_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_agent_actions_e2e.py ]; then python tests/rich_agent_actions_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_notify_e2e.py ]; then python tests/rich_notify_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/webgl_render_e2e.py
       - run: python tests/android_download_e2e.py
       - run: python tests/agents_e2e.py
