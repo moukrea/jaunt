@@ -313,6 +313,8 @@ jobs:
       # throwaway Claude Code and skip at once (exit 0) on a runner without it or its credentials.
       - run: if [ -f tests/rich_agent_actions_ui_e2e.py ]; then python tests/rich_agent_actions_ui_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_agents_tasks_e2e.py ]; then python tests/rich_agents_tasks_e2e.py; else echo 'Not in this source'; fi
+      # A message sent through the mod is the person's own and confirms its bubble (stand-in claude playing the mod).
+      - run: if [ -f tests/rich_mod_send_e2e.py ]; then python tests/rich_mod_send_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_mod_e2e.py ]; then python tests/rich_mod_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_reload_e2e.py ]; then python tests/rich_reload_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/rich_agent_actions_e2e.py ]; then python tests/rich_agent_actions_e2e.py; else echo 'Not in this source'; fi
