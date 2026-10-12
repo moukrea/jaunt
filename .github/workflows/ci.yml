@@ -281,6 +281,7 @@ jobs:
       - run: xvfb-run -a python tests/desktop_download_e2e.py
       - run: xvfb-run -a python tests/desktop_artifacts_e2e.py
       - run: python tests/feedback_e2e.py
+      - run: if [ -f tests/feedback_ui_e2e.py ]; then python tests/feedback_ui_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/terminal_render_e2e.py
       - run: if [ -f tests/terminal_keybar_e2e.py ]; then python tests/terminal_keybar_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/workspace_usability_e2e.py
