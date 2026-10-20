@@ -280,6 +280,7 @@ jobs:
       - run: if [ -f tests/background_e2e.py ]; then python tests/background_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/sidebar_tabs_e2e.py ]; then python tests/sidebar_tabs_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/sidebar_search_e2e.py ]; then python tests/sidebar_search_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/history_ui_e2e.py ]; then python tests/history_ui_e2e.py; else echo 'Not in this source'; fi
   browser-and-relay:
     # About twenty real browser, desktop and installer suites run in sequence here (28 to 30 minutes
     # in the runs of 2026-10-08; richline_e2e.py adds about two).
