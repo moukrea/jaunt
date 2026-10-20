@@ -28,7 +28,7 @@ env:
   PYTEST_ADDOPTS: --tb=line
 jobs:
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions: {}
     steps:
       - name: Require an exact source commit
@@ -42,7 +42,7 @@ jobs:
           [[ -z "$PR" || "$PR" =~ ^[1-9][0-9]{0,6}$ ]] || { echo "pr must be a number"; exit 1; }
   lint:
     needs: guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
       - run: npm run prepare-web
       - run: python scripts/check_project.py
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [host, browser-and-relay, browser-shells, installer-fedora, windows, desktop-agent]
     if: always()
     permissions: {}
@@ -88,7 +88,7 @@ jobs:
   release:
     needs: [lint, test]
     if: inputs.kind == 'main' && success()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: write
     steps:
@@ -98,7 +98,7 @@ jobs:
         run: gh workflow run auto-release.yml --repo "$GITHUB_REPOSITORY" --ref main
   installer-fedora:
     needs: guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -160,7 +160,7 @@ jobs:
     needs: guard
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
         python: ['3.11', '3.13']
     runs-on: ${{ matrix.os }}
     permissions:
@@ -253,7 +253,7 @@ jobs:
   browser-shells:
     needs: guard
     timeout-minutes: 25
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -285,7 +285,7 @@ jobs:
     # in the runs of 2026-10-08; richline_e2e.py adds about two).
     needs: guard
     timeout-minutes: 40
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -333,6 +333,7 @@ jobs:
       - run: python tests/remote_paste_e2e.py
       - run: python tests/artifacts_e2e.py
       - run: python tests/artifact_runtime_e2e.py
+      - run: if [ -f tests/artifact_terminal_e2e.py ]; then python tests/artifact_terminal_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/rich_view_e2e.py
       - run: python tests/rich_control_e2e.py
       - run: python tests/rich_codex_e2e.py
@@ -369,6 +370,11 @@ jobs:
       - run: if [ -f tests/rich_phone_start_e2e.py ]; then python tests/rich_phone_start_e2e.py; else echo 'Not in this source'; fi
       # Daily-driving Claude Code from the rich view against a real, throwaway one (skips without claude and its credentials, as rich_mod_e2e does).
       - run: if [ -f tests/rich_daily_e2e.py ]; then python tests/rich_daily_e2e.py; else echo 'Not in this source'; fi
+      # Claude Code's sign-in as a card: the card in a browser on the real screens of 2.1.299, and /login against a real Claude Code with no credentials (skips without claude).
+      - run: if [ -f tests/richlogin_ui_e2e.py ]; then python tests/richlogin_ui_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/rich_login_e2e.py ]; then python tests/rich_login_e2e.py; else echo 'Not in this source'; fi
+      # A Claude Code that says it waits for an answer and drew nothing: the terminal card that says so, in a browser (no terminal).
+      - run: if [ -f tests/rich_blank_ui_e2e.py ]; then python tests/rich_blank_ui_e2e.py; else echo 'Not in this source'; fi
       # The view's own logic against a fake host (Stop before the message was recorded, Claude Code's own queue, an answered question).
       - run: if [ -f tests/rich_view_logic_e2e.py ]; then python tests/rich_view_logic_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/webgl_render_e2e.py
@@ -379,6 +385,8 @@ jobs:
       # A suite newer than some merges still in the release queue (which runs main CI on them with
       # this workflow) runs only where the source has it.
       - run: if [ -f tests/agentshome_ui_e2e.py ]; then python tests/agentshome_ui_e2e.py; else echo 'Not in this source'; fi
+      # A program enrolled with its own manifest, through the web client (Settings → Programs, revoke).
+      - run: if [ -f tests/service_manifest_ui_e2e.py ]; then python tests/service_manifest_ui_e2e.py; else echo 'Not in this source'; fi
       # A service's questions on the desktop app of the host's own computer (Electron, its local connection).
       - run: if [ -f tests/agentsworld_desktop_e2e.py ]; then xvfb-run -a python tests/agentsworld_desktop_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/bridge_ui_e2e.py
