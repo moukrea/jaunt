@@ -317,6 +317,8 @@ jobs:
           echo "e93a5aa25ecdf3af2f9fbb2de32b0173e64a2eae81002a4ccfe35fa6f4f60b92  challtestsrv.tar.gz" | sha256sum -c -
           tar xzf pebble.tar.gz
           tar xzf challtestsrv.tar.gz
+          # The release archives store both binaries without the executable bit.
+          chmod +x pebble-linux-amd64/linux/amd64/pebble pebble-challtestsrv-linux-amd64/linux/amd64/pebble-challtestsrv
           echo "PEBBLE_BIN=$dir/pebble-linux-amd64/linux/amd64/pebble" >> "$GITHUB_ENV"
           echo "PEBBLE_CHALLTESTSRV_BIN=$dir/pebble-challtestsrv-linux-amd64/linux/amd64/pebble-challtestsrv" >> "$GITHUB_ENV"
       - run: npm ci
