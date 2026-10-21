@@ -335,7 +335,7 @@ jobs:
   # which stage the direct link takes on each. Runs only where the source has it.
   network-bench:
     needs: guard
-    timeout-minutes: 20
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -363,7 +363,7 @@ jobs:
           printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d >/dev/null
           sudo chmod 755 /usr/sbin/policy-rc.d
           sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nftables miniupnpd-nftables
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nftables miniupnpd-nftables libnss3-tools
           sudo rm -f /usr/sbin/policy-rc.d
           if systemctl is-active --quiet miniupnpd; then sudo systemctl stop miniupnpd; fi
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor; the bench needs one
