@@ -63,7 +63,7 @@ jobs:
       - run: python scripts/check_project.py
   test:
     runs-on: ubuntu-latest
-    needs: [host, browser-and-relay, browser-shells, installer-fedora, windows, desktop-agent]
+    needs: [host, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent]
     if: always()
     permissions: {}
     steps:
@@ -75,6 +75,7 @@ jobs:
           WINDOWS_RESULT: ${{ needs.windows.result }}
           DESKTOP_AGENT_RESULT: ${{ needs.desktop-agent.result }}
           BROWSER_SHELLS_RESULT: ${{ needs.browser-shells.result }}
+          DIRECT_TLS_RESULT: ${{ needs.direct-tls.result }}
         run: |
           test "$HOST_RESULT" = success
           test "$BROWSER_RELAY_RESULT" = success
@@ -82,6 +83,7 @@ jobs:
           test "$WINDOWS_RESULT" = success
           test "$DESKTOP_AGENT_RESULT" = success
           test "$BROWSER_SHELLS_RESULT" = success
+          test "$DIRECT_TLS_RESULT" = success
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -281,6 +283,49 @@ jobs:
       - run: if [ -f tests/sidebar_tabs_e2e.py ]; then python tests/sidebar_tabs_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/sidebar_search_e2e.py ]; then python tests/sidebar_search_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/history_ui_e2e.py ]; then python tests/history_ui_e2e.py; else echo 'Not in this source'; fi
+  direct-tls:
+    # Stage 3 of the direct connection cascade (docs/PROTOCOL.md "Direct link over TLS"): the relay's
+    # certificate flow against Pebble (Let's Encrypt's test CA, pinned) with a fake Cloudflare DNS API,
+    # then headless Chromium reaching a real host through its TURN server over TLS only. No real
+    # certificate and no real DNS record is ever made. The TURN server's and the host's unit tests run in `host`.
+    needs: guard
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Pebble and its DNS test server, pinned releases checked by SHA-256
+        run: |
+          set -e
+          dir="$RUNNER_TEMP/pebble"; mkdir -p "$dir"; cd "$dir"
+          base=https://github.com/letsencrypt/pebble/releases/download/v2.10.1
+          curl -sSLf -o pebble.tar.gz "$base/pebble-linux-amd64.tar.gz"
+          curl -sSLf -o challtestsrv.tar.gz "$base/pebble-challtestsrv-linux-amd64.tar.gz"
+          echo "4f2fcb5bca8c85c9cf73ad140fccfc0d2be40bd81ab99879c79b7b8a0b4f70ed  pebble.tar.gz" | sha256sum -c -
+          echo "e93a5aa25ecdf3af2f9fbb2de32b0173e64a2eae81002a4ccfe35fa6f4f60b92  challtestsrv.tar.gz" | sha256sum -c -
+          tar xzf pebble.tar.gz
+          tar xzf challtestsrv.tar.gz
+          echo "PEBBLE_BIN=$dir/pebble-linux-amd64/linux/amd64/pebble" >> "$GITHUB_ENV"
+          echo "PEBBLE_CHALLTESTSRV_BIN=$dir/pebble-challtestsrv-linux-amd64/linux/amd64/pebble-challtestsrv" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run prepare-web
+      - run: if [ -f tests/relay_acme.miniflare.mjs ]; then npm run test:relay-acme; else echo 'Not in this source'; fi
+      - run: pip install -e . -r requirements-dev.txt
+      - run: sudo apt-get install -y libnss3-tools
+      - run: python -m playwright install --with-deps chromium
+      - run: if [ -f tests/direct_tls_e2e.py ]; then python tests/direct_tls_e2e.py; else echo 'Not in this source'; fi
   browser-and-relay:
     # About twenty real browser, desktop and installer suites run in sequence here (28 to 30 minutes
     # in the runs of 2026-10-08; richline_e2e.py adds about two).
