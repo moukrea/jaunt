@@ -374,9 +374,10 @@ jobs:
           JAUNT_NETBENCH_REQUIRED: '1'
   browser-and-relay:
     # About twenty real browser, desktop and installer suites run in sequence here (28 to 30 minutes
-    # in the runs of 2026-10-08; richline_e2e.py adds about two).
+    # in the runs of 2026-10-08; richline_e2e.py adds about two; 33 to 34 on 2026-10-21 and 22, and
+    # one run on 2026-10-23 was still passing its suites when it reached 40).
     needs: guard
-    timeout-minutes: 40
+    timeout-minutes: 55
     runs-on: ubuntu-latest
     permissions:
       contents: read
