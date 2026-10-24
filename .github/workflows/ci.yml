@@ -418,6 +418,8 @@ jobs:
       - run: python tests/latency_e2e.py
       - run: python tests/flow_control_e2e.py
       - run: python tests/direct_e2e.py
+      # A host's web server in another computer's browser through the desktop app (docs/PROTOCOL.md "Web over HTTPS").
+      - run: if [ -f tests/web_desktop_e2e.py ]; then xvfb-run -a python tests/web_desktop_e2e.py; else echo 'Not in this source'; fi
       - run: python tests/scrollback_e2e.py
       - run: python tests/mobile_scroll_e2e.py
       - run: python tests/history_geometry_e2e.py
