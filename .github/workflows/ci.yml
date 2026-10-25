@@ -378,6 +378,12 @@ jobs:
       - run: if [ -f tests/net_bench.py ]; then python tests/net_bench.py; else echo 'Not in this source'; fi
         env:
           JAUNT_NETBENCH_REQUIRED: '1'
+      # A phone on a mobile network: fetches of every kind (gzip with a Content-Length, Range, 16 MB files) over a link that is
+      # cut for 12 s (a cell handover) all succeed. It shapes the link with tc in a user and network namespace, like the bench above.
+      - run: if [ -f tests/web_bench.py ]; then JAUNT_BENCH_STRESS=2 xvfb-run -a python tests/web_bench.py; else echo 'Not in this source'; fi
+        timeout-minutes: 10
+        env:
+          JAUNT_BENCH_REQUIRED: '1'
   browser-and-relay:
     # About twenty real browser, desktop and installer suites run in sequence here (28 to 30 minutes
     # in the runs of 2026-10-08; richline_e2e.py adds about two; 33 to 34 on 2026-10-21 and 22, and
@@ -426,8 +432,7 @@ jobs:
       - run: if [ -f tests/web_desktop_e2e.py ]; then xvfb-run -a python tests/web_desktop_e2e.py; else echo 'Not in this source'; fi
       # Throughput of the same path (a large file, many files, many small requests) with floors well under what it gives.
       - run: if [ -f tests/web_bench.py ]; then xvfb-run -a python tests/web_bench.py; else echo 'Not in this source'; fi
-      # A phone on a mobile network: fetches of every kind over a link that is cut for 12 s (a cell handover) all succeed.
-      - run: if [ -f tests/web_bench.py ]; then JAUNT_BENCH_STRESS=2 xvfb-run -a python tests/web_bench.py; else echo 'Not in this source'; fi
+        timeout-minutes: 10   # the bench bounds its own waits (480 s); a step that stops must not hold the job to its limit
       - run: python tests/scrollback_e2e.py
       - run: python tests/mobile_scroll_e2e.py
       - run: python tests/history_geometry_e2e.py
