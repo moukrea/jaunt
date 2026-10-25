@@ -289,6 +289,8 @@ jobs:
       - run: if [ -f tests/web_e2e.py ]; then python tests/web_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/web_android_e2e.py ]; then python tests/web_android_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/web_guest_e2e.py ]; then python tests/web_guest_e2e.py; else echo 'Not in this source'; fi
+      # Public links: the relay Worker itself (workerd) serves the visitor's page; a visitor's Chromium gets the site over WebRTC.
+      - run: if [ -f tests/web_public_e2e.py ]; then python tests/web_public_e2e.py; else echo 'Not in this source'; fi
   direct-tls:
     # Stage 3 of the direct connection cascade (docs/PROTOCOL.md "Direct link over TLS"): the relay's
     # certificate flow against Pebble (Let's Encrypt's test CA, pinned) with a fake Cloudflare DNS API,
