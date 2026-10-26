@@ -1,8 +1,8 @@
 name: Host release
-# Called by auto-release.yml only. The builds (the desktop agent per platform, then the wheel) run the
-# release commit's own code and dependencies with a read-only key they do not keep; the publisher
-# installs nothing, so the read key it keeps (the publisher reads the ledger and the tag in the
-# source) never meets third-party code.
+# Called by auto-release.yml only. The builds (the desktop agent per platform, then the wheel) and
+# the tests run the release commit's own code and dependencies with a read-only key they do not
+# keep; the publisher installs nothing, so the read key it keeps (the publisher reads the ledger and
+# the tag in the source) never meets third-party code.
 on:
   workflow_call:
     inputs:
@@ -82,11 +82,6 @@ jobs:
         with:
           node-version: '22'
       - run: pip install -e . -r requirements-dev.txt
-      # The coordinator's own tests are control plane, validated by main CI; they
-      # must not block a frozen release commit that carries older copies of them.
-      - run: pytest -q --ignore=tests/test_release_pipeline.py
-        env:
-          PYTEST_ADDOPTS: --tb=line
       - id: crate
         run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; fi
       - if: steps.crate.outputs.present == 'true'
@@ -126,8 +121,33 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 1
+  # The release commit's tests, beside the agent builds instead of after them (they took 9 of the
+  # release's 24 minutes in October 2026): publish waits for both.
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      # The coordinator's own tests are control plane, validated by main CI; they
+      # must not block a frozen release commit that carries older copies of them.
+      - run: pytest -q --ignore=tests/test_release_pipeline.py
+        env:
+          PYTEST_ADDOPTS: --tb=line
   publish:
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
