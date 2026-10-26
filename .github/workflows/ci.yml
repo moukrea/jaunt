@@ -47,15 +47,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     outputs:
-      host_matrix: ${{ steps.plan.outputs.host_matrix }}
-      groups: ${{ steps.plan.outputs.groups }}
-      shells: ${{ steps.plan.outputs.shells }}
-      direct_tls: ${{ steps.plan.outputs.direct_tls }}
-      fedora: ${{ steps.plan.outputs.fedora }}
-      windows: ${{ steps.plan.outputs.windows }}
-      desktop_agent: ${{ steps.plan.outputs.desktop_agent }}
-      network_bench: ${{ steps.plan.outputs.network_bench }}
+      host_matrix: ${{ steps.reuse.outputs.host_matrix || steps.plan.outputs.host_matrix }}
+      groups: ${{ steps.reuse.outputs.groups || steps.plan.outputs.groups }}
+      shells: ${{ steps.reuse.outputs.shells || steps.plan.outputs.shells }}
+      direct_tls: ${{ steps.reuse.outputs.direct_tls || steps.plan.outputs.direct_tls }}
+      fedora: ${{ steps.reuse.outputs.fedora || steps.plan.outputs.fedora }}
+      windows: ${{ steps.reuse.outputs.windows || steps.plan.outputs.windows }}
+      desktop_agent: ${{ steps.reuse.outputs.desktop_agent || steps.plan.outputs.desktop_agent }}
+      network_bench: ${{ steps.reuse.outputs.network_bench || steps.plan.outputs.network_bench }}
       flake_tests: ${{ steps.plan.outputs.flake_tests }}
       flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
     steps:
@@ -82,6 +83,74 @@ jobs:
               echo 'flake_e2e={}'
             } | tee -a "$GITHUB_OUTPUT"
           fi
+      # A `CI main` run does not repeat what a `CI pr` run of this repository already proved on the same files.
+      # Reused only: a job (or matrix leg) that succeeded in a workflow_dispatch run of this repository named
+      # `CI pr <commit>`, from this workflow file exactly as it is now (the same blob), for a commit whose tree is
+      # the tree under test. The release queue still sees a run whose `lint` and `test` succeeded; the jobs reused
+      # show as skipped, and the summary names the run each came from. Lint always runs.
+      - id: reuse
+        if: inputs.kind == 'main'
+        continue-on-error: true   # without it every job runs, as before
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ inputs.sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          MATRIX: ${{ steps.plan.outputs.host_matrix }}
+          GROUPS_JSON: ${{ steps.plan.outputs.groups }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          repo, sha = os.environ['REPO'], os.environ['SHA']
+          def gh(path):
+              return json.loads(subprocess.run(['gh', 'api', path], capture_output=True, text=True, check=True).stdout)
+          def git(*args):
+              done = subprocess.run(['git', *args], capture_output=True, text=True)
+              return done.stdout.strip() if done.returncode == 0 else None
+          out = open(os.environ['GITHUB_OUTPUT'], 'a')
+          summary = open(os.environ['GITHUB_STEP_SUMMARY'], 'a')
+          def emit(**values):
+              for key, value in values.items():
+                  out.write(f'{key}={value}\n')
+          all_legs = json.loads(os.environ['MATRIX'])
+          all_groups = json.loads(os.environ['GROUPS_JSON'])
+          blob = lambda ref: gh(f'repos/{repo}/contents/.github/workflows/ci.yml?ref={ref}')['sha']
+          tree = git('rev-parse', sha + '^{tree}')
+          me = blob(os.environ['WORKFLOW_SHA'])
+          ok = {}   # job name -> run id, the newest success
+          for number in (1, 2, 3):
+              for run in gh(f'repos/{repo}/actions/workflows/ci.yml/runs?event=workflow_dispatch&per_page=100&page={number}')['workflow_runs']:
+                  m = re.fullmatch(r'CI pr ([0-9a-f]{40})', run.get('display_title') or '')
+                  if not m or run['status'] != 'completed' or run['path'].split('@')[0] != '.github/workflows/ci.yml':
+                      continue
+                  if (run.get('head_repository') or {}).get('full_name') != repo or run['head_branch'] != 'main':
+                      continue
+                  if tree is None or git('rev-parse', m[1] + '^{tree}') != tree or blob(run['head_sha']) != me:
+                      continue
+                  for job in gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100")['jobs']:
+                      if job['conclusion'] == 'success' and run['id'] > ok.get(job['name'], 0):
+                          ok[job['name']] = run['id']
+          agent = ['desktop-agent (ubuntu-24.04, linux-x86_64, screens)', 'desktop-agent (ubuntu-24.04, linux-x86_64, web)',
+                   'desktop-agent (ubuntu-24.04-arm, linux-aarch64)', 'desktop-agent (windows-latest, windows-x86_64)',
+                   'desktop-agent (macos-latest, macos-universal)']
+          whole = {'shells': ['browser-shells'], 'direct_tls': ['direct-tls'], 'fedora': ['installer-fedora (43)', 'installer-fedora (44)'],
+                   'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench']}
+          reused = {}
+          flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
+          for key, names in whole.items():
+              if flags[key] == 'false':
+                  reused[key] = sorted({ok[n] for n in names})
+          legs = [leg for leg in all_legs if f"host ({leg['os']}, {leg['python']})" not in ok]
+          groups = [g for g in all_groups if f'browser-and-relay ({g})' not in ok]
+          emit(host_matrix=json.dumps(legs, separators=(',', ':')), groups=json.dumps(groups, separators=(',', ':')), **flags)
+          lines = ['### Reused from `CI pr` runs on the same files', '']
+          lines += [f'- {name}: run {ok[name]}' for name in sorted(ok) if name.startswith(('host (', 'browser-and-relay (')) and
+                    (name in {f"host ({l['os']}, {l['python']})" for l in all_legs} or name in {f'browser-and-relay ({g})' for g in all_groups})]
+          lines += [f'- {key}: run {", ".join(map(str, runs))}' for key, runs in reused.items()]
+          lines.append(f'Tree {tree}; this workflow file {me}.' if tree else 'No tree for this commit: nothing reused.')
+          summary.write('\n'.join(lines) + '\n')
+          print('\n'.join(lines))
+          PY
   lint:
     needs: guard
     runs-on: ubuntu-latest
@@ -116,6 +185,7 @@ jobs:
           HOST_RESULT: ${{ needs.host.result }}
           FLAKE_RESULT: ${{ needs.flake.result }}
           FLAKE_PLANNED: ${{ needs.plan.outputs.flake_tests != '' }}
+          HOST_PLANNED: ${{ needs.plan.outputs.host_matrix != '[]' }}
           BROWSER_RELAY_RESULT: ${{ needs.browser-and-relay.result }}
           FEDORA_RESULT: ${{ needs.installer-fedora.result }}
           FEDORA_PLANNED: ${{ needs.plan.outputs.fedora }}
@@ -134,8 +204,8 @@ jobs:
           # whose predecessor failed is a failure here, not a pass).
           check() { if [ "$3" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
           test "$PLAN_RESULT" = success
-          test "$HOST_RESULT" = success
           check flake "$FLAKE_RESULT" "$FLAKE_PLANNED"
+          check host "$HOST_RESULT" "$HOST_PLANNED"
           check browser-and-relay "$BROWSER_RELAY_RESULT" "$GROUPS_PLANNED"
           check installer-fedora "$FEDORA_RESULT" "$FEDORA_PLANNED"
           check windows "$WINDOWS_RESULT" "$WINDOWS_PLANNED"
@@ -279,6 +349,7 @@ jobs:
         run: python3 tests/installer_storage_e2e.py
   host:
     needs: [guard, plan]
+    if: needs.plan.outputs.host_matrix != '[]'
     strategy:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.host_matrix) }}
@@ -402,9 +473,11 @@ jobs:
       - run: pip install -e . -r requirements-dev.txt
       - run: npm ci
       - run: npm run prepare-web
-      # apt waited two to three minutes on each stalled download from Ubuntu's mirror before asking again:
-      # one Playwright install in eight took 5 to 16 minutes that way (October 2026); the retries came in seconds.
+      # Ubuntu's mirror sometimes hands a large package out at 15-30 kB/s and apt waits for it (one Playwright
+      # install in eight took 5 to 16 minutes, October 2026): scripts/apt_prefetch.sh downloads the packages
+      # first, dropping a download below 300 kB/s for 8 s for the next mirror; apt then finds them in its archive.
       - run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
       - run: python -m playwright install --with-deps chromium
       - run: if [ -f tests/limits_e2e.py ]; then python tests/limits_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/launch_e2e.py ]; then python tests/launch_e2e.py; else echo 'Not in this source'; fi
@@ -472,10 +545,13 @@ jobs:
       - run: npm run prepare-web
       - run: if [ -f tests/relay_acme.miniflare.mjs ]; then npm run test:relay-acme; else echo 'Not in this source'; fi
       - run: pip install -e . -r requirements-dev.txt
-      # apt waited two to three minutes on each stalled download from Ubuntu's mirror before asking again:
-      # one Playwright install in eight took 5 to 16 minutes that way (October 2026); the retries came in seconds.
+      # Ubuntu's mirror sometimes hands a large package out at 15-30 kB/s and apt waits for it (one Playwright
+      # install in eight took 5 to 16 minutes, October 2026): scripts/apt_prefetch.sh downloads the packages
+      # first, dropping a download below 300 kB/s for 8 s for the next mirror; apt then finds them in its archive.
       - run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh libnss3-tools; fi
       - run: sudo apt-get install -y libnss3-tools
+      - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
       - run: python -m playwright install --with-deps chromium
       - run: if [ -f tests/direct_tls_e2e.py ]; then python tests/direct_tls_e2e.py; else echo 'Not in this source'; fi
   # The network bench (tests/net_bench.py): simulated networks in network namespaces (NATs, a network
@@ -513,9 +589,11 @@ jobs:
       - run: pip install -e . -r requirements-dev.txt
       - run: npm ci
       - run: npm run prepare-web
-      # apt waited two to three minutes on each stalled download from Ubuntu's mirror before asking again:
-      # one Playwright install in eight took 5 to 16 minutes that way (October 2026); the retries came in seconds.
+      # Ubuntu's mirror sometimes hands a large package out at 15-30 kB/s and apt waits for it (one Playwright
+      # install in eight took 5 to 16 minutes, October 2026): scripts/apt_prefetch.sh downloads the packages
+      # first, dropping a download below 300 kB/s for 8 s for the next mirror; apt then finds them in its archive.
       - run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
       - run: python -m playwright install --with-deps chromium
       # nft, miniupnpd for the bench's router and coturn for its TURN server (stage 4) only: never started
       # as services on the runner's own network (policy-rc.d refuses every service start during the install).
@@ -523,6 +601,7 @@ jobs:
         run: |
           printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d >/dev/null
           sudo chmod 755 /usr/sbin/policy-rc.d
+          if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh nftables miniupnpd-nftables libnss3-tools coturn; fi
           sudo apt-get update -q
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nftables miniupnpd-nftables libnss3-tools coturn
           sudo rm -f /usr/sbin/policy-rc.d
@@ -593,9 +672,11 @@ jobs:
       # scripts/invite_tester.py against the local Worker (skipped by the host job, which has no npm packages).
       - run: python -m pytest -q tests/test_invite_tester.py
         if: matrix.group == 'terminal'
-      # apt waited two to three minutes on each stalled download from Ubuntu's mirror before asking again:
-      # one Playwright install in eight took 5 to 16 minutes that way (October 2026); the retries came in seconds.
+      # Ubuntu's mirror sometimes hands a large package out at 15-30 kB/s and apt waits for it (one Playwright
+      # install in eight took 5 to 16 minutes, October 2026): scripts/apt_prefetch.sh downloads the packages
+      # first, dropping a download below 300 kB/s for 8 s for the next mirror; apt then finds them in its archive.
       - run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_e2e.py
         if: matrix.group == 'terminal'
