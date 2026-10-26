@@ -2,14 +2,14 @@ name: Automatic release
 # The release queue of the private source, publishing here: releases, Pages and the relay. The
 # ledger (jaunt-release-state, jaunt-channel-state) and the release tags stay in the source, written
 # with the ledger deploy key; control code is source main, one commit for the whole run (prepare's
-# `control` output). A run starts after a green "CI main <commit>" run, every hour, or by hand.
+# `control` output). A run starts after a green "CI main <commit>" run, every 10 minutes, or by hand.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
   schedule:
-    - cron: '17 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
     inputs:
       site_only:
