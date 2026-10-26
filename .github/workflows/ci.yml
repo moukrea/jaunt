@@ -362,22 +362,24 @@ jobs:
       - run: npm ci
       - run: npm run prepare-web
       - run: python -m playwright install --with-deps chromium
-      # nft, and miniupnpd for the bench's router only: never started as a service on the runner's
-      # own network (policy-rc.d refuses every service start during the install).
+      # nft, miniupnpd for the bench's router and coturn for its TURN server (stage 4) only: never started
+      # as services on the runner's own network (policy-rc.d refuses every service start during the install).
       - name: Network tools for the bench
         run: |
           printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d >/dev/null
           sudo chmod 755 /usr/sbin/policy-rc.d
           sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nftables miniupnpd-nftables libnss3-tools
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends nftables miniupnpd-nftables libnss3-tools coturn
           sudo rm -f /usr/sbin/policy-rc.d
           if systemctl is-active --quiet miniupnpd; then sudo systemctl stop miniupnpd; fi
+          if systemctl is-active --quiet coturn; then sudo systemctl stop coturn; fi
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor; the bench needs one
       # (it runs unprivileged inside it, as on a workstation).
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: if [ -f tests/net_bench.py ]; then python tests/net_bench.py; else echo 'Not in this source'; fi
         env:
           JAUNT_NETBENCH_REQUIRED: '1'
+          JAUNT_NETBENCH_COTURN: required
       # Electron downloads its binary on first start; the bench starts the app inside a network namespace that has no
       # route to the internet, so fetch it here first.
       - run: node node_modules/electron/install.js
