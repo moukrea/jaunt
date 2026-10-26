@@ -191,6 +191,31 @@ jobs:
         env:
           TESTS: ${{ needs.plan.outputs.flake_tests }}
         run: if [ -f scripts/flake_gate.py ]; then python scripts/flake_gate.py run $TESTS; fi
+  # A red `CI main <sha>` says which merge most likely broke main (scripts/ci_report.py): the run's
+  # failed jobs, the last green commit of main, the merges since with their own CI main results.
+  # Reporting only: nothing is rerun, and no other job waits for it.
+  report:
+    needs: [lint, test]
+    if: always() && inputs.kind == 'main' && (needs.lint.result != 'success' || needs.test.result != 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Name the merge that broke main
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: if [ -f scripts/ci_report.py ]; then python3 scripts/ci_report.py --sha "$SHA" --run "$RUN_ID"; else echo 'Not in this source'; fi
   installer-fedora:
     needs: [guard, plan]
     if: needs.plan.outputs.fedora == 'true'
