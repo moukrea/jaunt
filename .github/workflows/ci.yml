@@ -421,9 +421,11 @@ jobs:
       # Public links: the relay Worker itself (workerd) serves the visitor's page; a visitor's Chromium gets the site over WebRTC.
       - run: if [ -f tests/web_public_e2e.py ]; then python tests/web_public_e2e.py; else echo 'Not in this source'; fi
       # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
-      # environment as their normal run above.
+      # environment as their normal run above. The step runs only when the plan names this job (an empty
+      # output, from a source whose plan script predates the gate, or `{}`, names none: fromJSON of an empty
+      # string is an error that fails the job).
       - name: Flake gate for the suites this change adds or edits
-        if: needs.plan.outputs.flake_e2e != '{}'
+        if: contains(needs.plan.outputs.flake_e2e, '"shells":')
         env:
           SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['shells'], ' ') }}
         run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
@@ -480,9 +482,11 @@ jobs:
   # that lets out only TCP 443, a router running miniupnpd), a real host, the test relay and Chromium;
   # which stage the direct link takes on each. Runs only where the source has it.
       # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
-      # environment as their normal run above.
+      # environment as their normal run above. The step runs only when the plan names this job (an empty
+      # output, from a source whose plan script predates the gate, or `{}`, names none: fromJSON of an empty
+      # string is an error that fails the job).
       - name: Flake gate for the suites this change adds or edits
-        if: needs.plan.outputs.flake_e2e != '{}'
+        if: contains(needs.plan.outputs.flake_e2e, '"direct_tls":')
         env:
           SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['direct_tls'], ' ') }}
         run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
@@ -541,9 +545,11 @@ jobs:
         env:
           JAUNT_BENCH_REQUIRED: '1'
       # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
-      # environment as their normal run above.
+      # environment as their normal run above. The step runs only when the plan names this job (an empty
+      # output, from a source whose plan script predates the gate, or `{}`, names none: fromJSON of an empty
+      # string is an error that fails the job).
       - name: Flake gate for the suites this change adds or edits
-        if: needs.plan.outputs.flake_e2e != '{}'
+        if: contains(needs.plan.outputs.flake_e2e, '"network_bench":')
         env:
           SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['network_bench'], ' ') }}
         run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
@@ -773,9 +779,11 @@ jobs:
           jaunt_LEGACY_RELEASE_DIR: ${{ runner.temp }}/legacy-host
         run: python tests/installer_e2e.py
       # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
-      # environment as their normal run above.
+      # environment as their normal run above. The step runs only when the plan names this job (an empty
+      # output, from a source whose plan script predates the gate, or `{}`, names none: fromJSON of an empty
+      # string is an error that fails the job).
       - name: Flake gate for the suites this change adds or edits
-        if: needs.plan.outputs.flake_e2e != '{}'
+        if: contains(needs.plan.outputs.flake_e2e, format('"{0}":', matrix.group))
         env:
           SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)[matrix.group], ' ') }}
         run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
