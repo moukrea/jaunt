@@ -56,6 +56,8 @@ jobs:
       windows: ${{ steps.plan.outputs.windows }}
       desktop_agent: ${{ steps.plan.outputs.desktop_agent }}
       network_bench: ${{ steps.plan.outputs.network_bench }}
+      flake_tests: ${{ steps.plan.outputs.flake_tests }}
+      flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -76,6 +78,8 @@ jobs:
               echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
               echo 'groups=["terminal","rich","agents","lifecycle"]'
               echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true | tr ' ' '\n'
+              echo 'flake_tests='
+              echo 'flake_e2e={}'
             } | tee -a "$GITHUB_OUTPUT"
           fi
   lint:
@@ -101,7 +105,7 @@ jobs:
       - run: python scripts/check_project.py
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
+    needs: [plan, host, flake, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
     if: always()
     permissions: {}
     steps:
@@ -110,6 +114,8 @@ jobs:
           PLAN_RESULT: ${{ needs.plan.result }}
           GROUPS_PLANNED: ${{ needs.plan.outputs.groups != '[]' }}
           HOST_RESULT: ${{ needs.host.result }}
+          FLAKE_RESULT: ${{ needs.flake.result }}
+          FLAKE_PLANNED: ${{ needs.plan.outputs.flake_tests != '' }}
           BROWSER_RELAY_RESULT: ${{ needs.browser-and-relay.result }}
           FEDORA_RESULT: ${{ needs.installer-fedora.result }}
           FEDORA_PLANNED: ${{ needs.plan.outputs.fedora }}
@@ -129,6 +135,7 @@ jobs:
           check() { if [ "$3" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
           test "$PLAN_RESULT" = success
           test "$HOST_RESULT" = success
+          check flake "$FLAKE_RESULT" "$FLAKE_PLANNED"
           check browser-and-relay "$BROWSER_RELAY_RESULT" "$GROUPS_PLANNED"
           check installer-fedora "$FEDORA_RESULT" "$FEDORA_PLANNED"
           check windows "$WINDOWS_RESULT" "$WINDOWS_PLANNED"
@@ -150,6 +157,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run auto-release.yml --repo "$GITHUB_REPOSITORY" --ref main
+  # The flake gate (scripts/flake_gate.py): the pytest tests and JS tests a change adds or edits run many times
+  # with every core busy, on Linux and on macOS (where the host's tests run too); one failure fails the
+  # change. The e2e suites it adds or edits are repeated the same way by a last step of the job that runs them.
+  flake:
+    needs: [guard, plan]
+    if: needs.plan.outputs.flake_tests != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: npm ci
+      - run: npm run prepare-web
+      - name: Repeat the changed tests under load
+        env:
+          TESTS: ${{ needs.plan.outputs.flake_tests }}
+        run: if [ -f scripts/flake_gate.py ]; then python scripts/flake_gate.py run $TESTS; fi
   installer-fedora:
     needs: [guard, plan]
     if: needs.plan.outputs.fedora == 'true'
@@ -354,6 +395,13 @@ jobs:
       - run: if [ -f tests/web_guest_e2e.py ]; then python tests/web_guest_e2e.py; else echo 'Not in this source'; fi
       # Public links: the relay Worker itself (workerd) serves the visitor's page; a visitor's Chromium gets the site over WebRTC.
       - run: if [ -f tests/web_public_e2e.py ]; then python tests/web_public_e2e.py; else echo 'Not in this source'; fi
+      # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
+      # environment as their normal run above.
+      - name: Flake gate for the suites this change adds or edits
+        if: needs.plan.outputs.flake_e2e != '{}'
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['shells'], ' ') }}
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
   direct-tls:
     # Stage 3 of the direct connection cascade (docs/PROTOCOL.md "Direct link over TLS"): the relay's
     # certificate flow against Pebble (Let's Encrypt's test CA, pinned) with a fake Cloudflare DNS API,
@@ -406,6 +454,13 @@ jobs:
   # The network bench (tests/net_bench.py): simulated networks in network namespaces (NATs, a network
   # that lets out only TCP 443, a router running miniupnpd), a real host, the test relay and Chromium;
   # which stage the direct link takes on each. Runs only where the source has it.
+      # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
+      # environment as their normal run above.
+      - name: Flake gate for the suites this change adds or edits
+        if: needs.plan.outputs.flake_e2e != '{}'
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['direct_tls'], ' ') }}
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
   network-bench:
     needs: [guard, plan]
     if: needs.plan.outputs.network_bench == 'true'
@@ -460,6 +515,13 @@ jobs:
         timeout-minutes: 10
         env:
           JAUNT_BENCH_REQUIRED: '1'
+      # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
+      # environment as their normal run above.
+      - name: Flake gate for the suites this change adds or edits
+        if: needs.plan.outputs.flake_e2e != '{}'
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['network_bench'], ' ') }}
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
   browser-and-relay:
     # The real browser, desktop and installer suites, in four groups on four runners at once: in one
     # job they took 32 to 42 minutes (main runs of 2026-10-21 to 26), the critical path of the whole
@@ -685,3 +747,10 @@ jobs:
         env:
           jaunt_LEGACY_RELEASE_DIR: ${{ runner.temp }}/legacy-host
         run: python tests/installer_e2e.py
+      # The e2e suites this change adds or edits, repeated under load (scripts/flake_gate.py): the same
+      # environment as their normal run above.
+      - name: Flake gate for the suites this change adds or edits
+        if: needs.plan.outputs.flake_e2e != '{}'
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)[matrix.group], ' ') }}
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
