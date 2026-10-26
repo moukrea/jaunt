@@ -378,6 +378,9 @@ jobs:
       - run: if [ -f tests/net_bench.py ]; then python tests/net_bench.py; else echo 'Not in this source'; fi
         env:
           JAUNT_NETBENCH_REQUIRED: '1'
+      # Electron downloads its binary on first start; the bench starts the app inside a network namespace that has no
+      # route to the internet, so fetch it here first.
+      - run: node node_modules/electron/install.js
       # A phone on a mobile network: fetches of every kind (gzip with a Content-Length, Range, 16 MB files) over a link that is
       # cut for 12 s (a cell handover) all succeed. It shapes the link with tc in a user and network namespace, like the bench above.
       - run: if [ -f tests/web_bench.py ]; then JAUNT_BENCH_STRESS=2 xvfb-run -a python tests/web_bench.py; else echo 'Not in this source'; fi
