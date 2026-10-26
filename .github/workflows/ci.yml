@@ -40,6 +40,44 @@ jobs:
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
           [[ "$KIND" == main || "$KIND" == pr ]] || { echo "kind must be main or pr"; exit 1; }
           [[ -z "$PR" || "$PR" =~ ^[1-9][0-9]{0,6}$ ]] || { echo "pr must be a number"; exit 1; }
+  # Which jobs a proposed change needs (scripts/ci_plan.py, docs/DEPLOYMENT.md "Selective CI"). A `CI main`
+  # run, and a source without the script, run everything: the release queue accepts only full runs.
+  plan:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      host_matrix: ${{ steps.plan.outputs.host_matrix }}
+      groups: ${{ steps.plan.outputs.groups }}
+      shells: ${{ steps.plan.outputs.shells }}
+      direct_tls: ${{ steps.plan.outputs.direct_tls }}
+      fedora: ${{ steps.plan.outputs.fedora }}
+      windows: ${{ steps.plan.outputs.windows }}
+      desktop_agent: ${{ steps.plan.outputs.desktop_agent }}
+      network_bench: ${{ steps.plan.outputs.network_bench }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        env:
+          KIND: ${{ inputs.kind }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          if [ "$KIND" = pr ] && [ -f scripts/ci_plan.py ]; then
+            python3 scripts/ci_plan.py --base origin/main --head "$SHA" | tee -a "$GITHUB_OUTPUT"
+          else
+            {
+              echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
+              echo 'groups=["terminal","rich","agents","lifecycle"]'
+              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true | tr ' ' '\n'
+            } | tee -a "$GITHUB_OUTPUT"
+          fi
   lint:
     needs: guard
     runs-on: ubuntu-latest
@@ -63,29 +101,41 @@ jobs:
       - run: python scripts/check_project.py
   test:
     runs-on: ubuntu-latest
-    needs: [host, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
+    needs: [plan, host, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
     if: always()
     permissions: {}
     steps:
-      - name: Require every real test suite to succeed
+      - name: Require every planned test suite to succeed
         env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          GROUPS_PLANNED: ${{ needs.plan.outputs.groups != '[]' }}
           HOST_RESULT: ${{ needs.host.result }}
           BROWSER_RELAY_RESULT: ${{ needs.browser-and-relay.result }}
           FEDORA_RESULT: ${{ needs.installer-fedora.result }}
+          FEDORA_PLANNED: ${{ needs.plan.outputs.fedora }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
+          WINDOWS_PLANNED: ${{ needs.plan.outputs.windows }}
           DESKTOP_AGENT_RESULT: ${{ needs.desktop-agent.result }}
+          DESKTOP_AGENT_PLANNED: ${{ needs.plan.outputs.desktop_agent }}
           BROWSER_SHELLS_RESULT: ${{ needs.browser-shells.result }}
+          BROWSER_SHELLS_PLANNED: ${{ needs.plan.outputs.shells }}
           DIRECT_TLS_RESULT: ${{ needs.direct-tls.result }}
+          DIRECT_TLS_PLANNED: ${{ needs.plan.outputs.direct_tls }}
           NETWORK_BENCH_RESULT: ${{ needs.network-bench.result }}
+          NETWORK_BENCH_PLANNED: ${{ needs.plan.outputs.network_bench }}
         run: |
+          # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
+          # whose predecessor failed is a failure here, not a pass).
+          check() { if [ "$3" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
+          test "$PLAN_RESULT" = success
           test "$HOST_RESULT" = success
-          test "$BROWSER_RELAY_RESULT" = success
-          test "$FEDORA_RESULT" = success
-          test "$WINDOWS_RESULT" = success
-          test "$DESKTOP_AGENT_RESULT" = success
-          test "$BROWSER_SHELLS_RESULT" = success
-          test "$DIRECT_TLS_RESULT" = success
-          test "$NETWORK_BENCH_RESULT" = success
+          check browser-and-relay "$BROWSER_RELAY_RESULT" "$GROUPS_PLANNED"
+          check installer-fedora "$FEDORA_RESULT" "$FEDORA_PLANNED"
+          check windows "$WINDOWS_RESULT" "$WINDOWS_PLANNED"
+          check desktop-agent "$DESKTOP_AGENT_RESULT" "$DESKTOP_AGENT_PLANNED"
+          check browser-shells "$BROWSER_SHELLS_RESULT" "$BROWSER_SHELLS_PLANNED"
+          check direct-tls "$DIRECT_TLS_RESULT" "$DIRECT_TLS_PLANNED"
+          check network-bench "$NETWORK_BENCH_RESULT" "$NETWORK_BENCH_PLANNED"
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -101,7 +151,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run auto-release.yml --repo "$GITHUB_REPOSITORY" --ref main
   installer-fedora:
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.fedora == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -161,11 +212,10 @@ jobs:
         if: matrix.fedora == '44'
         run: python3 tests/installer_storage_e2e.py
   host:
-    needs: guard
+    needs: [guard, plan]
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ['3.11', '3.13']
+        include: ${{ fromJSON(needs.plan.outputs.host_matrix) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -192,7 +242,8 @@ jobs:
     # here. A commit without that script passes at once. linux-x86_64's checks run in two parts on
     # two runners (JAUNT_DESKTOP_CI_PART, which a source from before it ignores: each part then runs
     # them all).
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.desktop_agent == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -241,7 +292,8 @@ jobs:
           if-no-files-found: ${{ job.status == 'success' && 'error' || 'warn' }}
           retention-days: 1
   windows:
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.windows == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
@@ -262,7 +314,8 @@ jobs:
   # The shell-list suites (tabs, names, background, limits, launch, sidebar): a job of their own, so
   # browser-and-relay stays inside its timeout. Each runs only where the source has it.
   browser-shells:
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.shells == 'true'
     timeout-minutes: 25
     runs-on: ubuntu-latest
     permissions:
@@ -306,7 +359,8 @@ jobs:
     # certificate flow against Pebble (Let's Encrypt's test CA, pinned) with a fake Cloudflare DNS API,
     # then headless Chromium reaching a real host through its TURN server over TLS only. No real
     # certificate and no real DNS record is ever made. The TURN server's and the host's unit tests run in `host`.
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.direct_tls == 'true'
     timeout-minutes: 20
     runs-on: ubuntu-latest
     permissions:
@@ -353,7 +407,8 @@ jobs:
   # that lets out only TCP 443, a router running miniupnpd), a real host, the test relay and Chromium;
   # which stage the direct link takes on each. Runs only where the source has it.
   network-bench:
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.network_bench == 'true'
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
@@ -412,12 +467,13 @@ jobs:
     # terminal, workspaces, the relay's own tests), rich (the rich view), agents (agents, artifacts,
     # scale, Android), lifecycle (direct links, the host's lifecycle, the installer and its release). A
     # suite added here goes to the group it belongs with; check the groups' times now and then.
-    needs: guard
+    needs: [guard, plan]
+    if: needs.plan.outputs.groups != '[]'
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        group: [terminal, rich, agents, lifecycle]
+        group: ${{ fromJSON(needs.plan.outputs.groups) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
