@@ -58,6 +58,7 @@ jobs:
       desktop_agent: ${{ steps.reuse.outputs.desktop_agent || steps.plan.outputs.desktop_agent }}
       network_bench: ${{ steps.reuse.outputs.network_bench || steps.plan.outputs.network_bench }}
       android: ${{ steps.reuse.outputs.android || steps.plan.outputs.android }}
+      client_link: ${{ steps.reuse.outputs.client_link || steps.plan.outputs.client_link }}
       flake_tests: ${{ steps.plan.outputs.flake_tests }}
       flake_suites: ${{ steps.plan.outputs.flake_suites }}
       flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
@@ -80,7 +81,7 @@ jobs:
             {
               echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
               echo 'groups=["terminal","rich","agents","lifecycle"]'
-              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true | tr ' ' '\n'
+              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true client_link=true | tr ' ' '\n'
               echo 'flake_tests='
               echo 'flake_suites=[]'
               echo 'flake_e2e={}'
@@ -137,7 +138,8 @@ jobs:
                    'desktop-agent (ubuntu-24.04-arm, linux-aarch64)', 'desktop-agent (windows-latest, windows-x86_64)',
                    'desktop-agent (macos-latest, macos-universal)']
           whole = {'shells': ['browser-shells'], 'direct_tls': ['direct-tls'], 'fedora': ['installer-fedora (43)', 'installer-fedora (44)'],
-                   'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build']}
+                   'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build'],
+                   'client_link': ['client-link']}
           reused = {}
           flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
@@ -178,7 +180,7 @@ jobs:
       - run: python scripts/check_project.py --undefined-names
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
+    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link]
     if: always()
     permissions: {}
     steps:
@@ -207,6 +209,8 @@ jobs:
           NETWORK_BENCH_PLANNED: ${{ needs.plan.outputs.network_bench }}
           ANDROID_RESULT: ${{ needs.android-build.result }}
           ANDROID_PLANNED: ${{ needs.plan.outputs.android }}
+          CLIENT_LINK_RESULT: ${{ needs.client-link.result }}
+          CLIENT_LINK_PLANNED: ${{ needs.plan.outputs.client_link }}
         run: |
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
           # whose predecessor failed is a failure here, not a pass).
@@ -223,6 +227,7 @@ jobs:
           check direct-tls "$DIRECT_TLS_RESULT" "$DIRECT_TLS_PLANNED"
           check network-bench "$NETWORK_BENCH_RESULT" "$NETWORK_BENCH_PLANNED"
           check android-build "$ANDROID_RESULT" "$ANDROID_PLANNED"
+          check client-link "$CLIENT_LINK_RESULT" "$CLIENT_LINK_PLANNED"
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -275,7 +280,7 @@ jobs:
   # several suites would not fit one job's time (a batch of six, repeated ten times each, did not). Each suite gets a
   # budget of ten minutes (never fewer than three runs); one it cannot repeat three times inside fifteen is reported
   # as over budget and fails the change, instead of being cancelled at the job's limit. The set-up is the browser
-  # groups' (Chromium, Xvfb); direct-tls and network-bench repeat their own suites by a last step of their own jobs.
+  # groups' (Chromium, Xvfb); direct-tls, network-bench and client-link repeat their own suites by a last step of their own jobs.
   flake-e2e:
     needs: [guard, plan]
     if: needs.plan.outputs.flake_suites != '' && needs.plan.outputs.flake_suites != '[]'
@@ -646,6 +651,40 @@ jobs:
       - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
       - run: python -m playwright install --with-deps chromium
       - run: if [ -f tests/direct_tls_e2e.py ]; then python tests/direct_tls_e2e.py; else echo 'Not in this source'; fi
+  client-link:
+    # The native client link (client/link, docs/NATIVE_LINK.md; the Android app's link to a host): its Rust tests, then its
+    # probe against the real host and a real relay (pairing, the direct link, a web stream, the relay as the fallback, the
+    # lock of the Links manager). The vectors the Python host makes for it run in `host` (tests/test_link_vectors.py).
+    # Planned when client/ or what it mirrors of the host's crypto and direct link changes (scripts/ci_plan.py).
+    needs: [guard, plan]
+    if: needs.plan.outputs.client_link == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: npm ci
+      - run: npm run prepare-web
+      - run: if [ -f client/link/Cargo.toml ]; then cargo test -p jaunt-link --locked; else echo 'Not in this source'; fi
+      - run: if [ -f tests/native_link_e2e.py ]; then python tests/native_link_e2e.py; else echo 'Not in this source'; fi
+      - name: Flake gate for the suites this change adds or edits
+        if: contains(needs.plan.outputs.flake_e2e, '"client_link":')
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['client_link'], ' ') }}
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
   # The network bench (tests/net_bench.py): simulated networks in network namespaces (NATs, a network
   # that lets out only TCP 443, a router running miniupnpd), a real host, the test relay and Chromium;
   # which stage the direct link takes on each. Runs only where the source has it.
@@ -799,11 +838,6 @@ jobs:
       # A host's web server in another computer's browser through the desktop app (docs/PROTOCOL.md "Web over HTTPS").
       - run: if [ -f tests/web_desktop_e2e.py ]; then xvfb-run -a python tests/web_desktop_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'lifecycle'
-      # The native client link (client/link, the Android app's link to a host, docs/PROTOCOL.md): its Rust tests, then its probe
-      # against the real host and a real relay (pairing, the direct link, a web stream, the relay as the fallback).
-      - run: if [ -f tests/native_link_e2e.py ]; then cargo test -p jaunt-link && python tests/native_link_e2e.py; else echo 'Not in this source'; fi
-        if: matrix.group == 'lifecycle'
-        timeout-minutes: 15
       # Throughput of the same path (a large file, many files, many small requests) with floors well under what it gives.
       - run: if [ -f tests/web_bench.py ]; then xvfb-run -a python tests/web_bench.py; else echo 'Not in this source'; fi
         if: matrix.group == 'lifecycle'
