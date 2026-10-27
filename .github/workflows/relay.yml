@@ -30,7 +30,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - run: npm ci
+      # npm test reads files prepare-web makes (web/sw.js, web/locales): they are not committed.
+      - run: npm ci && npm run prepare-web
       # Includes the configuration guard (tests/relay_config.test.mjs): a wrangler.jsonc that would
       # drop or rename the Durable Objects, and every registration with them, never deploys.
       - run: npm test && npm run test:relay
