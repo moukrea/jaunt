@@ -57,6 +57,7 @@ jobs:
       windows: ${{ steps.reuse.outputs.windows || steps.plan.outputs.windows }}
       desktop_agent: ${{ steps.reuse.outputs.desktop_agent || steps.plan.outputs.desktop_agent }}
       network_bench: ${{ steps.reuse.outputs.network_bench || steps.plan.outputs.network_bench }}
+      android: ${{ steps.reuse.outputs.android || steps.plan.outputs.android }}
       flake_tests: ${{ steps.plan.outputs.flake_tests }}
       flake_suites: ${{ steps.plan.outputs.flake_suites }}
       flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
@@ -79,7 +80,7 @@ jobs:
             {
               echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
               echo 'groups=["terminal","rich","agents","lifecycle"]'
-              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true | tr ' ' '\n'
+              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true | tr ' ' '\n'
               echo 'flake_tests='
               echo 'flake_suites=[]'
               echo 'flake_e2e={}'
@@ -136,7 +137,7 @@ jobs:
                    'desktop-agent (ubuntu-24.04-arm, linux-aarch64)', 'desktop-agent (windows-latest, windows-x86_64)',
                    'desktop-agent (macos-latest, macos-universal)']
           whole = {'shells': ['browser-shells'], 'direct_tls': ['direct-tls'], 'fedora': ['installer-fedora (43)', 'installer-fedora (44)'],
-                   'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench']}
+                   'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build']}
           reused = {}
           flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
@@ -173,10 +174,11 @@ jobs:
           python-version: '3.13'
       - run: npm ci
       - run: npm run prepare-web
-      - run: python scripts/check_project.py
+      - run: pip install ruff==0.14.14
+      - run: python scripts/check_project.py --undefined-names
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
+    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench]
     if: always()
     permissions: {}
     steps:
@@ -203,6 +205,8 @@ jobs:
           DIRECT_TLS_PLANNED: ${{ needs.plan.outputs.direct_tls }}
           NETWORK_BENCH_RESULT: ${{ needs.network-bench.result }}
           NETWORK_BENCH_PLANNED: ${{ needs.plan.outputs.network_bench }}
+          ANDROID_RESULT: ${{ needs.android-build.result }}
+          ANDROID_PLANNED: ${{ needs.plan.outputs.android }}
         run: |
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
           # whose predecessor failed is a failure here, not a pass).
@@ -218,6 +222,7 @@ jobs:
           check browser-shells "$BROWSER_SHELLS_RESULT" "$BROWSER_SHELLS_PLANNED"
           check direct-tls "$DIRECT_TLS_RESULT" "$DIRECT_TLS_PLANNED"
           check network-bench "$NETWORK_BENCH_RESULT" "$NETWORK_BENCH_PLANNED"
+          check android-build "$ANDROID_RESULT" "$ANDROID_PLANNED"
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -335,6 +340,53 @@ jobs:
           SHA: ${{ inputs.sha }}
           RUN_ID: ${{ github.run_id }}
         run: if [ -f scripts/ci_report.py ]; then python3 scripts/ci_report.py --sha "$SHA" --run "$RUN_ID"; else echo 'Not in this source'; fi
+  # The Android app, built as a release builds it but unsigned (android.yml builds, signs and publishes at release
+  # time, and nothing built it before: a broken build, or a missing native library, would show only there and
+  # block the release). Unit tests, lint, the release and debug builds. The native link (client/link, Rust through
+  # JNI) is built by Gradle with the NDK: android/ci_native.sh, the script android.yml runs too, installs the NDK
+  # and the Rust targets; here it is built for arm64-v8a and armeabi-v7a only (the release also builds x86_64), and
+  # the release APK is required to hold a library for each of the two.
+  android-build:
+    needs: [guard, plan]
+    if: needs.plan.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: The NDK and the Rust targets of the native link, when the source has one
+        run: if [ -f android/ci_native.sh ]; then bash android/ci_native.sh; else echo 'No native link in this source'; fi
+      # The bundled web configuration names no relay: devices get it from a host's pairing code.
+      - run: npm ci && npm run prepare-web
+      - name: Unit tests, lint, release (unsigned) and debug builds
+        run: android/gradlew -p android -PnativeAbis=arm64-v8a,armeabi-v7a :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleRelease :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+      - name: A native library for each ABI in the APK
+        run: |
+          # Unsigned: Gradle names it app-release-unsigned.apk, or app-release.apk if it ever finds a key.
+          apk=$(ls android/app/build/outputs/apk/release/app-release*.apk | head -n 1)
+          test -s "$apk"
+          if grep -q cargoBuild android/app/build.gradle; then
+            for abi in arm64-v8a armeabi-v7a; do
+              unzip -l "$apk" | grep -q " lib/$abi/libjaunt_link.so" || { echo "::error::no libjaunt_link.so for $abi in the release APK"; exit 1; }
+            done
+          fi
   installer-fedora:
     needs: [guard, plan]
     if: needs.plan.outputs.fedora == 'true'
@@ -747,6 +799,11 @@ jobs:
       # A host's web server in another computer's browser through the desktop app (docs/PROTOCOL.md "Web over HTTPS").
       - run: if [ -f tests/web_desktop_e2e.py ]; then xvfb-run -a python tests/web_desktop_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'lifecycle'
+      # The native client link (client/link, the Android app's link to a host, docs/PROTOCOL.md): its Rust tests, then its probe
+      # against the real host and a real relay (pairing, the direct link, a web stream, the relay as the fallback).
+      - run: if [ -f tests/native_link_e2e.py ]; then cargo test -p jaunt-link && python tests/native_link_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'lifecycle'
+        timeout-minutes: 15
       # Throughput of the same path (a large file, many files, many small requests) with floors well under what it gives.
       - run: if [ -f tests/web_bench.py ]; then xvfb-run -a python tests/web_bench.py; else echo 'Not in this source'; fi
         if: matrix.group == 'lifecycle'
@@ -847,6 +904,8 @@ jobs:
       - run: python tests/webgl_render_e2e.py
         if: matrix.group == 'agents'
       - run: python tests/android_download_e2e.py
+        if: matrix.group == 'agents'
+      - run: if [ -f tests/android_notifications_ui_e2e.py ]; then python tests/android_notifications_ui_e2e.py; fi
         if: matrix.group == 'agents'
       - run: python tests/agents_e2e.py
         if: matrix.group == 'agents'
