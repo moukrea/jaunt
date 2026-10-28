@@ -81,7 +81,13 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - run: pip install -e . -r requirements-dev.txt
+      # The tools that make the wheel, each file by its SHA-256 (a source from before that lock: as before).
+      - run: |
+          if [ -f .github/build-requirements.txt ]; then
+            python -m pip install --disable-pip-version-check --require-hashes --only-binary :all: -r .github/build-requirements.txt
+          else
+            pip install -e . -r requirements-dev.txt
+          fi
       - id: crate
         run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; fi
       - if: steps.crate.outputs.present == 'true'
