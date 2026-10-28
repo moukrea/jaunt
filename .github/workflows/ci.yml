@@ -938,6 +938,10 @@ jobs:
       # The view's own logic against a fake host (Stop before the message was recorded, Claude Code's own queue, an answered question).
       - run: if [ -f tests/rich_view_logic_e2e.py ]; then python tests/rich_view_logic_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
+      # OpenCode in jaunt: started from the top bar, its rich view (messages, permissions, questions, Stop, menus, rename), against a stand-in
+      # opencode (no account, no network).
+      - run: if [ -f tests/rich_opencode_e2e.py ]; then python tests/rich_opencode_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
       - run: python tests/webgl_render_e2e.py
         if: matrix.group == 'agents'
       - run: python tests/android_download_e2e.py
