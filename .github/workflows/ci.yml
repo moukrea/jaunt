@@ -593,6 +593,7 @@ jobs:
       - run: if [ -f tests/sidebar_tabs_e2e.py ]; then python tests/sidebar_tabs_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/sidebar_search_e2e.py ]; then python tests/sidebar_search_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/history_ui_e2e.py ]; then python tests/history_ui_e2e.py; else echo 'Not in this source'; fi
+      - run: if [ -f tests/history_machines_e2e.py ]; then python tests/history_machines_e2e.py; else echo 'Not in this source'; fi
       # The web channel (docs/PROTOCOL.md "Web channel"): the Web panel and streams over the direct link.
       - run: if [ -f tests/web_e2e.py ]; then python tests/web_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/web_android_e2e.py ]; then python tests/web_android_e2e.py; else echo 'Not in this source'; fi
