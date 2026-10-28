@@ -912,6 +912,9 @@ jobs:
       # A long message folded with "Show more" (the page's own view against a fake host), and a conversation that ended resumed from the banner.
       - run: if [ -f tests/rich_view_fold_e2e.py ]; then python tests/rich_view_fold_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
+      # Selecting text in the conversation (the page's own view against a fake host): a selection survives the redraws, stays in the conversation.
+      - run: if [ -f tests/rich_selection_e2e.py ]; then python tests/rich_selection_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
       - run: if [ -f tests/rich_resume_e2e.py ]; then python tests/rich_resume_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
       - run: if [ -f tests/rich_workflow_actions_ui_e2e.py ]; then python tests/rich_workflow_actions_ui_e2e.py; else echo 'Not in this source'; fi
