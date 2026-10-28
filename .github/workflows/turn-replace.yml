@@ -1,0 +1,57 @@
+name: Replace the TURN machine
+# Owner tool: delete jaunt's TURN machine (stage 4, coturn on Oracle Cloud, which has no login) so that the
+# relay's recovery makes a new one from the configuration the relay was deployed with (ops/turn, relay/turn_boot.mjs),
+# then wait until the new machine reports to the relay. The TURN secret stays the relay's; links through the server
+# drop and come back on the next attempt. Run it after a relay deployment that changed ops/turn. The relay keeps
+# every guard of its recovery (one machine, Always Free shapes, at most one deletion an hour). Job logs are public:
+# the script prints states only, never a key, an address or an identifier. The inputs are read from the event file.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'replace, or status (the machine and the recovery journal)'
+        type: choice
+        options: [replace, status]
+        default: replace
+      confirm:
+        description: 'replace: type replace to delete the TURN machine and make a new one'
+        required: false
+        default: ''
+      wait_minutes:
+        description: 'replace: minutes to wait for the new machine to report (1-90)'
+        required: false
+        default: '40'
+permissions: {}
+concurrency:
+  group: turn-replace
+  cancel-in-progress: false
+jobs:
+  replace:
+    # Only from the default branch; RELAY_ADMIN_KEY lives in the relay-admin environment,
+    # restricted to that branch.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    environment: relay-admin
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Replace the machine and wait for the new one
+        env:
+          JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
+          JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
+        run: |
+          if [ ! -f scripts/turn_replace.py ]; then
+            echo "This version of the source has no scripts/turn_replace.py yet."
+            exit 1
+          fi
+          python scripts/turn_replace.py github
