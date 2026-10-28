@@ -58,7 +58,7 @@ jobs:
           path: .control
           persist-credentials: false
       # The probe's client, each file by its SHA-256, in a job that holds the probe key.
-      - run: python -m pip install --disable-pip-version-check --require-hashes --only-binary :all: -r .control/.github/probe-requirements.txt
+      - run: 'python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r .control/.github/probe-requirements.txt'
       - run: python .control/scripts/release_pipeline.py relay-probe
         env:
           JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}

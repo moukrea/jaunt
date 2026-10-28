@@ -84,7 +84,7 @@ jobs:
       # The tools that make the wheel, each file by its SHA-256 (a source from before that lock: as before).
       - run: |
           if [ -f .github/build-requirements.txt ]; then
-            python -m pip install --disable-pip-version-check --require-hashes --only-binary :all: -r .github/build-requirements.txt
+            python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r .github/build-requirements.txt
           else
             pip install -e . -r requirements-dev.txt
           fi
