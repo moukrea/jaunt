@@ -964,6 +964,9 @@ jobs:
         if: matrix.group == 'agents'
       - run: python tests/i18n_e2e.py
         if: matrix.group == 'agents'
+      # The machine's health at the top of a host's settings: bars and numbers, warning colours, refresh while shown, a host without the capability.
+      - run: if [ -f tests/host_health_e2e.py ]; then python tests/host_health_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'agents'
       # The interface's scale at every step, desktop and phone; the desktop app's window zoom (its own Xvfb).
       - run: if [ -f tests/ui_scale_e2e.py ]; then python tests/ui_scale_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'agents'
