@@ -773,6 +773,10 @@ jobs:
         run: pip install -e . -r requirements-dev.txt
       - if: steps.crate.outputs.present == 'true'
         run: npm ci
+      # npm ci leaves Electron's binary out; the rescue import (app_migration_e2e) starts the repository's own Electron app.
+      - name: Electron's binary, for the move from the Electron app
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f node_modules/electron/install.js ]; then node node_modules/electron/install.js; fi
       - if: steps.crate.outputs.present == 'true'
         run: npm run prepare-web
       - if: steps.crate.outputs.present == 'true'
