@@ -221,11 +221,15 @@ jobs:
           if [ -n "$TAG" ]; then
             python .control/scripts/release_pipeline.py download --tag "$TAG" --pattern '*-x64.tar.gz' --pattern SHA256SUMS --directory /tmp/jaunt-desktop-release
             python3 - <<'PYDESKTOP'
-          import hashlib,pathlib
+          import hashlib,pathlib,re
           root=pathlib.Path('/tmp/jaunt-desktop-release')
-          archive,=root.glob('*-x64.tar.gz')
+          # The Electron app's archive, the Tauri app's (jaunt-app-…), or both while computers move (scripts/desktop_assets.py).
+          archives=sorted(root.glob('*-x64.tar.gz'))
           checks=dict(row.split('  ',1)[::-1] for row in (root/'SHA256SUMS').read_text().splitlines())
-          assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
+          sets=[re.fullmatch(r'(jaunt-desktop|jaunt-app)-.+-x64\.tar\.gz',a.name) for a in archives]
+          assert archives and all(sets) and len({s[1] for s in sets})==len(archives),[a.name for a in archives]
+          for archive in archives:
+              assert hashlib.sha256(archive.read_bytes()).hexdigest()==checks[archive.name]
           PYDESKTOP
           fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
