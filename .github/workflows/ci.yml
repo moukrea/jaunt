@@ -736,7 +736,7 @@ jobs:
     # (scripts/ci_plan.py); a commit without app/ passes at once.
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
-    timeout-minutes: 60
+    timeout-minutes: 90
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -795,6 +795,13 @@ jobs:
         run: cargo build --locked
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_e2e.py ]; then python tests/app_e2e.py; else echo 'Not in this source'; fi
+      # The updater (a supervised update, the rollbacks of four broken builds, on a loopback mirror) and the move from the Electron
+      # app (the migration page, the probation, the rescue import with the repository's own Electron app). Each app on a private X
+      # server, session bus, HOME and runtime directory; pkexec is never run.
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_update_e2e.py ]; then python tests/app_update_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_migration_e2e.py ]; then python tests/app_migration_e2e.py; else echo 'Not in this source'; fi
       - name: Flake gate for the suites this change adds or edits
         if: contains(needs.plan.outputs.flake_e2e, '"app":')
         env:
