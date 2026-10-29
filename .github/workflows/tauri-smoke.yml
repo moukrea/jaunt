@@ -1,0 +1,174 @@
+name: Tauri smoke
+# Feedback #11, spikes S2/S3 (started by hand only): a tiny Tauri 2.12 app (spikes/tauri-smoke in the source) on macOS
+# (WKWebView) and Windows (WebView2). Checks the remote desktop view's needs in the platform webview (RTCPeerConnection,
+# a recvonly H.264 track decoded, a data channel, WebCodecs), shows a notification and reports a click if one comes
+# (nobody clicks on a runner: Windows tries UI Automation, best effort), installs the NSIS build per user and checks
+# that it lands in %LOCALAPPDATA%\Programs\jaunt and that installing and uninstalling never touch %LOCALAPPDATA%\jaunt
+# (the host runtime's folder; a control build without the hook shows what Tauri's default does there), and launches the
+# ad-hoc signed macOS bundle the way jaunt's own installer would leave it (ditto, no quarantine). Reports go to the run
+# summary and a one-day artifact; no installer is uploaded.
+#   gh workflow run tauri-smoke.yml --repo moukrea/jaunt -f sha=<source commit with spikes/tauri-smoke>
+run-name: Tauri smoke ${{ inputs.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to build (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: tauri-smoke-${{ inputs.sha }}
+  cancel-in-progress: true
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAURI_CLI_VERSION: 2.12.4
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id"; exit 1; }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: The smoke app is in this source
+        run: |
+          test -f spikes/tauri-smoke/tauri.conf.json || { echo "spikes/tauri-smoke is not in this commit"; exit 1; }
+      - name: Tauri CLI (pinned)
+        run: |
+          rustc --version
+          cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      - name: Icons from the app's artwork
+        run: |
+          cargo tauri icon web/assets/jaunt.png -o spikes/tauri-smoke/icons
+      - name: Build (macOS app bundle, ad-hoc signed)
+        if: runner.os == 'macOS'
+        working-directory: spikes/tauri-smoke
+        run: |
+          cargo tauri build --ci --bundles app
+          mkdir -p "$RUNNER_TEMP/out"
+          ditto -c -k --keepParent target/release/bundle/macos/jaunt.app "$RUNNER_TEMP/out/jaunt.zip"
+      - name: Build (Windows NSIS, with and without the install folder hook)
+        if: runner.os == 'Windows'
+        working-directory: spikes/tauri-smoke
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          echo '{"bundle":{"windows":{"nsis":{"installerHooks":null}}}}' > "$RUNNER_TEMP/control.json"
+          cargo tauri build --ci --bundles nsis --config "$RUNNER_TEMP/control.json"
+          cp target/release/bundle/nsis/*-setup.exe "$RUNNER_TEMP/out/control-setup.exe"
+          rm -f target/release/bundle/nsis/*-setup.exe
+          cargo tauri build --ci --bundles nsis
+          cp target/release/bundle/nsis/*-setup.exe "$RUNNER_TEMP/out/jaunt-setup.exe"
+      - name: macOS - launch as jaunt's installer leaves it, then with a quarantine flag
+        if: runner.os == 'macOS'
+        run: |
+          set -u
+          out="$RUNNER_TEMP/out"; mkdir -p "$out/plain" "$out/quarantined"
+          ditto -x -k "$out/jaunt.zip" "$out/plain"
+          app="$out/plain/jaunt.app"
+          { echo "## macOS"; echo '```'; codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Signature|Identifier|Format'; spctl -a -vv "$app" 2>&1 || true; xattr -l "$app"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          launch() {
+            report="$1"; shift
+            rm -f "$report"
+            open -n --env "JAUNT_SMOKE_REPORT=$report" --env JAUNT_SMOKE_CLICK_WAIT=0 "$@"
+            for _ in $(seq 1 180); do [ -s "$report" ] && return 0; sleep 1; done
+            return 1
+          }
+          if launch "$out/report-plain.json" "$app"; then echo "plain launch reported" >> "$GITHUB_STEP_SUMMARY"; else echo "plain launch did NOT report within 180 s" >> "$GITHUB_STEP_SUMMARY"; fi
+          # A browser-downloaded copy (quarantine flag): informational, Gatekeeper is expected to refuse an ad-hoc app.
+          ditto -x -k "$out/jaunt.zip" "$out/quarantined"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$out/quarantined/jaunt.app"
+          if launch "$out/report-quarantined.json" "$out/quarantined/jaunt.app"; then echo "quarantined launch reported (Gatekeeper let it run)" >> "$GITHUB_STEP_SUMMARY"; else echo "quarantined launch did not report (expected: Gatekeeper)" >> "$GITHUB_STEP_SUMMARY"; fi
+          for pid in $(pgrep -x jaunt || true); do kill "$pid" || true; done
+          test -s "$out/report-plain.json"
+          cp "$out/report-plain.json" "$out/report.json"
+      - name: Windows - install folder, launch, uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'out'
+          $runtime = Join-Path $env:LOCALAPPDATA 'jaunt'
+          $programs = Join-Path $env:LOCALAPPDATA 'Programs\jaunt'
+          $summary = @('## Windows')
+          function Sentinels {
+            New-Item -ItemType Directory -Force (Join-Path $runtime 'runtime') | Out-Null
+            Set-Content -NoNewline (Join-Path $runtime 'runtime\sentinel.txt') 'host runtime'
+            Set-Content -NoNewline (Join-Path $runtime 'jaunt.exe') 'not the app: a file of the host folder'
+          }
+          function State { Get-ChildItem -Recurse -File $runtime | ForEach-Object { "$($_.FullName.Substring($runtime.Length)) $((Get-FileHash $_.FullName).Hash.Substring(0,12))" } }
+          function Run($exe, $arguments) { Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru | Out-Null }
+          function WaitGone($path) { for ($i = 0; $i -lt 60 -and (Test-Path $path); $i++) { Start-Sleep 1 } }
+          # Control: Tauri's own currentUser default.
+          Sentinels; $before = State
+          Run (Join-Path $out 'control-setup.exe') '/S'
+          $summary += "control install: app in %LOCALAPPDATA%\jaunt = $(Test-Path (Join-Path $runtime 'uninstall.exe')); host folder changed = $((Compare-Object $before (State)) -ne $null)"
+          if (Test-Path (Join-Path $runtime 'uninstall.exe')) {
+            Run (Join-Path $runtime 'uninstall.exe') '/S'; WaitGone (Join-Path $runtime 'uninstall.exe')
+            $summary += "control uninstall: host's jaunt.exe still there = $(Test-Path (Join-Path $runtime 'jaunt.exe')); sentinel = $(Test-Path (Join-Path $runtime 'runtime\sentinel.txt'))"
+          }
+          Remove-Item -Recurse -Force $runtime, $programs -ErrorAction SilentlyContinue
+          # With the hook: %LOCALAPPDATA%\Programs\jaunt, the host folder untouched.
+          Sentinels; $before = State
+          Run (Join-Path $out 'jaunt-setup.exe') '/S'
+          $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\jaunt' -ErrorAction SilentlyContinue
+          $installed = Test-Path (Join-Path $programs 'jaunt.exe')
+          $untouched = (Compare-Object $before (State)) -eq $null
+          $summary += "hooked install: app in Programs\jaunt = $installed; InstallLocation = $($key.InstallLocation); host folder untouched = $untouched"
+          if (-not $installed -or -not $untouched) { $summary | Add-Content $env:GITHUB_STEP_SUMMARY; throw 'install folder check failed' }
+          # Launch, with a notification click attempted through UI Automation while the page waits for one.
+          $report = Join-Path $out 'report.json'
+          $env:JAUNT_SMOKE_REPORT = $report; $env:JAUNT_SMOKE_CLICK_WAIT = '30'
+          $app = Start-Process -FilePath (Join-Path $programs 'jaunt.exe') -PassThru
+          Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+          $clicked = 'no toast found'
+          for ($i = 0; $i -lt 40 -and -not (Test-Path $report); $i++) {
+            Start-Sleep 1
+            $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'New notification')
+            $toast = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+            if ($toast) {
+              $all = $toast.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+              foreach ($e in $all) { $p = $null; if ($e.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { $p.Invoke(); $clicked = "invoked '$($e.Current.Name)'"; break } }
+              break
+            }
+          }
+          for ($i = 0; $i -lt 180 -and -not (Test-Path $report); $i++) { Start-Sleep 1 }
+          if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          $summary += "UI Automation click: $clicked"
+          Run (Join-Path $programs 'uninstall.exe') '/S'; WaitGone (Join-Path $programs 'jaunt.exe')
+          $summary += "uninstall: app removed = $(-not (Test-Path (Join-Path $programs 'jaunt.exe'))); host folder untouched = $((Compare-Object $before (State)) -eq $null)"
+          $summary | Add-Content $env:GITHUB_STEP_SUMMARY
+          if (-not (Test-Path $report)) { throw 'the app did not report' }
+          if ((Compare-Object $before (State)) -ne $null) { throw 'uninstall changed the host folder' }
+      - name: Report
+        if: always()
+        run: |
+          r="$RUNNER_TEMP/out/report.json"
+          if [ ! -s "$r" ]; then echo "no report" >> "$GITHUB_STEP_SUMMARY"; exit 1; fi
+          { echo '```json'; cat "$r"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          py=$(command -v python3 || command -v python)
+          "$py" -c 'import json,sys; r=json.load(open(sys.argv[1])); bad=[k for k in ("h264Receive","dataChannel","webCodecs") if "error" in r["checks"].get(k,{"error":1})]; print("failed:",bad) if bad else print("all required checks passed"); sys.exit(1 if bad else 0)' "$r"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: tauri-smoke-${{ runner.os }}
+          path: ${{ runner.temp }}/out/report*.json
+          retention-days: 1
+          if-no-files-found: ignore
