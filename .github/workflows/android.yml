@@ -20,9 +20,12 @@ on:
         required: true
 permissions: {}
 jobs:
+  # A source with the app on Tauri (app/android, docs/ANDROID.md "The app on Tauri") builds it with the Tauri CLI, which
+  # builds its Rust library and runs Gradle; a source from before builds the Java app with Gradle alone (android/), as the
+  # release queue may still publish one. Both sign the same way, with the same pinned signer and SHA256SUMS.
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     environment: release
     permissions:
       contents: read
@@ -47,11 +50,20 @@ jobs:
       # The bundled web configuration names no relay: devices get it from a host's pairing code.
       - run: npm ci && npm run prepare-web
       # The native link (client/link, docs/NATIVE_LINK.md: Rust, built by Gradle for each ABI with the NDK's clang, --locked):
-      # its NDK and Rust targets, from the script CI's android-build job runs too.
+      # its NDK and Rust targets, and the pinned Tauri CLI for the app on Tauri, from the script CI's android-build job runs too.
       - name: The NDK and the Rust targets of the native link, when the source has one
         run: if [ -f android/ci_native.sh ]; then bash android/ci_native.sh; else echo 'No native link in this source'; fi
+      # Without the key: the app on Tauri's release build (its Rust libraries, cached by cargo for the signed build below),
+      # unit tests, lint and the instrumentation build; or the Java app's tests, lint and builds.
       - name: Test native protocol, lint and build APK
-        run: android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+        run: |
+          set -euo pipefail
+          if [ -f app/android/tauri.conf.json ]; then
+            (cd app/android && cargo tauri android build --ci --apk --target aarch64 armv7)
+            app/android/gen/android/gradlew -p app/android/gen/android -PskipNative :app:testUniversalDebugUnitTest :app:lintUniversalDebug :app:assembleUniversalDebugAndroidTest --no-daemon
+          else
+            android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+          fi
       # An APK signed by another key cannot update installed apps: they would have to be
       # uninstalled, which loses their pairings. The signer is pinned below, not in a variable.
       - name: Sign the immutable Android release
@@ -67,14 +79,25 @@ jobs:
           trap 'rm -f "$jaunt_ANDROID_KEYSTORE"' EXIT
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$jaunt_ANDROID_KEYSTORE"
           chmod 600 "$jaunt_ANDROID_KEYSTORE"
+          # The version the release pipeline stamped: the app on Tauri's file, else (a source from before) build.gradle.
           python3 - <<'PY'
-          import os,re
-          version=re.search(r"versionName '([^']+)'",open('android/app/build.gradle').read())[1]
+          import json,os,re
+          if os.path.exists('app/android/tauri.android.conf.json'):
+              version=json.load(open('app/android/tauri.android.conf.json'))['version']
+          else:
+              version=re.search(r"versionName '([^']+)'",open('android/app/build.gradle').read())[1]
           assert os.environ['TAG']=='android-v'+version, 'Tag/version mismatch'
           PY
-          android/gradlew -p android :app:assembleRelease :app:lintRelease --no-daemon
+          if [ -f app/android/tauri.conf.json ]; then
+            (cd app/android && cargo tauri android build --ci --apk --target aarch64 armv7)
+            app/android/gen/android/gradlew -p app/android/gen/android -PskipNative :app:lintUniversalRelease --no-daemon
+            apk=app/android/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          else
+            android/gradlew -p android :app:assembleRelease :app:lintRelease --no-daemon
+            apk=android/app/build/outputs/apk/release/app-release.apk
+          fi
           mkdir -p android-release
-          cp android/app/build/outputs/apk/release/app-release.apk "android-release/jaunt-$TAG.apk"
+          cp "$apk" "android-release/jaunt-$TAG.apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "android-release/jaunt-$TAG.apk" > android-release/SIGNING-CERTIFICATE.txt
           # Android installs an update only over the same signer, and the app refuses any other:
           # never publish an APK signed by anything but the established key. The pin lives here, not in a
@@ -91,6 +114,20 @@ jobs:
             exit 1
           fi
           (cd android-release && sha256sum -- *.apk SIGNING-CERTIFICATE.txt > SHA256SUMS)
+      # The app on Tauri, after signing and without the key (the keystore is gone, the token only reads releases): package,
+      # SDK levels, no debugging, backup or cleartext, the stamped version above the newest published production APK's,
+      # and Tauri's and the native link's libraries for each phone ABI.
+      - name: Check the app on Tauri's APK against the newest production APK
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -f app/android/tauri.conf.json ] && [ -f scripts/check_android_apk.py ]; then
+            python3 scripts/check_android_apk.py "android-release/jaunt-$TAG.apk" --version-file app/android/tauri.android.conf.json --abis arm64-v8a,armeabi-v7a --tag "$TAG" --previous "$GITHUB_REPOSITORY"
+          else
+            echo 'Java app: nothing more to check'
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-release

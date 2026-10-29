@@ -353,13 +353,17 @@ jobs:
   # time, and nothing built it before: a broken build, or a missing native library, would show only there and
   # block the release). Unit tests, lint, the release and debug builds. The native link (client/link, Rust through
   # JNI) is built by Gradle with the NDK: android/ci_native.sh, the script android.yml runs too, installs the NDK
-  # and the Rust targets; here it is built for arm64-v8a and armeabi-v7a only (the release also builds x86_64), and
-  # the release APK is required to hold a library for each of the two.
+  # and the Rust targets; here it is built for arm64-v8a and armeabi-v7a only, and the release APK is required to
+  # hold a library for each of the two. A source with the app on Tauri (app/android, docs/ANDROID.md "The app on
+  # Tauri") builds it with the Tauri CLI (from the same script): its release APK is checked as the release checks it
+  # (scripts/check_android_apk.py: Tauri's and the native link's libraries per ABI, package, SDK levels, no debugging,
+  # backup or cleartext, the explicit version), then the unit tests, lint and the instrumentation build run in Gradle.
+  # A source from before builds the Java app (android/) with Gradle alone.
   android-build:
     needs: [guard, plan]
     if: needs.plan.outputs.android == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -385,9 +389,26 @@ jobs:
       # The bundled web configuration names no relay: devices get it from a host's pairing code.
       - run: npm ci && npm run prepare-web
       - name: Unit tests, lint, release (unsigned) and debug builds
-        run: android/gradlew -p android -PnativeAbis=arm64-v8a,armeabi-v7a :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleRelease :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+        run: |
+          set -euo pipefail
+          if [ -f app/android/tauri.conf.json ]; then
+            (cd app/android && cargo tauri android build --ci --apk --target aarch64 armv7)
+            app/android/gen/android/gradlew -p app/android/gen/android -PskipNative :app:testUniversalDebugUnitTest :app:lintUniversalDebug :app:lintUniversalRelease :app:assembleUniversalDebugAndroidTest --no-daemon
+          else
+            android/gradlew -p android -PnativeAbis=arm64-v8a,armeabi-v7a :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleRelease :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+          fi
       - name: A native library for each ABI in the APK
         run: |
+          set -euo pipefail
+          if [ -f app/android/tauri.conf.json ]; then
+            # Unsigned: Gradle names it app-universal-release-unsigned.apk, or app-universal-release.apk if it ever finds a key.
+            apk=$(ls app/android/gen/android/app/build/outputs/apk/universal/release/app-universal-release*.apk | head -n 1)
+            test -s "$apk"
+            if [ -f scripts/check_android_apk.py ]; then
+              python3 scripts/check_android_apk.py "$apk" --version-file app/android/tauri.android.conf.json --abis arm64-v8a,armeabi-v7a
+            fi
+            exit 0
+          fi
           # Unsigned: Gradle names it app-release-unsigned.apk, or app-release.apk if it ever finds a key.
           apk=$(ls android/app/build/outputs/apk/release/app-release*.apk | head -n 1)
           test -s "$apk"
