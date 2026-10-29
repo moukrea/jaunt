@@ -1,0 +1,192 @@
+name: Channel release
+run-name: Channel ${{ inputs.action }} ${{ inputs.pr }} ${{ inputs.sha }}
+# Publishes the candidate of a pull request of the private source on its update channel
+# <dispatcher>_<pr> (docs/UPDATES.md#update-channels), and removes it again. Started by hand only,
+# on main, by someone who can write here: that is the authority over what a channel installs, since
+# the token of this repository cannot read the source's pull requests.
+#   publish: gh workflow run channel.yml --repo moukrea/jaunt -f pr=<n> -f sha=<head commit> [-f title=<text>]
+#   cleanup: gh workflow run channel.yml --repo moukrea/jaunt -f action=cleanup -f pr=<n>
+# `prepare` (ledger environment, the ledger key, installs nothing) proves over the deploy key that the
+# head is what the source's refs/pull/<n>/head names and the tip of one of its branches, then reserves
+# the candidate and pushes its three tags with the reservation. The three builds are the release
+# workflows the queue calls (keyless; Android is signed in the `release` environment with the pinned
+# signer); `record` (ledger) verifies the three prereleases and marks the candidate delivered. The
+# channel page is deployed by auto-release.yml under its lock, requested at the end of `record` and
+# `cleanup`. This workflow never deploys Pages and never takes the production lock.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: publish a candidate or cleanup the channel of a closed pull request
+        type: choice
+        options: [publish, cleanup]
+        default: publish
+      pr:
+        description: Pull request number in the source
+        required: true
+        type: string
+      sha:
+        description: Head commit of the pull request (publish)
+        required: false
+        type: string
+      title:
+        description: Pull request title, shown in the channel list (publish, optional)
+        required: false
+        type: string
+# One lane per pull request: a run waits for the previous one of its pull request.
+concurrency:
+  group: jaunt-channel-${{ inputs.pr }}
+  cancel-in-progress: false
+permissions: {}
+env:
+  JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+jobs:
+  prepare:
+    # The ledger and release environments are restricted to main; so is the dispatch.
+    if: github.ref == 'refs/heads/main' && inputs.action == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ledger
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.prepare.outputs.publish }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      control: ${{ steps.control.outputs.sha }}
+      host: ${{ steps.prepare.outputs.host }}
+      desktop: ${{ steps.prepare.outputs.desktop }}
+      android: ${{ steps.prepare.outputs.android }}
+      host_tag: ${{ steps.prepare.outputs.host_tag }}
+      desktop_tag: ${{ steps.prepare.outputs.desktop_tag }}
+      android_tag: ${{ steps.prepare.outputs.android_tag }}
+    steps:
+      # The ledger key may push to the source: this job runs control code only (main) and installs nothing.
+      # It reads the pull request's objects, never runs them.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_LEDGER_KEY }}
+          ref: main
+          fetch-depth: 0
+      - id: control
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Verify the head and reserve the candidate
+        id: prepare
+        run: |
+          if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi
+          python scripts/channel_release.py prepare --pr "$PR" --sha "$HEAD_SHA" --title "$TITLE"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.sha }}
+          TITLE: ${{ inputs.title }}
+  host:
+    needs: prepare
+    if: needs.prepare.outputs.host == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.host_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  desktop:
+    needs: prepare
+    if: needs.prepare.outputs.desktop == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.desktop_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+  android:
+    needs: prepare
+    if: needs.prepare.outputs.android == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.android_tag }}
+      control: ${{ needs.prepare.outputs.control }}
+    # Its build reads the release environment's signing secrets, which GitHub hands to a called
+    # workflow only through inherit (the repository-level secret inherited is SOURCE_READ_KEY).
+    secrets: inherit
+  record:
+    needs: [prepare, host, desktop, android]
+    if: always() && needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ledger
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_LEDGER_KEY }}
+          ref: ${{ needs.prepare.outputs.control }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Verify the three prereleases and record the candidate
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        run: |
+          if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi
+          python scripts/channel_release.py record --sha "$RELEASE_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      - name: Retain the failed candidate for a rerun
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi
+          python scripts/channel_release.py failed --sha "$RELEASE_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - name: Request the channel page under the production lock
+        run: gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+  cleanup:
+    if: github.ref == 'refs/heads/main' && inputs.action == 'cleanup'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ledger
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_LEDGER_KEY }}
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - name: Delete the channel's prereleases, tags and entry
+        run: |
+          if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi
+          python scripts/channel_release.py cleanup --pr "$PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+      - name: Remove the channel page under the production lock
+        run: gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
