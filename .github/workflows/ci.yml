@@ -318,6 +318,10 @@ jobs:
       - run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
       - run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
       - run: python -m playwright install --with-deps chromium
+      # Electron downloads its binary on first start, not at npm ci: the suites that drive the desktop app (their own Xvfb or
+      # xvfb-run) fetch it here first, so that a start under load does not wait for the network. The others skip the download.
+      - run: if [ -f node_modules/electron/install.js ]; then node node_modules/electron/install.js; fi
+        if: contains(matrix.suite, 'desktop') || matrix.suite == 'shared_workspace_e2e' || matrix.suite == 'pwa_e2e'
       - name: Repeat the changed suite under load
         env:
           SUITE: ${{ matrix.suite }}
