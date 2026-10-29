@@ -732,8 +732,9 @@ jobs:
     # checks and tests (a Rust release of its own, so that a newer one on the runner does not turn clippy red), the desktop
     # bridge's tests, then a debug build driven on a private X server by WebKitWebDriver against a real host and the test relay
     # (tests/app_e2e.py: the workspace starts and says app.ready, the local host over its bridge, pairing over the native link,
-    # an artifact's frame that reaches neither the bridge nor the IPC). Planned for app/, client/, web/ and what they mirror
-    # (scripts/ci_plan.py); a commit without app/ passes at once.
+    # an artifact's frame that reaches neither the bridge nor the IPC), and the remote desktop received by the app against the
+    # real desktop agent (tests/app_desktop_e2e.py). Planned for app/, client/, web/ and what they mirror (scripts/ci_plan.py);
+    # a commit without app/ passes at once.
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
     timeout-minutes: 90
@@ -762,11 +763,13 @@ jobs:
       - if: steps.crate.outputs.present == 'true'
         run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
       # WebKitGTK and what Tauri links on Linux; WebKitWebDriver (the same WebKit), Xvfb and xrdb (the screen's font resolution),
-      # and the system Python's GObject bindings for the suite's stand-in notification service on its private session bus.
+      # and the system Python's GObject bindings for the suite's stand-in notification service on its private session bus. For the
+      # remote desktop: WebKitGTK's H.264 decoder for WebCodecs (gstreamer1.0-libav: Ubuntu's WebKit only suggests it), and a
+      # private PipeWire with a null sink for its sound (tests/desktop_sound_session.sh; never the runner's own services).
       - if: steps.crate.outputs.present == 'true'
-        run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils dbus python3-gi gir1.2-glib-2.0; fi
+        run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils dbus python3-gi gir1.2-glib-2.0 gstreamer1.0-libav pipewire pipewire-pulse wireplumber pulseaudio-utils; fi
       - if: steps.crate.outputs.present == 'true'
-        run: sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils dbus python3-gi gir1.2-glib-2.0
+        run: sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils dbus python3-gi gir1.2-glib-2.0 gstreamer1.0-libav pipewire pipewire-pulse wireplumber pulseaudio-utils
       - if: steps.crate.outputs.present == 'true'
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
       - if: steps.crate.outputs.present == 'true'
@@ -802,6 +805,13 @@ jobs:
         run: if [ -f tests/app_update_e2e.py ]; then python tests/app_update_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_migration_e2e.py ]; then python tests/app_migration_e2e.py; else echo 'Not in this source'; fi
+      # The remote desktop received by the app (option A of #11: its str0m receiver, WebCodecs in the page) against the real desktop
+      # agent, built here from source with its test pattern (the release's agent leaves the test tools out), on a private Xvfb, with
+      # its sound through a private PipeWire whose only output is a null sink.
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_desktop_e2e.py ]; then cargo build --release --locked -p jaunt-desktop-agent; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_desktop_e2e.py ]; then python tests/app_desktop_e2e.py; else echo 'Not in this source'; fi
       - name: Flake gate for the suites this change adds or edits
         if: contains(needs.plan.outputs.flake_e2e, '"app":')
         env:
