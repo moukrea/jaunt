@@ -78,16 +78,18 @@ jobs:
           cp target/release/bundle/nsis/*-setup.exe "$RUNNER_TEMP/out/jaunt-setup.exe"
       - name: macOS - launch as jaunt's installer leaves it, then with a quarantine flag
         if: runner.os == 'macOS'
+        timeout-minutes: 10
         run: |
           set -u
           out="$RUNNER_TEMP/out"; mkdir -p "$out/plain" "$out/quarantined"
           ditto -x -k "$out/jaunt.zip" "$out/plain"
           app="$out/plain/jaunt.app"
-          { echo "## macOS"; echo '```'; codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Signature|Identifier|Format'; spctl -a -vv "$app" 2>&1 || true; xattr -l "$app"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          bounded() { "$@" & p=$!; for _ in $(seq 1 30); do kill -0 "$p" 2>/dev/null || { wait "$p"; return; }; sleep 1; done; kill "$p"; echo "(timed out after 30 s) $1"; }
+          { echo "## macOS"; echo '```'; bounded codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Signature|Identifier|Format|timed out'; bounded spctl -a -vv "$app" 2>&1 || true; xattr -l "$app"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           launch() {
             report="$1"; shift
             rm -f "$report"
-            open -n --env "JAUNT_SMOKE_REPORT=$report" --env JAUNT_SMOKE_CLICK_WAIT=0 "$@"
+            bounded open -n --env "JAUNT_SMOKE_REPORT=$report" --env JAUNT_SMOKE_CLICK_WAIT=0 "$@" || true
             for _ in $(seq 1 180); do [ -s "$report" ] && return 0; sleep 1; done
             return 1
           }
@@ -101,6 +103,7 @@ jobs:
           cp "$out/report-plain.json" "$out/report.json"
       - name: Windows - install folder, launch, uninstall
         if: runner.os == 'Windows'
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -110,8 +113,8 @@ jobs:
           $summary = @('## Windows')
           function Sentinels {
             New-Item -ItemType Directory -Force (Join-Path $runtime 'runtime') | Out-Null
-            Set-Content -NoNewline (Join-Path $runtime 'runtime\sentinel.txt') 'host runtime'
-            Set-Content -NoNewline (Join-Path $runtime 'jaunt.exe') 'not the app: a file of the host folder'
+            [IO.File]::WriteAllText((Join-Path $runtime 'runtime\sentinel.txt'), 'host runtime')
+            [IO.File]::WriteAllText((Join-Path $runtime 'jaunt.exe'), 'not the app: a file of the host folder')
           }
           function State { Get-ChildItem -Recurse -File $runtime | ForEach-Object { "$($_.FullName.Substring($runtime.Length)) $((Get-FileHash $_.FullName).Hash.Substring(0,12))" } }
           function Run($exe, $arguments) { Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru | Out-Null }
