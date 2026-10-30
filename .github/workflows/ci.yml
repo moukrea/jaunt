@@ -732,9 +732,10 @@ jobs:
     # checks and tests (a Rust release of its own, so that a newer one on the runner does not turn clippy red), the desktop
     # bridge's tests, then a debug build driven on a private X server by WebKitWebDriver against a real host and the test relay
     # (tests/app_e2e.py: the workspace starts and says app.ready, the local host over its bridge, pairing over the native link,
-    # an artifact's frame that reaches neither the bridge nor the IPC), and the remote desktop received by the app against the
-    # real desktop agent (tests/app_desktop_e2e.py). Planned for app/, client/, web/ and what they mirror (scripts/ci_plan.py);
-    # a commit without app/ passes at once.
+    # an artifact's frame that reaches neither the bridge nor the IPC), the remote desktop received by the app against the
+    # real desktop agent (tests/app_desktop_e2e.py), and a host's web server opened in Chromium through the app's web gate and its
+    # browser proxy (tests/app_web_e2e.py). Planned for app/, client/, web/ and what they mirror (scripts/ci_plan.py); a commit
+    # without app/ passes at once.
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
     timeout-minutes: 90
@@ -812,6 +813,12 @@ jobs:
         run: if [ -f tests/app_desktop_e2e.py ]; then cargo build --release --locked -p jaunt-desktop-agent; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_desktop_e2e.py ]; then python tests/app_desktop_e2e.py; else echo 'Not in this source'; fi
+      # The web gate (app/src/web, plan #11 M5): Chromium (Playwright's, with its PAC resolver: the full build) opens a host's web
+      # server through the app on :4443, then through its PAC file; the proxy setting's commands are logged, never run.
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_web_e2e.py ]; then if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; fi; python -m playwright install --with-deps chromium; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_web_e2e.py ]; then python tests/app_web_e2e.py; else echo 'Not in this source'; fi
       - name: Flake gate for the suites this change adds or edits
         if: contains(needs.plan.outputs.flake_e2e, '"app":')
         env:
