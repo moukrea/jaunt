@@ -899,10 +899,11 @@ jobs:
       - if: steps.crate.outputs.present == 'true'
         working-directory: app
         run: cargo build --locked
-      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
-        run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
+      # The driverless self-test first: it needs no DevTools port, so it says whether the app starts at all.
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_selftest_e2e.py ]; then python tests/app_selftest_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
+        run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
   network-bench:
     needs: [guard, plan]
     if: needs.plan.outputs.network_bench == 'true'
