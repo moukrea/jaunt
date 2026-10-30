@@ -1,14 +1,17 @@
 name: Channel release
 run-name: Channel ${{ inputs.action }} ${{ inputs.pr }} ${{ inputs.sha }}
 # Publishes the candidate of a pull request of the private source on its update channel
-# <dispatcher>_<pr> (docs/UPDATES.md#update-channels), and removes it again. Started by hand only,
-# on main, by someone who can write here: that is the authority over what a channel installs, since
-# the token of this repository cannot read the source's pull requests.
-#   publish: gh workflow run channel.yml --repo moukrea/jaunt -f pr=<n> -f sha=<head commit> [-f title=<text>]
-#   cleanup: gh workflow run channel.yml --repo moukrea/jaunt -f action=cleanup -f pr=<n>
+# <dispatcher>_<pr> (docs/UPDATES.md#update-channels), removes it again, or publishes a build of
+# a branch of the source on the Experimental channel. Started by hand only, on main, by someone who
+# can write here: that is the authority over what a channel installs, since the token of this
+# repository cannot read the source's pull requests.
+#   publish:      gh workflow run channel.yml --repo moukrea/jaunt -f pr=<n> -f sha=<head commit> [-f title=<text>]
+#   cleanup:      gh workflow run channel.yml --repo moukrea/jaunt -f action=cleanup -f pr=<n>
+#   experimental: gh workflow run channel.yml --repo moukrea/jaunt -f action=experimental -f sha=<branch tip> [-f title=<text>]
 # `prepare` (ledger environment, the ledger key, installs nothing) proves over the deploy key that the
-# head is what the source's refs/pull/<n>/head names and the tip of one of its branches, then reserves
-# the candidate and pushes its three tags with the reservation. The three builds are the release
+# head is what the source's refs/pull/<n>/head names and the tip of one of its branches (an
+# Experimental build: the tip of one of its branches), then reserves the build and pushes its three
+# tags with the reservation (`-exp.N` tags for Experimental). The three builds are the release
 # workflows the queue calls (keyless; Android is signed in the `release` environment with the pinned
 # signer); `record` (ledger) verifies the three prereleases and marks the candidate delivered. The
 # channel page is deployed by auto-release.yml under its lock, requested at the end of `record` and
@@ -17,25 +20,25 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: publish a candidate or cleanup the channel of a closed pull request
+        description: publish a pull request candidate, cleanup the channel of a closed pull request, or publish a branch tip on Experimental
         type: choice
-        options: [publish, cleanup]
+        options: [publish, cleanup, experimental]
         default: publish
       pr:
-        description: Pull request number in the source
-        required: true
+        description: Pull request number in the source (publish, cleanup; not experimental)
+        required: false
         type: string
       sha:
-        description: Head commit of the pull request (publish)
+        description: Head commit of the pull request (publish) or tip of a source branch (experimental)
         required: false
         type: string
       title:
-        description: Pull request title, shown in the channel list (publish, optional)
+        description: Title shown in the channel list (publish and experimental, optional)
         required: false
         type: string
-# One lane per pull request: a run waits for the previous one of its pull request.
+# One lane per pull request, and one for Experimental: a run waits for the previous one of its lane.
 concurrency:
-  group: jaunt-channel-${{ inputs.pr }}
+  group: jaunt-channel-${{ inputs.action == 'experimental' && 'experimental' || inputs.pr }}
   cancel-in-progress: false
 permissions: {}
 env:
@@ -43,22 +46,22 @@ env:
 jobs:
   prepare:
     # The ledger and release environments are restricted to main; so is the dispatch.
-    if: github.ref == 'refs/heads/main' && inputs.action == 'publish'
+    if: github.ref == 'refs/heads/main' && (inputs.action == 'publish' || inputs.action == 'experimental')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ledger
     permissions:
       contents: read
     outputs:
-      publish: ${{ steps.prepare.outputs.publish }}
-      sha: ${{ steps.prepare.outputs.sha }}
+      publish: ${{ steps.prepare.outputs.publish || steps.experimental.outputs.publish }}
+      sha: ${{ steps.prepare.outputs.sha || steps.experimental.outputs.sha }}
       control: ${{ steps.control.outputs.sha }}
-      host: ${{ steps.prepare.outputs.host }}
-      desktop: ${{ steps.prepare.outputs.desktop }}
-      android: ${{ steps.prepare.outputs.android }}
-      host_tag: ${{ steps.prepare.outputs.host_tag }}
-      desktop_tag: ${{ steps.prepare.outputs.desktop_tag }}
-      android_tag: ${{ steps.prepare.outputs.android_tag }}
+      host: ${{ steps.prepare.outputs.host || steps.experimental.outputs.host }}
+      desktop: ${{ steps.prepare.outputs.desktop || steps.experimental.outputs.desktop }}
+      android: ${{ steps.prepare.outputs.android || steps.experimental.outputs.android }}
+      host_tag: ${{ steps.prepare.outputs.host_tag || steps.experimental.outputs.host_tag }}
+      desktop_tag: ${{ steps.prepare.outputs.desktop_tag || steps.experimental.outputs.desktop_tag }}
+      android_tag: ${{ steps.prepare.outputs.android_tag || steps.experimental.outputs.android_tag }}
     steps:
       # The ledger key may push to the source: this job runs control code only (main) and installs nothing.
       # It reads the pull request's objects, never runs them.
@@ -75,12 +78,23 @@ jobs:
           python-version: '3.13'
       - name: Verify the head and reserve the candidate
         id: prepare
+        if: inputs.action == 'publish'
         run: |
           if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi
           python scripts/channel_release.py prepare --pr "$PR" --sha "$HEAD_SHA" --title "$TITLE"
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.sha }}
+          TITLE: ${{ inputs.title }}
+      - name: Verify the branch tip and reserve the Experimental build
+        id: experimental
+        if: inputs.action == 'experimental'
+        run: |
+          if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi
+          python scripts/channel_release.py experimental --sha "$HEAD_SHA" --title "$TITLE"
+        env:
+          GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ inputs.sha }}
           TITLE: ${{ inputs.title }}
   host:
@@ -139,7 +153,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.13'
-      - name: Verify the three prereleases and record the candidate
+      - name: Verify the three prereleases and record the build
         if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
         run: |
           if [ ! -f scripts/channel_release.py ]; then echo 'This source has no channel publisher'; exit 1; fi

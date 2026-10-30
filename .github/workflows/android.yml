@@ -86,7 +86,8 @@ jobs:
               version=json.load(open('app/android/tauri.android.conf.json'))['version']
           else:
               version=re.search(r"versionName '([^']+)'",open('android/app/build.gradle').read())[1]
-          assert os.environ['TAG']=='android-v'+version, 'Tag/version mismatch'
+          # A legacy tag is `android-v<version>`, a current one (Experimental builds, plain releases) `android-<version>`.
+          assert os.environ['TAG'] in ('android-v'+version,'android-'+version), 'Tag/version mismatch'
           PY
           if [ -f app/android/tauri.conf.json ]; then
             (cd app/android && cargo tauri android build --ci --apk --target aarch64 armv7)

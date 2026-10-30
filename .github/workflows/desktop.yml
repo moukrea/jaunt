@@ -219,7 +219,7 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          node -e 'if(process.env.TAG!=="desktop-v"+require("./package.json").version)throw Error("Tag/version mismatch")'
+          node -e 'const v=require("./package.json").version;if(process.env.TAG!=="desktop-v"+v&&process.env.TAG!=="desktop-"+v)throw Error("Tag/version mismatch")'
           (cd desktop-release && sha256sum -- * > SHA256SUMS)
       - name: Read trusted resumable publisher
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
