@@ -734,11 +734,12 @@ jobs:
     # (tests/app_e2e.py: the workspace starts and says app.ready, the local host over its bridge, pairing over the native link,
     # an artifact's frame that reaches neither the bridge nor the IPC), the remote desktop received by the app against the
     # real desktop agent (tests/app_desktop_e2e.py), and a host's web server opened in Chromium through the app's web gate and its
-    # browser proxy (tests/app_web_e2e.py). Planned for app/, client/, web/ and what they mirror (scripts/ci_plan.py); a commit
-    # without app/ passes at once.
+    # browser proxy (tests/app_web_e2e.py); the Electron app's desktop suites ported to it, its boundary, the keyboard and a
+    # self-test without a driver (the app_*_e2e suites, on the app driver). Planned for app/, client/, web/ and what they mirror
+    # (scripts/ci_plan.py); a commit without app/ passes at once. (Its flake gate's 40 minutes at most are in the limit.)
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
-    timeout-minutes: 90
+    timeout-minutes: 120
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -766,11 +767,13 @@ jobs:
       # WebKitGTK and what Tauri links on Linux; WebKitWebDriver (the same WebKit), Xvfb and xrdb (the screen's font resolution),
       # and the system Python's GObject bindings for the suite's stand-in notification service on its private session bus. For the
       # remote desktop: WebKitGTK's H.264 decoder for WebCodecs (gstreamer1.0-libav: Ubuntu's WebKit only suggests it), and a
-      # private PipeWire with a null sink for its sound (tests/desktop_sound_session.sh; never the runner's own services).
+      # private PipeWire with a null sink for its sound (tests/desktop_sound_session.sh; never the runner's own services). For the
+      # suites that press keys and click as a person does on the private X server (the app driver's X11): xdotool (and its
+      # libXtst), setxkbmap for the keyboard suite's French layout (x11-xkb-utils).
       - if: steps.crate.outputs.present == 'true'
-        run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils dbus python3-gi gir1.2-glib-2.0 gstreamer1.0-libav pipewire pipewire-pulse wireplumber pulseaudio-utils; fi
+        run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils x11-xkb-utils xdotool dbus python3-gi gir1.2-glib-2.0 gstreamer1.0-libav pipewire pipewire-pulse wireplumber pulseaudio-utils; fi
       - if: steps.crate.outputs.present == 'true'
-        run: sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils dbus python3-gi gir1.2-glib-2.0 gstreamer1.0-libav pipewire pipewire-pulse wireplumber pulseaudio-utils
+        run: sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev webkit2gtk-driver xvfb x11-xserver-utils x11-xkb-utils xdotool dbus python3-gi gir1.2-glib-2.0 gstreamer1.0-libav pipewire pipewire-pulse wireplumber pulseaudio-utils
       - if: steps.crate.outputs.present == 'true'
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
       - if: steps.crate.outputs.present == 'true'
@@ -815,15 +818,91 @@ jobs:
         run: if [ -f tests/app_desktop_e2e.py ]; then python tests/app_desktop_e2e.py; else echo 'Not in this source'; fi
       # The web gate (app/src/web, plan #11 M5): Chromium (Playwright's, with its PAC resolver: the full build) opens a host's web
       # server through the app on :4443, then through its PAC file; the proxy setting's commands are logged, never run.
+      # (Playwright's Chromium is also the paired browser of the workspace and AgentsWorld suites below.)
       - if: steps.crate.outputs.present == 'true'
-        run: if [ -f tests/app_web_e2e.py ]; then if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; fi; python -m playwright install --with-deps chromium; else echo 'Not in this source'; fi
+        run: if [ -f tests/app_web_e2e.py ] || [ -f tests/app_workspace_e2e.py ]; then if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; fi; python -m playwright install --with-deps chromium; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_web_e2e.py ]; then python tests/app_web_e2e.py; else echo 'Not in this source'; fi
+      # The Electron app's desktop suites on the Tauri app (plan #11 M6), through the app driver (app_driver.py): the same checks, the app driven
+      # by WebKitWebDriver and pressed with real input on its private X server. Then the boundary (security), real key presses checked
+      # at the PTY's bytes (keyboard), and the app checked from inside its own page with no driver (the self-test macOS runs too).
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_workspace_e2e.py ]; then python tests/app_workspace_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_download_e2e.py ]; then python tests/app_download_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_artifacts_e2e.py ]; then python tests/app_artifacts_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_agentsworld_e2e.py ]; then python tests/app_agentsworld_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_scale_e2e.py ]; then python tests/app_scale_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_keyboard_e2e.py ]; then python tests/app_keyboard_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_selftest_e2e.py ]; then python tests/app_selftest_e2e.py; else echo 'Not in this source'; fi
+      # The app's suites each start a WebKit app (a minute or two under load, three runs at least): this job's gate has 40 minutes
+      # for all of a change's suites, not the default 25 (a change that adds eight of them would not fit).
       - name: Flake gate for the suites this change adds or edits
         if: contains(needs.plan.outputs.flake_e2e, '"app":')
         env:
           SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['app'], ' ') }}
+          TOTAL: '2400'
         run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
+  app-platforms:
+    # The Tauri app's debug build on Windows (WebView2) and macOS (WKWebView), where the app job's WebKitWebDriver does not exist:
+    # on Windows its boundary over WebView2's DevTools protocol (tests/app_security_e2e.py, backend tauri-cdp: Playwright attached
+    # to the app's own webview), and on both the app checked from inside its own page with no driver, its window closed as a person
+    # closes it (tests/app_selftest_e2e.py). Client-only (no host of their own). Planned with the app job.
+    needs: [guard, plan]
+    if: needs.plan.outputs.app == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: crate
+        run: if [ -f app/Cargo.toml ] && [ -f tests/app_selftest_e2e.py ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.crate.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      # Playwright's Python package only: it attaches to WebView2, it downloads no browser.
+      - if: steps.crate.outputs.present == 'true'
+        run: pip install -r requirements-dev.txt
+      - if: steps.crate.outputs.present == 'true'
+        run: npm ci
+      - if: steps.crate.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.crate.outputs.present == 'true'
+        working-directory: app
+        run: cargo build --locked
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
+        run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_selftest_e2e.py ]; then python tests/app_selftest_e2e.py; else echo 'Not in this source'; fi
   network-bench:
     needs: [guard, plan]
     if: needs.plan.outputs.network_bench == 'true'
