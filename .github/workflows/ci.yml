@@ -814,6 +814,12 @@ jobs:
         run: if [ -f tests/app_update_e2e.py ]; then python tests/app_update_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_migration_e2e.py ]; then python tests/app_migration_e2e.py; else echo 'Not in this source'; fi
+      # The cutover's two halves joined (plan #11 C1): the repository's Electron bridge moves to this very debug build and back, in the
+      # world of the Electron bridge suite. Four outcomes of the real mover: three deliberately broken builds (a missing library,
+      # a page that never says it is ready, a lost workspace) roll back to the Electron app with its data and the tag set aside, and a
+      # healthy one takes the workspace over and hands its reverse handoff back. pkexec is never run.
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_bridge_e2e.py ]; then python tests/app_bridge_e2e.py; else echo 'Not in this source'; fi
       # The remote desktop received by the app (option A of #11: its str0m receiver, WebCodecs in the page) against the real desktop
       # agent, built here from source with its test pattern (the release's agent leaves the test tools out), on a private Xvfb, with
       # its sound through a private PipeWire whose only output is a null sink.

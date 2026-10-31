@@ -223,7 +223,7 @@ jobs:
             python3 - <<'PYDESKTOP'
           import hashlib,pathlib,re
           root=pathlib.Path('/tmp/jaunt-desktop-release')
-          # The Electron app's archive, the Tauri app's (jaunt-app-…), or both while computers move (scripts/desktop_assets.py).
+          # The Electron app's archive, the Tauri app's (jaunt-app-…), or both while computers move.
           archives=sorted(root.glob('*-x64.tar.gz'))
           checks=dict(row.split('  ',1)[::-1] for row in (root/'SHA256SUMS').read_text().splitlines())
           sets=[re.fullmatch(r'(jaunt-desktop|jaunt-app)-.+-x64\.tar\.gz',a.name) for a in archives]
