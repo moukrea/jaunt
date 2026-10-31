@@ -155,6 +155,7 @@ jobs:
       run:
         shell: bash
     env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
       TAURI_CLI_VERSION: 2.12.4
       PLATFORM: ${{ matrix.platform }}
       ARCH: ${{ matrix.arch }}
@@ -177,16 +178,28 @@ jobs:
       - run: npm run prepare-web
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev rpm
-      - name: Tauri CLI (pinned)
+      - name: Rust (pinned) and the Tauri CLI (pinned)
         run: |
-          rustup target add "$TARGET"
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
           cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+      # The same commands as ci.yml's app-package job, which builds and checks the packages before a release does. The staging writes
+      # the Linux packages' versions with ~ for the - of a pre-release, as the Electron app's were (scripts/desktop_assets.py), so
+      # that a final release orders above its betas; scripts/check_app_package.mjs holds the result to that.
       - name: Build
         working-directory: app
-        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES"
+        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
       - name: Stage under the jaunt-app names
         run: |
           if [ -f scripts/desktop_assets.py ]; then python scripts/desktop_assets.py app --platform "$PLATFORM" --arch "$ARCH" --bundle "app/target/$TARGET/release" --out dist/desktop; else exit 1; fi
+      # What a person installs, inspected as it is (scripts/check_app_package.mjs): not published if it is wrong. A source before the
+      # check has none, and builds as it did.
+      - name: Check the packages
+        run: if [ -f scripts/check_app_package.mjs ]; then node scripts/check_app_package.mjs dist/desktop; fi
+      - name: Install, update and uninstall the Windows installer
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        env:
+          JAUNT_PACKAGE_INSTALL_TEST: '1'
+        run: if [ -f scripts/check_app_package.mjs ]; then node scripts/check_app_package.mjs --install-windows dist/desktop/jaunt-app-*-x64.exe; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-app-${{ matrix.platform }}-${{ matrix.arch }}

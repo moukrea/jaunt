@@ -60,6 +60,7 @@ jobs:
       android: ${{ steps.reuse.outputs.android || steps.plan.outputs.android }}
       client_link: ${{ steps.reuse.outputs.client_link || steps.plan.outputs.client_link }}
       app: ${{ steps.reuse.outputs.app || steps.plan.outputs.app }}
+      app_package: ${{ steps.reuse.outputs.app_package || steps.plan.outputs.app_package }}
       flake_tests: ${{ steps.plan.outputs.flake_tests }}
       flake_suites: ${{ steps.plan.outputs.flake_suites }}
       flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
@@ -82,7 +83,7 @@ jobs:
             {
               echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
               echo 'groups=["terminal","rich","agents","lifecycle"]'
-              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true client_link=true app=true | tr ' ' '\n'
+              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true client_link=true app=true app_package=true | tr ' ' '\n'
               echo 'flake_tests='
               echo 'flake_suites=[]'
               echo 'flake_e2e={}'
@@ -140,7 +141,8 @@ jobs:
                    'desktop-agent (macos-latest, macos-universal)']
           whole = {'shells': ['browser-shells'], 'direct_tls': ['direct-tls'], 'fedora': ['installer-fedora (43)', 'installer-fedora (44)'],
                    'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build'],
-                   'client_link': ['client-link'], 'app': ['app']}
+                   'client_link': ['client-link'], 'app': ['app'],
+                   'app_package': ['app-package (linux)', 'app-package (windows)', 'app-package (macos)']}
           reused = {}
           flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
@@ -181,7 +183,7 @@ jobs:
       - run: python scripts/check_project.py --undefined-names
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app]
+    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package]
     if: always()
     permissions: {}
     steps:
@@ -214,6 +216,8 @@ jobs:
           CLIENT_LINK_PLANNED: ${{ needs.plan.outputs.client_link }}
           APP_RESULT: ${{ needs.app.result }}
           APP_PLANNED: ${{ needs.plan.outputs.app }}
+          APP_PACKAGE_RESULT: ${{ needs.app-package.result }}
+          APP_PACKAGE_PLANNED: ${{ needs.plan.outputs.app_package }}
         run: |
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
           # whose predecessor failed is a failure here, not a pass).
@@ -232,6 +236,7 @@ jobs:
           check android-build "$ANDROID_RESULT" "$ANDROID_PLANNED"
           check client-link "$CLIENT_LINK_RESULT" "$CLIENT_LINK_PLANNED"
           check app "$APP_RESULT" "$APP_PLANNED"
+          check app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -904,6 +909,86 @@ jobs:
         run: if [ -f tests/app_selftest_e2e.py ]; then python tests/app_selftest_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
         run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
+  app-package:
+    # The Tauri app's installable packages (docs/DEPLOYMENT.md "Desktop: the Electron bridge pin"), built here as desktop.yml builds
+    # them for a release (the same commands, the pinned Tauri CLI, the same staging under the jaunt-app names) and held to
+    # scripts/check_app_package.mjs: the deb and rpm named jaunt-desktop and ordered above the Electron app's, the archive's layout,
+    # the macOS bundle ad-hoc signed, and on Windows an installer that lands in %LOCALAPPDATA%\Programs\jaunt and spares
+    # %LOCALAPPDATA%\jaunt (run on this disposable runner, never anywhere else). Nothing is published. Planned where the installers'
+    # settings, icons, hook, dependencies or version change (scripts/ci_plan.py); a source without the packaging passes at once.
+    needs: [guard, plan]
+    if: needs.plan.outputs.app_package == 'true'
+    name: app-package (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux, os: ubuntu-22.04, arch: x64, target: x86_64-unknown-linux-gnu, bundles: 'deb,rpm'}
+          - {platform: windows, os: windows-latest, arch: x64, target: x86_64-pc-windows-msvc, bundles: nsis}
+          - {platform: macos, os: macos-latest, arch: arm64, target: aarch64-apple-darwin, bundles: app}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+      TAURI_CLI_VERSION: 2.12.4
+      PLATFORM: ${{ matrix.platform }}
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: crate
+        run: if [ -f app/nsis-hooks.nsh ] && [ -f scripts/check_app_package.mjs ] && [ -f scripts/desktop_assets.py ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No packaging in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.crate.outputs.present == 'true'
+        run: npm ci
+      - if: steps.crate.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
+        run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
+        run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev rpm; fi
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
+        run: sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev rpm
+      - if: steps.crate.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
+      - name: Tauri CLI (pinned)
+        if: steps.crate.outputs.present == 'true'
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+      # The release's build command (desktop.yml, job app); the staging below also writes the Linux packages' versions with ~ for the
+      # - of a pre-release, as the Electron app's were (scripts/desktop_assets.py).
+      - name: Build
+        if: steps.crate.outputs.present == 'true'
+        working-directory: app
+        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+      - name: Stage under the jaunt-app names
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f scripts/desktop_assets.py ]; then python scripts/desktop_assets.py app --platform "$PLATFORM" --arch "$ARCH" --bundle "app/target/$TARGET/release" --out dist/desktop; fi
+      - name: Check the packages
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f scripts/check_app_package.mjs ]; then node scripts/check_app_package.mjs dist/desktop; fi
+      - name: Install, update and uninstall the Windows installer
+        if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
+        env:
+          JAUNT_PACKAGE_INSTALL_TEST: '1'
+        run: if [ -f scripts/check_app_package.mjs ]; then node scripts/check_app_package.mjs --install-windows dist/desktop/jaunt-app-*-x64.exe; fi
   network-bench:
     needs: [guard, plan]
     if: needs.plan.outputs.network_bench == 'true'
