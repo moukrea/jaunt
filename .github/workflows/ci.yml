@@ -865,7 +865,12 @@ jobs:
     # The Tauri app's debug build on Windows (WebView2) and macOS (WKWebView), where the app job's WebKitWebDriver does not exist:
     # on Windows its boundary over WebView2's DevTools protocol (tests/app_security_e2e.py, backend tauri-cdp: Playwright attached
     # to the app's own webview), and on both the app checked from inside its own page with no driver, its window closed as a person
-    # closes it (tests/app_selftest_e2e.py). Client-only (no host of their own). Planned with the app job.
+    # closes it (tests/app_selftest_e2e.py). Client-only (no host of their own). Then the cutover on these systems (plan #11 C1,
+    # tests/app_bridge_platforms_e2e.py): the pinned Electron bridge's own code moves to this debug build, bundled by the pinned Tauri
+    # CLI as a release bundles it (Windows: the NSIS installer into %LOCALAPPDATA%\Programs\jaunt; macOS: the ad-hoc signed bundle),
+    # and back: three broken builds roll back to the Electron app with its data, a healthy one takes the workspace over. It installs
+    # into this disposable runner's account (JAUNT_BRIDGE_PLATFORM_TEST=1), never anywhere else. Planned with the app job. (Its flake
+    # gate's 40 minutes at most are in the limit.)
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
     strategy:
@@ -873,7 +878,7 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 150
     permissions:
       contents: read
     defaults:
@@ -905,6 +910,10 @@ jobs:
         run: pip install -r requirements-dev.txt
       - if: steps.crate.outputs.present == 'true'
         run: npm ci
+      # npm ci leaves Electron's binary out; the cutover suite runs the Electron bridge on it.
+      - name: Electron's binary, for the move from the Electron app
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_bridge_platforms_e2e.py ] && [ -f node_modules/electron/install.js ]; then node node_modules/electron/install.js; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: npm run prepare-web
       - if: steps.crate.outputs.present == 'true'
@@ -915,6 +924,26 @@ jobs:
         run: if [ -f tests/app_selftest_e2e.py ]; then python tests/app_selftest_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
         run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
+      # The cutover (plan #11 C1): the release's Tauri CLI bundles the debug build as each version the suite publishes, and the pinned
+      # bridge's package for this computer is downloaded and checked against the pin (once, untimed), then the move and the rollbacks.
+      - name: Tauri CLI (pinned), for the cutover suite's packages
+        if: steps.crate.outputs.present == 'true'
+        env:
+          TAURI_CLI_VERSION: 2.12.4
+        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then python tests/app_bridge_platforms_e2e.py --prepare; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        env:
+          JAUNT_BRIDGE_PLATFORM_TEST: '1'
+        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then python tests/app_bridge_platforms_e2e.py; else echo 'Not in this source'; fi
+      - name: Flake gate for the suites this change adds or edits
+        if: contains(needs.plan.outputs.flake_e2e, '"app_platforms":')
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['app_platforms'], ' ') }}
+          TOTAL: '2400'
+          JAUNT_BRIDGE_PLATFORM_TEST: '1'
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
   app-package:
     # The Tauri app's installable packages (docs/DEPLOYMENT.md "Desktop: the Electron bridge pin"), built here as desktop.yml builds
     # them for a release (the same commands, the pinned Tauri CLI, the same staging under the jaunt-app names) and held to
