@@ -972,12 +972,20 @@ jobs:
       - name: Tauri CLI (pinned)
         if: steps.crate.outputs.present == 'true'
         run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
-      # The release's build command (desktop.yml, job app); the staging below also writes the Linux packages' versions with ~ for the
-      # - of a pre-release, as the Electron app's were (scripts/desktop_assets.py).
+      # The release's build commands (desktop.yml, job app). Linux: the executable with its real version, then the bundles given the
+      # version with + for the - of a pre-release (the rpm bundler refuses a -, the CLI's config takes semver only); the staging
+      # below writes it as ~, as the Electron app's packages had (scripts/desktop_assets.py).
       - name: Build
         if: steps.crate.outputs.present == 'true'
         working-directory: app
-        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+        run: |
+          if [ "$PLATFORM" = linux ]; then
+            cargo tauri build --ci --target "$TARGET" --no-bundle -- --locked
+            VERSION=$(node -p 'require("../package.json").version.replace("-", "+")')
+            cargo tauri bundle --ci --target "$TARGET" --bundles "$BUNDLES" --config "{\"version\":\"$VERSION\"}"
+          else
+            cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+          fi
       - name: Stage under the jaunt-app names
         if: steps.crate.outputs.present == 'true'
         run: if [ -f scripts/desktop_assets.py ]; then python scripts/desktop_assets.py app --platform "$PLATFORM" --arch "$ARCH" --bundle "app/target/$TARGET/release" --out dist/desktop; fi

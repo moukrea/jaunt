@@ -182,12 +182,20 @@ jobs:
         run: |
           rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
           cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
-      # The same commands as ci.yml's app-package job, which builds and checks the packages before a release does. The staging writes
-      # the Linux packages' versions with ~ for the - of a pre-release, as the Electron app's were (scripts/desktop_assets.py), so
-      # that a final release orders above its betas; scripts/check_app_package.mjs holds the result to that.
+      # The same commands as ci.yml's app-package job, which builds and checks the packages before a release does. Linux: the
+      # executable is built with its real version, then bundled with + for the - of a pre-release (the rpm bundler refuses a -, the
+      # CLI's config takes semver only); the staging writes ~ instead (scripts/desktop_assets.py), as the Electron app's packages
+      # had, so that a final release orders above its betas; scripts/check_app_package.mjs holds the result to that.
       - name: Build
         working-directory: app
-        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+        run: |
+          if [ "$PLATFORM" = linux ]; then
+            cargo tauri build --ci --target "$TARGET" --no-bundle -- --locked
+            VERSION=$(node -p 'require("../package.json").version.replace("-", "+")')
+            cargo tauri bundle --ci --target "$TARGET" --bundles "$BUNDLES" --config "{\"version\":\"$VERSION\"}"
+          else
+            cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+          fi
       - name: Stage under the jaunt-app names
         run: |
           if [ -f scripts/desktop_assets.py ]; then python scripts/desktop_assets.py app --platform "$PLATFORM" --arch "$ARCH" --bundle "app/target/$TARGET/release" --out dist/desktop; else exit 1; fi
