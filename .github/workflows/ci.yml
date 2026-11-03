@@ -144,10 +144,12 @@ jobs:
                    'client_link': ['client-link'], 'app': ['app'],
                    'app_package': ['app-package (linux)', 'app-package (windows)', 'app-package (macos)']}
           reused = {}
-          flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
+          # macOS never blocks (docs/DEPLOYMENT.md "macOS is not required"): a group is reused when its other legs succeeded; its macOS
+          # leg is not rerun for that (the host matrix's own macOS legs are, below, as before).
+          flags = {key: 'false' if all(n in ok for n in names if 'macos' not in n) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
               if flags[key] == 'false':
-                  reused[key] = sorted({ok[n] for n in names})
+                  reused[key] = sorted({ok[n] for n in names if n in ok})
           legs = [leg for leg in all_legs if f"host ({leg['os']}, {leg['python']})" not in ok]
           groups = [g for g in all_groups if f'browser-and-relay ({g})' not in ok]
           emit(host_matrix=json.dumps(legs, separators=(',', ':')), groups=json.dumps(groups, separators=(',', ':')), **flags)
@@ -185,10 +187,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package]
     if: always()
-    permissions: {}
+    permissions:
+      actions: read
     steps:
       - name: Require every planned test suite to succeed
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
           PLAN_RESULT: ${{ needs.plan.result }}
           GROUPS_PLANNED: ${{ needs.plan.outputs.groups != '[]' }}
           HOST_RESULT: ${{ needs.host.result }}
@@ -219,24 +225,40 @@ jobs:
           APP_PACKAGE_RESULT: ${{ needs.app-package.result }}
           APP_PACKAGE_PLANNED: ${{ needs.plan.outputs.app_package }}
         run: |
+          # macOS never blocks (docs/DEPLOYMENT.md "macOS is not required"): its jobs and matrix legs run and are reported below,
+          # and never decide the gate. Every other job and leg is required, as before.
+          JOBS="$RUNNER_TEMP/jobs.tsv"
+          gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | [.name, .conclusion] | @tsv' > "$JOBS"
+          {
+            echo '### macOS (not required)'
+            awk -F'\t' 'tolower($1) ~ /macos/ { print "- " $1 ": " ($2 == "" ? "not finished" : $2) }' "$JOBS"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
           # whose predecessor failed is a failure here, not a pass).
           check() { if [ "$3" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
+          # The same for a job with macOS legs. Those legs are continue-on-error, so a failed one leaves the job a success; a
+          # cancelled one (a timeout, a runner never acquired) may not, and then every other leg of the job must have succeeded.
+          mixed() {
+            if [ "$3" != true ]; then test "$2" = skipped; return; fi
+            if [ "$2" = success ]; then return 0; fi
+            case "$2" in failure|cancelled) ;; *) return 1 ;; esac
+            awk -F'\t' -v prefix="$1 (" 'index($1, prefix) == 1 && tolower($1) !~ /macos/ { n++; if ($2 != "success") bad++ } END { exit !(n > 0 && bad == 0) }' "$JOBS"
+          }
           test "$PLAN_RESULT" = success
-          check flake "$FLAKE_RESULT" "$FLAKE_PLANNED"
+          mixed flake "$FLAKE_RESULT" "$FLAKE_PLANNED"
           check flake-e2e "$FLAKE_E2E_RESULT" "$FLAKE_E2E_PLANNED"
-          check host "$HOST_RESULT" "$HOST_PLANNED"
+          mixed host "$HOST_RESULT" "$HOST_PLANNED"
           check browser-and-relay "$BROWSER_RELAY_RESULT" "$GROUPS_PLANNED"
           check installer-fedora "$FEDORA_RESULT" "$FEDORA_PLANNED"
           check windows "$WINDOWS_RESULT" "$WINDOWS_PLANNED"
-          check desktop-agent "$DESKTOP_AGENT_RESULT" "$DESKTOP_AGENT_PLANNED"
+          mixed desktop-agent "$DESKTOP_AGENT_RESULT" "$DESKTOP_AGENT_PLANNED"
           check browser-shells "$BROWSER_SHELLS_RESULT" "$BROWSER_SHELLS_PLANNED"
           check direct-tls "$DIRECT_TLS_RESULT" "$DIRECT_TLS_PLANNED"
           check network-bench "$NETWORK_BENCH_RESULT" "$NETWORK_BENCH_PLANNED"
           check android-build "$ANDROID_RESULT" "$ANDROID_PLANNED"
           check client-link "$CLIENT_LINK_RESULT" "$CLIENT_LINK_PLANNED"
           check app "$APP_RESULT" "$APP_PLANNED"
-          check app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
+          mixed app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -257,6 +279,7 @@ jobs:
   flake:
     needs: [guard, plan]
     if: needs.plan.outputs.flake_tests != ''
+    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -490,7 +513,11 @@ jobs:
   host:
     needs: [guard, plan]
     if: needs.plan.outputs.host_matrix != '[]'
+    # macOS never blocks (docs/DEPLOYMENT.md "macOS is not required"): its legs run and are reported, and a failed one does not fail
+    # the job or the run; the `test` job below checks the other legs itself when a cancelled one makes the job's result unusable.
+    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.host_matrix) }}
     runs-on: ${{ matrix.os }}
@@ -521,6 +548,7 @@ jobs:
     # them all).
     needs: [guard, plan]
     if: needs.plan.outputs.desktop_agent == 'true'
+    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -873,6 +901,7 @@ jobs:
     # gate's 40 minutes at most are in the limit.)
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
+    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -954,6 +983,7 @@ jobs:
     needs: [guard, plan]
     if: needs.plan.outputs.app_package == 'true'
     name: app-package (${{ matrix.platform }})
+    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:

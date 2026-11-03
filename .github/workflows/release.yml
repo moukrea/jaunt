@@ -25,8 +25,12 @@ jobs:
     # The desktop agent ships with the host (docs/DESKTOP.md, "Shipping"): built, tested and
     # smoke-tested per platform by the release commit's own agent/desktop/ci.sh (release mode), so
     # its build steps change with the source. A commit without that script ships no agent.
+    # macOS never blocks a release (docs/DEPLOYMENT.md "macOS is not required"): its leg is continue-on-error and does not stop
+    # the others, and the release goes out without its agent when it did not build one; the other three are still required
+    # (scripts/build_release.py refuses a release without them).
+    continue-on-error: ${{ matrix.platform == 'macos-universal' }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
@@ -65,6 +69,9 @@ jobs:
           retention-days: 1
   build:
     needs: agent
+    # Whatever the agent job ended as (a macOS leg alone may have failed or been cancelled): build_release.py requires the agents
+    # that are not optional, so a missing Linux or Windows one still fails the release here.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
