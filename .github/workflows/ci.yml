@@ -3,6 +3,8 @@ name: CI
 # queue: gh workflow run ci.yml -f sha=<commit> -f kind=pr -f pr=<number>, or -f kind=main for a
 # commit of source main. "CI main <commit>" runs are what the queue accepts before publishing that
 # commit. Logs are public: pytest prints one line per failure.
+# macOS is not here: its legs run in ci-macos.yml (job `macos` below dispatches it with the same inputs), which nothing waits
+# for (docs/DEPLOYMENT.md "macOS is not required"): no job of this workflow runs on a macOS runner or needs one that does.
 run-name: CI ${{ inputs.kind }} ${{ inputs.sha }}
 on:
   workflow_dispatch:
@@ -77,18 +79,23 @@ jobs:
           KIND: ${{ inputs.kind }}
           SHA: ${{ inputs.sha }}
         run: |
+          PLAN="$RUNNER_TEMP/plan.txt"
           if [ "$KIND" = pr ] && [ -f scripts/ci_plan.py ]; then
-            python3 scripts/ci_plan.py --base origin/main --head "$SHA" | tee -a "$GITHUB_OUTPUT"
+            python3 scripts/ci_plan.py --base origin/main --head "$SHA" > "$PLAN"
           else
             {
-              echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"},{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
+              echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"}]'
               echo 'groups=["terminal","rich","agents","lifecycle"]'
               echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true client_link=true app=true app_package=true | tr ' ' '\n'
               echo 'flake_tests='
               echo 'flake_suites=[]'
               echo 'flake_e2e={}'
-            } | tee -a "$GITHUB_OUTPUT"
+            } > "$PLAN"
           fi
+          # macOS legs are ci-macos.yml's, whatever the source's own plan script lists (an older one still lists them).
+          grep -v '^host_matrix=' "$PLAN" >> "$GITHUB_OUTPUT"
+          echo "host_matrix=$(sed -n 's/^host_matrix=//p' "$PLAN" | jq -c '[.[] | select(.os | startswith("macos") | not)]')" >> "$GITHUB_OUTPUT"
+          cat "$PLAN"
       # A `CI main` run does not repeat what a `CI pr` run of this repository already proved on the same files.
       # Reused only: a job (or matrix leg) that succeeded in a workflow_dispatch run of this repository named
       # `CI pr <commit>`, from this workflow file exactly as it is now (the same blob), for a commit whose tree is
@@ -137,16 +144,13 @@ jobs:
                       if job['conclusion'] == 'success' and run['id'] > ok.get(job['name'], 0):
                           ok[job['name']] = run['id']
           agent = ['desktop-agent (ubuntu-24.04, linux-x86_64, screens)', 'desktop-agent (ubuntu-24.04, linux-x86_64, web)',
-                   'desktop-agent (ubuntu-24.04-arm, linux-aarch64)', 'desktop-agent (windows-latest, windows-x86_64)',
-                   'desktop-agent (macos-latest, macos-universal)']
+                   'desktop-agent (ubuntu-24.04-arm, linux-aarch64)', 'desktop-agent (windows-latest, windows-x86_64)']
           whole = {'shells': ['browser-shells'], 'direct_tls': ['direct-tls'], 'fedora': ['installer-fedora (43)', 'installer-fedora (44)'],
                    'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build'],
                    'client_link': ['client-link'], 'app': ['app'],
-                   'app_package': ['app-package (linux)', 'app-package (windows)', 'app-package (macos)']}
+                   'app_package': ['app-package (linux)', 'app-package (windows)']}
           reused = {}
-          # macOS never blocks (docs/DEPLOYMENT.md "macOS is not required"): a group is reused when its other legs succeeded; its macOS
-          # leg is not rerun for that (the host matrix's own macOS legs are, below, as before).
-          flags = {key: 'false' if all(n in ok for n in names if 'macos' not in n) else 'true' for key, names in whole.items()}
+          flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
               if flags[key] == 'false':
                   reused[key] = sorted({ok[n] for n in names if n in ok})
@@ -183,18 +187,30 @@ jobs:
       - run: npm run prepare-web
       - run: pip install ruff==0.14.14
       - run: python scripts/check_project.py --undefined-names
+  # macOS runs in ci-macos.yml, started here with the same inputs and never waited for: no job below lists this one in `needs`, the
+  # `test` gate and the release job do not read it, and a dispatch that fails (a workflow not yet published, no runner) changes nothing.
+  macos:
+    needs: guard
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: Start the macOS workflow (reported on its own, never gating)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          KIND: ${{ inputs.kind }}
+          PR: ${{ inputs.pr }}
+        run: gh workflow run ci-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f "kind=$KIND" -f "pr=$PR"
   test:
     runs-on: ubuntu-latest
     needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package]
     if: always()
-    permissions:
-      actions: read
+    permissions: {}
     steps:
       - name: Require every planned test suite to succeed
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
           PLAN_RESULT: ${{ needs.plan.result }}
           GROUPS_PLANNED: ${{ needs.plan.outputs.groups != '[]' }}
           HOST_RESULT: ${{ needs.host.result }}
@@ -225,40 +241,25 @@ jobs:
           APP_PACKAGE_RESULT: ${{ needs.app-package.result }}
           APP_PACKAGE_PLANNED: ${{ needs.plan.outputs.app_package }}
         run: |
-          # macOS never blocks (docs/DEPLOYMENT.md "macOS is not required"): its jobs and matrix legs run and are reported below,
-          # and never decide the gate. Every other job and leg is required, as before.
-          JOBS="$RUNNER_TEMP/jobs.tsv"
-          gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | [.name, .conclusion] | @tsv' > "$JOBS"
-          {
-            echo '### macOS (not required)'
-            awk -F'\t' 'tolower($1) ~ /macos/ { print "- " $1 ": " ($2 == "" ? "not finished" : $2) }' "$JOBS"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # No job of this workflow runs on macOS (ci-macos.yml does, and nothing here waits for it), so every planned job is required.
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
           # whose predecessor failed is a failure here, not a pass).
           check() { if [ "$3" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
-          # The same for a job with macOS legs. Those legs are continue-on-error, so a failed one leaves the job a success; a
-          # cancelled one (a timeout, a runner never acquired) may not, and then every other leg of the job must have succeeded.
-          mixed() {
-            if [ "$3" != true ]; then test "$2" = skipped; return; fi
-            if [ "$2" = success ]; then return 0; fi
-            case "$2" in failure|cancelled) ;; *) return 1 ;; esac
-            awk -F'\t' -v prefix="$1 (" 'index($1, prefix) == 1 && tolower($1) !~ /macos/ { n++; if ($2 != "success") bad++ } END { exit !(n > 0 && bad == 0) }' "$JOBS"
-          }
           test "$PLAN_RESULT" = success
-          mixed flake "$FLAKE_RESULT" "$FLAKE_PLANNED"
+          check flake "$FLAKE_RESULT" "$FLAKE_PLANNED"
           check flake-e2e "$FLAKE_E2E_RESULT" "$FLAKE_E2E_PLANNED"
-          mixed host "$HOST_RESULT" "$HOST_PLANNED"
+          check host "$HOST_RESULT" "$HOST_PLANNED"
           check browser-and-relay "$BROWSER_RELAY_RESULT" "$GROUPS_PLANNED"
           check installer-fedora "$FEDORA_RESULT" "$FEDORA_PLANNED"
           check windows "$WINDOWS_RESULT" "$WINDOWS_PLANNED"
-          mixed desktop-agent "$DESKTOP_AGENT_RESULT" "$DESKTOP_AGENT_PLANNED"
+          check desktop-agent "$DESKTOP_AGENT_RESULT" "$DESKTOP_AGENT_PLANNED"
           check browser-shells "$BROWSER_SHELLS_RESULT" "$BROWSER_SHELLS_PLANNED"
           check direct-tls "$DIRECT_TLS_RESULT" "$DIRECT_TLS_PLANNED"
           check network-bench "$NETWORK_BENCH_RESULT" "$NETWORK_BENCH_PLANNED"
           check android-build "$ANDROID_RESULT" "$ANDROID_PLANNED"
           check client-link "$CLIENT_LINK_RESULT" "$CLIENT_LINK_PLANNED"
           check app "$APP_RESULT" "$APP_PLANNED"
-          mixed app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
+          check app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
   # a person dispatched also triggers the workflow_run path; the queue's lock makes the second a no-op.)
@@ -274,16 +275,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run auto-release.yml --repo "$GITHUB_REPOSITORY" --ref main
   # The flake gate (scripts/flake_gate.py): the pytest tests and JS tests a change adds or edits run many times
-  # with every core busy, on Linux and on macOS (where the host's tests run too); one failure fails the
+  # with every core busy, on Linux (ci-macos.yml repeats them on macOS, unwaited); one failure fails the
   # change. The e2e suites it adds or edits are repeated the same way by a last step of the job that runs them.
   flake:
     needs: [guard, plan]
     if: needs.plan.outputs.flake_tests != ''
-    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     permissions:
@@ -513,9 +513,6 @@ jobs:
   host:
     needs: [guard, plan]
     if: needs.plan.outputs.host_matrix != '[]'
-    # macOS never blocks (docs/DEPLOYMENT.md "macOS is not required"): its legs run and are reported, and a failed one does not fail
-    # the job or the run; the `test` job below checks the other legs itself when a cancelled one makes the job's result unusable.
-    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -548,7 +545,6 @@ jobs:
     # them all).
     needs: [guard, plan]
     if: needs.plan.outputs.desktop_agent == 'true'
-    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
@@ -563,8 +559,6 @@ jobs:
             platform: linux-aarch64
           - os: windows-latest
             platform: windows-x86_64
-          - os: macos-latest
-            platform: macos-universal
     runs-on: ${{ matrix.os }}
     # The longest platform (linux-x86_64, whole) took 16 to 35 min in October 2026. The source's ci.sh
     # bounds each command it runs, but older merges' ci.sh does not, so the step has its own limit.
@@ -890,22 +884,21 @@ jobs:
           TOTAL: '2400'
         run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
   app-platforms:
-    # The Tauri app's debug build on Windows (WebView2) and macOS (WKWebView), where the app job's WebKitWebDriver does not exist:
-    # on Windows its boundary over WebView2's DevTools protocol (tests/app_security_e2e.py, backend tauri-cdp: Playwright attached
-    # to the app's own webview), and on both the app checked from inside its own page with no driver, its window closed as a person
-    # closes it (tests/app_selftest_e2e.py). Client-only (no host of their own). Then the cutover on these systems (plan #11 C1,
+    # The Tauri app's debug build on Windows (WebView2), where the app job's WebKitWebDriver does not exist (macOS's is in
+    # ci-macos.yml): its boundary over WebView2's DevTools protocol (tests/app_security_e2e.py, backend tauri-cdp: Playwright attached
+    # to the app's own webview), and the app checked from inside its own page with no driver, its window closed as a person
+    # closes it (tests/app_selftest_e2e.py). Client-only (no host of their own). Then the cutover on this system (plan #11 C1,
     # tests/app_bridge_platforms_e2e.py): the pinned Electron bridge's own code moves to this debug build, bundled by the pinned Tauri
-    # CLI as a release bundles it (Windows: the NSIS installer into %LOCALAPPDATA%\Programs\jaunt; macOS: the ad-hoc signed bundle),
+    # CLI as a release bundles it (the NSIS installer into %LOCALAPPDATA%\Programs\jaunt),
     # and back: three broken builds roll back to the Electron app with its data, a healthy one takes the workspace over. It installs
     # into this disposable runner's account (JAUNT_BRIDGE_PLATFORM_TEST=1), never anywhere else. Planned with the app job. (Its flake
     # gate's 40 minutes at most are in the limit.)
     needs: [guard, plan]
     if: needs.plan.outputs.app == 'true'
-    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     permissions:
@@ -977,20 +970,18 @@ jobs:
     # The Tauri app's installable packages (docs/DEPLOYMENT.md "Desktop: the Electron bridge pin"), built here as desktop.yml builds
     # them for a release (the same commands, the pinned Tauri CLI, the same staging under the jaunt-app names) and held to
     # scripts/check_app_package.mjs: the deb and rpm named jaunt-desktop and ordered above the Electron app's, the archive's layout,
-    # the macOS bundle ad-hoc signed, and on Windows an installer that lands in %LOCALAPPDATA%\Programs\jaunt and spares
+    # (the macOS bundle, ad-hoc signed, is ci-macos.yml's), and on Windows an installer that lands in %LOCALAPPDATA%\Programs\jaunt and spares
     # %LOCALAPPDATA%\jaunt (run on this disposable runner, never anywhere else). Nothing is published. Planned where the installers'
     # settings, icons, hook, dependencies or version change (scripts/ci_plan.py); a source without the packaging passes at once.
     needs: [guard, plan]
     if: needs.plan.outputs.app_package == 'true'
     name: app-package (${{ matrix.platform }})
-    continue-on-error: ${{ contains(matrix.os, 'macos') }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - {platform: linux, os: ubuntu-22.04, arch: x64, target: x86_64-unknown-linux-gnu, bundles: 'deb,rpm'}
           - {platform: windows, os: windows-latest, arch: x64, target: x86_64-pc-windows-msvc, bundles: nsis}
-          - {platform: macos, os: macos-latest, arch: arm64, target: aarch64-apple-darwin, bundles: app}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     permissions:

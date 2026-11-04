@@ -1,0 +1,323 @@
+name: CI macOS
+# The macOS legs of CI, apart from ci.yml (docs/DEPLOYMENT.md "macOS is not required"): GitHub may take hours to hand out a macOS
+# runner, so nothing waits for these jobs. ci.yml starts this workflow with the same inputs at its start and never reads its result;
+# the release queue accepts "CI main <commit>" runs of ci.yml only, and this workflow's name is not "CI", so it starts no release.
+# A run is reported on its own, in its summary. Started by hand it is the same:
+# gh workflow run ci-macos.yml -f sha=<commit> -f kind=pr -f pr=<number>
+run-name: CI macOS ${{ inputs.kind }} ${{ inputs.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      kind:
+        description: 'main: a commit of source main; pr: a proposed change'
+        type: choice
+        options: [pr, main]
+        default: pr
+      pr:
+        description: 'pr: the change number, so a newer run of the same change replaces an older one'
+        required: false
+        default: ''
+permissions: {}
+concurrency:
+  group: ci-macos-${{ inputs.kind }}-${{ inputs.pr || inputs.sha }}
+  cancel-in-progress: ${{ inputs.kind == 'pr' }}
+env:
+  PYTEST_ADDOPTS: --tb=line
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+          KIND: ${{ inputs.kind }}
+          PR: ${{ inputs.pr }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+          [[ "$KIND" == main || "$KIND" == pr ]] || { echo "kind must be main or pr"; exit 1; }
+          [[ -z "$PR" || "$PR" =~ ^[1-9][0-9]{0,6}$ ]] || { echo "pr must be a number"; exit 1; }
+  # What a proposed change needs on macOS: ci.yml's plan (scripts/ci_plan.py) with only the macOS legs of the host matrix. A `CI main`
+  # run, and a source without the script, run everything.
+  plan:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      host_matrix: ${{ steps.plan.outputs.host_matrix }}
+      desktop_agent: ${{ steps.plan.outputs.desktop_agent }}
+      app: ${{ steps.plan.outputs.app }}
+      app_package: ${{ steps.plan.outputs.app_package }}
+      flake_tests: ${{ steps.plan.outputs.flake_tests }}
+      flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        env:
+          KIND: ${{ inputs.kind }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          PLAN="$RUNNER_TEMP/plan.txt"
+          if [ "$KIND" = pr ] && [ -f scripts/ci_plan.py ]; then
+            python3 scripts/ci_plan.py --base origin/main --head "$SHA" > "$PLAN"
+          else
+            {
+              echo 'host_matrix=[{"os":"macos-latest","python":"3.11"},{"os":"macos-latest","python":"3.13"}]'
+              echo desktop_agent=true app=true app_package=true | tr ' ' '\n'
+              echo 'flake_tests='
+              echo 'flake_e2e={}'
+            } > "$PLAN"
+          fi
+          grep -v '^host_matrix=' "$PLAN" >> "$GITHUB_OUTPUT"
+          echo "host_matrix=$(sed -n 's/^host_matrix=//p' "$PLAN" | jq -c '[.[] | select(.os | startswith("macos"))]')" >> "$GITHUB_OUTPUT"
+          cat "$PLAN"
+  # The flake gate (scripts/flake_gate.py) on macOS, where the host's tests run too; ci.yml's `flake` is the Linux one.
+  flake:
+    needs: [guard, plan]
+    if: needs.plan.outputs.flake_tests != ''
+    runs-on: macos-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: npm ci
+      - run: npm run prepare-web
+      - name: Repeat the changed tests under load
+        env:
+          TESTS: ${{ needs.plan.outputs.flake_tests }}
+        run: if [ -f scripts/flake_gate.py ]; then python scripts/flake_gate.py run $TESTS; fi
+  host:
+    needs: [guard, plan]
+    if: needs.plan.outputs.host_matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.host_matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: pytest -q
+      - run: python scripts/build_release.py
+  desktop-agent:
+    # The native desktop agent (agent/desktop, docs/DESKTOP.md) built and tested as released, by the source's own
+    # agent/desktop/ci.sh, as ci.yml does for the other platforms. A commit without that script passes at once.
+    needs: [guard, plan]
+    if: needs.plan.outputs.desktop_agent == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: crate
+        shell: bash
+        run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo "No desktop agent in this commit"; fi
+      - if: steps.crate.outputs.present == 'true'
+        shell: bash
+        timeout-minutes: 40
+        run: bash agent/desktop/ci.sh macos-universal
+      - if: always() && steps.crate.outputs.present == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-agent-macos-universal
+          path: dist/desktop-agent/
+          if-no-files-found: ${{ job.status == 'success' && 'error' || 'warn' }}
+          retention-days: 1
+  app-platforms:
+    # The Tauri app's debug build on macOS (WKWebView), where the app job's WebKitWebDriver does not exist: the app checked from inside
+    # its own page with no driver, its window closed as a person closes it (tests/app_selftest_e2e.py). Client-only (no host of its
+    # own). Then the cutover (plan #11 C1, tests/app_bridge_platforms_e2e.py): the pinned Electron bridge's own code moves to this debug
+    # build, bundled by the pinned Tauri CLI as a release bundles it (the ad-hoc signed bundle), and back: three broken builds roll back
+    # to the Electron app with its data, a healthy one takes the workspace over. It installs into this disposable runner's account
+    # (JAUNT_BRIDGE_PLATFORM_TEST=1), never anywhere else. Planned with the app job of ci.yml.
+    needs: [guard, plan]
+    if: needs.plan.outputs.app == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: crate
+        run: if [ -f app/Cargo.toml ] && [ -f tests/app_selftest_e2e.py ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.crate.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      # Playwright's Python package only: it attaches to the app's webview, it downloads no browser.
+      - if: steps.crate.outputs.present == 'true'
+        run: pip install -r requirements-dev.txt
+      - if: steps.crate.outputs.present == 'true'
+        run: npm ci
+      # npm ci leaves Electron's binary out; the cutover suite runs the Electron bridge on it.
+      - name: Electron's binary, for the move from the Electron app
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_bridge_platforms_e2e.py ] && [ -f node_modules/electron/install.js ]; then node node_modules/electron/install.js; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.crate.outputs.present == 'true'
+        working-directory: app
+        run: cargo build --locked
+      # The driverless self-test first: it needs no DevTools port, so it says whether the app starts at all.
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_selftest_e2e.py ]; then python tests/app_selftest_e2e.py; else echo 'Not in this source'; fi
+      # The cutover (plan #11 C1): the release's Tauri CLI bundles the debug build as each version the suite publishes, and the pinned
+      # bridge's package for this computer is downloaded and checked against the pin (once, untimed), then the move and the rollbacks.
+      - name: Tauri CLI (pinned), for the cutover suite's packages
+        if: steps.crate.outputs.present == 'true'
+        env:
+          TAURI_CLI_VERSION: 2.12.4
+        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then python tests/app_bridge_platforms_e2e.py --prepare; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        env:
+          JAUNT_BRIDGE_PLATFORM_TEST: '1'
+        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then python tests/app_bridge_platforms_e2e.py; else echo 'Not in this source'; fi
+      - name: Flake gate for the suites this change adds or edits
+        if: contains(needs.plan.outputs.flake_e2e, '"app_platforms":')
+        env:
+          SUITES: ${{ join(fromJSON(needs.plan.outputs.flake_e2e)['app_platforms'], ' ') }}
+          TOTAL: '2400'
+          JAUNT_BRIDGE_PLATFORM_TEST: '1'
+        run: if [ -f scripts/flake_gate.py ] && [ -n "$SUITES" ]; then python scripts/flake_gate.py run $SUITES; fi
+  app-package:
+    # The Tauri app's macOS package, built here as desktop.yml builds it for a release (the same commands, the pinned Tauri CLI, the same
+    # staging under the jaunt-app names) and held to scripts/check_app_package.mjs: the bundle ad-hoc signed. Nothing is published. Planned
+    # where the installers' settings, icons, hook, dependencies or version change (scripts/ci_plan.py); a source without the packaging
+    # passes at once.
+    needs: [guard, plan]
+    if: needs.plan.outputs.app_package == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+      TAURI_CLI_VERSION: 2.12.4
+      PLATFORM: macos
+      ARCH: arm64
+      TARGET: aarch64-apple-darwin
+      BUNDLES: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: crate
+        run: if [ -f app/nsis-hooks.nsh ] && [ -f scripts/check_app_package.mjs ] && [ -f scripts/desktop_assets.py ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No packaging in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      # The version a release would carry (see ci.yml's app-package job): the packages must order above the pinned bridge's.
+      - name: Stamp the version a release would carry
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f scripts/desktop_assets.py ] && grep -q "'stamp'" scripts/desktop_assets.py; then python scripts/desktop_assets.py stamp; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: npm ci
+      - if: steps.crate.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.crate.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
+      - name: Tauri CLI (pinned)
+        if: steps.crate.outputs.present == 'true'
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+      - name: Build
+        if: steps.crate.outputs.present == 'true'
+        working-directory: app
+        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+      - name: Stage under the jaunt-app names
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f scripts/desktop_assets.py ]; then python scripts/desktop_assets.py app --platform "$PLATFORM" --arch "$ARCH" --bundle "app/target/$TARGET/release" --out dist/desktop; fi
+      - name: Check the packages
+        if: steps.crate.outputs.present == 'true'
+        run: if [ -f scripts/check_app_package.mjs ]; then node scripts/check_app_package.mjs dist/desktop; fi
+  # The run's own report: what each macOS job ended as. Nothing reads it but a person; it never fails the run itself.
+  report:
+    needs: [flake, host, desktop-agent, app-platforms, app-package]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Report the macOS jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          KIND: ${{ inputs.kind }}
+          SHA: ${{ inputs.sha }}
+          PR: ${{ inputs.pr }}
+        run: |
+          {
+            echo "### macOS legs of CI $KIND $SHA ${PR:+(change $PR)}"
+            echo 'Not required: nothing waits for this workflow (docs/DEPLOYMENT.md "macOS is not required").'
+            jq -r 'to_entries[] | "- " + .key + ": " + .value.result' <<<"$NEEDS"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

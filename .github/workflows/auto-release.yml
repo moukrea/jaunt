@@ -154,6 +154,23 @@ jobs:
     # Its build reads an environment's secrets (Android signing / Cloudflare), which GitHub hands to a
     # called workflow only through inherit; the repository-level secrets inherited are SOURCE_READ_KEY.
     secrets: inherit
+  # The macOS builds (release-macos.yml) start beside the others and are never waited for: no job below lists this one in `needs`
+  # (docs/DEPLOYMENT.md "macOS is not required"), and a dispatch that fails changes nothing.
+  macos:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true' && (needs.prepare.outputs.host == 'true' || needs.prepare.outputs.desktop == 'true')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: Start the macOS builds (reported on their own, never gating)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.prepare.outputs.sha }}
+          HOST: ${{ needs.prepare.outputs.host == 'true' }}
+          DESKTOP: ${{ needs.prepare.outputs.desktop == 'true' }}
+        run: gh workflow run release-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "ref=$REF" -f "host=$HOST" -f "desktop=$DESKTOP"
   promote:
     needs: [prepare, host, desktop, android, relay]
     if: always() && needs.prepare.outputs.publish == 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')

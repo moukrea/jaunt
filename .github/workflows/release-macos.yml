@@ -1,0 +1,196 @@
+name: Release macOS
+# The macOS builds of a release, apart from the release (docs/DEPLOYMENT.md "macOS is not required"): GitHub may take hours to hand out
+# a macOS runner, so no publish, promotion, Pages deployment or receipt of auto-release.yml waits for these jobs. auto-release.yml
+# starts this workflow beside host and desktop with the release commit and never reads its result.
+# A published release is immutable and its checksums, manifests and receipt cover exactly the files it was published with
+# (scripts/release_pipeline.py verify_assets), so these builds are not added to it: they are built and checked at the release commit,
+# the run's summary reports them, and a day's artifacts hold their files. When macOS has users, its packages join a release through
+# the release workflows again, as a decision of its own.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Release commit of the source (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      host:
+        description: 'The release carries a host: build the macOS desktop agent'
+        type: boolean
+        default: false
+      desktop:
+        description: 'The release carries the desktop app: build its macOS packages'
+        type: boolean
+        default: false
+run-name: Release macOS ${{ inputs.ref }}
+permissions: {}
+concurrency:
+  group: release-macos-${{ inputs.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      electron: ${{ steps.plan.outputs.electron }}
+      app: ${{ steps.app.outputs.app }}
+    steps:
+      - name: Require an exact commit
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "ref must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      # The same plan as desktop.yml's (a source before the pin builds the Electron app only).
+      - id: plan
+        run: |
+          if [ -f scripts/desktop_assets.py ]; then
+            python scripts/desktop_assets.py plan >> "$GITHUB_OUTPUT"
+          else
+            printf 'electron=true\nbridge=false\napp=[]\n' >> "$GITHUB_OUTPUT"
+          fi
+      - id: app
+        env:
+          APP: ${{ steps.plan.outputs.app }}
+        run: echo "app=$(jq -c '[.[] | select(.os | startswith("macos"))]' <<<"$APP")" >> "$GITHUB_OUTPUT"
+  agent:
+    # The desktop agent (docs/DESKTOP.md "Shipping"), built, tested and smoke-tested by the release commit's own agent/desktop/ci.sh in
+    # release mode, as release.yml does for the other platforms.
+    needs: plan
+    if: inputs.host
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - id: crate
+        shell: bash
+        run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo "No desktop agent in this commit"; fi
+      - if: steps.crate.outputs.present == 'true'
+        shell: bash
+        run: bash agent/desktop/ci.sh macos-universal release
+      - if: steps.crate.outputs.present == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-host-agent
+          path: dist/agent-release/
+          if-no-files-found: error
+          retention-days: 1
+  # The Electron app's macOS packages, for a source that has no pin (desktop.yml builds the others).
+  electron:
+    needs: plan
+    if: inputs.desktop && needs.plan.outputs.electron == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run prepare-web
+      - run: npx electron-builder --mac zip dmg --x64 --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: node scripts/check_desktop_package.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-desktop-electron
+          path: |
+            dist/desktop/*.zip
+            dist/desktop/*.dmg
+          if-no-files-found: error
+          retention-days: 1
+  # The Tauri app's macOS packages for the platforms the pin names, under their jaunt-app names (desktop.yml's app job, macOS legs).
+  app:
+    needs: plan
+    if: inputs.desktop && needs.plan.outputs.app != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.app) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+      TAURI_CLI_VERSION: 2.12.4
+      PLATFORM: ${{ matrix.platform }}
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: npm ci
+      - run: npm run prepare-web
+      - name: Rust (pinned) and the Tauri CLI (pinned)
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
+          cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+      - name: Build
+        working-directory: app
+        run: cargo tauri build --ci --target "$TARGET" --bundles "$BUNDLES" -- --locked
+      - name: Stage under the jaunt-app names
+        run: |
+          if [ -f scripts/desktop_assets.py ]; then python scripts/desktop_assets.py app --platform "$PLATFORM" --arch "$ARCH" --bundle "app/target/$TARGET/release" --out dist/desktop; else exit 1; fi
+      - name: Check the packages
+        run: if [ -f scripts/check_app_package.mjs ]; then node scripts/check_app_package.mjs dist/desktop; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-desktop-app-${{ matrix.arch }}
+          path: dist/desktop/*
+          if-no-files-found: error
+          retention-days: 1
+  report:
+    needs: [plan, agent, electron, app]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Report the macOS jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          REF: ${{ inputs.ref }}
+        run: |
+          {
+            echo "### macOS builds of release commit $REF"
+            echo 'Not required: no release step waits for this workflow, and its files are not added to a published release (docs/DEPLOYMENT.md "macOS is not required").'
+            jq -r 'to_entries[] | "- " + .key + ": " + .value.result' <<<"$NEEDS"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -5,8 +5,9 @@ name: Desktop app
 # (scripts/desktop_assets.py, docs/DEPLOYMENT.md "Desktop: the Electron bridge pin"): plan reads the
 # source's pin (desktop/bridge.json). Without one (every source before the move, and any older source
 # the release queue still publishes) only the Electron build runs, as it always did.
-# macOS never blocks a release (docs/DEPLOYMENT.md "macOS is not required"): its build legs are continue-on-error and publish
-# goes ahead with what they left; scripts/desktop_assets.py require then insists on every Linux and Windows package.
+# macOS never blocks a release (docs/DEPLOYMENT.md "macOS is not required") and never waits for one: it has no build leg here (a
+# macOS runner may not be handed out for hours); release-macos.yml, which auto-release.yml starts beside this run, builds it
+# unwaited. scripts/desktop_assets.py require insists on every Linux and Windows package.
 on:
   workflow_call:
     inputs:
@@ -33,7 +34,7 @@ jobs:
     outputs:
       electron: ${{ steps.plan.outputs.electron }}
       bridge: ${{ steps.plan.outputs.bridge }}
-      app: ${{ steps.plan.outputs.app }}
+      app: ${{ steps.app.outputs.app }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -51,18 +52,20 @@ jobs:
           else
             printf 'electron=true\nbridge=false\napp=[]\n' >> "$GITHUB_OUTPUT"
           fi
+      # The plan lists macOS's builds too (release-macos.yml reads them there): this workflow builds the others only.
+      - id: app
+        env:
+          APP: ${{ steps.plan.outputs.app }}
+        run: echo "app=$(jq -c '[.[] | select(.os | startswith("macos") | not)]' <<<"$APP")" >> "$GITHUB_OUTPUT"
   build:
     needs: plan
     if: needs.plan.outputs.electron == 'true'
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             targets: --linux tar.gz deb rpm --x64 --arm64
-          - os: macos-latest
-            targets: --mac zip dmg --x64 --arm64
           - os: windows-latest
             targets: --win nsis --x64 --arm64
     runs-on: ${{ matrix.os }}
@@ -147,7 +150,6 @@ jobs:
   app:
     needs: plan
     if: needs.plan.outputs.app != '[]'
-    continue-on-error: ${{ matrix.platform == 'macos' }}
     strategy:
       fail-fast: false
       matrix:
@@ -220,9 +222,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   publish:
-    # The build and app jobs may end failed or cancelled because of a macOS leg alone, so their results do not gate here: the
-    # packages do (the step "Require every non-macOS package"). The bridge has no macOS leg of its own.
-    if: ${{ !cancelled() && inputs.tag != '' && needs.plan.result == 'success' && needs.bridge.result != 'failure' && needs.bridge.result != 'cancelled' }}
+    # A build or app job that was skipped (not planned) is fine; one that failed is not.
+    if: ${{ !cancelled() && inputs.tag != '' && !contains(needs.*.result, 'failure') }}
     needs: [plan, build, bridge, app]
     runs-on: ubuntu-latest
     permissions:
@@ -260,7 +261,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.13'
-      - name: Require every non-macOS package
+      - name: Require every package
         run: python .control/scripts/desktop_assets.py require --root . --directory desktop-release
       - name: Publish or resume the frozen draft assets
         run: python .control/scripts/release_pipeline.py publish --directory desktop-release --component desktop --tag "$RELEASE_TAG"
