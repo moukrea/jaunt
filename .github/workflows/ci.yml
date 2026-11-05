@@ -726,6 +726,22 @@ jobs:
           JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
           jaunt_E2E_RELAY: workerd
         run: python -m pytest -q -o python_files='conformance_*.py' tests/conformance
+      # The Rust host's leg (docs/RUST_HOST.md "Conformance"): reporting, it fails nothing until its groups are made required. A
+      # check of a later milestone's surface is skipped there by its `needs` marker (parity/status.toml). Built on its own, after the
+      # probe, so that each keeps its own crypto backend.
+      - id: rust
+        if: steps.suite.outputs.present == 'true'
+        run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
+      - if: steps.rust.outputs.present == 'true'
+        run: cargo build --locked -p jaunt-host
+      - name: The Rust host (reporting)
+        if: steps.rust.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
+          jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
+          jaunt_E2E_RELAY: workerd
+        run: python -m pytest -q -rs -o python_files='conformance_*.py' tests/conformance
   # The Rust track's bookkeeping (parity/, docs/RUST_HOST.md "Parity"): coverage of the inventory by kind, the surfaces added, changed
   # or removed since parity/synced with the change that brought each, and the Python modules changed since then with the Rust modules
   # to review, in this run's summary. Reporting only: nothing waits for it, it fails nothing (continue-on-error), and the `test`
