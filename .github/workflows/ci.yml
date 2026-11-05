@@ -477,9 +477,20 @@ jobs:
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           ref: ${{ inputs.sha }}
           persist-credentials: false
+      # install.sh's uv and the Python build uv installs on these images (pinned, checked by SHA-256 here, by the installer for uv and by uv
+      # for the build) come from the copy of the site the tests serve, not from GitHub while a test runs (HTTP 504, 2026-11-05):
+      # tests/release_site.py, JAUNT_CI_DOWNLOADS.
+      - if: hashFiles('scripts/ci_downloads.py') != ''
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/jaunt-downloads
+          key: jaunt-downloads-uv-${{ hashFiles('scripts/ci_downloads.py') }}
+      - name: The pinned uv and Python build the installer under test takes from the local site (cached, checked by SHA-256)
+        run: if [ -f scripts/ci_downloads.py ]; then python3 scripts/ci_downloads.py fetch "$RUNNER_TEMP/jaunt-downloads" uv-linux-x86_64 python-build-standalone; else echo 'Not in this source'; fi
       - name: Install the candidate release with the candidate installer on Fedora, from a copy of the site
         env:
           FEDORA_VERSION: ${{ matrix.fedora }}
+          JAUNT_CI_DOWNLOADS: ${{ runner.temp }}/jaunt-downloads
         run: |
           # The site and the release served here (tests/release_site.py): nothing changes while the
           # test runs, and the installed release must be exactly the one announced.
@@ -517,9 +528,13 @@ jobs:
         run: if [ -f tests/installer_live_smoke.py ]; then python3 tests/installer_live_smoke.py; else echo 'Checked above for this source.'; fi
       - name: Install with curl isolated from the installer temporary directory
         if: matrix.fedora == '44'
+        env:
+          JAUNT_CI_DOWNLOADS: ${{ runner.temp }}/jaunt-downloads
         run: python3 tests/installer_namespace_e2e.py
       - name: Install with full temporary storage and recover from curl write errors
         if: matrix.fedora == '44'
+        env:
+          JAUNT_CI_DOWNLOADS: ${{ runner.temp }}/jaunt-downloads
         run: python3 tests/installer_storage_e2e.py
   host:
     needs: [guard, plan]
@@ -811,13 +826,27 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      - if: hashFiles('scripts/ci_downloads.py') != ''
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/jaunt-downloads
+          key: jaunt-downloads-pebble-${{ hashFiles('scripts/ci_downloads.py') }}
       - name: Pebble and its DNS test server, pinned releases checked by SHA-256
         run: |
           set -e
-          dir="$RUNNER_TEMP/pebble"; mkdir -p "$dir"; cd "$dir"
-          base=https://github.com/letsencrypt/pebble/releases/download/v2.10.1
-          curl -sSLf -o pebble.tar.gz "$base/pebble-linux-amd64.tar.gz"
-          curl -sSLf -o challtestsrv.tar.gz "$base/pebble-challtestsrv-linux-amd64.tar.gz"
+          dir="$RUNNER_TEMP/pebble"; mkdir -p "$dir"
+          # The two archives: pinned files from scripts/ci_downloads.py (cached; GitHub only on a cache miss). A source from before
+          # it downloads them as it did.
+          if [ -f scripts/ci_downloads.py ]; then
+            python3 scripts/ci_downloads.py fetch "$RUNNER_TEMP/jaunt-downloads" pebble pebble-challtestsrv
+            cp "$RUNNER_TEMP/jaunt-downloads/pebble-linux-amd64.tar.gz" "$dir/pebble.tar.gz"
+            cp "$RUNNER_TEMP/jaunt-downloads/pebble-challtestsrv-linux-amd64.tar.gz" "$dir/challtestsrv.tar.gz"
+          else
+            base=https://github.com/letsencrypt/pebble/releases/download/v2.10.1
+            curl -sSLf -o "$dir/pebble.tar.gz" "$base/pebble-linux-amd64.tar.gz"
+            curl -sSLf -o "$dir/challtestsrv.tar.gz" "$base/pebble-challtestsrv-linux-amd64.tar.gz"
+          fi
+          cd "$dir"
           echo "4f2fcb5bca8c85c9cf73ad140fccfc0d2be40bd81ab99879c79b7b8a0b4f70ed  pebble.tar.gz" | sha256sum -c -
           echo "e93a5aa25ecdf3af2f9fbb2de32b0173e64a2eae81002a4ccfe35fa6f4f60b92  challtestsrv.tar.gz" | sha256sum -c -
           tar xzf pebble.tar.gz
@@ -1084,7 +1113,23 @@ jobs:
         env:
           TAURI_CLI_VERSION: 2.12.4
         run: if [ -f tests/app_bridge_platforms_e2e.py ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; else echo 'Not in this source'; fi
+      # What the suite downloads while it runs, from pinned files instead (cached, checked by SHA-256): the NSIS toolchain the bundler
+      # fetches on its first bundle (HTTP 504, 2026-11-05), and the pinned bridge's package (desktop/bridge.json).
+      - if: steps.crate.outputs.present == 'true' && hashFiles('scripts/ci_downloads.py') != ''
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/jaunt-downloads
+          key: jaunt-downloads-nsis-bridge-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json') }}
+      - name: The NSIS toolchain and the pinned bridge's package, from pinned files
+        if: steps.crate.outputs.present == 'true'
+        run: |
+          if [ -f scripts/ci_downloads.py ] && [ -f tests/app_bridge_platforms_e2e.py ]; then
+            python scripts/ci_downloads.py tauri-tools "$RUNNER_TEMP/jaunt-downloads"
+            python scripts/ci_downloads.py bridge "$RUNNER_TEMP/jaunt-downloads"
+          else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
+        env:
+          JAUNT_CI_DOWNLOADS: ${{ runner.temp }}/jaunt-downloads
         run: if [ -f tests/app_bridge_platforms_e2e.py ]; then python tests/app_bridge_platforms_e2e.py --prepare; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         env:
@@ -1166,6 +1211,16 @@ jobs:
       - name: Tauri CLI (pinned)
         if: steps.crate.outputs.present == 'true'
         run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+      # The NSIS installer's toolchain (NSIS, its Tauri plugin, the WebView2 bootstrapper) is what the bundler downloads on its first
+      # bundle (HTTP 504, 2026-11-05): pinned files, cached and checked by SHA-256, laid out where the bundler looks, so it downloads nothing.
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows' && hashFiles('scripts/ci_downloads.py') != ''
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/jaunt-downloads
+          key: jaunt-downloads-nsis-${{ hashFiles('scripts/ci_downloads.py') }}
+      - name: The NSIS toolchain from pinned files
+        if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
+        run: if [ -f scripts/ci_downloads.py ]; then python scripts/ci_downloads.py tauri-tools "$RUNNER_TEMP/jaunt-downloads"; else echo 'Not in this source'; fi
       # The release's build commands (desktop.yml, job app). Linux: the executable with its real version, then the bundles given the
       # version with + for the - of a pre-release (the rpm bundler refuses a -, the CLI's config takes semver only); the staging
       # below writes it as ~, as the Electron app's packages had (scripts/desktop_assets.py).
