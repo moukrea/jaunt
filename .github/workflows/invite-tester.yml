@@ -1,16 +1,17 @@
 name: Invite a tester
-# Owner tool: create, list or revoke a tester invite on the relay. Job logs and summaries are public,
-# so the script prints no key and no tester name: create and list are encrypted with age to the
-# repository variable OWNER_PUBLIC_KEY (an age or SSH public key) and refused without it; revoke
-# prints the id only. The inputs are read from the event file by the script, never interpolated
-# into a command.
+# Owner tool: create, list or revoke a tester invite on the relay, or read the relay's live admin
+# state (status: quota.status, flags.get, certs.quota). Job logs, summaries and artifacts are public,
+# so the script prints no key and no tester name: create, list and status are encrypted with age to
+# the repository variable OWNER_PUBLIC_KEY (an age or SSH public key) and refused without it; revoke
+# prints the id only. status is also kept, encrypted, as the one-day artifact relay-status (gh run
+# download). The inputs are read from the event file by the script, never interpolated into a command.
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'create, list or revoke'
+        description: 'create, list, revoke or status'
         type: choice
-        options: [list, create, revoke]
+        options: [list, create, revoke, status]
         default: list
       name:
         description: "create: the tester's name (not printed; still run metadata, so a first name or a pseudonym)"
@@ -54,9 +55,21 @@ jobs:
           python-version: '3.13'
       - name: Install age
         run: sudo apt-get update -qq && sudo apt-get install -y -qq age
-      - name: Create, list or revoke
+      - name: Create, list, revoke or status
         env:
           JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
           JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
           OWNER_PUBLIC_KEY: ${{ vars.OWNER_PUBLIC_KEY }}
+          # status only: where the script writes its age-encrypted answers, for the artifact below.
+          JAUNT_STATUS_FILE: ${{ runner.temp }}/relay-status/relay-status.age
         run: python scripts/invite_tester.py github
+      # The status, encrypted to OWNER_PUBLIC_KEY (never anything in clear), for `gh run download --name relay-status`.
+      # Also after a failed run when the script wrote it (some actions answered, none with 200).
+      - name: Keep the status
+        if: ${{ !cancelled() && inputs.action == 'status' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: relay-status
+          path: ${{ runner.temp }}/relay-status/relay-status.age
+          if-no-files-found: ignore
+          retention-days: 1
