@@ -1,0 +1,18 @@
+[package]
+name = "jaunt-emulator"
+version = "0.0.1"
+edition = "2021"
+license = "LGPL-3.0-or-later"
+publish = false
+description = "jaunt's terminal emulator: a port of pyte 0.8.2 and of jaunt's screen.py, as a shared library the host loads (LGPL)."
+readme = "README.md"
+
+# Standalone on purpose: everything here is published (LGPL) apart from the rest of jaunt, so this manifest inherits nothing from the
+# jaunt workspace and depends on no other crate of it (scripts/check_public_ops.py holds both).
+[lib]
+name = "jaunt_emulator"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde_json = "1"
+memchr = "2"
