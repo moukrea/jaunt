@@ -1456,6 +1456,9 @@ jobs:
       # A message sent through the mod is the person's own and confirms its bubble (stand-in claude playing the mod).
       - run: if [ -f tests/rich_mod_send_e2e.py ]; then python tests/rich_mod_send_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
+      # The default model and effort changed through the mod, with Claude Code's own switch question answered from the device.
+      - run: if [ -f tests/rich_mod_settings_e2e.py ]; then python tests/rich_mod_settings_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
       - run: if [ -f tests/rich_mod_e2e.py ]; then python tests/rich_mod_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
       - run: if [ -f tests/rich_reload_e2e.py ]; then python tests/rich_reload_e2e.py; else echo 'Not in this source'; fi
