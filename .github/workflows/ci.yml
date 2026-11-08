@@ -66,6 +66,7 @@ jobs:
       rust_host: ${{ steps.reuse.outputs.rust_host || steps.plan.outputs.rust_host }}
       conformance: ${{ steps.reuse.outputs.conformance || steps.plan.outputs.conformance }}
       parity: ${{ steps.reuse.outputs.parity || steps.plan.outputs.parity }}
+      rust_e2e: ${{ steps.reuse.outputs.rust_e2e || steps.plan.outputs.rust_e2e }}
       flake_tests: ${{ steps.plan.outputs.flake_tests }}
       flake_suites: ${{ steps.plan.outputs.flake_suites }}
       flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
@@ -89,7 +90,7 @@ jobs:
             {
               echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"}]'
               echo 'groups=["terminal","rich","agents","lifecycle"]'
-              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true client_link=true app=true app_package=true rust_host=true conformance=true parity=true | tr ' ' '\n'
+              echo shells=true direct_tls=true fedora=true windows=true desktop_agent=true network_bench=true android=true client_link=true app=true app_package=true rust_host=true conformance=true parity=true rust_e2e=true | tr ' ' '\n'
               echo 'flake_tests='
               echo 'flake_suites=[]'
               echo 'flake_e2e={}'
@@ -742,6 +743,95 @@ jobs:
           jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
           jaunt_E2E_RELAY: workerd
         run: python -m pytest -q -rs -o python_files='conformance_*.py' tests/conformance
+  # The browser suites against the Rust host (docs/RUST_HOST.md "CI"): the groups of browser-and-relay that start a host
+  # (tests/browser_e2e.py's Harness, scripts/ci_rust_e2e.py) with `jaunt_HOST_CMD` naming the Rust host, which `rust-build` builds once for
+  # all five legs. Reporting: it is not in the `test` gate, a suite listed `required` in parity/rust_e2e.toml fails its leg (a red job,
+  # nothing waits for it), the others only show in the leg's summary table. Planned where the Rust host or the harness change
+  # (scripts/ci_plan.py `rust_e2e`) and on every `CI main`; a source without the runner passes at once.
+  rust-build:
+    needs: [guard, plan]
+    if: needs.plan.outputs.rust_e2e == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: rust
+        run: if [ -f scripts/ci_rust_e2e.py ] && [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host end-to-end runner in this source'; fi
+      - if: steps.rust.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - if: steps.rust.outputs.present == 'true'
+        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
+      - if: steps.rust.outputs.present == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rust-host
+          path: |
+            target/debug/jaunt
+            target/debug/jaunt-launch
+            target/debug/libjaunt_emulator.so
+          if-no-files-found: error
+          retention-days: 1
+  rust-e2e:
+    needs: [guard, plan, rust-build]
+    if: needs.plan.outputs.rust_e2e == 'true' && needs.rust-build.result == 'success'
+    name: rust-e2e (${{ matrix.group }})
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [terminal, rich, agents, lifecycle, shells]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: runner
+        run: if [ -f scripts/ci_rust_e2e.py ] && [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host end-to-end runner in this source'; fi
+      - if: steps.runner.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.runner.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.runner.outputs.present == 'true'
+        run: pip install -e . -r requirements-dev.txt
+      - if: steps.runner.outputs.present == 'true'
+        run: npm ci
+      - if: steps.runner.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.runner.outputs.present == 'true'
+        run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - if: steps.runner.outputs.present == 'true'
+        run: if [ -f scripts/apt_prefetch.sh ]; then bash scripts/apt_prefetch.sh --playwright; else echo 'Not in this source'; fi
+      - if: steps.runner.outputs.present == 'true'
+        run: python -m playwright install --with-deps chromium
+      - if: steps.runner.outputs.present == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rust-host
+          path: target/debug
+      - if: steps.runner.outputs.present == 'true'
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          chmod +x target/debug/jaunt target/debug/jaunt-launch
+          if [ -f scripts/ci_rust_e2e.py ]; then python scripts/ci_rust_e2e.py "$GROUP" --host target/debug/jaunt; fi
   # The Rust track's bookkeeping (parity/, docs/RUST_HOST.md "Parity"): coverage of the inventory by kind, the surfaces added, changed
   # or removed since parity/synced with the change that brought each, and the Python modules changed since then with the Rust modules
   # to review, in this run's summary. Reporting only: nothing waits for it, it fails nothing (continue-on-error), and the `test`
