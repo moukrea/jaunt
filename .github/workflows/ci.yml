@@ -1549,6 +1549,9 @@ jobs:
       # The default model and effort changed through the mod, with Claude Code's own switch question answered from the device.
       - run: if [ -f tests/rich_mod_settings_e2e.py ]; then python tests/rich_mod_settings_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
+      # A Codex that jaunt's launcher did not start, driven through its terminal's keys (a stand-in Codex TUI).
+      - run: if [ -f tests/rich_codex_keys_e2e.py ]; then python tests/rich_codex_keys_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
       - run: if [ -f tests/rich_mod_e2e.py ]; then python tests/rich_mod_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
       - run: if [ -f tests/rich_reload_e2e.py ]; then python tests/rich_reload_e2e.py; else echo 'Not in this source'; fi

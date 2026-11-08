@@ -65,6 +65,28 @@ jobs:
           path: dist/agent-release/
           if-no-files-found: error
           retention-days: 1
+      # The Rust host, its launcher and the terminal emulator library, for an Experimental build only (docs/RUST_HOST.md, "The switch
+      # under the Canary freeze"): a Canary, a Latest and a channel candidate run none of the three steps, so their jobs, matrix and
+      # manifest are what they were (tests/test_release_workflow.py holds that). Linux only; a commit without the script ships none.
+      - id: rust
+        if: ${{ startsWith(matrix.platform, 'linux-') }}
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$TAG" =~ ^host-[0-9]+\.[0-9]+\.[0-9]+-exp\.[0-9]+$ ]] && [ -f scripts/rust_release.sh ]; then echo wanted=true >> "$GITHUB_OUTPUT"; else echo wanted=false >> "$GITHUB_OUTPUT"; fi
+      - if: ${{ steps.rust.outputs.wanted == 'true' }}
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: if [ -f scripts/rust_release.sh ]; then bash scripts/rust_release.sh "$PLATFORM"; fi
+      - if: ${{ steps.rust.outputs.wanted == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: host-rust-${{ matrix.platform }}
+          path: dist/rust-release/
+          if-no-files-found: error
+          retention-days: 1
   build:
     needs: agent
     runs-on: ubuntu-latest
@@ -98,10 +120,28 @@ jobs:
           pattern: host-agent-*
           path: dist-agents
           merge-multiple: true
+      # An Experimental build of a source with the Rust host publishes it for both Linux platforms (build_release.py refuses one
+      # missing, and refuses it for any other build).
+      - id: rust
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "$TAG" =~ ^host-[0-9]+\.[0-9]+\.[0-9]+-exp\.[0-9]+$ ]] && [ -f scripts/rust_release.sh ]; then echo wanted=true >> "$GITHUB_OUTPUT"; else echo wanted=false >> "$GITHUB_OUTPUT"; fi
+      - if: ${{ steps.rust.outputs.wanted == 'true' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: host-rust-*
+          path: dist-rust
+          merge-multiple: true
       # A source with the agent publishes it for every platform (build_release.py refuses one missing).
       - env:
           AGENTS: ${{ steps.crate.outputs.present }}
-        run: if [ "$AGENTS" = true ]; then python scripts/build_release.py --agents dist-agents; else python scripts/build_release.py; fi
+          RUST: ${{ steps.rust.outputs.wanted }}
+        run: |
+          args=()
+          if [ "$AGENTS" = true ]; then args+=(--agents dist-agents); fi
+          if [ "$RUST" = true ]; then args+=(--rust dist-rust); fi
+          python scripts/build_release.py "${args[@]}"
       - name: Read trusted resumable publisher
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
