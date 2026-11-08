@@ -153,7 +153,7 @@ jobs:
                    'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build'],
                    'client_link': ['client-link'], 'app': ['app'],
                    'app_package': ['app-package (linux)', 'app-package (windows)'],
-                   'rust_host': ['rust-host (linux-x86_64)', 'rust-host (linux-aarch64)', 'rust-host (windows-x86_64)'], 'conformance': ['conformance']}
+                   'rust_host': ['rust-host (linux-x86_64)', 'rust-host (linux-aarch64)', 'rust-host (windows-x86_64)'], 'conformance': ['conformance', 'conformance-desktop']}
           reused = {}
           flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
@@ -210,7 +210,7 @@ jobs:
         run: gh workflow run ci-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f "kind=$KIND" -f "pr=$PR"
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance]
+    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-desktop]
     if: always()
     permissions: {}
     steps:
@@ -249,6 +249,7 @@ jobs:
           RUST_HOST_PLANNED: ${{ needs.plan.outputs.rust_host }}
           CONFORMANCE_RESULT: ${{ needs.conformance.result }}
           CONFORMANCE_PLANNED: ${{ needs.plan.outputs.conformance }}
+          CONFORMANCE_DESKTOP_RESULT: ${{ needs.conformance-desktop.result }}
         run: |
           # No job of this workflow runs on macOS (ci-macos.yml does, and nothing here waits for it), so every planned job is required.
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
@@ -271,6 +272,7 @@ jobs:
           check app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
           check rust-host "$RUST_HOST_RESULT" "$RUST_HOST_PLANNED"
           check conformance "$CONFORMANCE_RESULT" "$CONFORMANCE_PLANNED"
+          check conformance-desktop "$CONFORMANCE_DESKTOP_RESULT" "$CONFORMANCE_PLANNED"
           # (the parity job below is the Rust track's bookkeeping: reported, never waited for)
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
@@ -726,7 +728,7 @@ jobs:
         env:
           JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
           jaunt_E2E_RELAY: workerd
-        run: python -m pytest -q -o python_files='conformance_*.py' tests/conformance
+        run: python -m pytest -q -o python_files='conformance_*.py' -m 'not desktop' tests/conformance
       # The Rust host's leg (docs/RUST_HOST.md "Conformance"): reporting, it fails nothing until its groups are made required. A
       # check of a later milestone's surface is skipped there by its `needs` marker (parity/status.toml). Built on its own, after the
       # probe, so that each keeps its own crypto backend.
@@ -742,7 +744,65 @@ jobs:
           JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
           jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
           jaunt_E2E_RELAY: workerd
-        run: python -m pytest -q -rs -o python_files='conformance_*.py' tests/conformance
+        run: python -m pytest -q -rs -o python_files='conformance_*.py' -m 'not desktop' tests/conformance
+  # The remote desktop's conformance suite (the `desktop` marker, conformance_desktop.py: a stand-in desktop agent and devices on real direct
+  # links, about 3 minutes a leg on a workstation) is a job of its own, so that `conformance` stays well under its timeout: the same
+  # steps, the same planning (the `conformance` flag), the same legs (the Python host required, the Rust host reporting).
+  conformance-desktop:
+    needs: [guard, plan]
+    if: needs.plan.outputs.conformance == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: suite
+        run: if [ -f tests/conformance/support.py ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No conformance suites in this source'; fi
+      - if: steps.suite.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.suite.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.suite.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - if: steps.suite.outputs.present == 'true'
+        run: pip install -e . -r requirements-dev.txt
+      - if: steps.suite.outputs.present == 'true'
+        run: npm ci
+      - if: steps.suite.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.suite.outputs.present == 'true'
+        run: cargo build --locked -p jaunt-link --example probe
+      - name: The Python host
+        if: steps.suite.outputs.present == 'true'
+        env:
+          JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
+          jaunt_E2E_RELAY: workerd
+        run: python -m pytest -q -o python_files='conformance_*.py' -m desktop tests/conformance
+      - id: rust
+        if: steps.suite.outputs.present == 'true'
+        run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
+      - if: steps.rust.outputs.present == 'true'
+        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
+      - name: The Rust host (reporting)
+        if: steps.rust.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
+          jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
+          jaunt_E2E_RELAY: workerd
+        run: python -m pytest -q -rs -o python_files='conformance_*.py' -m desktop tests/conformance
   # The browser suites against the Rust host (docs/RUST_HOST.md "CI"): the groups of browser-and-relay that start a host
   # (tests/browser_e2e.py's Harness, scripts/ci_rust_e2e.py) with `jaunt_HOST_CMD` naming the Rust host, which `rust-build` builds once for
   # all five legs. Reporting: it is not in the `test` gate, a suite listed `required` in parity/rust_e2e.toml fails its leg (a red job,
@@ -862,6 +922,88 @@ jobs:
         run: pip install -e .
       - if: steps.script.outputs.present == 'true'
         run: if [ -f scripts/parity_inventory.py ]; then python scripts/parity_inventory.py --report --summary "$GITHUB_STEP_SUMMARY"; fi
+  # The remote desktop's end-to-end suites with the real desktop agent (tests/desktop_e2e.py, desktop_control_e2e.py,
+  # desktop_resolution_e2e.py and desktop_load_e2e.py: Google Chrome, a private Xvfb, a GTK window, the agent built as in app_desktop_e2e),
+  # against the Rust host (`jaunt_HOST_CMD`, built once by `rust-build`). The Python host runs the same four in agent/desktop/ci.sh
+  # (job desktop-agent, part web). Reporting: the job never fails and the `test` gate does not list it; each suite's verdict, seconds and
+  # PASS/FAIL lines go to the run's summary, its output to the artifact. web_desktop_e2e is rust-e2e's (group lifecycle). The load suite
+  # is the one that needs a quiet machine (four Chrome instances and the agent at once): this runner is where it is judged.
+  rust-desktop-e2e:
+    needs: [guard, plan, rust-build]
+    if: needs.plan.outputs.rust_e2e == 'true' && needs.rust-build.result == 'success'
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: runner
+        run: if [ -f tests/desktop_load_e2e.py ] && [ -f crates/jaunt-host/src/remote_desktop/mod.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust remote desktop in this source'; fi
+      - if: steps.runner.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.runner.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.runner.outputs.present == 'true'
+        run: pip install -e . -r requirements-dev.txt
+      - if: steps.runner.outputs.present == 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - if: steps.runner.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.runner.outputs.present == 'true'
+        run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
+      - if: steps.runner.outputs.present == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb python3-gi python3-gi-cairo gir1.2-gtk-3.0 x11-xserver-utils xserver-xorg-core xserver-xorg-video-dummy
+      - if: steps.runner.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - if: steps.runner.outputs.present == 'true'
+        run: cargo build --release --locked -p jaunt-desktop-agent
+      - if: steps.runner.outputs.present == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rust-host
+          path: target/debug
+      - if: steps.runner.outputs.present == 'true'
+        run: |
+          chmod +x target/debug/jaunt target/debug/jaunt-launch
+          mkdir -p dist/rust-desktop
+          openh264=$(python host/jaunt/openh264.py "$PWD/target/openh264")
+          export jaunt_HOST_CMD=$PWD/target/debug/jaunt jaunt_DESKTOP_AGENT=$PWD/target/release/jaunt-desktop-agent jaunt_DESKTOP_OPENH264=$openh264
+          export jaunt_CHROME=$(command -v google-chrome) JAUNT_CHROME=$(command -v google-chrome)
+          {
+            echo '### Remote desktop end to end, Rust host (reporting)'
+            echo
+            echo '| suite | result | seconds |'
+            echo '|---|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for suite in desktop_e2e desktop_control_e2e desktop_resolution_e2e desktop_load_e2e; do
+            if [ -f "tests/$suite.py" ]; then
+              began=$SECONDS
+              if timeout -k 15 900 python "tests/$suite.py" > "dist/rust-desktop/$suite.txt" 2>&1; then result=passed; else result=failed; fi
+              echo "== $suite: $result in $((SECONDS - began)) s"
+              grep -E '^(PASS|FAIL)' "dist/rust-desktop/$suite.txt" | cut -c1-400 || tail -n 5 "dist/rust-desktop/$suite.txt"
+              echo "| $suite | $result | $((SECONDS - began)) |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $suite | not in this source | |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+      - if: always() && steps.runner.outputs.present == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rust-desktop-e2e
+          path: dist/rust-desktop/
+          if-no-files-found: warn
+          retention-days: 1
   # The shell-list suites (tabs, names, background, limits, launch, sidebar): a job of their own, so
   # browser-and-relay stays inside its timeout. Each runs only where the source has it.
   browser-shells:
