@@ -733,7 +733,7 @@ jobs:
         if: steps.suite.outputs.present == 'true'
         run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
       - if: steps.rust.outputs.present == 'true'
-        run: cargo build --locked -p jaunt-host -p jaunt-emulator
+        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
       - name: The Rust host (reporting)
         if: steps.rust.outputs.present == 'true'
         continue-on-error: true
