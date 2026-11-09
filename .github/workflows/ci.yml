@@ -153,7 +153,8 @@ jobs:
                    'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build'],
                    'client_link': ['client-link'], 'app': ['app'],
                    'app_package': ['app-package (linux)', 'app-package (windows)'],
-                   'rust_host': ['rust-host (linux-x86_64)', 'rust-host (linux-aarch64)', 'rust-host (windows-x86_64)'], 'conformance': ['conformance', 'conformance-desktop']}
+                   'rust_host': ['rust-host (linux-x86_64)', 'rust-host (linux-aarch64)', 'rust-host (windows-x86_64)'], 'conformance': ['conformance', 'conformance-desktop'],
+                   'rust_e2e': ['rust-build', *[f'rust-e2e ({g})' for g in ('terminal', 'rich', 'agents', 'lifecycle', 'shells')], 'rust-desktop-e2e']}
           reused = {}
           flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
           for key, names in whole.items():
@@ -210,7 +211,7 @@ jobs:
         run: gh workflow run ci-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f "kind=$KIND" -f "pr=$PR"
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-desktop]
+    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-desktop, rust-build, rust-e2e, rust-desktop-e2e]
     if: always()
     permissions: {}
     steps:
@@ -250,6 +251,10 @@ jobs:
           CONFORMANCE_RESULT: ${{ needs.conformance.result }}
           CONFORMANCE_PLANNED: ${{ needs.plan.outputs.conformance }}
           CONFORMANCE_DESKTOP_RESULT: ${{ needs.conformance-desktop.result }}
+          RUST_BUILD_RESULT: ${{ needs.rust-build.result }}
+          RUST_E2E_RESULT: ${{ needs.rust-e2e.result }}
+          RUST_DESKTOP_E2E_RESULT: ${{ needs.rust-desktop-e2e.result }}
+          RUST_E2E_PLANNED: ${{ needs.plan.outputs.rust_e2e }}
         run: |
           # No job of this workflow runs on macOS (ci-macos.yml does, and nothing here waits for it), so every planned job is required.
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
@@ -273,6 +278,11 @@ jobs:
           check rust-host "$RUST_HOST_RESULT" "$RUST_HOST_PLANNED"
           check conformance "$CONFORMANCE_RESULT" "$CONFORMANCE_PLANNED"
           check conformance-desktop "$CONFORMANCE_DESKTOP_RESULT" "$CONFORMANCE_PLANNED"
+          # The browser suites on the Rust host: a suite listed `required` in parity/rust_e2e.toml fails its leg, and a leg that is red, or
+          # never started because its build failed, fails here (the reporting suites only show in the leg's table).
+          check rust-build "$RUST_BUILD_RESULT" "$RUST_E2E_PLANNED"
+          check rust-e2e "$RUST_E2E_RESULT" "$RUST_E2E_PLANNED"
+          check rust-desktop-e2e "$RUST_DESKTOP_E2E_RESULT" "$RUST_E2E_PLANNED"
           # (the parity job below is the Rust track's bookkeeping: reported, never waited for)
   # A green "CI main <sha>" starts the release queue itself: GitHub starts no workflow_run for a CI
   # run that the queue dispatched with GITHUB_TOKEN, while a workflow_dispatch it may trigger. (A run
@@ -805,8 +815,8 @@ jobs:
         run: python -m pytest -q -rs -o python_files='conformance_*.py' -m desktop tests/conformance
   # The browser suites against the Rust host (docs/RUST_HOST.md "CI"): the groups of browser-and-relay that start a host
   # (tests/browser_e2e.py's Harness, scripts/ci_rust_e2e.py) with `jaunt_HOST_CMD` naming the Rust host, which `rust-build` builds once for
-  # all five legs. Reporting: it is not in the `test` gate, a suite listed `required` in parity/rust_e2e.toml fails its leg (a red job,
-  # nothing waits for it), the others only show in the leg's summary table. Planned where the Rust host or the harness change
+  # all five legs. In the `test` gate (with `rust-build`): a suite listed `required` in parity/rust_e2e.toml fails its leg, a red leg fails the
+  # gate, the others only show in the leg's summary table. Planned where the Rust host or the harness change
   # (scripts/ci_plan.py `rust_e2e`) and on every `CI main`; a source without the runner passes at once.
   rust-build:
     needs: [guard, plan]
@@ -925,7 +935,7 @@ jobs:
   # The remote desktop's end-to-end suites with the real desktop agent (tests/desktop_e2e.py, desktop_control_e2e.py,
   # desktop_resolution_e2e.py and desktop_load_e2e.py: Google Chrome, a private Xvfb, a GTK window, the agent built as in app_desktop_e2e),
   # against the Rust host (`jaunt_HOST_CMD`, built once by `rust-build`). The Python host runs the same four in agent/desktop/ci.sh
-  # (job desktop-agent, part web). Reporting: the job never fails and the `test` gate does not list it; each suite's verdict, seconds and
+  # (job desktop-agent, part web). In the `test` gate as having run (planned, it must have succeeded: the job itself never fails); each suite's verdict, seconds and
   # PASS/FAIL lines go to the run's summary, its output to the artifact. web_desktop_e2e is rust-e2e's (group lifecycle). The load suite
   # is the one that needs a quiet machine (four Chrome instances and the agent at once): this runner is where it is judged.
   rust-desktop-e2e:
