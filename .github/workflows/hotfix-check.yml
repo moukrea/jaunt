@@ -3,6 +3,8 @@ name: Hotfix check
 # maintenance branch is built as production's last release was, and its site and wheel must be that release's but for the copies of
 # what the hotfix changes. auto-release.yml's prepare tags a hotfix only after a successful run of this workflow named for exactly that
 # source, base and allow-list (run-name below), and dispatches one when there is none. It publishes nothing and writes no ledger.
+# Besides the artifacts, its `test` job runs release.yml's test job on the release commit exactly as prepare will make it (the source,
+# its version fields and main's workflows: release_pipeline.py hotfix-commit), so that a failure of the release's tests shows here.
 run-name: Hotfix check ${{ inputs.source }} over ${{ inputs.base }} allow ${{ inputs.allow }}
 on:
   workflow_dispatch:
@@ -52,6 +54,50 @@ jobs:
           JAUNT_HOTFIX_SOURCE: ${{ inputs.source }}
           JAUNT_HOTFIX_BASE: ${{ inputs.base }}
           JAUNT_HOTFIX_ALLOW: ${{ inputs.allow }}
+      # The release commit prepare will tag, made here and not pushed, with its parent (a shallow clone of two commits), for `test`.
+      - name: Make the release commit as prepare will
+        run: |
+          python scripts/release_pipeline.py hotfix-commit
+          git clone -q --depth 2 --branch hotfix-release "file://$PWD" "$RUNNER_TEMP/release"
+          tar --directory "$RUNNER_TEMP" -cf "$RUNNER_TEMP/release.tar" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_HOTFIX_SOURCE: ${{ inputs.source }}
+          JAUNT_HOTFIX_BASE: ${{ inputs.base }}
+          JAUNT_HOTFIX_ALLOW: ${{ inputs.allow }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hotfix-release-commit
+          path: ${{ runner.temp }}/release.tar
+          if-no-files-found: error
+          retention-days: 1
+  # release.yml's test job on that commit, step for step (no key is kept: it installs the commit's dependencies).
+  test:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hotfix-release-commit
+          path: ${{ runner.temp }}/commit
+      - run: tar --directory "$GITHUB_WORKSPACE" -xf "$RUNNER_TEMP/commit/release.tar" --strip-components=1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: A hotfix tests its own workflows
+        run: |
+          git rm -rfq .github/workflows
+          git checkout -q HEAD^ -- .github/workflows
+      - run: pip install -e . -r requirements-dev.txt
+      - run: pytest -q --ignore=tests/test_release_pipeline.py
+        env:
+          PYTEST_ADDOPTS: --tb=line
   # The builds, as the release builds them: the last production build commit's site, and the hotfix source's site and wheel (the
   # wheel stamped with that production's version fields, so that only what the hotfix changed can differ). No key is kept.
   build:

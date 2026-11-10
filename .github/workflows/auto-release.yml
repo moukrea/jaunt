@@ -73,6 +73,7 @@ jobs:
       desktop_tag: ${{ steps.prepare.outputs.desktop_tag || steps.site.outputs.desktop_tag }}
       android_tag: ${{ steps.prepare.outputs.android_tag || steps.site.outputs.android_tag }}
       agents_from: ${{ steps.prepare.outputs.agents_from }}
+      hotfix: ${{ steps.prepare.outputs.hotfix }}
     steps:
       # The ledger key may push to the source: this job runs control code only and installs nothing.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -136,6 +137,7 @@ jobs:
       control: ${{ needs.prepare.outputs.control }}
       # A hotfix that changes nothing the desktop agent is built from ships the agents of the release it fixes (empty otherwise).
       agents_from: ${{ needs.prepare.outputs.agents_from }}
+      hotfix: ${{ needs.prepare.outputs.hotfix == 'true' }}
     secrets:
       SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
   desktop:
