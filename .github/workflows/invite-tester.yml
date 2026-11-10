@@ -60,13 +60,13 @@ jobs:
           JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
           JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
           OWNER_PUBLIC_KEY: ${{ vars.OWNER_PUBLIC_KEY }}
-          # list and status: where the script writes its age-encrypted answer, for the artifact below.
+          # create, list and status: where the script writes its age-encrypted answer, for the artifact below.
           JAUNT_STATUS_FILE: ${{ runner.temp }}/relay-status/relay-status.age
         run: python scripts/invite_tester.py github
-      # The list or the status, encrypted to OWNER_PUBLIC_KEY (never anything in clear), for `gh run download --name relay-status`.
+      # The created invite, the list or the status, encrypted to OWNER_PUBLIC_KEY (never anything in clear), for `gh run download --name relay-status`.
       # Also after a failed run when the script wrote it (some actions answered, none with 200).
-      - name: Keep the list or the status
-        if: ${{ !cancelled() && (inputs.action == 'list' || inputs.action == 'status') }}
+      - name: Keep the encrypted answer
+        if: ${{ !cancelled() && inputs.action != 'revoke' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: relay-status
