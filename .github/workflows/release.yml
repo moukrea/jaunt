@@ -16,6 +16,11 @@ on:
         description: Source main commit whose control scripts this run uses
         required: true
         type: string
+      agents_from:
+        description: 'A hotfix that changes nothing the desktop agent is built from: the published host tag whose agents it ships again, byte for byte (docs/DEPLOYMENT.md "Hotfix releases")'
+        required: false
+        type: string
+        default: ''
     secrets:
       SOURCE_READ_KEY:
         required: true
@@ -29,6 +34,8 @@ jobs:
     # here (a macOS runner may not be handed out for hours). release-macos.yml, which auto-release.yml starts beside this run, builds
     # it unwaited. The release goes out without a macOS agent; the other three are required (scripts/build_release.py refuses
     # a release without them).
+    # A hotfix that reuses the agents of the release it fixes (agents_from) builds none.
+    if: ${{ inputs.agents_from == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +96,7 @@ jobs:
           retention-days: 1
   build:
     needs: agent
+    if: ${{ !cancelled() && (needs.agent.result == 'success' || (needs.agent.result == 'skipped' && inputs.agents_from != '')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -114,12 +122,30 @@ jobs:
           fi
       - id: crate
         run: if [ -f agent/desktop/ci.sh ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; fi
-      - if: steps.crate.outputs.present == 'true'
+      - if: steps.crate.outputs.present == 'true' && inputs.agents_from == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: host-agent-*
           path: dist-agents
           merge-multiple: true
+      # A hotfix (agents_from): the agents of the release it fixes, checked against that release's manifest and checksums by main's
+      # release tooling (a copy of its own, removed before the build runs), instead of a build of the same agent source.
+      - if: steps.crate.outputs.present == 'true' && inputs.agents_from != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.control }}
+          path: .reuse
+          persist-credentials: false
+      - if: steps.crate.outputs.present == 'true' && inputs.agents_from != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+          AGENTS_FROM: ${{ inputs.agents_from }}
+        run: |
+          python .reuse/scripts/release_pipeline.py reuse-agents --tag "$AGENTS_FROM" --directory dist-agents
+          rm -rf .reuse
       # An Experimental build of a source with the Rust host publishes it for both Linux platforms (build_release.py refuses one
       # missing, and refuses it for any other build).
       - id: rust
@@ -196,6 +222,8 @@ jobs:
           PYTEST_ADDOPTS: --tb=line
   publish:
     needs: [build, test]
+    # Explicit: with agents_from the agent job is skipped, and a skipped job earlier in the chain would skip this one.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.test.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

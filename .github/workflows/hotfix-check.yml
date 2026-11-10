@@ -1,0 +1,153 @@
+name: Hotfix check
+# The artifact check of a hotfix (docs/DEPLOYMENT.md "Hotfix releases"), before anything is tagged: the hotfix source of a
+# maintenance branch is built as production's last release was, and its site and wheel must be that release's but for the copies of
+# what the hotfix changes. auto-release.yml's prepare tags a hotfix only after a successful run of this workflow named for exactly that
+# source, base and allow-list (run-name below), and dispatches one when there is none. It publishes nothing and writes no ledger.
+run-name: Hotfix check ${{ inputs.source }} over ${{ inputs.base }} allow ${{ inputs.allow }}
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Hotfix source: a commit of maint/production (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      base:
+        description: 'The source production last delivered (the ledger must say so)'
+        required: true
+        type: string
+      allow:
+        description: 'The paths the hotfix may change, space-separated globs (dir/** for a folder)'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: hotfix-check-${{ inputs.source }}
+  cancel-in-progress: false
+jobs:
+  # Control code from source main; the ledger is only read. Installs nothing.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      base_sha: ${{ steps.plan.outputs.base_sha }}
+      host_tag: ${{ steps.plan.outputs.host_tag }}
+      desktop_tag: ${{ steps.plan.outputs.desktop_tag }}
+      android_tag: ${{ steps.plan.outputs.android_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - id: plan
+        run: python scripts/release_pipeline.py hotfix-plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_HOTFIX_SOURCE: ${{ inputs.source }}
+          JAUNT_HOTFIX_BASE: ${{ inputs.base }}
+          JAUNT_HOTFIX_ALLOW: ${{ inputs.allow }}
+  # The builds, as the release builds them: the last production build commit's site, and the hotfix source's site and wheel (the
+  # wheel stamped with that production's version fields, so that only what the hotfix changed can differ). No key is kept.
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ needs.plan.outputs.base_sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.source }}
+          path: hotfix
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      # pages.yml's build of the production site, for both trees, with the last production's tags.
+      - name: Build both sites
+        env:
+          jaunt_PRODUCTION: '1'
+          jaunt_RELEASE_TAG: ${{ needs.plan.outputs.host_tag }}
+          jaunt_ANDROID_RELEASE_TAG: ${{ needs.plan.outputs.android_tag }}
+          jaunt_DESKTOP_RELEASE_TAG: ${{ needs.plan.outputs.desktop_tag }}
+          jaunt_PAGE_URL: ${{ vars.JAUNT_PAGE_URL }}
+        run: |
+          for tree in base hotfix; do
+            (cd "$tree" && npm ci && npm run prepare-web)
+            tar --directory "$tree/web" -cf "$RUNNER_TEMP/web-$tree.tar" --exclude=.git --exclude=.github .
+          done
+      # release.yml's build of the wheel (without agents: the manifest is not compared, only the wheel).
+      - name: Build the hotfix wheel with the last production's version fields
+        run: |
+          cp base/pyproject.toml hotfix/pyproject.toml
+          cp base/host/jaunt/__init__.py hotfix/host/jaunt/__init__.py
+          cd hotfix
+          if [ -f .github/build-requirements.txt ]; then
+            python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r .github/build-requirements.txt
+          else
+            pip install -e . -r requirements-dev.txt
+          fi
+          python scripts/build_release.py
+          mkdir -p "$RUNNER_TEMP/wheel"
+          cp dist/jaunt_host-*.whl "$RUNNER_TEMP/wheel/"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hotfix-builds
+          path: |
+            ${{ runner.temp }}/web-base.tar
+            ${{ runner.temp }}/web-hotfix.tar
+            ${{ runner.temp }}/wheel/
+          if-no-files-found: error
+          retention-days: 1
+  # Control code from source main compares; the published wheel is read from the release by id. Installs nothing.
+  compare:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      JAUNT_RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hotfix-builds
+          path: ${{ runner.temp }}/builds
+      - name: Compare with the last production release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JAUNT_HOTFIX_SOURCE: ${{ inputs.source }}
+          JAUNT_HOTFIX_BASE: ${{ inputs.base }}
+          JAUNT_HOTFIX_ALLOW: ${{ inputs.allow }}
+          BUILDS: ${{ runner.temp }}/builds
+        run: |
+          set -- "$BUILDS"/wheel/jaunt_host-*.whl
+          [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected exactly one built wheel"; exit 1; }
+          python scripts/release_pipeline.py hotfix-compare --base-web "$BUILDS/web-base.tar" --web "$BUILDS/web-hotfix.tar" --wheel "$1"
