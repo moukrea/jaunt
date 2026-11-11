@@ -153,7 +153,7 @@ jobs:
                    'windows': ['windows'], 'desktop_agent': agent, 'network_bench': ['network-bench'], 'android': ['android-build'],
                    'client_link': ['client-link'], 'app': ['app'],
                    'app_package': ['app-package (linux)', 'app-package (windows)'],
-                   'rust_host': ['rust-host (linux-x86_64)', 'rust-host (linux-aarch64)', 'rust-host (windows-x86_64)'], 'conformance': ['conformance', 'conformance-desktop'],
+                   'rust_host': ['rust-host (linux-x86_64)', 'rust-host (linux-aarch64)', 'rust-host (windows-x86_64)'], 'conformance': ['conformance', 'conformance-rust', 'conformance-desktop'],
                    'rust_e2e': ['rust-build', *[f'rust-e2e ({g})' for g in ('terminal', 'rich', 'agents', 'lifecycle', 'shells')], 'rust-desktop-e2e']}
           reused = {}
           flags = {key: 'false' if all(n in ok for n in names) else 'true' for key, names in whole.items()}
@@ -211,7 +211,7 @@ jobs:
         run: gh workflow run ci-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f "kind=$KIND" -f "pr=$PR"
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-desktop, rust-build, rust-e2e, rust-desktop-e2e]
+    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-rust, conformance-desktop, rust-build, rust-e2e, rust-desktop-e2e]
     if: always()
     permissions: {}
     steps:
@@ -250,6 +250,7 @@ jobs:
           RUST_HOST_PLANNED: ${{ needs.plan.outputs.rust_host }}
           CONFORMANCE_RESULT: ${{ needs.conformance.result }}
           CONFORMANCE_PLANNED: ${{ needs.plan.outputs.conformance }}
+          CONFORMANCE_RUST_RESULT: ${{ needs.conformance-rust.result }}
           CONFORMANCE_DESKTOP_RESULT: ${{ needs.conformance-desktop.result }}
           RUST_BUILD_RESULT: ${{ needs.rust-build.result }}
           RUST_E2E_RESULT: ${{ needs.rust-e2e.result }}
@@ -277,6 +278,7 @@ jobs:
           check app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
           check rust-host "$RUST_HOST_RESULT" "$RUST_HOST_PLANNED"
           check conformance "$CONFORMANCE_RESULT" "$CONFORMANCE_PLANNED"
+          check conformance-rust "$CONFORMANCE_RUST_RESULT" "$CONFORMANCE_PLANNED"
           check conformance-desktop "$CONFORMANCE_DESKTOP_RESULT" "$CONFORMANCE_PLANNED"
           # The browser suites on the Rust host: a suite listed `required` in parity/rust_e2e.toml fails its leg, and a leg that is red, or
           # never started because its build failed, fails here (the reporting suites only show in the leg's table).
@@ -470,7 +472,7 @@ jobs:
           test -s "$apk"
           if grep -q cargoBuild android/app/build.gradle; then
             for abi in arm64-v8a armeabi-v7a; do
-              unzip -l "$apk" | grep -q " lib/$abi/libjaunt_link.so" || { echo "::error::no libjaunt_link.so for $abi in the release APK"; exit 1; }
+              unzip -l "$apk" | grep " lib/$abi/libjaunt_link.so" >/dev/null || { echo "::error::no libjaunt_link.so for $abi in the release APK"; exit 1; }
             done
           fi
   installer-fedora:
@@ -739,6 +741,46 @@ jobs:
           JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
           jaunt_E2E_RELAY: workerd
         run: python -m pytest -q -o python_files='conformance_*.py' -m 'not desktop' tests/conformance
+  # The Rust host's leg of the conformance suites (docs/RUST_HOST.md "Conformance"), a job of its own: the two legs together took longer than
+  # the 30 minutes of one job (measured on run 42954216569: set-up 3 min, the Python host 13.4 min, the Rust build 2.3 min, then the Rust host's
+  # 21 % slices at 3.0, 1.8 and 5.5 minutes: about 36 minutes; 18.8 minutes for the Rust leg alone on a quiet workstation). Reporting, as before:
+  # its step fails nothing; the job is in the `test` gate (it must have run when planned) with `conformance`, the Python host's leg.
+  conformance-rust:
+    needs: [guard, plan]
+    if: needs.plan.outputs.conformance == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: suite
+        run: if [ -f tests/conformance/support.py ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No conformance suites in this source'; fi
+      - if: steps.suite.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.suite.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.suite.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - if: steps.suite.outputs.present == 'true'
+        run: pip install -e . -r requirements-dev.txt
+      - if: steps.suite.outputs.present == 'true'
+        run: npm ci
+      - if: steps.suite.outputs.present == 'true'
+        run: npm run prepare-web
+      - if: steps.suite.outputs.present == 'true'
+        run: cargo build --locked -p jaunt-link --example probe
       # The Rust host's leg (docs/RUST_HOST.md "Conformance"): reporting, it fails nothing until its groups are made required. A
       # check of a later milestone's surface is skipped there by its `needs` marker (parity/status.toml). Built on its own, after the
       # probe, so that each keeps its own crypto backend.
