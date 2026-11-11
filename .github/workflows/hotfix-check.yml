@@ -34,6 +34,7 @@ jobs:
       contents: read
     outputs:
       base_sha: ${{ steps.plan.outputs.base_sha }}
+      host_version: ${{ steps.plan.outputs.host_version }}
       host_tag: ${{ steps.plan.outputs.host_tag }}
       desktop_tag: ${{ steps.plan.outputs.desktop_tag }}
       android_tag: ${{ steps.plan.outputs.android_tag }}
@@ -142,9 +143,20 @@ jobs:
           done
       # release.yml's build of the wheel (without agents: the manifest is not compared, only the wheel).
       - name: Build the hotfix wheel with the last production's version fields
+        env:
+          HOST_VERSION: ${{ needs.plan.outputs.host_version }}
         run: |
-          cp base/pyproject.toml hotfix/pyproject.toml
-          cp base/host/jaunt/__init__.py hotfix/host/jaunt/__init__.py
+          # The published host release's version, from its tag (the base release commit of a relay-only release was never stamped).
+          python - <<'PYSTAMP'
+          import os, pathlib, re
+          version = os.environ['HOST_VERSION']
+          assert re.fullmatch(r'\d+\.\d+\.\d+(?:b\d+)?', version), version
+          for name, pattern in (('pyproject.toml', r'^version = "[^"]+"'), ('host/jaunt/__init__.py', r'__version__ = "[^"]+"')):
+              path = pathlib.Path('hotfix') / name
+              text, count = re.subn(pattern, lambda m: m[0].split('"')[0] + '"' + version + '"', path.read_text(), count=1, flags=re.M)
+              assert count == 1, name
+              path.write_text(text)
+          PYSTAMP
           cd hotfix
           if [ -f .github/build-requirements.txt ]; then
             python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r .github/build-requirements.txt
