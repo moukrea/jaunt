@@ -382,6 +382,16 @@ jobs:
           BUDGET: '600'
           HARD: '900'
         run: if [ -f scripts/flake_gate.py ]; then python scripts/flake_gate.py run "$SUITE"; fi
+      # What a failed browser suite leaves for reading (the harness's test-results folder: screenshots, and the diagnostic files a suite writes
+      # before it re-raises, such as rich-plans-diagnostic.json).
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-flake-${{ matrix.suite }}
+          path: |
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 1
   # A red `CI main <sha>` says which merge most likely broke main (scripts/ci_report.py): the run's
   # failed jobs, the last green commit of main, the merges since with their own CI main results.
   # Reporting only: nothing is rerun, and no other job waits for it.
@@ -944,6 +954,17 @@ jobs:
         run: |
           chmod +x target/debug/jaunt target/debug/jaunt-launch
           if [ -f scripts/ci_rust_e2e.py ]; then python scripts/ci_rust_e2e.py "$GROUP" --host target/debug/jaunt; fi
+      # What a failed browser suite leaves for reading (the harness's test-results folder: screenshots, and the diagnostic files a suite writes
+      # before it re-raises, such as rich-plans-diagnostic.json).
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-rust-e2e-${{ matrix.group }}
+          path: |
+            test-results/
+            target/rust-e2e/
+          if-no-files-found: ignore
+          retention-days: 1
   # The Rust track's bookkeeping (parity/, docs/RUST_HOST.md "Parity"): coverage of the inventory by kind, the surfaces added, changed
   # or removed since parity/synced with the change that brought each, and the Python modules changed since then with the Rust modules
   # to review, in this run's summary. Reporting only: nothing waits for it, it fails nothing (continue-on-error), and the `test`
@@ -1866,3 +1887,13 @@ jobs:
         env:
           jaunt_LEGACY_RELEASE_DIR: ${{ runner.temp }}/legacy-host
         run: python tests/installer_e2e.py
+      # What a failed browser suite leaves for reading (the harness's test-results folder: screenshots, and the diagnostic files a suite writes
+      # before it re-raises, such as rich-plans-diagnostic.json).
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-browser-and-relay-${{ matrix.group }}
+          path: |
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 1
