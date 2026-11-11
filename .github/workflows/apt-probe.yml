@@ -1,0 +1,25 @@
+# Probe: can GitHub's runners reach the Ubuntu package mirrors right now? Run it before dispatching CI after a mirror
+# outage (15 jobs dying at status 124 in apt-get or playwright --with-deps): green = the mirrors answer; red = wait, do not
+# rerun CI. It installs nothing and reads no secret.
+name: apt-probe
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions: {}
+    timeout-minutes: 4
+    steps:
+      - name: apt-get update (90 s at most, any fetch error fails)
+        run: |
+          if timeout 90 sudo apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=0; then
+            echo "::notice::Ubuntu mirrors reachable from ${{ matrix.runner }}"
+          else
+            echo "::error::Ubuntu mirrors unreachable from ${{ matrix.runner }} (status $?): wait, do not rerun CI"
+            exit 1
+          fi
