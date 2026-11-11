@@ -67,7 +67,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install age
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+        run: curl -fsSL -o "$RUNNER_TEMP/age.tgz" https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz && echo "7df45a6cc87d4da11cc03a539a7470c15b1041ab2b396af088fe9990f7c79d50  $RUNNER_TEMP/age.tgz" | sha256sum -c - && tar -xzf "$RUNNER_TEMP/age.tgz" -C "$RUNNER_TEMP" && sudo install -m 0755 "$RUNNER_TEMP/age/age" /usr/local/bin/age
       - name: Create, list, revoke, status, connlog or account
         env:
           JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
