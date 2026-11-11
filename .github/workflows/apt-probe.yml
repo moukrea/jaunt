@@ -15,6 +15,14 @@ jobs:
     permissions: {}
     timeout-minutes: 4
     steps:
+      - name: Serve the -security pocket from the runner's archive mirror (security.ubuntu.com unreachable; temporary, replaced by the lot-14 cache)
+        run: |
+          f=/etc/apt/sources.list.d/ubuntu.sources
+          cat "$f"
+          main=$(awk '/^URIs:/ && $2 !~ /security\.ubuntu\.com/ {print $2; exit}' "$f")
+          echo "archive mirror: $main"
+          sudo sed -i -E "s#https?://security\.ubuntu\.com/ubuntu/?#${main}#" "$f"
+          grep -n '^URIs:' "$f"
       - name: apt-get update (90 s at most, any fetch error fails)
         run: |
           if timeout 90 sudo apt-get update -o APT::Update::Error-Mode=any -o Acquire::Retries=0; then
