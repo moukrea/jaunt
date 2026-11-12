@@ -1,0 +1,135 @@
+# Probe: does python.org's Python on a fresh Windows verify the hosts a jaunt install downloads from, and which root does it
+# miss? A tester's install failed at the desktop client's SHA256SUMS (github.com, then its file host) with
+# CERTIFICATE_VERIFY_FAILED "unable to get issuer certificate". The job removes the roots of those chains from the machine
+# stores (a fresh Windows ships few roots and fetches the others on demand, through Windows' own libraries only), then
+# measures Python's ssl before and after each candidate step: Windows PowerShell's Invoke-WebRequest, Edge, and the
+# truststore package (Windows' own chain verification from Python). It installs only truststore (hash-pinned), reads no secret,
+# and never turns verification off.
+name: windows-tls-probe
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-2022]
+    runs-on: ${{ matrix.runner }}
+    permissions: {}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Write the probe script, install truststore 0.10.5 (by hash)
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'probe'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Set-Content -Encoding ASCII -Path (Join-Path $dir 'req.txt') -Value 'truststore==0.10.5 --hash=sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c'
+          python -m pip install --disable-pip-version-check --require-hashes --only-binary :all: --target (Join-Path $dir 'site') -r (Join-Path $dir 'req.txt')
+          @'
+          import hashlib, json, os, socket, ssl, sys, urllib.error, urllib.request
+          ROOTS = {
+              "D1CBCA5DB2D52A7F693B674DE5F05A1D0C957DF0": "USERTrust ECC Certification Authority (root of github.com via the cross-sign)",
+              "EC8A396C40F02EBC4275D49FAB1C1A5B67BED29A": "Sectigo Public Server Authentication Root E46 (self-signed)",
+              "3F969989F5310E9C050DFFD7ABC15530E3C13AA0": "Sectigo Public Server Authentication Root E46 (cross-signed by USERTrust ECC, sent by github.com)",
+              "CABD2A79A1076A31F21D253635CB039D4329A5E8": "ISRG Root X1 (root of the Let's Encrypt hosts)",
+          }
+          HOSTS = ["moukrea.github.io", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
+          label, mode = sys.argv[1], sys.argv[2]
+          print(f"=== Python {sys.version.split()[0]} {ssl.OPENSSL_VERSION} [{label}] mode={mode}")
+          for store in ("ROOT", "CA"):
+              seen = {hashlib.sha1(der).hexdigest().upper(): trust for der, enc, trust in ssl.enum_certificates(store) if enc == "x509_asn"}
+              print(f"  ssl.enum_certificates({store}): {len(seen)} certificates")
+              for thumb, name in ROOTS.items():
+                  if thumb in seen:
+                      print(f"    has {name}: trust={'all' if seen[thumb] is True else sorted(seen[thumb])}")
+          def context():
+              if mode == "truststore":
+                  sys.path.insert(0, os.environ["PROBE_SITE"])
+                  import truststore
+                  return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+              return ssl.create_default_context()
+          for host in HOSTS:
+              try:
+                  with socket.create_connection((host, 443), timeout=15) as raw, context().wrap_socket(raw, server_hostname=host):
+                      print(f"  {host}: verified")
+              except ssl.SSLCertVerificationError as exc:
+                  print(f"  {host}: FAILED verify_code={exc.verify_code} {exc.verify_message}")
+              except Exception as exc:
+                  print(f"  {host}: FAILED {type(exc).__name__}: {exc}")
+          url = os.environ["PROBE_URL"]
+          try:
+              opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context()))
+              with opener.open(urllib.request.Request(url, headers={"User-Agent": "jaunt probe"}), timeout=30) as answer:
+                  print(f"  urllib SHA256SUMS: {answer.status}, {len(answer.read())} bytes, from {answer.url.split('?')[0][:80]}")
+          except Exception as exc:
+              print(f"  urllib SHA256SUMS: FAILED {type(exc).__name__}: {exc}")
+          '@ | Set-Content -Encoding ASCII -Path (Join-Path $dir 'probe.py')
+      - name: Measure, remove the roots, then try each step
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $dir = Join-Path $env:RUNNER_TEMP 'probe'
+          $env:PROBE_SITE = Join-Path $dir 'site'
+          $roots = 'D1CBCA5DB2D52A7F693B674DE5F05A1D0C957DF0', 'EC8A396C40F02EBC4275D49FAB1C1A5B67BED29A', '3F969989F5310E9C050DFFD7ABC15530E3C13AA0'
+          $watch = $roots + 'CABD2A79A1076A31F21D253635CB039D4329A5E8'
+          $stores = 'Cert:\LocalMachine\Root', 'Cert:\LocalMachine\AuthRoot', 'Cert:\LocalMachine\CA', 'Cert:\CurrentUser\Root', 'Cert:\CurrentUser\CA'
+          function Stores($label) {
+            Write-Host "--- Windows stores [$label]"
+            foreach ($s in $stores) {
+              $all = @(Get-ChildItem $s)
+              $hits = $all | Where-Object { $watch -contains $_.Thumbprint } | ForEach-Object { "$($_.Thumbprint.Substring(0,8)) $($_.Subject.Split(',')[0])" }
+              Write-Host "  $s ($($all.Count)): $(if ($hits) { $hits -join '; ' } else { 'none of the watched roots' })"
+            }
+          }
+          function Remove-Roots {
+            foreach ($s in 'Cert:\LocalMachine\Root', 'Cert:\LocalMachine\AuthRoot', 'Cert:\LocalMachine\CA') {
+              Get-ChildItem $s | Where-Object { $roots -contains $_.Thumbprint } | Remove-Item
+            }
+            certutil -urlcache * delete | Out-Null
+          }
+          function Py($label, $mode = 'default') { python (Join-Path $dir 'probe.py') $label $mode }
+          Write-Host "Windows $([Environment]::OSVersion.Version) ($env:ImageOS $env:ImageVersion)"
+          $policy = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot' -ErrorAction SilentlyContinue
+          Write-Host "AuthRoot policy: DisableRootAutoUpdate=$($policy.DisableRootAutoUpdate) EnableDisallowedCertAutoUpdate=$($policy.EnableDisallowedCertAutoUpdate)"
+          $config = python -c "import json,urllib.request;print(json.load(urllib.request.urlopen('https://moukrea.github.io/jaunt/config.json',timeout=30))['desktopRelease'])"
+          $env:PROBE_URL = "https://github.com/moukrea/jaunt/releases/download/$config/SHA256SUMS"
+          Write-Host "SHA256SUMS: $env:PROBE_URL"
+          $git = 'C:\Program Files\Git\usr\bin\openssl.exe'
+          foreach ($h in 'github.com', 'release-assets.githubusercontent.com', 'moukrea.github.io') {
+            Write-Host "--- chain sent by $h (Git's OpenSSL, no Windows chain engine)"
+            '' | & $git s_client -connect "${h}:443" -servername $h -showcerts 2>$null | Select-String '^ *\d s:|^ *i:' | ForEach-Object { Write-Host "  $_" }
+          }
+          Stores 'as the image ships'
+          Py 'as the image ships'
+          Remove-Roots; Stores 'roots removed'
+          Py 'roots removed'
+          Write-Host '##### Step A: Windows PowerShell 5.1 Invoke-WebRequest of the SHA256SUMS URL'
+          powershell.exe -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri '$env:PROBE_URL').StatusCode } catch { 'Invoke-WebRequest failed: ' + `$_ }"
+          Write-Host "AuthRoot fetches cached: $(@(certutil -urlcache | Select-String 'ctldl|windowsupdate').Count)"
+          Stores 'after Invoke-WebRequest'
+          Py 'after Invoke-WebRequest'
+          Remove-Roots
+          Write-Host '##### Step A2: Invoke-WebRequest of https://github.com/ only'
+          powershell.exe -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/').StatusCode } catch { 'Invoke-WebRequest failed: ' + `$_ }"
+          Stores 'after Invoke-WebRequest github.com'
+          Py 'after Invoke-WebRequest github.com'
+          Remove-Roots; Stores 'roots removed again'
+          Write-Host '##### Step B: Edge opens the SHA256SUMS URL'
+          $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+          if (Test-Path $edge) {
+            $p = Start-Process -FilePath $edge -ArgumentList '--headless=new', '--disable-gpu', '--no-first-run', "--user-data-dir=$dir\edge", '--dump-dom', $env:PROBE_URL -PassThru -RedirectStandardOutput "$dir\edge.out"
+            if (-not $p.WaitForExit(60000)) { $p.Kill() }
+            Write-Host "Edge wrote $((Get-Item "$dir\edge.out").Length) bytes"
+            Stores 'after Edge'
+            Py 'after Edge'
+          } else { Write-Host 'no Edge on this image' }
+          Remove-Roots; Stores 'roots removed again'
+          Write-Host '##### Step C: Python with truststore (Windows verifies the chain, fetching the root)'
+          Py 'truststore' 'truststore'
+          Stores 'after truststore'
+          Py 'after truststore'
