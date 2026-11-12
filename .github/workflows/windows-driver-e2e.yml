@@ -1,0 +1,58 @@
+# The virtual display driver installed and removed through the Rust host, on its own: `jaunt remote-desktop driver install` and `uninstall` with the
+# real operating system (the registry, the HTTPS download of the pinned moukrea/jaunt-idd release, Windows' administrator prompt through ShellExecuteExW,
+# the elevated install.ps1 -SignLocally) and the person's answers given as a person would give them. One test, crates/jaunt-host/tests/driver_windows.rs:
+# `#[ignore]` (the parallel cargo test of crates/ci.sh never runs it) and, on top of that, a no-op anywhere but a GitHub-hosted runner. It changes
+# the runner (a driver package, a device, a certificate trusted by the computer, files in Program Files), and puts them back; the runner is thrown away.
+# What it cannot show: the driver loading without test-signing mode (the runner boots in it), Windows' UAC and publisher prompts (the runner is an
+# administrator without a prompt, and no release is signed), a real monitor (no GPU). docs/validation, "The virtual display driver installed and removed
+# through the Rust host". Same checkout of the private source (same key, same read-only permissions) as ci.yml's jobs; it is not a substitute for
+# "CI main <commit>", which the release queue still requires.
+#   gh workflow run windows-driver-e2e.yml --repo moukrea/jaunt -f sha=<commit of the source>
+run-name: Windows driver e2e ${{ inputs.sha }}
+name: windows-driver-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: windows-driver-e2e-${{ inputs.sha }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+  windows:
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: test
+        run: if [ -f crates/jaunt-host/tests/driver_windows.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No driver test in this source'; fi
+      - if: steps.test.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - name: The driver installed and removed through the Rust host
+        if: steps.test.outputs.present == 'true'
+        run: cargo test --locked -p jaunt-host --test driver_windows -- --ignored --nocapture
