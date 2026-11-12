@@ -797,16 +797,26 @@ jobs:
       - id: rust
         if: steps.suite.outputs.present == 'true'
         run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
+      # A test host: built with the `test-clock` feature, which makes it read jaunt_TEST_CLOCK below (crates/jaunt-host/src/testclock.rs). The
+      # program that ships is built without it (scripts/rust_release.sh, release.yml: tests/test_testclock_gate.py), and ignores the variable.
       - if: steps.rust.outputs.present == 'true'
-        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
+        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator --features jaunt-host/test-clock
       - name: The Rust host (reporting)
+        id: rustsuite
         if: steps.rust.outputs.present == 'true'
         continue-on-error: true
         env:
           JAUNT_LINK_PROBE: ${{ github.workspace }}/target/debug/examples/probe
           jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
           jaunt_E2E_RELAY: workerd
-        run: python -m pytest -q -rs -o python_files='conformance_*.py' -m 'not desktop' tests/conformance
+          jaunt_TEST_CLOCK: approval=4,rules=3,link=15
+        run: python -m pytest -q -rs --durations=25 -o python_files='conformance_*.py' -m 'not desktop' tests/conformance
+      # What `continue-on-error` hides: the job is green whatever the step above did. This step runs only when it succeeded (its `outcome`, not
+      # its `conclusion`), so that scripts/channel_release.py, which refuses an Experimental build without a Rust conformance that passed,
+      # reads a step that is there and succeeded only for a pass. Its name is that script's RUST_VERDICT.
+      - name: The Rust host passed
+        if: steps.rustsuite.outcome == 'success'
+        run: echo 'The Rust conformance suite passed on this run.'
   # The remote desktop's conformance suite (the `desktop` marker, conformance_desktop.py: a stand-in desktop agent and devices on real direct
   # links, about 3 minutes a leg on a workstation) is a job of its own, so that `conformance` stays well under its timeout: the same
   # steps, the same planning (the `conformance` flag), the same legs (the Python host required, the Rust host reporting).
