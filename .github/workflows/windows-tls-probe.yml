@@ -18,7 +18,7 @@ jobs:
         runner: [windows-2025, windows-2022]
     runs-on: ${{ matrix.runner }}
     permissions: {}
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         shell: pwsh
@@ -152,3 +152,27 @@ jobs:
           Iwr $env:PROBE_URL; Fetched
           Stores 'cross in CA, after Invoke-WebRequest'
           Py 'cross in CA, after Invoke-WebRequest'
+          Write-Host '##### Step E: truststore in that state'
+          Py 'cross in CA, truststore' 'truststore'
+          Stores 'cross in CA, after truststore'
+          Py 'cross in CA, after truststore'
+          Remove-Roots
+          Import-Certificate -FilePath "$dir\cross.pem" -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
+          Stores 'cross in CA again, no root'
+          Write-Host "##### Step F: SSL_CERT_FILE = pip's own copy of the Mozilla roots (certifi), in that state"
+          $env:SSL_CERT_FILE = (python -c "import pip._vendor.certifi as c; print(c.where())").Trim()
+          Write-Host "  SSL_CERT_FILE=$env:SSL_CERT_FILE"
+          Py 'cross in CA, SSL_CERT_FILE'
+          Remove-Item Env:SSL_CERT_FILE
+          Write-Host "##### Step G: the published installer, -ClientOnly, in Windows PowerShell 5.1, in that state"
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://moukrea.github.io/jaunt/install.ps1' -OutFile "$dir\install.ps1"
+          Stores 'before the installer'
+          $env:jaunt_NO_GUI = '1'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" -ClientOnly 2>&1 | ForEach-Object { "  | $_" } | Select-Object -Last 25
+          Write-Host "  installer exit: $LASTEXITCODE"
+          Stores 'after the installer'
+          Write-Host "##### Step H: the same installer with SSL_CERT_FILE set to pip's certifi"
+          $env:SSL_CERT_FILE = (python -c "import pip._vendor.certifi as c; print(c.where())").Trim()
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" -ClientOnly 2>&1 | ForEach-Object { "  | $_" } | Select-Object -Last 12
+          Write-Host "  installer exit: $LASTEXITCODE"
+          Remove-Item Env:SSL_CERT_FILE
