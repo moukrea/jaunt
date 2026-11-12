@@ -2,7 +2,8 @@
 # miss? A tester's install failed at the desktop client's SHA256SUMS (github.com, then its file host) with
 # CERTIFICATE_VERIFY_FAILED "unable to get issuer certificate". The job removes the roots of those chains from the machine
 # stores (a fresh Windows ships few roots and fetches the others on demand, through Windows' own libraries only), then
-# measures Python's ssl before and after each candidate step: Windows PowerShell's Invoke-WebRequest, Edge, and the
+# lifts the runner images' policy that turns that fetching off, and measures Python's ssl before and after each candidate
+# step: Windows PowerShell's Invoke-WebRequest, Edge, and the
 # truststore package (Windows' own chain verification from Python). It installs only truststore (hash-pinned), reads no secret,
 # and never turns verification off.
 name: windows-tls-probe
@@ -90,6 +91,7 @@ jobs:
             foreach ($s in 'Cert:\LocalMachine\Root', 'Cert:\LocalMachine\AuthRoot', 'Cert:\LocalMachine\CA') {
               Get-ChildItem $s | Where-Object { $roots -contains $_.Thumbprint } | Remove-Item
             }
+            Get-ChildItem Cert:\CurrentUser\CA | Where-Object { $roots -contains $_.Thumbprint } | Remove-Item
             certutil -urlcache * delete | Out-Null
           }
           function Py($label, $mode = 'default') { python (Join-Path $dir 'probe.py') $label $mode }
@@ -106,30 +108,47 @@ jobs:
           }
           Stores 'as the image ships'
           Py 'as the image ships'
+          # The runner images turn Windows' on-demand root fetching off; a user's Windows has it on.
+          Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot' -Name DisableRootAutoUpdate -Value 0 -Type DWord
+          Restart-Service CryptSvc -Force
+          Write-Host "AuthRoot policy now: DisableRootAutoUpdate=$((Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot').DisableRootAutoUpdate)"
+          function Fetched { Write-Host "  AuthRoot downloads cached: $(@(certutil -urlcache | Select-String 'ctldl|windowsupdate|\.crt|\.cab').Count)" }
+          function Iwr($url) { powershell.exe -NoProfile -Command "try { 'Invoke-WebRequest: ' + (Invoke-WebRequest -UseBasicParsing -Uri '$url').StatusCode } catch { 'Invoke-WebRequest failed: ' + `$_ }" }
           Remove-Roots; Stores 'roots removed'
           Py 'roots removed'
           Write-Host '##### Step A: Windows PowerShell 5.1 Invoke-WebRequest of the SHA256SUMS URL'
-          powershell.exe -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri '$env:PROBE_URL').StatusCode } catch { 'Invoke-WebRequest failed: ' + `$_ }"
-          Write-Host "AuthRoot fetches cached: $(@(certutil -urlcache | Select-String 'ctldl|windowsupdate').Count)"
+          Iwr $env:PROBE_URL; Fetched
           Stores 'after Invoke-WebRequest'
           Py 'after Invoke-WebRequest'
           Remove-Roots
           Write-Host '##### Step A2: Invoke-WebRequest of https://github.com/ only'
-          powershell.exe -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/').StatusCode } catch { 'Invoke-WebRequest failed: ' + `$_ }"
+          Iwr 'https://github.com/'; Fetched
           Stores 'after Invoke-WebRequest github.com'
           Py 'after Invoke-WebRequest github.com'
           Remove-Roots; Stores 'roots removed again'
-          Write-Host '##### Step B: Edge opens the SHA256SUMS URL'
+          Write-Host '##### Step B: Edge opens https://github.com/'
           $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
           if (Test-Path $edge) {
-            $p = Start-Process -FilePath $edge -ArgumentList '--headless=new', '--disable-gpu', '--no-first-run', "--user-data-dir=$dir\edge", '--dump-dom', $env:PROBE_URL -PassThru -RedirectStandardOutput "$dir\edge.out"
+            $p = Start-Process -FilePath $edge -ArgumentList '--headless=new', '--disable-gpu', '--no-first-run', "--user-data-dir=$dir\edge", '--dump-dom', 'https://github.com/' -PassThru -RedirectStandardOutput "$dir\edge.out"
             if (-not $p.WaitForExit(60000)) { $p.Kill() }
-            Write-Host "Edge wrote $((Get-Item "$dir\edge.out").Length) bytes"
+            Write-Host "Edge exit $($p.ExitCode), wrote $((Get-Item "$dir\edge.out").Length) bytes, github in page: $([bool](Select-String -Quiet -Path "$dir\edge.out" -Pattern 'github'))"
+            Fetched
             Stores 'after Edge'
             Py 'after Edge'
           } else { Write-Host 'no Edge on this image' }
           Remove-Roots; Stores 'roots removed again'
           Write-Host '##### Step C: Python with truststore (Windows verifies the chain, fetching the root)'
-          Py 'truststore' 'truststore'
+          Py 'truststore' 'truststore'; Fetched
           Stores 'after truststore'
           Py 'after truststore'
+          Remove-Roots
+          Write-Host '##### Step D: the cross-signed Root E46 cached as an intermediate (CA store), no root'
+          $pem = ('' | & $git s_client -connect 'github.com:443' -servername github.com -showcerts 2>$null) -join "`n"
+          $blocks = [regex]::Matches($pem, '-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----')
+          Set-Content -Path "$dir\cross.pem" -Value $blocks[2].Value
+          Import-Certificate -FilePath "$dir\cross.pem" -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
+          Stores 'cross-signed E46 in CA'
+          Py 'cross-signed E46 in CA'
+          Iwr $env:PROBE_URL; Fetched
+          Stores 'cross in CA, after Invoke-WebRequest'
+          Py 'cross in CA, after Invoke-WebRequest'
