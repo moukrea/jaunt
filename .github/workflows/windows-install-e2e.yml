@@ -3,7 +3,7 @@
 # root of github.com missing, Windows' root updates refused). Same checkout of the private source (same key, same read-only
 # permissions) and the same steps as that job; it is not a substitute for "CI main <commit>", which the release queue still requires.
 #   gh workflow run windows-install-e2e.yml --repo moukrea/jaunt -f sha=<commit of the source>
-run-name: Windows install e2e ${{ inputs.sha }}
+run-name: Windows install e2e ${{ inputs.sha }} python ${{ inputs.python }}
 name: windows-install-e2e
 on:
   workflow_dispatch:
@@ -12,9 +12,14 @@ on:
         description: 'Source commit to test (40 lowercase hexadecimal characters)'
         required: true
         type: string
+      python:
+        description: 'Python for the job (3.11.9 is python.org''s the tester runs, whose OpenSSL 3.0 fails where 3.13''s does not)'
+        required: false
+        default: '3.13'
+        type: string
 permissions: {}
 concurrency:
-  group: windows-install-e2e-${{ inputs.sha }}
+  group: windows-install-e2e-${{ inputs.sha }}-${{ inputs.python }}
   cancel-in-progress: false
 jobs:
   guard:
@@ -41,6 +46,6 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.13'
+          python-version: ${{ inputs.python }}
       - run: pip install -e . -r requirements-dev.txt
       - run: python tests/windows_install_e2e.py
