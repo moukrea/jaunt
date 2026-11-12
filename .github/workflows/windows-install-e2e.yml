@@ -1,0 +1,46 @@
+# The Windows install end to end, on its own: ci.yml's `windows` job reduced to the one step that needs a Windows machine and a fresh
+# certificate store (tests/windows_install_e2e.py: install.ps1, the host, the update, and on a runner the tester's TLS state: the
+# root of github.com missing, Windows' root updates refused). Same checkout of the private source (same key, same read-only
+# permissions) and the same steps as that job; it is not a substitute for "CI main <commit>", which the release queue still requires.
+#   gh workflow run windows-install-e2e.yml --repo moukrea/jaunt -f sha=<commit of the source>
+run-name: Windows install e2e ${{ inputs.sha }}
+name: windows-install-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: windows-install-e2e-${{ inputs.sha }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+  windows:
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - run: pip install -e . -r requirements-dev.txt
+      - run: python tests/windows_install_e2e.py
