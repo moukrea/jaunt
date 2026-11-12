@@ -10,7 +10,8 @@ run-name: Channel ${{ inputs.action }} ${{ inputs.pr }} ${{ inputs.sha }}
 #   experimental: gh workflow run channel.yml --repo moukrea/jaunt -f action=experimental -f sha=<branch tip> [-f title=<text>]
 # `prepare` (ledger environment, the ledger key, installs nothing) proves over the deploy key that the
 # head is what the source's refs/pull/<n>/head names and the tip of one of its branches (an
-# Experimental build: the tip of one of its branches), then reserves the build and pushes its three
+# Experimental build: the tip of one of its branches, which also needs a green CI run of that head, or of
+# a commit of the same tree, whose Rust host conformance step succeeded), then reserves the build and pushes its three
 # tags with the reservation (`-exp.N` tags for Experimental). The three builds are the release
 # workflows the queue calls (keyless; Android is signed in the `release` environment with the pinned
 # signer); `record` (ledger) verifies the three prereleases and marks the candidate delivered. The
@@ -52,6 +53,9 @@ jobs:
     environment: ledger
     permissions:
       contents: read
+      # An Experimental build is refused without a green CI run whose Rust conformance step succeeded (scripts/channel_release.py): the
+      # runs and their steps are read here, with this token, in this repository.
+      actions: read
     outputs:
       publish: ${{ steps.prepare.outputs.publish || steps.experimental.outputs.publish }}
       sha: ${{ steps.prepare.outputs.sha || steps.experimental.outputs.sha }}
@@ -172,7 +176,18 @@ jobs:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: exit 1
       - name: Request the channel page under the production lock
-        run: gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
+        run: |
+          # auto-release.yml is disabled by design while the Canary channel is frozen (docs/DEPLOYMENT.md, Release channels):
+          # then nothing is published, which is not a failure of this run. Any other failure, reading the state or
+          # dispatching the run, still fails the step.
+          state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/auto-release.yml" --jq .state) || {
+            echo '::error::could not read the state of auto-release.yml'; exit 1; }
+          case "$state" in
+            disabled*)
+              echo "::notice::auto-release.yml is disabled by design (Canary freeze, owner decision): the channel page was not requested and nothing was published. The three prereleases stay recorded."
+              exit 0 ;;
+          esac
+          gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
   cleanup:
@@ -201,6 +216,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ inputs.pr }}
       - name: Remove the channel page under the production lock
-        run: gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
+        run: |
+          # auto-release.yml is disabled by design while the Canary channel is frozen (docs/DEPLOYMENT.md, Release channels):
+          # then nothing is published, which is not a failure of this run. Any other failure, reading the state or
+          # dispatching the run, still fails the step.
+          state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/auto-release.yml" --jq .state) || {
+            echo '::error::could not read the state of auto-release.yml'; exit 1; }
+          case "$state" in
+            disabled*)
+              echo "::notice::auto-release.yml is disabled by design (Canary freeze, owner decision): the channel page was not requested and nothing was published. The candidate's prereleases, tags and entry are already deleted."
+              exit 0 ;;
+          esac
+          gh workflow run auto-release.yml --ref main --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
