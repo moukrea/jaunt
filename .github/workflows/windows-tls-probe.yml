@@ -176,3 +176,22 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" -ClientOnly 2>&1 | ForEach-Object { "  | $_" } | Select-Object -Last 12
           Write-Host "  installer exit: $LASTEXITCODE"
           Remove-Item Env:SSL_CERT_FILE
+          Remove-Roots
+          Import-Certificate -FilePath "$dir\cross.pem" -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
+          Stores 'cross in CA again, no root (workaround lines)'
+          Write-Host '##### Step I: the tester workaround, exact lines, py launcher then python'
+          Write-Host "  py launcher: $((Get-Command py -ErrorAction SilentlyContinue).Source)"
+          foreach ($launcher in 'py', 'python') {
+            Remove-Item Env:SSL_CERT_FILE -ErrorAction SilentlyContinue
+            Write-Host "  --- $launcher"
+            $env:SSL_CERT_FILE = (& $launcher -c "import pip._vendor.certifi as c; print(c.where())")
+            Write-Host "  SSL_CERT_FILE=$env:SSL_CERT_FILE exists=$(Test-Path $env:SSL_CERT_FILE) size=$((Get-Item $env:SSL_CERT_FILE).Length)"
+            Py "workaround via $launcher"
+            Remove-Item Env:SSL_CERT_FILE
+          }
+          Write-Host '  --- the same, from a venv made by that Python (what the jaunt runtime is)'
+          python -m venv "$dir\venv"
+          $env:SSL_CERT_FILE = (& "$dir\venv\Scripts\python.exe" -c "import pip._vendor.certifi as c; print(c.where())")
+          Write-Host "  SSL_CERT_FILE=$env:SSL_CERT_FILE exists=$(Test-Path $env:SSL_CERT_FILE)"
+          Py 'workaround via the venv python'
+          Remove-Item Env:SSL_CERT_FILE
