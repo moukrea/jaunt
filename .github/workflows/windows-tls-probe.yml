@@ -94,7 +94,7 @@ jobs:
             Get-ChildItem Cert:\CurrentUser\CA | Where-Object { $roots -contains $_.Thumbprint } | Remove-Item
             certutil -urlcache * delete | Out-Null
           }
-          function Py($label, $mode = 'default') { python (Join-Path $dir 'probe.py') $label $mode }
+          function Probe($label, $mode = 'default') { python (Join-Path $dir 'probe.py') $label $mode }
           Write-Host "Windows $([Environment]::OSVersion.Version) ($env:ImageOS $env:ImageVersion)"
           $policy = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot' -ErrorAction SilentlyContinue
           Write-Host "AuthRoot policy: DisableRootAutoUpdate=$($policy.DisableRootAutoUpdate) EnableDisallowedCertAutoUpdate=$($policy.EnableDisallowedCertAutoUpdate)"
@@ -107,7 +107,7 @@ jobs:
             '' | & $git s_client -connect "${h}:443" -servername $h -showcerts 2>$null | Select-String '^ *\d s:|^ *i:' | ForEach-Object { Write-Host "  $_" }
           }
           Stores 'as the image ships'
-          Py 'as the image ships'
+          Probe 'as the image ships'
           # The runner images turn Windows' on-demand root fetching off; a user's Windows has it on.
           Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot' -Name DisableRootAutoUpdate -Value 0 -Type DWord
           Restart-Service CryptSvc -Force
@@ -115,16 +115,16 @@ jobs:
           function Fetched { Write-Host "  AuthRoot downloads cached: $(@(certutil -urlcache | Select-String 'ctldl|windowsupdate|\.crt|\.cab').Count)" }
           function Iwr($url) { powershell.exe -NoProfile -Command "try { 'Invoke-WebRequest: ' + (Invoke-WebRequest -UseBasicParsing -Uri '$url').StatusCode } catch { 'Invoke-WebRequest failed: ' + `$_ }" }
           Remove-Roots; Stores 'roots removed'
-          Py 'roots removed'
+          Probe 'roots removed'
           Write-Host '##### Step A: Windows PowerShell 5.1 Invoke-WebRequest of the SHA256SUMS URL'
           Iwr $env:PROBE_URL; Fetched
           Stores 'after Invoke-WebRequest'
-          Py 'after Invoke-WebRequest'
+          Probe 'after Invoke-WebRequest'
           Remove-Roots
           Write-Host '##### Step A2: Invoke-WebRequest of https://github.com/ only'
           Iwr 'https://github.com/'; Fetched
           Stores 'after Invoke-WebRequest github.com'
-          Py 'after Invoke-WebRequest github.com'
+          Probe 'after Invoke-WebRequest github.com'
           Remove-Roots; Stores 'roots removed again'
           Write-Host '##### Step B: Edge opens https://github.com/'
           $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
@@ -134,13 +134,13 @@ jobs:
             Write-Host "Edge exit $($p.ExitCode), wrote $((Get-Item "$dir\edge.out").Length) bytes, github in page: $([bool](Select-String -Quiet -Path "$dir\edge.out" -Pattern 'github'))"
             Fetched
             Stores 'after Edge'
-            Py 'after Edge'
+            Probe 'after Edge'
           } else { Write-Host 'no Edge on this image' }
           Remove-Roots; Stores 'roots removed again'
           Write-Host '##### Step C: Python with truststore (Windows verifies the chain, fetching the root)'
-          Py 'truststore' 'truststore'; Fetched
+          Probe 'truststore' 'truststore'; Fetched
           Stores 'after truststore'
-          Py 'after truststore'
+          Probe 'after truststore'
           Remove-Roots
           Write-Host '##### Step D: the cross-signed Root E46 cached as an intermediate (CA store), no root'
           $pem = ('' | & $git s_client -connect 'github.com:443' -servername github.com -showcerts 2>$null) -join "`n"
@@ -148,21 +148,21 @@ jobs:
           Set-Content -Path "$dir\cross.pem" -Value $blocks[2].Value
           Import-Certificate -FilePath "$dir\cross.pem" -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
           Stores 'cross-signed E46 in CA'
-          Py 'cross-signed E46 in CA'
+          Probe 'cross-signed E46 in CA'
           Iwr $env:PROBE_URL; Fetched
           Stores 'cross in CA, after Invoke-WebRequest'
-          Py 'cross in CA, after Invoke-WebRequest'
+          Probe 'cross in CA, after Invoke-WebRequest'
           Write-Host '##### Step E: truststore in that state'
-          Py 'cross in CA, truststore' 'truststore'
+          Probe 'cross in CA, truststore' 'truststore'
           Stores 'cross in CA, after truststore'
-          Py 'cross in CA, after truststore'
+          Probe 'cross in CA, after truststore'
           Remove-Roots
           Import-Certificate -FilePath "$dir\cross.pem" -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
           Stores 'cross in CA again, no root'
           Write-Host "##### Step F: SSL_CERT_FILE = pip's own copy of the Mozilla roots (certifi), in that state"
           $env:SSL_CERT_FILE = (python -c "import pip._vendor.certifi as c; print(c.where())").Trim()
           Write-Host "  SSL_CERT_FILE=$env:SSL_CERT_FILE"
-          Py 'cross in CA, SSL_CERT_FILE'
+          Probe 'cross in CA, SSL_CERT_FILE'
           Remove-Item Env:SSL_CERT_FILE
           Write-Host "##### Step G: the published installer, -ClientOnly, in Windows PowerShell 5.1, in that state"
           Invoke-WebRequest -UseBasicParsing -Uri 'https://moukrea.github.io/jaunt/install.ps1' -OutFile "$dir\install.ps1"
