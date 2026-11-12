@@ -176,22 +176,36 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir\install.ps1" -ClientOnly 2>&1 | ForEach-Object { "  | $_" } | Select-Object -Last 12
           Write-Host "  installer exit: $LASTEXITCODE"
           Remove-Item Env:SSL_CERT_FILE
+          # The tester's Python: python.org's own installer with its py launcher (the runner's Python is not that one).
+          # Pinned: the SHA-256 of python-3.11.9-amd64.exe as downloaded from python.org over TLS on 2026-11-12.
+          $exe = "$dir\python-3.11.9-amd64.exe"
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile $exe
+          if ((Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() -ne '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde') { throw 'python.org installer: unexpected SHA-256' }
+          Start-Process -FilePath $exe -ArgumentList '/quiet', 'InstallAllUsers=0', 'Include_launcher=1', 'InstallLauncherAllUsers=0', 'PrependPath=0', 'Include_test=0', 'Include_pip=1', "TargetDir=$dir\py311" -Wait
+          $launcher = Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Launcher\py.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          Write-Host "  python.org install: python.exe=$(Test-Path "$dir\py311\python.exe") py.exe=$($launcher.FullName)"
+          $env:Path = "$($launcher.DirectoryName);$dir\py311;" + $env:Path
+          Write-Host "  Get-Command py: $((Get-Command py -ErrorAction SilentlyContinue).Source)"
+          Write-Host "  py -c version: $(& py -c 'import sys;print(sys.version.split()[0], sys.executable)')"
           Remove-Roots
           Import-Certificate -FilePath "$dir\cross.pem" -CertStoreLocation Cert:\LocalMachine\CA | Out-Null
           Stores 'cross in CA again, no root (workaround lines)'
-          Write-Host '##### Step I: the tester workaround, exact lines, py launcher then python'
-          Write-Host "  py launcher: $((Get-Command py -ErrorAction SilentlyContinue).Source)"
+          Write-Host '##### Step I: the tester workaround, exact lines; python.org Python run through py and through python'
           foreach ($launcher in 'py', 'python') {
             Remove-Item Env:SSL_CERT_FILE -ErrorAction SilentlyContinue
-            Write-Host "  --- $launcher"
+            Write-Host "  --- $launcher (the tester's Python: python.org $dir\py311, py launcher first on PATH)"
             $env:SSL_CERT_FILE = (& $launcher -c "import pip._vendor.certifi as c; print(c.where())")
             Write-Host "  SSL_CERT_FILE=$env:SSL_CERT_FILE exists=$(Test-Path $env:SSL_CERT_FILE) size=$((Get-Item $env:SSL_CERT_FILE).Length)"
-            Py "workaround via $launcher"
+            Remove-Item Env:SSL_CERT_FILE
+            $env:SSL_CERT_FILE = (& $launcher -c "import pip._vendor.certifi as c; print(c.where())")
+            & $launcher (Join-Path $dir 'probe.py') "workaround via $launcher" default
             Remove-Item Env:SSL_CERT_FILE
           }
-          Write-Host '  --- the same, from a venv made by that Python (what the jaunt runtime is)'
-          python -m venv "$dir\venv"
-          $env:SSL_CERT_FILE = (& "$dir\venv\Scripts\python.exe" -c "import pip._vendor.certifi as c; print(c.where())")
+          Write-Host '  --- control: python.org Python, no variable'
+          & py (Join-Path $dir 'probe.py') 'python.org Python, no variable' default
+          Write-Host '  --- a venv of python.org Python (what the jaunt runtime is)'
+          & py -m venv "$dir\venv2"
+          $env:SSL_CERT_FILE = (& "$dir\venv2\Scripts\python.exe" -c "import pip._vendor.certifi as c; print(c.where())")
           Write-Host "  SSL_CERT_FILE=$env:SSL_CERT_FILE exists=$(Test-Path $env:SSL_CERT_FILE)"
-          Py 'workaround via the venv python'
+          & "$dir\venv2\Scripts\python.exe" (Join-Path $dir 'probe.py') 'workaround via the venv python' default
           Remove-Item Env:SSL_CERT_FILE
