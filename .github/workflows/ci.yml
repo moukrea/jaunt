@@ -799,10 +799,8 @@ jobs:
         run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
       # A test host: built with the `test-clock` feature, which makes it read jaunt_TEST_CLOCK below (crates/jaunt-host/src/testclock.rs). The
       # program that ships is built without it (scripts/rust_release.sh, release.yml: tests/test_testclock_gate.py), and ignores the variable.
-      # A source from before the feature (a production hotfix's, based on an older release: its `CI main` runs this workflow) builds without it:
-      # its tests/conformance know no jaunt_TEST_CLOCK.
       - if: steps.rust.outputs.present == 'true'
-        run: if [ -f crates/jaunt-host/src/testclock.rs ]; then cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator --features jaunt-host/test-clock; else cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator; fi
+        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator --features jaunt-host/test-clock
       - name: The Rust host (reporting)
         id: rustsuite
         if: steps.rust.outputs.present == 'true'
