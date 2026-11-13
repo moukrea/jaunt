@@ -26,10 +26,18 @@ on:
         required: false
         type: boolean
         default: false
+      tests_proven:
+        description: 'An Experimental build (an -exp.N tag) of a tree whose whole pytest suite ran green in CI (channel.yml, from scripts/channel_release.py proven_suites): `test-stamped` runs only the tests the stamp can change, instead of `test` (docs/DEPLOYMENT.md "What an Experimental build re-verifies"). Never a production release: auto-release.yml does not pass it, and the tag must be an Experimental one.'
+        required: false
+        type: boolean
+        default: false
     secrets:
       SOURCE_READ_KEY:
         required: true
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
+# holding more than the source read key, never takes files another run saved (scripts/check_public_ops.py).
+cache-mode: none
 jobs:
   agent:
     # The desktop agent ships with the host (docs/DESKTOP.md, "Shipping"): built, tested and
@@ -203,6 +211,8 @@ jobs:
   # The release commit's tests, beside the agent builds instead of after them (they took 9 of the
   # release's 24 minutes in October 2026): publish waits for both.
   test:
+    # Not for an Experimental build whose tree CI already ran whole: test-stamped below runs what the stamp can change.
+    if: ${{ !(inputs.tests_proven && contains(inputs.tag, '-exp.')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -235,10 +245,44 @@ jobs:
       - run: pytest -q --ignore=tests/test_release_pipeline.py
         env:
           PYTEST_ADDOPTS: --tb=line
+  # An Experimental build is the tested commit plus the stamped files and main's workflows, and its prepare job found a green CI run of that
+  # very tree whose unit suite ran the whole pytest: what that run cannot show is the stamped commit's own reading of the version files.
+  # Only those tests run here (scripts/stamped_tests.py); a source without the script runs the suite `test` runs.
+  test-stamped:
+    if: ${{ inputs.tests_proven && contains(inputs.tag, '-exp.') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: pip install -e . -r requirements-dev.txt
+      - name: The tests the stamp can change
+        run: |
+          if [ -f scripts/stamped_tests.py ]; then
+            files=$(python scripts/stamped_tests.py)
+            test -n "$files"
+            pytest -q $files
+          else
+            pytest -q --ignore=tests/test_release_pipeline.py
+          fi
+        env:
+          PYTEST_ADDOPTS: --tb=line
   publish:
-    needs: [build, test]
-    # Explicit: with agents_from the agent job is skipped, and a skipped job earlier in the chain would skip this one.
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.test.result == 'success' }}
+    needs: [build, test, test-stamped]
+    # Explicit: with agents_from the agent job is skipped, and a skipped job earlier in the chain would skip this one. Exactly one of the
+    # two test jobs runs (test-stamped only for a proved Experimental build) and it must have succeeded.
+    if: ${{ !cancelled() && needs.build.result == 'success' && ((needs.test.result == 'success' && needs.test-stamped.result == 'skipped') || (needs.test.result == 'skipped' && needs.test-stamped.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
