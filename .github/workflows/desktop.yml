@@ -25,6 +25,9 @@ on:
       SOURCE_READ_KEY:
         required: true
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
+# holding more than the source read key, never takes files another run saved (scripts/check_public_ops.py).
+cache-mode: none
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -185,10 +188,15 @@ jobs:
       - run: npm run prepare-web
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev rpm
-      - name: Rust (pinned) and the Tauri CLI (pinned)
+      - run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
+      # The pinned Tauri CLI is tauri-apps' own build of it, downloaded from its release and checked against its SHA-256 before it is
+      # extracted (scripts/ci_downloads.py tauri-cli, from the release commit; no Actions cache in a release workflow): compiling it took
+      # ten minutes on Windows, five on Linux. A commit without the script, another version, or a download that fails or does not match:
+      # it is compiled, as it was.
+      - name: The Tauri CLI (pinned)
         run: |
-          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
-          cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+          if [ -f scripts/ci_downloads.py ]; then python scripts/ci_downloads.py tauri-cli "$RUNNER_TEMP/jaunt-tauri-cli" "$TAURI_CLI_VERSION" || true; fi
+          if [ "$(cargo tauri --version 2>/dev/null)" != "tauri-cli $TAURI_CLI_VERSION" ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; fi
       # The same commands as ci.yml's app-package job, which builds and checks the packages before a release does. Linux: the
       # executable is built with its real version, then bundled with + for the - of a pre-release (the rpm bundler refuses a -, the
       # CLI's config takes semver only); the staging writes ~ instead (scripts/desktop_assets.py), as the Electron app's packages
