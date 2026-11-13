@@ -15,10 +15,18 @@ on:
         description: Source main commit whose control scripts this run uses
         required: true
         type: string
+      tests_proven:
+        description: 'An Experimental build (an -exp.N tag) of a tree whose Android unit tests, lint and builds ran green in CI (channel.yml, from scripts/channel_release.py proven_suites): that step is not repeated (docs/DEPLOYMENT.md "What an Experimental build re-verifies"). Never a production release: auto-release.yml does not pass it, and the tag must be an Experimental one.'
+        required: false
+        type: boolean
+        default: false
     secrets:
       SOURCE_READ_KEY:
         required: true
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
+# holding more than the source read key, never takes files another run saved (scripts/check_public_ops.py).
+cache-mode: none
 jobs:
   # A source with the app on Tauri (app/android, docs/ANDROID.md "The app on Tauri") builds it with the Tauri CLI, which
   # builds its Rust library and runs Gradle; a source from before builds the Java app with Gradle alone (android/), as the
@@ -56,6 +64,7 @@ jobs:
       # Without the key: the app on Tauri's release build (its Rust libraries, cached by cargo for the signed build below),
       # unit tests, lint and the instrumentation build; or the Java app's tests, lint and builds.
       - name: Test native protocol, lint and build APK
+        if: ${{ !(inputs.tests_proven && contains(inputs.tag, '-exp.')) }}
         run: |
           set -euo pipefail
           if [ -f app/android/tauri.conf.json ]; then
