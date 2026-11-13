@@ -23,6 +23,9 @@ on:
         required: false
         default: ''
 permissions: {}
+# Restores, never saves (cache-mode, enforced by GitHub's cache service): the commit under test may be a proposed change,
+# and what a run on main saves, every later run on main restores (scripts/check_public_ops.py).
+cache-mode: read
 concurrency:
   group: ci-${{ inputs.kind }}-${{ inputs.pr || inputs.sha }}
   cancel-in-progress: ${{ inputs.kind == 'pr' }}
@@ -171,6 +174,58 @@ jobs:
           summary.write('\n'.join(lines) + '\n')
           print('\n'.join(lines))
           PY
+  # The pinned third-party downloads (scripts/ci_downloads.py), for the jobs that take them: the ONE job of this workflow that may
+  # save to the Actions cache (cache-mode: write; the workflow's is read, and no other job here restores a cache at all). It runs
+  # nothing of the commit under test: its checkout is source MAIN (never inputs.sha), and it reads no input and no other job's
+  # output, so a proposed change cannot plant an entry (scripts/check_public_ops.py holds all three). It restores the cache (key
+  # prefix jaunt-downloads-main-: nothing saved before this job existed is ever restored), fetches what is missing, every file
+  # checked against main's pins (a mismatch is deleted), saves on a miss, and hands the directory to the jobs as a one-day artifact.
+  # They check every file against their own commit's pins before use and download what is missing or differs: a fetch that fails
+  # here fails no run.
+  downloads:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    cache-mode: write
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: main
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci_downloads.py
+            scripts/desktop_assets.py
+            desktop/bridge.json
+          sparse-checkout-cone-mode: false
+      - id: restore
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/jaunt-downloads
+          key: jaunt-downloads-main-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json') }}
+      - id: fetch
+        name: Every pinned download, and the bridge's package for the Windows jobs, checked against source main's pins
+        continue-on-error: true
+        run: |
+          if [ -f scripts/ci_downloads.py ]; then
+            python3 scripts/ci_downloads.py fetch-all "$RUNNER_TEMP/jaunt-downloads"
+            python3 scripts/ci_downloads.py bridge "$RUNNER_TEMP/jaunt-downloads" windows-x64
+          fi
+      # Saved only complete (every fetch succeeded) and only on a miss: an entry never changes once saved.
+      - if: steps.fetch.outcome == 'success' && steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/jaunt-downloads
+          key: jaunt-downloads-main-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json') }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: jaunt-downloads
+          path: ${{ runner.temp }}/jaunt-downloads
+          retention-days: 1
+          if-no-files-found: ignore
   lint:
     needs: guard
     runs-on: ubuntu-latest
@@ -486,7 +541,7 @@ jobs:
             done
           fi
   installer-fedora:
-    needs: [guard, plan]
+    needs: [guard, plan, downloads]
     if: needs.plan.outputs.fedora == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -505,12 +560,16 @@ jobs:
       # install.sh's uv and the Python build uv installs on these images (pinned, checked by SHA-256 here, by the installer for uv and by uv
       # for the build) come from the copy of the site the tests serve, not from GitHub while a test runs (HTTP 504, 2026-11-05):
       # tests/release_site.py, JAUNT_CI_DOWNLOADS.
+      # From this run's `downloads` job, as an artifact: never a cache restore in a job that runs the commit under test (a cache's
+      # tar extracts anywhere on the runner). The script below checks each file against this commit's pins and downloads what is
+      # missing or differs (also when that job could not fetch it).
       - if: hashFiles('scripts/ci_downloads.py') != ''
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: jaunt-downloads
           path: ${{ runner.temp }}/jaunt-downloads
-          key: jaunt-downloads-uv-${{ hashFiles('scripts/ci_downloads.py') }}
-      - name: The pinned uv and Python build the installer under test takes from the local site (cached, checked by SHA-256)
+      - name: The pinned uv and Python build the installer under test takes from the local site (checked by SHA-256)
         run: if [ -f scripts/ci_downloads.py ]; then python3 scripts/ci_downloads.py fetch "$RUNNER_TEMP/jaunt-downloads" uv-linux-x86_64 python-build-standalone; else echo 'Not in this source'; fi
       - name: Install the candidate release with the candidate installer on Fedora, from a copy of the site
         env:
@@ -709,9 +768,11 @@ jobs:
   # (invitation-only, as it ships) and the Rust probe (client/link/examples/probe.rs) as the client: handshake, pairing, principals and
   # the machine.info schema. Planned where the host, the relay, the probe or the suites change (scripts/ci_plan.py); a source
   # without the suites passes at once.
+  # The native probe comes from `rust-build` when this run builds it (a run that plans the Rust end-to-end suites and this one: every full
+  # run), and is built here when it does not (a change that plans only this job: `rust-build` is skipped, and nothing else is different).
   conformance:
-    needs: [guard, plan]
-    if: needs.plan.outputs.conformance == 'true'
+    needs: [guard, plan, rust-build]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.conformance == 'true' && needs.rust-build.result != 'failure' }}
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
@@ -743,8 +804,15 @@ jobs:
         run: npm ci
       - if: steps.suite.outputs.present == 'true'
         run: npm run prepare-web
+      - if: steps.suite.outputs.present == 'true' && needs.rust-build.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: conformance-probe
+          path: target/debug/examples
       - if: steps.suite.outputs.present == 'true'
-        run: cargo build --locked -p jaunt-link --example probe
+        run: |
+          if [ -s target/debug/examples/probe ]; then chmod +x target/debug/examples/probe; else cargo build --locked -p jaunt-link --example probe; fi
       - name: The Python host
         if: steps.suite.outputs.present == 'true'
         env:
@@ -799,8 +867,10 @@ jobs:
         run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
       # A test host: built with the `test-clock` feature, which makes it read jaunt_TEST_CLOCK below (crates/jaunt-host/src/testclock.rs). The
       # program that ships is built without it (scripts/rust_release.sh, release.yml: tests/test_testclock_gate.py), and ignores the variable.
+      # A source from before the feature (a production hotfix's, based on an older release: its `CI main` runs this workflow) builds without it:
+      # its tests/conformance know no jaunt_TEST_CLOCK.
       - if: steps.rust.outputs.present == 'true'
-        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator --features jaunt-host/test-clock
+        run: if [ -f crates/jaunt-host/src/testclock.rs ]; then cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator --features jaunt-host/test-clock; else cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator; fi
       - name: The Rust host (reporting)
         id: rustsuite
         if: steps.rust.outputs.present == 'true'
@@ -821,8 +891,8 @@ jobs:
   # links, about 3 minutes a leg on a workstation) is a job of its own, so that `conformance` stays well under its timeout: the same
   # steps, the same planning (the `conformance` flag), the same legs (the Python host required, the Rust host reporting).
   conformance-desktop:
-    needs: [guard, plan]
-    if: needs.plan.outputs.conformance == 'true'
+    needs: [guard, plan, rust-build]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.conformance == 'true' && needs.rust-build.result != 'failure' }}
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
@@ -854,8 +924,15 @@ jobs:
         run: npm ci
       - if: steps.suite.outputs.present == 'true'
         run: npm run prepare-web
+      - if: steps.suite.outputs.present == 'true' && needs.rust-build.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: conformance-probe
+          path: target/debug/examples
       - if: steps.suite.outputs.present == 'true'
-        run: cargo build --locked -p jaunt-link --example probe
+        run: |
+          if [ -s target/debug/examples/probe ]; then chmod +x target/debug/examples/probe; else cargo build --locked -p jaunt-link --example probe; fi
       - name: The Python host
         if: steps.suite.outputs.present == 'true'
         env:
@@ -865,8 +942,20 @@ jobs:
       - id: rust
         if: steps.suite.outputs.present == 'true'
         run: if [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host in this source'; fi
+      # The same build `rust-build` makes (same crates, same command, after the probe), taken from it when this run has it.
+      - if: steps.rust.outputs.present == 'true' && needs.rust-build.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: rust-host
+          path: target/debug
       - if: steps.rust.outputs.present == 'true'
-        run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
+        run: |
+          if [ -s target/debug/jaunt ] && [ -s target/debug/jaunt-launch ] && [ -s target/debug/libjaunt_emulator.so ]; then
+            chmod +x target/debug/jaunt target/debug/jaunt-launch
+          else
+            cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
+          fi
       - name: The Rust host (reporting)
         if: steps.rust.outputs.present == 'true'
         continue-on-error: true
@@ -900,6 +989,23 @@ jobs:
         run: if [ -f scripts/ci_rust_e2e.py ] && [ -f crates/jaunt-host/src/daemon.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No Rust host end-to-end runner in this source'; fi
       - if: steps.rust.outputs.present == 'true'
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      # The conformance jobs' native probe, built once here when this run plans them (before the host, in its own build, as each of them
+      # always did: the probe and the host keep their own crypto backend) and handed to the two jobs that wait for this one. The third,
+      # `conformance-rust`, is the longest of the run and builds its own: waiting for this job would put it behind the longest chain.
+      - id: probe
+        if: steps.rust.outputs.present == 'true' && needs.plan.outputs.conformance == 'true'
+        run: |
+          if [ -f tests/conformance/support.py ]; then
+            cargo build --locked -p jaunt-link --example probe
+            echo built=true >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.probe.outputs.built == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: conformance-probe
+          path: target/debug/examples/probe
+          if-no-files-found: error
+          retention-days: 1
       - if: steps.rust.outputs.present == 'true'
         run: cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
       - if: steps.rust.outputs.present == 'true'
@@ -1139,7 +1245,7 @@ jobs:
     # certificate flow against Pebble (Let's Encrypt's test CA, pinned) with a fake Cloudflare DNS API,
     # then headless Chromium reaching a real host through its TURN server over TLS only. No real
     # certificate and no real DNS record is ever made. The TURN server's and the host's unit tests run in `host`.
-    needs: [guard, plan]
+    needs: [guard, plan, downloads]
     if: needs.plan.outputs.direct_tls == 'true'
     timeout-minutes: 20
     runs-on: ubuntu-latest
@@ -1158,16 +1264,20 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
+      # From this run's `downloads` job, as an artifact: never a cache restore in a job that runs the commit under test (a cache's
+      # tar extracts anywhere on the runner). The script below checks each file against this commit's pins and downloads what is
+      # missing or differs (also when that job could not fetch it).
       - if: hashFiles('scripts/ci_downloads.py') != ''
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: jaunt-downloads
           path: ${{ runner.temp }}/jaunt-downloads
-          key: jaunt-downloads-pebble-${{ hashFiles('scripts/ci_downloads.py') }}
       - name: Pebble and its DNS test server, pinned releases checked by SHA-256
         run: |
           set -e
           dir="$RUNNER_TEMP/pebble"; mkdir -p "$dir"
-          # The two archives: pinned files from scripts/ci_downloads.py (cached; GitHub only on a cache miss). A source from before
+          # The two archives: pinned files from scripts/ci_downloads.py (the downloads job's; GitHub only if missing). A source from before
           # it downloads them as it did.
           if [ -f scripts/ci_downloads.py ]; then
             python3 scripts/ci_downloads.py fetch "$RUNNER_TEMP/jaunt-downloads" pebble pebble-challtestsrv
@@ -1385,7 +1495,7 @@ jobs:
     # and back: three broken builds roll back to the Electron app with its data, a healthy one takes the workspace over. It installs
     # into this disposable runner's account (JAUNT_BRIDGE_PLATFORM_TEST=1), never anywhere else. Planned with the app job. (Its flake
     # gate's 40 minutes at most are in the limit.)
-    needs: [guard, plan]
+    needs: [guard, plan, downloads]
     if: needs.plan.outputs.app == 'true'
     strategy:
       fail-fast: false
@@ -1440,18 +1550,29 @@ jobs:
         run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
       # The cutover (plan #11 C1): the release's Tauri CLI bundles the debug build as each version the suite publishes, and the pinned
       # bridge's package for this computer is downloaded and checked against the pin (once, untimed), then the move and the rollbacks.
+      # The CLI is tauri-apps' own build of the pinned version, downloaded and checked against its SHA-256 (scripts/ci_downloads.py tauri-cli, no cache; compiling
+      # it takes ten minutes on this runner); where that is not possible (a source without the script, another version, a download that
+      # fails or does not match) it is compiled, as it was.
       - name: Tauri CLI (pinned), for the cutover suite's packages
         if: steps.crate.outputs.present == 'true'
         env:
           TAURI_CLI_VERSION: 2.12.4
-        run: if [ -f tests/app_bridge_platforms_e2e.py ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; else echo 'Not in this source'; fi
-      # What the suite downloads while it runs, from pinned files instead (cached, checked by SHA-256): the NSIS toolchain the bundler
+        run: |
+          if [ -f tests/app_bridge_platforms_e2e.py ]; then
+            if [ -f scripts/ci_downloads.py ]; then python scripts/ci_downloads.py tauri-cli "$RUNNER_TEMP/jaunt-tauri-cli" "$TAURI_CLI_VERSION" || true; fi
+            if [ "$(cargo tauri --version 2>/dev/null)" != "tauri-cli $TAURI_CLI_VERSION" ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; fi
+          else echo 'Not in this source'; fi
+      # What the suite downloads while it runs, from pinned files instead (checked by SHA-256): the NSIS toolchain the bundler
       # fetches on its first bundle (HTTP 504, 2026-11-05), and the pinned bridge's package (desktop/bridge.json).
+      # From this run's `downloads` job, as an artifact: never a cache restore in a job that runs the commit under test (a cache's
+      # tar extracts anywhere on the runner). The script below checks each file against this commit's pins and downloads what is
+      # missing or differs (also when that job could not fetch it).
       - if: steps.crate.outputs.present == 'true' && hashFiles('scripts/ci_downloads.py') != ''
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: jaunt-downloads
           path: ${{ runner.temp }}/jaunt-downloads
-          key: jaunt-downloads-nsis-bridge-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json') }}
       - name: The NSIS toolchain and the pinned bridge's package, from pinned files
         if: steps.crate.outputs.present == 'true'
         run: |
@@ -1481,7 +1602,7 @@ jobs:
     # (the macOS bundle, ad-hoc signed, is ci-macos.yml's), and on Windows an installer that lands in %LOCALAPPDATA%\Programs\jaunt and spares
     # %LOCALAPPDATA%\jaunt (run on this disposable runner, never anywhere else). Nothing is published. Planned where the installers'
     # settings, icons, hook, dependencies or version change (scripts/ci_plan.py); a source without the packaging passes at once.
-    needs: [guard, plan]
+    needs: [guard, plan, downloads]
     if: needs.plan.outputs.app_package == 'true'
     name: app-package (${{ matrix.platform }})
     strategy:
@@ -1540,16 +1661,24 @@ jobs:
         run: sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev rpm
       - if: steps.crate.outputs.present == 'true'
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target "$TARGET"
+      # tauri-apps' own build of the pinned CLI, checked against its SHA-256 (scripts/ci_downloads.py tauri-cli; compiling it takes ten
+      # minutes on Windows, five on Linux); where that is not possible it is compiled, as it was.
       - name: Tauri CLI (pinned)
         if: steps.crate.outputs.present == 'true'
-        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+        run: |
+          if [ -f scripts/ci_downloads.py ]; then python scripts/ci_downloads.py tauri-cli "$RUNNER_TEMP/jaunt-tauri-cli" "$TAURI_CLI_VERSION" || true; fi
+          if [ "$(cargo tauri --version 2>/dev/null)" != "tauri-cli $TAURI_CLI_VERSION" ]; then cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked; fi
       # The NSIS installer's toolchain (NSIS, its Tauri plugin, the WebView2 bootstrapper) is what the bundler downloads on its first
-      # bundle (HTTP 504, 2026-11-05): pinned files, cached and checked by SHA-256, laid out where the bundler looks, so it downloads nothing.
+      # bundle (HTTP 504, 2026-11-05): pinned files, checked by SHA-256, laid out where the bundler looks, so it downloads nothing.
+      # From this run's `downloads` job, as an artifact: never a cache restore in a job that runs the commit under test (a cache's
+      # tar extracts anywhere on the runner). The script below checks each file against this commit's pins and downloads what is
+      # missing or differs (also when that job could not fetch it).
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Windows' && hashFiles('scripts/ci_downloads.py') != ''
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: jaunt-downloads
           path: ${{ runner.temp }}/jaunt-downloads
-          key: jaunt-downloads-nsis-${{ hashFiles('scripts/ci_downloads.py') }}
       - name: The NSIS toolchain from pinned files
         if: steps.crate.outputs.present == 'true' && runner.os == 'Windows'
         run: if [ -f scripts/ci_downloads.py ]; then python scripts/ci_downloads.py tauri-tools "$RUNNER_TEMP/jaunt-downloads"; else echo 'Not in this source'; fi
