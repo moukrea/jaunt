@@ -706,9 +706,13 @@ jobs:
     needs: [guard, plan]
     if: needs.plan.outputs.windows == 'true'
     runs-on: windows-latest
-    timeout-minutes: 30
+    # The Rust programs are built here as the release builds them (below) for the install's Rust leg: each step has its own limit, so that
+    # one that hangs fails alone, with the log of the step, long before the job's.
+    timeout-minutes: 60
     permissions:
       contents: read
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -721,7 +725,21 @@ jobs:
           python-version: '3.13'
       - run: pip install -e . -r requirements-dev.txt
       - run: pytest -q -rA tests/test_windows.py tests/test_screen.py tests/test_termstate.py tests/test_direct.py
+        timeout-minutes: 10
+      # The Rust host, its launcher and the emulator library for windows-x86_64, as the release's Windows leg builds them
+      # (scripts/rust_release.sh): install.ps1's Rust leg installs these. A source without the script runs the Python legs only.
+      - name: The Rust programs, as the release builds them
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          if [ -f scripts/rust_release.sh ]; then
+            rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+            bash scripts/rust_release.sh windows-x86_64
+          else
+            echo 'No Rust programs in this source'
+          fi
       - run: python tests/windows_install_e2e.py
+        timeout-minutes: 20
   # The Rust host's crates (crates/, docs/RUST_HOST.md): the boundary of the generic nebul-* crates (no jaunt dependency, no product
   # string), format, clippy with warnings denied, and the tests, by the source's own crates/ci.sh (so that the steps change with
   # the source, as the desktop agent's do). A Rust release of its own, as the app's, so that a newer one on the runner does not turn
