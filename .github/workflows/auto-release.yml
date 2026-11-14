@@ -58,6 +58,9 @@ jobs:
         github.event.workflow_run.path == '.github/workflows/ci.yml' &&
         startsWith(github.event.workflow_run.display_title, 'CI main ')))
     runs-on: ubuntu-latest
+    # `preflight` and `prepare` each may read the public Page (the tag probe, the bootstrap of the ledger): each waits for a Page that does not answer yet and for a
+    # CDN edge that still holds an older file, so the limit holds two such waits and a margin (tests/test_pages_wait.py).
+    timeout-minutes: 75
     environment: ledger
     permissions:
       contents: read
@@ -240,6 +243,9 @@ jobs:
     needs: [prepare, host, desktop, android, relay, promote, pages]
     if: always() && (needs.prepare.outputs.publish == 'true' || needs.prepare.outputs.site == 'true' || needs.prepare.result == 'failure')
     runs-on: ubuntu-latest
+    # `finish` and `channel_site.py verify` each wait for a Page that does not answer yet and for a CDN edge that still holds an older file, one after the other:
+    # the limit holds both and a margin (tests/test_pages_wait.py).
+    timeout-minutes: 75
     environment: ledger
     permissions:
       contents: read

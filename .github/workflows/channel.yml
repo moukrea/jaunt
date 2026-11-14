@@ -252,12 +252,14 @@ jobs:
       control: ${{ needs.record.outputs.control || needs.cleanup.outputs.control || needs.prepare.outputs.control }}
     # Like auto-release.yml's: pages.yml has an environment job, which GitHub hands secrets to only through inherit.
     secrets: inherit
+  # The reads wait for a Page that is not answering yet (at most 10 min, scripts/release_pipeline.py wait_for_pages) and for a CDN edge that still holds an
+  # older file (12 min): the job's limit holds both, one after the other, and a margin (tests/test_pages_wait.py holds every such job to that).
   verify-pages:
     needs: [pages, prepare, record, cleanup]
     # Only when a site was deployed (pages.yml's `channels` output is empty when `plan` found nothing to do).
     if: always() && needs.pages.result == 'success' && needs.pages.outputs.channels != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     environment: ledger
     permissions:
       contents: read
