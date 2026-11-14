@@ -18,6 +18,9 @@ on:
         default: '3.13'
         type: string
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a probe needs none, and every
+# run here is on main, whose cache every later run on main restores (ci/cache-mode, scripts/check_public_ops.py there).
+cache-mode: none
 concurrency:
   group: windows-install-e2e-${{ inputs.sha }}-${{ inputs.python }}
   cancel-in-progress: false
@@ -34,9 +37,11 @@ jobs:
   windows:
     needs: guard
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -48,4 +53,15 @@ jobs:
         with:
           python-version: ${{ inputs.python }}
       - run: pip install -e . -r requirements-dev.txt
+      - name: The Rust programs, as the release builds them
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          if [ -f scripts/rust_release.sh ]; then
+            rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+            bash scripts/rust_release.sh windows-x86_64
+          else
+            echo 'No Rust programs in this source'
+          fi
       - run: python tests/windows_install_e2e.py
+        timeout-minutes: 20
