@@ -87,9 +87,9 @@ jobs:
           retention-days: 1
       # The Rust host, its launcher and the terminal emulator library, for an Experimental build only (docs/RUST_HOST.md, "The switch
       # under the Canary freeze"): a Canary, a Latest and a channel candidate run none of the three steps, so their jobs, matrix and
-      # manifest are what they were (tests/test_release_workflow.py holds that). Linux only; a commit without the script ships none.
+      # manifest are what they were (tests/test_release_workflow.py holds that). Each leg builds its own platform's three programs (the Linux ones
+      # in manylinux_2_28, the Windows ones on the runner, as the desktop agent is); a commit without the script ships none.
       - id: rust
-        if: ${{ startsWith(matrix.platform, 'linux-') }}
         shell: bash
         env:
           TAG: ${{ inputs.tag }}
@@ -159,7 +159,7 @@ jobs:
         run: |
           python .reuse/scripts/release_pipeline.py reuse-agents --tag "$AGENTS_FROM" --directory dist-agents
           rm -rf .reuse
-      # An Experimental build of a source with the Rust host publishes it for both Linux platforms (build_release.py refuses one
+      # An Experimental build of a source with the Rust host publishes it for the three platforms (build_release.py refuses one
       # missing, and refuses it for any other build).
       - id: rust
         env:
