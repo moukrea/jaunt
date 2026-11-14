@@ -6,6 +6,9 @@ name: Android signer check
 on:
   workflow_dispatch:
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
+# holding more than the source read key, never takes files another run saved (scripts/check_public_ops.py).
+cache-mode: none
 concurrency:
   group: android-signer-check
   cancel-in-progress: false

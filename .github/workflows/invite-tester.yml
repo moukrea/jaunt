@@ -1,18 +1,18 @@
 name: Invite a tester
-# Owner tool: create, list or revoke a tester invite on the relay, or read the relay's live admin
+# Owner tool: create, list, rekey or revoke a tester invite on the relay, move one room to another invite (reassign), or read the relay's live admin
 # state (status: quota.status, flags.get, certs.quota), a room's or an invite's connection log (connlog)
 # or an invite's account budgets (account); both read-only. Job logs, summaries and artifacts are public,
-# so the script prints no key and no tester name: create, list, status, connlog and account are encrypted with age to
+# so the script prints no key and no tester name: create, list, rekey, reassign, status, connlog, account and exemptions are encrypted with age to
 # the repository variable OWNER_PUBLIC_KEY (an age or SSH public key) and refused without it; revoke
-# prints the id only. each of those is also kept, encrypted, as the one-day artifact relay-status (gh run
+# and exempt (the early-access exemption) print ids only. each of those is also kept, encrypted, as the one-day artifact relay-status (gh run
 # download). The inputs are read from the event file by the script, never interpolated into a command.
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'create, list, revoke, status, connlog or account'
+        description: 'create, list, rekey, revoke, status, connlog, account, reassign, exemptions or exempt'
         type: choice
-        options: [list, create, revoke, status, connlog, account]
+        options: [list, create, rekey, revoke, status, connlog, account, reassign, exemptions, exempt]
         default: list
       name:
         description: "create: the tester's name (not printed; still run metadata, so a first name or a pseudonym)"
@@ -23,11 +23,11 @@ on:
         required: false
         default: '10'
       id:
-        description: 'revoke, account, connlog: the invite id (inv-...); connlog takes this or room'
+        description: "revoke, rekey, account, connlog: the invite id (inv-...); connlog takes this or room; exempt: an invite id or early-access (testers and early-access accounts); reassign: the TARGET invite id (inv-..., valid) or none (an owner's room)"
         required: false
         default: ''
       room:
-        description: 'connlog: a room id (24 characters) instead of an invite id (not printed; still run metadata)'
+        description: 'connlog: a room id (24 characters) instead of an invite id; reassign: the one room to move (not printed; still run metadata)'
         required: false
         default: ''
       from:
@@ -38,11 +38,22 @@ on:
         description: 'connlog: last UTC day, YYYY-MM-DD (default: today; at most 31 days from "from")'
         required: false
         default: ''
+      until:
+        description: 'create, exempt: the early-access exemption lasts until this date (default 2099-12-31)'
+        required: false
+        default: ''
+      force:
+        description: 'rekey: ignore the relay''s waiting limits (owner key RELAY_OWNER_ADMIN_KEY; refused without it)'
+        type: boolean
+        default: false
       forget_hosts:
         description: 'revoke: also forget and disconnect the hosts that key registered'
         type: boolean
         default: false
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
+# holding more than the source read key, never takes files another run saved (scripts/check_public_ops.py).
+cache-mode: none
 concurrency:
   group: invite-tester
   cancel-in-progress: false
@@ -67,19 +78,21 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install age
-        run: curl -fsSL -o "$RUNNER_TEMP/age.tgz" https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz && echo "7df45a6cc87d4da11cc03a539a7470c15b1041ab2b396af088fe9990f7c79d50  $RUNNER_TEMP/age.tgz" | sha256sum -c - && tar -xzf "$RUNNER_TEMP/age.tgz" -C "$RUNNER_TEMP" && sudo install -m 0755 "$RUNNER_TEMP/age/age" /usr/local/bin/age
-      - name: Create, list, revoke, status, connlog or account
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+      - name: Create, list, rekey, revoke, status, connlog, account, reassign, exemptions or exempt
         env:
           JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
           JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
           OWNER_PUBLIC_KEY: ${{ vars.OWNER_PUBLIC_KEY }}
+          # rekey with force only: the owner's own admin secret, which the jaunt.one site does not hold.
+          JAUNT_RELAY_OWNER_ADMIN_KEY: ${{ secrets.RELAY_OWNER_ADMIN_KEY }}
           # every action but revoke: where the script writes its age-encrypted answer, for the artifact below.
           JAUNT_STATUS_FILE: ${{ runner.temp }}/relay-status/relay-status.age
         run: python scripts/invite_tester.py github
       # The created invite, the list or the status, encrypted to OWNER_PUBLIC_KEY (never anything in clear), for `gh run download --name relay-status`.
       # Also after a failed run when the script wrote it (some actions answered, none with 200).
       - name: Keep the encrypted answer
-        if: ${{ !cancelled() && inputs.action != 'revoke' }}
+        if: ${{ !cancelled() && inputs.action != 'revoke' && inputs.action != 'exempt' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: relay-status

@@ -18,6 +18,9 @@ on:
         required: true
         type: string
 permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a probe needs none, and every
+# run here is on main, whose cache every later run on main restores (ci/cache-mode, scripts/check_public_ops.py there).
+cache-mode: none
 concurrency:
   group: windows-driver-e2e-${{ inputs.sha }}
   cancel-in-progress: false

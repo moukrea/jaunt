@@ -5,6 +5,8 @@ name: apt-probe
 on:
   workflow_dispatch:
 permissions: {}
+# (It caches nothing; the repository's workflows each state their cache access, scripts/check_public_ops.py.)
+cache-mode: none
 jobs:
   probe:
     strategy:

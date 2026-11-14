@@ -1,0 +1,71 @@
+name: Cache mode probe
+# Proves that a job under `cache-mode: read` cannot save to the Actions cache, the guarantee every other workflow here relies on
+# (CI restores only; a release or a workflow holding secrets uses no cache at all). `save-under-read` tries to save one small file;
+# `save-under-write`, the control, saves another under `cache-mode: write`; `verdict` looks both up. The run is green only when the
+# control's entry exists (the probe can see a save) and the read-only job's does not (its save was refused).
+# The actions are actions/cache v4.2.4 (August 2025), older than cache-mode (GA 2026-09-10): they know nothing of it, so a refused
+# save here is the cache service's doing, not the action's. Nothing is checked out and nothing of the source runs: each entry is
+# one file under a key of this run (run id and attempt), so a rerun probes afresh.
+# https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#controlling-cache-access-with-cache-mode
+run-name: Cache mode probe
+on:
+  workflow_dispatch:
+permissions: {}
+# Restores, never saves, but for the control job below (scripts/check_public_ops.py allows that one job, in this workflow only).
+cache-mode: read
+concurrency:
+  group: cache-mode-probe
+  cancel-in-progress: false
+jobs:
+  save-under-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: One file to save
+        run: mkdir -p "$RUNNER_TEMP/cache-mode-probe" && echo "$GITHUB_RUN_ID" > "$RUNNER_TEMP/cache-mode-probe/run"
+      # Refused by the service, the action warns and the step passes: the verdict job decides.
+      - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/cache-mode-probe
+          key: cache-mode-probe-read-${{ github.run_id }}-${{ github.run_attempt }}
+  save-under-write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    cache-mode: write
+    permissions: {}
+    steps:
+      - name: One file to save
+        run: mkdir -p "$RUNNER_TEMP/cache-mode-probe" && echo "$GITHUB_RUN_ID" > "$RUNNER_TEMP/cache-mode-probe/run"
+      - uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/cache-mode-probe
+          key: cache-mode-probe-write-${{ github.run_id }}-${{ github.run_attempt }}
+  verdict:
+    needs: [save-under-read, save-under-write]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # Looked up only (lookup-only): nothing is downloaded or extracted.
+      - id: read
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/cache-mode-probe
+          key: cache-mode-probe-read-${{ github.run_id }}-${{ github.run_attempt }}
+          lookup-only: true
+      - id: write
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/cache-mode-probe
+          key: cache-mode-probe-write-${{ github.run_id }}-${{ github.run_attempt }}
+          lookup-only: true
+      - name: The control's save is there, the read-only job's is not
+        env:
+          READ_HIT: ${{ steps.read.outputs.cache-hit }}
+          WRITE_HIT: ${{ steps.write.outputs.cache-hit }}
+        run: |
+          echo "entry of the job under cache-mode: write (control): ${WRITE_HIT:-absent}; entry of the job under cache-mode: read: ${READ_HIT:-absent}"
+          [ "$WRITE_HIT" = true ] || { echo "::error::The control's entry is missing: this run cannot tell whether a read-only job can save"; exit 1; }
+          [ "$READ_HIT" != true ] || { echo "::error::A job under cache-mode: read saved an entry: cache-mode is not enforced"; exit 1; }
+          echo "A job under cache-mode: read could not save; the control under cache-mode: write could."
