@@ -5,7 +5,10 @@ name: CI
 # commit. Logs are public: pytest prints one line per failure.
 # macOS is not here: its legs run in ci-macos.yml (job `macos` below dispatches it with the same inputs), which nothing waits
 # for (docs/DEPLOYMENT.md "macOS is not required"): no job of this workflow runs on a macOS runner or needs one that does.
-run-name: CI ${{ inputs.kind }} ${{ inputs.sha }}
+# kind=hotfix (-f base=<production source>) tests a commit of maint/production with the plan of its own diff from that base:
+# "CI hotfix <commit> over <base>", which the release queue accepts in place of CI main for a hotfix of relay/** alone
+# (scripts/release_pipeline.py `validate_hotfix_checks`, docs/DEPLOYMENT.md "Hotfix releases").
+run-name: CI ${{ inputs.kind }} ${{ inputs.sha }}${{ inputs.kind == 'hotfix' && format(' over {0}', inputs.base) || '' }}
 on:
   workflow_dispatch:
     inputs:
@@ -14,12 +17,16 @@ on:
         required: true
         type: string
       kind:
-        description: 'main: a commit of source main (the release queue waits for it); pr: a proposed change'
+        description: 'main: a commit of source main (the release queue waits for it); pr: a proposed change; hotfix: a commit of maint/production'
         type: choice
-        options: [pr, main]
+        options: [pr, main, hotfix]
         default: pr
       pr:
         description: 'pr: the change number, so a newer run of the same change replaces an older one'
+        required: false
+        default: ''
+      base:
+        description: 'hotfix: the production source it fixes (40 lowercase hexadecimal characters); empty otherwise'
         required: false
         default: ''
 permissions: {}
@@ -41,10 +48,16 @@ jobs:
           SHA: ${{ inputs.sha }}
           KIND: ${{ inputs.kind }}
           PR: ${{ inputs.pr }}
+          BASE: ${{ inputs.base }}
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
-          [[ "$KIND" == main || "$KIND" == pr ]] || { echo "kind must be main or pr"; exit 1; }
+          [[ "$KIND" == main || "$KIND" == pr || "$KIND" == hotfix ]] || { echo "kind must be main, pr or hotfix"; exit 1; }
           [[ -z "$PR" || "$PR" =~ ^[1-9][0-9]{0,6}$ ]] || { echo "pr must be a number"; exit 1; }
+          if [[ "$KIND" == hotfix ]]; then
+            [[ "$BASE" =~ ^[0-9a-f]{40}$ ]] || { echo "a hotfix names its base: a full commit id"; exit 1; }
+          else
+            [[ -z "$BASE" ]] || { echo "base is a hotfix's input only"; exit 1; }
+          fi
   # Which jobs a proposed change needs (scripts/ci_plan.py, docs/DEPLOYMENT.md "Selective CI"). A `CI main`
   # run, and a source without the script, run everything: the release queue accepts only full runs.
   plan:
@@ -85,10 +98,14 @@ jobs:
         env:
           KIND: ${{ inputs.kind }}
           SHA: ${{ inputs.sha }}
+          BASE: ${{ inputs.base }}
         run: |
           PLAN="$RUNNER_TEMP/plan.txt"
           if [ "$KIND" = pr ] && [ -f scripts/ci_plan.py ]; then
             python3 scripts/ci_plan.py --base origin/main --head "$SHA" > "$PLAN"
+          elif [ "$KIND" = hotfix ] && [ -f scripts/ci_plan.py ]; then
+            # A hotfix of maint/production: the plan of its own diff from the production source it fixes.
+            python3 scripts/ci_plan.py --base "$BASE" --head "$SHA" > "$PLAN"
           else
             {
               echo 'host_matrix=[{"os":"ubuntu-latest","python":"3.11"},{"os":"ubuntu-latest","python":"3.13"}]'
@@ -254,6 +271,7 @@ jobs:
   # `test` gate and the release job do not read it, and a dispatch that fails (a workflow not yet published, no runner) changes nothing.
   macos:
     needs: guard
+    if: inputs.kind != 'hotfix'   # ci-macos.yml takes pr and main only; a hotfix's own CI is the relay's (release_pipeline.py)
     runs-on: ubuntu-latest
     continue-on-error: true   # never waited for (macOS is not required, docs/DEPLOYMENT.md): a failed dispatch changes nothing
     permissions:
@@ -707,8 +725,9 @@ jobs:
     if: needs.plan.outputs.windows == 'true'
     runs-on: windows-latest
     # The Rust programs are built here as the release builds them (below) for the install's Rust leg: each step has its own limit, so that
-    # one that hangs fails alone, with the log of the step, long before the job's.
-    timeout-minutes: 60
+    # one that hangs fails alone, with the log of the step, long before the job's. (The install leg's own updates of the Rust host, each a
+    # stop and a start of the host with a wait for its health, are what the step's 45 minutes are for.)
+    timeout-minutes: 90
     permissions:
       contents: read
     env:
@@ -739,7 +758,7 @@ jobs:
             echo 'No Rust programs in this source'
           fi
       - run: python tests/windows_install_e2e.py
-        timeout-minutes: 20
+        timeout-minutes: 45
   # The Rust host's crates (crates/, docs/RUST_HOST.md): the boundary of the generic nebul-* crates (no jaunt dependency, no product
   # string), format, clippy with warnings denied, and the tests, by the source's own crates/ci.sh (so that the steps change with
   # the source, as the desktop agent's do). A Rust release of its own, as the app's, so that a newer one on the runner does not turn
@@ -1867,6 +1886,10 @@ jobs:
         if: matrix.group == 'terminal'
       - run: xvfb-run -a -s "-screen 0 1280x1024x24" python tests/desktop_artifacts_e2e.py
         if: matrix.group == 'terminal'
+      - run: if [ -f tests/desktop_remote_e2e.py ]; then xvfb-run -a -s "-screen 0 1280x1024x24" python tests/desktop_remote_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'terminal'
+      - run: if [ -f tests/client_only_e2e.py ]; then xvfb-run -a -s "-screen 0 1280x1024x24" python tests/client_only_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'terminal'
       - run: python tests/feedback_e2e.py
         if: matrix.group == 'terminal'
       - run: if [ -f tests/feedback_ui_e2e.py ]; then python tests/feedback_ui_e2e.py; else echo 'Not in this source'; fi
@@ -1912,7 +1935,11 @@ jobs:
         if: matrix.group == 'agents'
       - run: python tests/artifact_runtime_e2e.py
         if: matrix.group == 'agents'
+      - run: if [ -f tests/artifact_media_e2e.py ]; then python tests/artifact_media_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'agents'
       - run: if [ -f tests/artifact_terminal_e2e.py ]; then python tests/artifact_terminal_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'agents'
+      - run: if [ -f tests/artifact_links_e2e.py ]; then python tests/artifact_links_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'agents'
       - run: python tests/rich_view_e2e.py
         if: matrix.group == 'rich'
@@ -1985,6 +2012,9 @@ jobs:
         if: matrix.group == 'rich'
       # The view's own logic against a fake host (Stop before the message was recorded, Claude Code's own queue, an answered question).
       - run: if [ -f tests/rich_view_logic_e2e.py ]; then python tests/rich_view_logic_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
+      # A message with images the host holds while Claude Code works: waiting, its thumbnails stable, shown once once recorded.
+      - run: if [ -f tests/rich_queued_images_e2e.py ]; then python tests/rich_queued_images_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
       # OpenCode in jaunt: started from the top bar, its rich view (messages, permissions, questions, Stop, menus, rename), against a stand-in
       # opencode (no account, no network).
