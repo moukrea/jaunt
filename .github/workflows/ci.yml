@@ -286,7 +286,7 @@ jobs:
         run: gh workflow run ci-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f "kind=$KIND" -f "pr=$PR"
   test:
     runs-on: ubuntu-latest
-    needs: [plan, host, flake, flake-e2e, android-build, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-rust, conformance-desktop, rust-build, rust-e2e, rust-desktop-e2e]
+    needs: [plan, host, flake, flake-e2e, android-build, android-emulator, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-rust, conformance-desktop, rust-build, rust-e2e, rust-desktop-e2e]
     if: always()
     permissions: {}
     steps:
@@ -315,6 +315,7 @@ jobs:
           NETWORK_BENCH_PLANNED: ${{ needs.plan.outputs.network_bench }}
           ANDROID_RESULT: ${{ needs.android-build.result }}
           ANDROID_PLANNED: ${{ needs.plan.outputs.android }}
+          ANDROID_EMULATOR_RESULT: ${{ needs.android-emulator.result }}
           CLIENT_LINK_RESULT: ${{ needs.client-link.result }}
           CLIENT_LINK_PLANNED: ${{ needs.plan.outputs.client_link }}
           APP_RESULT: ${{ needs.app.result }}
@@ -348,6 +349,7 @@ jobs:
           check direct-tls "$DIRECT_TLS_RESULT" "$DIRECT_TLS_PLANNED"
           check network-bench "$NETWORK_BENCH_RESULT" "$NETWORK_BENCH_PLANNED"
           check android-build "$ANDROID_RESULT" "$ANDROID_PLANNED"
+          check android-emulator "$ANDROID_EMULATOR_RESULT" "$ANDROID_PLANNED"
           check client-link "$CLIENT_LINK_RESULT" "$CLIENT_LINK_PLANNED"
           check app "$APP_RESULT" "$APP_PLANNED"
           check app-package "$APP_PACKAGE_RESULT" "$APP_PACKAGE_PLANNED"
@@ -560,6 +562,103 @@ jobs:
               unzip -l "$apk" | grep " lib/$abi/libjaunt_link.so" >/dev/null || { echo "::error::no libjaunt_link.so for $abi in the release APK"; exit 1; }
             done
           fi
+  # The Android app on an emulator (x86_64, AOSP image, KVM): a file picked in Android's document picker reaches an isolated
+  # host byte for byte, also when its original is gone before the page reads it (d044, PickedFiles.java;
+  # tests/android_pick_upload_e2e.py). The Java debug build, the one with an x86_64 native link.
+  android-emulator:
+    needs: [guard, plan]
+    if: needs.plan.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: present
+        run: if [ -f tests/android_pick_upload_e2e.py ] && grep -q cargoBuild android/app/build.gradle; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'Not in this source'; fi
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - if: steps.present.outputs.present == 'true'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+      - if: steps.present.outputs.present == 'true'
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - if: steps.present.outputs.present == 'true'
+        run: bash android/ci_native.sh
+      - if: steps.present.outputs.present == 'true'
+        run: npm ci && npm run prepare-web
+      - if: steps.present.outputs.present == 'true'
+        run: pip install -e . -r requirements-dev.txt
+      - name: The debug APK (x86_64 native link) and the Rust host
+        if: steps.present.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          android/gradlew -p android -PnativeAbis=x86_64 :app:assembleDebug --no-daemon
+          cargo build --locked -p jaunt-host -p jaunt-launch -p jaunt-emulator
+      - name: KVM for the emulator
+        if: steps.present.outputs.present == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # AOSP's image, without Google's services (they die now and then on the runner's CPU, and take the WebView with them).
+      - name: The emulator (Android 14, x86_64)
+        if: steps.present.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          sdk="$ANDROID_SDK_ROOT"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          { yes || true; } | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install emulator "platforms;android-34" "system-images;android-34;default;x86_64" > "$RUNNER_TEMP/sdkmanager.log" 2>&1 ||
+            { tail -30 "$RUNNER_TEMP/sdkmanager.log"; echo "::error::sdkmanager failed"; exit 1; }
+          echo no | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd -n ci -k "system-images;android-34;default;x86_64" -d pixel_6 > "$RUNNER_TEMP/avdmanager.log" 2>&1 ||
+            { tail -30 "$RUNNER_TEMP/avdmanager.log"; echo "::error::avdmanager failed"; exit 1; }
+          nohup "$sdk/emulator/emulator" -avd ci -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 -accel on > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator=$!
+          adb="$sdk/platform-tools/adb"
+          booted=0
+          for _ in $(seq 1 120); do
+            kill -0 "$emulator" 2>/dev/null || { tail -40 "$RUNNER_TEMP/emulator.log"; echo "::error::the emulator stopped"; exit 1; }
+            [ "$(timeout 10 "$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && { booted=1; break; }
+            sleep 5
+          done
+          [ "$booted" = 1 ] || { tail -40 "$RUNNER_TEMP/emulator.log"; echo "::error::the emulator did not boot in 10 minutes"; exit 1; }
+          "$adb" shell settings put global window_animation_scale 0
+          "$adb" shell settings put global transition_animation_scale 0
+          "$adb" shell settings put global animator_duration_scale 0
+          echo "booted: Android $("$adb" shell getprop ro.build.version.release | tr -d '\r')"
+      - name: A picked file reaches the host, also when its original is gone (d044)
+        if: steps.present.outputs.present == 'true'
+        env:
+          jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
+          jaunt_ANDROID_SERIAL: emulator-5554
+        run: |
+          export jaunt_ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+          if [ -f tests/android_pick_upload_e2e.py ]; then python tests/android_pick_upload_e2e.py; else echo 'Not in this source'; fi
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-emulator-results
+          path: test-results/android-pick-upload
+          if-no-files-found: ignore
+          retention-days: 1
   installer-fedora:
     needs: [guard, plan, downloads]
     if: needs.plan.outputs.fedora == 'true'
