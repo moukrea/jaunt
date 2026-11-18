@@ -1249,7 +1249,8 @@ jobs:
         run: pip install -e .
       - if: steps.script.outputs.present == 'true'
         run: if [ -f scripts/parity_inventory.py ]; then python scripts/parity_inventory.py --report --summary "$GITHUB_STEP_SUMMARY"; fi
-  # The remote desktop's end-to-end suites with the real desktop agent (tests/desktop_e2e.py, desktop_control_e2e.py,
+  # The remote desktop's end-to-end suites with the real desktop agent (tests/desktop_e2e.py, desktop_gnome_lock_e2e.py (a private headless
+  # GNOME: unlocked it plays; a stand-in for GNOME's refusal while locked: the host's plain words), desktop_control_e2e.py,
   # desktop_resolution_e2e.py and desktop_load_e2e.py: Google Chrome, a private Xvfb, a GTK window, the agent built as in app_desktop_e2e),
   # against the Rust host (`jaunt_HOST_CMD`, built once by `rust-build`). The Python host runs the same four in agent/desktop/ci.sh
   # (job desktop-agent, part web). In the `test` gate as having run (planned, it must have succeeded: the job itself never fails); each suite's verdict, seconds and
@@ -1290,7 +1291,7 @@ jobs:
       - if: steps.runner.outputs.present == 'true'
         run: printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' | sudo tee /etc/apt/apt.conf.d/99-jaunt-ci
       - if: steps.runner.outputs.present == 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb python3-gi python3-gi-cairo gir1.2-gtk-3.0 x11-xserver-utils xserver-xorg-core xserver-xorg-video-dummy
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb python3-gi python3-gi-cairo gir1.2-gtk-3.0 x11-xserver-utils xserver-xorg-core xserver-xorg-video-dummy mutter pipewire wireplumber dbus-daemon libglib2.0-bin adwaita-icon-theme
       - if: steps.runner.outputs.present == 'true'
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
       - if: steps.runner.outputs.present == 'true'
@@ -1313,7 +1314,7 @@ jobs:
             echo '| suite | result | seconds |'
             echo '|---|---|---|'
           } >> "$GITHUB_STEP_SUMMARY"
-          for suite in desktop_e2e desktop_control_e2e desktop_resolution_e2e desktop_load_e2e; do
+          for suite in desktop_e2e desktop_gnome_lock_e2e desktop_control_e2e desktop_resolution_e2e desktop_load_e2e; do
             if [ -f "tests/$suite.py" ]; then
               began=$SECONDS
               if timeout -k 15 900 python "tests/$suite.py" > "dist/rust-desktop/$suite.txt" 2>&1; then result=passed; else result=failed; fi
@@ -1384,6 +1385,8 @@ jobs:
       - run: if [ -f tests/web_invite_link_e2e.py ]; then python tests/web_invite_link_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/tab_switcher_e2e.py ]; then python tests/tab_switcher_e2e.py; else echo 'Not in this source'; fi
       - run: if [ -f tests/explorer_views_e2e.py ]; then python tests/explorer_views_e2e.py; else echo 'Not in this source'; fi
+      # A folder dropped on the explorer (feedback #51): a real tree byte for byte, and the sentence for what cannot be read.
+      - run: if [ -f tests/folder_drop_e2e.py ]; then python tests/folder_drop_e2e.py; else echo 'Not in this source'; fi
   direct-tls:
     # Stage 3 of the direct connection cascade (docs/PROTOCOL.md "Direct link over TLS"): the relay's
     # certificate flow against Pebble (Let's Encrypt's test CA, pinned) with a fake Cloudflare DNS API,
@@ -1623,6 +1626,8 @@ jobs:
         run: if [ -f tests/app_agentsworld_e2e.py ]; then python tests/app_agentsworld_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_scale_e2e.py ]; then python tests/app_scale_e2e.py; else echo 'Not in this source'; fi
+      - if: steps.crate.outputs.present == 'true'
+        run: if [ -f tests/app_idle_cpu_e2e.py ]; then python tests/app_idle_cpu_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
         run: if [ -f tests/app_security_e2e.py ]; then python tests/app_security_e2e.py; else echo 'Not in this source'; fi
       - if: steps.crate.outputs.present == 'true'
