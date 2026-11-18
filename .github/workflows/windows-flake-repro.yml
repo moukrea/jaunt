@@ -1,0 +1,129 @@
+# The intermittent Windows failures of 16-17 Nov 2026, each repeated on its own on a disposable runner (docs/validation,
+# 2026-11-17-windows-install-e2e-task-and-init-intermittent.md): never run by CI, dispatched by hand, one part per run.
+#   task-query-probe   tests/windows_task_query_probe.ps1: does reading a task that exists find nothing, or fail, while another task is
+#                      registered and removed (CI 44092421306: no `jaunt host` read right after the switch); `repeat` x 100 reads.
+#   runtime-switch     tests/windows_install_e2e.py --only switch: the Python host, `runtime use rust`, the logon task, and back, `repeat`
+#                      times (CI 44092421306).
+#   runtime-update     tests/windows_install_e2e.py --only update: the Rust host's updates, install.ps1 run again over it (CI 44018974066:
+#                      its `jaunt init` ended silently), `repeat` times.
+#   idd-eight-monitors agent/windows-idd/tests/load_test.ps1 -Repeat: the driver built and loaded, its connectors' part (eight monitors,
+#                      that connection closed, then a new connection's status and add) `repeat` times (CI 44097975342: "Pipe is broken").
+# Same checkout of the private source (same key, same read-only permissions) as ci.yml's jobs; it is not a substitute for
+# "CI main <commit>", which the release queue still requires.
+#   gh workflow run windows-flake-repro.yml --repo moukrea/jaunt -f sha=<commit of the source> -f part=<part> -f repeat=<1..50>
+run-name: Windows flake repro ${{ inputs.part }} x${{ inputs.repeat }} ${{ inputs.sha }}
+name: windows-flake-repro
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      part:
+        description: 'What to repeat'
+        required: true
+        type: choice
+        options:
+          - task-query-probe
+          - runtime-switch
+          - runtime-update
+          - idd-eight-monitors
+      repeat:
+        description: 'How many times (1 to 50)'
+        required: true
+        default: '10'
+        type: string
+permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a probe needs none, and every
+# run here is on main, whose cache every later run on main restores (ci/cache-mode, scripts/check_public_ops.py there).
+cache-mode: none
+concurrency:
+  group: windows-flake-repro-${{ inputs.sha }}-${{ inputs.part }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit and a count
+        env:
+          SHA: ${{ inputs.sha }}
+          REPEAT: ${{ inputs.repeat }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+          [[ "$REPEAT" =~ ^[0-9]{1,2}$ ]] && (( REPEAT >= 1 && REPEAT <= 50 )) || { echo "repeat must be 1 to 50"; exit 1; }
+  windows:
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+      PART: ${{ inputs.part }}
+      REPEAT: ${{ inputs.repeat }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - name: The task query while another task comes and goes
+        if: inputs.part == 'task-query-probe'
+        timeout-minutes: 60
+        run: |
+          if [ -f tests/windows_task_query_probe.ps1 ]; then
+            powershell -NoProfile -NonInteractive -InputFormat None -ExecutionPolicy Bypass -File tests/windows_task_query_probe.ps1 -Rounds $((REPEAT * 100)) < /dev/null
+          else
+            echo 'No probe in this source'; exit 1
+          fi
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: inputs.part == 'runtime-switch' || inputs.part == 'runtime-update'
+        with:
+          python-version: '3.13'
+      - if: inputs.part == 'runtime-switch' || inputs.part == 'runtime-update'
+        run: pip install -e . -r requirements-dev.txt
+      - name: The Rust programs, as the release builds them
+        if: inputs.part == 'runtime-switch' || inputs.part == 'runtime-update'
+        timeout-minutes: 25
+        run: |
+          if [ -f scripts/rust_release.sh ]; then
+            rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+            bash scripts/rust_release.sh windows-x86_64
+          else
+            echo 'No Rust programs in this source'; exit 1
+          fi
+      - name: The install's check, repeated
+        if: inputs.part == 'runtime-switch' || inputs.part == 'runtime-update'
+        timeout-minutes: 150
+        run: python tests/windows_install_e2e.py --only "${PART#runtime-}" --repeat "$REPEAT"
+      - name: The display driver built
+        if: inputs.part == 'idd-eight-monitors'
+        timeout-minutes: 20
+        run: powershell -NoProfile -NonInteractive -InputFormat None -ExecutionPolicy Bypass -File agent/windows-idd/build.ps1 -Version 0.0.1 -Out "$RUNNER_TEMP/idd" < /dev/null
+      - name: The display driver loaded, its connectors' part repeated
+        if: inputs.part == 'idd-eight-monitors'
+        timeout-minutes: 120
+        run: |
+          status=0
+          powershell -NoProfile -NonInteractive -InputFormat None -ExecutionPolicy Bypass -File agent/windows-idd/tests/load_test.ps1 -Package "$RUNNER_TEMP/idd/x64/package" -Repeat "$REPEAT" < /dev/null > "$RUNNER_TEMP/load.json" || status=$?
+          python - "$RUNNER_TEMP/load.json" <<'PY' || true
+          import json, sys
+          lines = [l for l in open(sys.argv[1], encoding="utf-8-sig", errors="replace").read().splitlines() if l.strip().startswith("{")]
+          report = json.loads(lines[-1]) if lines else {}
+          after = [k for k in report if isinstance(report[k], dict) and k.startswith("after a connection with eight monitors closed")]
+          bad = [k for k in after if not report[k].get("ok")]
+          print(f"rounds: {len(after)}, failed: {len(bad)}")
+          for k in bad:
+              print(k, json.dumps(report[k]["detail"])[:6000])
+          for k, v in report.items():
+              if isinstance(v, dict) and not v.get("ok") and k not in bad:
+                  print("also failed:", k, json.dumps(v.get("detail"))[:1500])
+          PY
+          cat agent/windows-idd/out/load-driver.log 2>/dev/null | tail -n 400 || true
+          exit $status
