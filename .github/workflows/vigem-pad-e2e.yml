@@ -1,0 +1,88 @@
+# A virtual Xbox 360 pad through ViGEmBus, on its own: nebul-pads (crates/nebul-pads/src/vigem.rs) with the real operating system. This
+# job installs ViGEmBus 1.22.0 (Nefarius's last release, its installer pinned by SHA-256 and by its Authenticode signer, which
+# Windows must find Valid) on the runner, then one test,
+# crates/nebul-pads/tests/vigem_windows.rs, plugs a pad through nebul-pads, checks that XInput sees it in a new slot with A pressed, lets go of A
+# and unplugs it. The test is `#[ignore]` (the parallel cargo test of crates/ci.sh never runs it) and, on top of that, a no-op anywhere but a
+# GitHub-hosted runner. It changes the runner (a driver, a device), which is thrown away: never a person's machine. It prints fixed words only
+# (`vigem-pad-e2e: …`). What it cannot show: rumble (not read back yet), a game's own reading beyond XInput. Same checkout of the private source
+# (same key, same read-only permissions) as ci.yml's jobs; it is not a substitute for "CI main <commit>".
+#   gh workflow run vigem-pad-e2e.yml --repo moukrea/jaunt -f sha=<commit of the source>
+run-name: ViGEmBus pad e2e ${{ inputs.sha }}
+name: vigem-pad-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a probe needs none.
+cache-mode: none
+concurrency:
+  group: vigem-pad-e2e-${{ inputs.sha }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+  windows:
+    needs: guard
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: test
+        run: if [ -f crates/nebul-pads/tests/vigem_windows.rs ]; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No ViGEmBus test in this source'; fi
+      - if: steps.test.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      # Its Authenticode signature too, before it runs: Windows must find it Valid, signed by the certificate read from
+      # this very file on 17 Nov 2026 (its PKCS#7 blob, on Linux): Nefarius Software Solutions e.U., issued by DigiCert
+      # Trusted G4 Code Signing RSA4096 SHA384 2021 CA1, valid 2023-03-13 to 2025-02-16, SHA-1 thumbprint
+      # 1F431092EC96A80B41AB5317F53AC02EA6F9B89B; the file was timestamped by DigiCert on 2023-11-02, inside that
+      # validity, which is what keeps it Valid after the certificate expired. Anything else: not run.
+      - name: ViGEmBus 1.22.0 installed (its installer pinned by SHA-256 and by its Authenticode signer)
+        if: steps.test.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vigembus-setup.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe' -OutFile $exe
+          if ((Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant() -ne '89220a7865076b342892f98865f3499fb7c4cfd673159e89d352c360fd014c6a') { 'vigem-pad-e2e: the installer is not the one pinned (SHA-256): nothing installed'; exit 1 }
+          'vigem-pad-e2e: ViGEmBus 1.22.0, its installer as pinned (SHA-256)'
+          $sig = Get-AuthenticodeSignature -LiteralPath $exe
+          $signer = $sig.SignerCertificate
+          if ($null -eq $signer) { 'vigem-pad-e2e: the installer is not signed (Authenticode): nothing installed'; exit 1 }
+          $status = [string]$sig.Status
+          $thumb = $signer.Thumbprint.ToUpperInvariant()
+          $name = $signer.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+          $issuer = $signer.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $true)
+          $stamped = if ($null -ne $sig.TimeStamperCertificate) { 'timestamped' } else { 'not timestamped' }
+          'vigem-pad-e2e: Authenticode: ' + $(if ($status -in @('Valid', 'NotSigned', 'HashMismatch', 'NotTrusted', 'UnknownError', 'NotSupportedFileFormat', 'Incompatible')) { $status } else { 'other' }) + ', ' + $stamped
+          if ($status -ne 'Valid') { 'vigem-pad-e2e: its signature is not Valid for Windows: nothing installed'; exit 1 }
+          if ($thumb -ne '1F431092EC96A80B41AB5317F53AC02EA6F9B89B' -or $name -ne 'Nefarius Software Solutions e.U.' -or $issuer -ne 'DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1') { 'vigem-pad-e2e: its signer is not the one pinned: nothing installed'; exit 1 }
+          'vigem-pad-e2e: signed by Nefarius Software Solutions e.U. (the pinned certificate, issued by DigiCert)'
+          # Advanced Installer's bootstrapper: no window of its own (/exenoui), Windows Installer quiet (/qn), never a restart.
+          $p = Start-Process -FilePath $exe -ArgumentList '/exenoui', '/qn', '/norestart' -Wait -PassThru
+          'vigem-pad-e2e: its installer exited ' + $p.ExitCode
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit 1 }
+      - name: A pad plugged through nebul-pads, seen and pressed in XInput, unplugged
+        if: steps.test.outputs.present == 'true'
+        run: cargo test --locked -p nebul-pads --test vigem_windows -- --ignored --nocapture
