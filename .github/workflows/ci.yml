@@ -1495,6 +1495,9 @@ jobs:
       - run: pip install -e . -r requirements-dev.txt
       - run: npm ci
       - run: npm run prepare-web
+      # The link's format and clippy with warnings denied, by the source's own client/link/lint.sh (with the rust-host job's Rust
+      # release, which it installs); a source without it has none.
+      - run: if [ -f client/link/lint.sh ]; then bash client/link/lint.sh; else echo 'Not in this source'; fi
       - run: if [ -f client/link/Cargo.toml ]; then cargo test -p jaunt-link --locked; else echo 'Not in this source'; fi
       - run: if [ -f tests/native_link_e2e.py ]; then python tests/native_link_e2e.py; else echo 'Not in this source'; fi
       - name: Flake gate for the suites this change adds or edits
