@@ -812,8 +812,13 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           JAUNT_DESKTOP_CI_PART: ${{ matrix.part }}
         run: bash agent/desktop/ci.sh "$PLATFORM"
+      # The agent's build, kept a day for whoever looks at it: no job of this workflow downloads it. An upload that hangs
+      # (CI 44663227925: the Windows leg's upload stalled after its files were stored, until the job's own limit cancelled
+      # it) never fails the agent's checks, which ran before it.
       - if: always() && steps.crate.outputs.present == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 10
+        continue-on-error: true   # plumbing: no job downloads this build, and a stalled upload must not fail the checks above
         with:
           name: desktop-agent-${{ matrix.platform }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
           path: dist/desktop-agent/
