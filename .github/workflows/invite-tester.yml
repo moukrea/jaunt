@@ -1,19 +1,22 @@
 name: Invite a tester
-# Owner tool: create, list, rekey or revoke a tester invite on the relay, move one room to another invite (reassign), forget one room of an invite (forget), or read the relay's live admin
+# Owner tool: create, list or rekey a tester invite on the relay, withdraw one (revoke: its access closes, its machines are cut and erased;
+# a first run lists them by name with a code, a second run with that code in `confirm` withdraws, the relay checking it), suspend one for a
+# security incident (suspend: listed first, refused for one of the owner's machines; cut, nothing erased, until lift), move one room to another invite (reassign;
+# lift-room lifts a suspension a reassign could not lift on the room), forget one room of an invite (forget), or read the relay's live admin
 # state (status: quota.status, flags.get, certs.quota), a room's or an invite's connection log (connlog)
 # or an invite's account budgets (account); both read-only; or the relay's spend switch (spend-status, spend-observe, spend-active,
 # spend-lift, spend-on: the HTTP status, the mode and the switch in clear, the usage and the dollars encrypted). Job logs, summaries and artifacts are public,
-# so the script prints no key and no tester name: create, list, rekey, reassign, forget, status, connlog, account and exemptions are encrypted with age to
-# the repository variable OWNER_PUBLIC_KEY (an age or SSH public key) and refused without it; revoke
-# and exempt (the early-access exemption) print ids only. each of those is also kept, encrypted, as the one-day artifact relay-status (gh run
-# download). The inputs are read from the event file by the script, never interpolated into a command.
+# so the script prints no key and no tester name: create, list, rekey, revoke, suspend, lift, lift-room, reassign, forget, status, connlog, account and exemptions are
+# encrypted with age to the repository variable OWNER_PUBLIC_KEY (an age or SSH public key) and refused without it (revoke, suspend and lift
+# print the invite id and counts in clear); exempt (the early-access exemption) prints ids only. Each of those is also kept, encrypted, as the
+# one-day artifact relay-status (gh run download). The inputs are read from the event file by the script, never interpolated into a command.
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'create, list, rekey, revoke, status, connlog, account, reassign, forget, exemptions, exempt, or the spend switch: spend-status, spend-observe, spend-active, spend-lift, spend-on'
+        description: 'create, list, rekey, revoke, suspend, lift, lift-room, status, connlog, account, reassign, forget, exemptions, exempt, or the spend switch: spend-status, spend-observe, spend-active, spend-lift, spend-on'
         type: choice
-        options: [list, create, rekey, revoke, status, connlog, account, reassign, forget, exemptions, exempt, spend-status, spend-observe, spend-active, spend-lift, spend-on]
+        options: [list, create, rekey, revoke, suspend, lift, lift-room, status, connlog, account, reassign, forget, exemptions, exempt, spend-status, spend-observe, spend-active, spend-lift, spend-on]
         default: list
       name:
         description: "create: the tester's name (not printed; still run metadata, so a first name or a pseudonym)"
@@ -24,11 +27,11 @@ on:
         required: false
         default: '10'
       id:
-        description: "revoke, rekey, account, connlog: the invite id (inv-...); forget: the room's invite, optional (the relay finds it); connlog takes this or room; exempt: an invite id or early-access (testers and early-access accounts); reassign: the TARGET invite id (inv-..., valid) or none (an owner's room)"
+        description: "revoke, suspend, lift, rekey, account, connlog: the invite id (inv-...); forget: the room's invite, optional (the relay finds it); connlog takes this or room; exempt: an invite id or early-access (testers and early-access accounts); reassign: the TARGET invite id (inv-..., valid) or none (an owner's room)"
         required: false
         default: ''
       room:
-        description: 'connlog: a room id (24 characters) instead of an invite id; reassign: the one room to move; forget: the one room to forget, its host must not be connected (not printed; still run metadata)'
+        description: 'connlog: a room id (24 characters) instead of an invite id; reassign: the one room to move; forget: the one room to forget, its host must not be connected; lift-room: the room a reassign left suspended (not printed; still run metadata)'
         required: false
         default: ''
       from:
@@ -47,10 +50,10 @@ on:
         description: 'rekey: ignore the relay''s waiting limits (owner key RELAY_OWNER_ADMIN_KEY; refused without it)'
         type: boolean
         default: false
-      forget_hosts:
-        description: 'revoke: also forget and disconnect the hosts that key registered'
-        type: boolean
-        default: false
+      confirm:
+        description: 'revoke: empty, a first run lists the machines it cuts and erases, by name, with a code (encrypted); that code here withdraws'
+        required: false
+        default: ''
       cut_at:
         description: 'spend-lift: dollars of overage at which the switch cuts again (empty: the relay computes it)'
         required: false
@@ -88,20 +91,23 @@ jobs:
           python-version: '3.13'
       - name: Install age
         run: curl -fsSL -o "$RUNNER_TEMP/age.tgz" https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz && echo "7df45a6cc87d4da11cc03a539a7470c15b1041ab2b396af088fe9990f7c79d50  $RUNNER_TEMP/age.tgz" | sha256sum -c - && tar -xzf "$RUNNER_TEMP/age.tgz" -C "$RUNNER_TEMP" && sudo install -m 0755 "$RUNNER_TEMP/age/age" /usr/local/bin/age
-      - name: Create, list, rekey, revoke, status, connlog, account, reassign, forget, exemptions, exempt or spend-*
+      - name: Create, list, rekey, revoke, suspend, lift, status, connlog, account, reassign, forget, exemptions, exempt or spend-*
         env:
           JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
           JAUNT_RELAY_URL: ${{ vars.JAUNT_RELAY_URL }}
           OWNER_PUBLIC_KEY: ${{ vars.OWNER_PUBLIC_KEY }}
           # rekey with force only: the owner's own admin secret, which the jaunt.one site does not hold.
           JAUNT_RELAY_OWNER_ADMIN_KEY: ${{ secrets.RELAY_OWNER_ADMIN_KEY }}
-          # every action but revoke: where the script writes its age-encrypted answer, for the artifact below.
+          # revoke and suspend, optional: the owner's own machines (room ids or their first 8 characters), which they refuse to cut. Not set,
+          # the run says so in its log and summary (naming nothing) and goes on: the list of machines by name is then the only guard.
+          JAUNT_OWNER_ROOMS: ${{ secrets.OWNER_ROOMS }}
+          # every action but exempt: where the script writes its age-encrypted answer, for the artifact below.
           JAUNT_STATUS_FILE: ${{ runner.temp }}/relay-status/relay-status.age
         run: python scripts/invite_tester.py github
-      # The created invite, the list or the status, encrypted to OWNER_PUBLIC_KEY (never anything in clear), for `gh run download --name relay-status`.
-      # Also after a failed run when the script wrote it (some actions answered, none with 200).
+      # The created invite, the list, the machines a withdrawal cuts or the status, encrypted to OWNER_PUBLIC_KEY (never anything in clear), for
+      # `gh run download --name relay-status`. Also after a failed run when the script wrote it (some actions answered, none with 200; a refused withdrawal).
       - name: Keep the encrypted answer
-        if: ${{ !cancelled() && inputs.action != 'revoke' && inputs.action != 'exempt' }}
+        if: ${{ !cancelled() && inputs.action != 'exempt' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: relay-status
