@@ -1,0 +1,113 @@
+# The Windows screen capture of the engine (crates/nebul-capture/src/windows.rs) on real Windows runners, with a window that repaints:
+# `wgc_delivers_pictures` (Windows.Graphics.Capture itself, not the DXGI fallback) and `dxgi_delivers_pictures` (Desktop Duplication),
+# both `#[ignore]` (a capture needs a desktop whose screen changes; crates/ci.sh's parallel cargo test never runs them). windows-2022 is
+# build 20348, whose Graphics Capture session has no MinUpdateInterval (it exists from 26100, which windows-2025 is): the capture must
+# stay Windows.Graphics.Capture there, with its default interval (the Laptop on 22631 and a CI runner on 20348 both once fell to DXGI,
+# and, on the Laptop, to no picture at all: feedback #48). The repainting window is a Windows Forms form that changes its colour every
+# 30 ms, opened by the job itself, found by its title within 30 s, closed by its own process id. Every wait has a deadline and nothing
+# is retried. It reads no secret but the source read key (same checkout, same read-only permissions as ci.yml's jobs); it changes the
+# runner, which is thrown away. Not a substitute for "CI main <commit>".
+#   gh workflow run windows-capture-e2e.yml --repo moukrea/jaunt -f sha=<commit of the source>
+run-name: Windows capture e2e ${{ inputs.sha }}
+name: windows-capture-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to test (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a probe needs none.
+cache-mode: none
+concurrency:
+  group: windows-capture-e2e-${{ inputs.sha }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+  capture:
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - id: test
+        run: if grep -q 'fn wgc_delivers_pictures' crates/nebul-capture/src/windows.rs 2> /dev/null; then echo present=true >> "$GITHUB_OUTPUT"; else echo present=false >> "$GITHUB_OUTPUT"; echo 'No capture e2e test in this source'; fi
+      - if: steps.test.outputs.present == 'true'
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - name: The runner, in fixed words
+        if: steps.test.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $v = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          "windows-capture-e2e: Windows build $($v.CurrentBuildNumber).$($v.UBR), session $((Get-Process -Id $PID).SessionId)"
+          $t = [Windows.Graphics.Capture.GraphicsCaptureSession,Windows.Graphics.Capture,ContentType=WindowsRuntime]
+          "windows-capture-e2e: Windows.Graphics.Capture supported $([Windows.Graphics.Capture.GraphicsCaptureSession]::IsSupported())"
+          Get-CimInstance Win32_VideoController | ForEach-Object { "windows-capture-e2e: display adapter $($_.Name)" }
+      - name: The tests build
+        if: steps.test.outputs.present == 'true'
+        timeout-minutes: 25
+        run: cargo test --locked --release -p nebul-capture --no-run
+      - name: A window that repaints, then the capture tests, then the window closed
+        if: steps.test.outputs.present == 'true'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $form = Join-Path $env:RUNNER_TEMP 'repaint.ps1'
+          @'
+          Add-Type -AssemblyName System.Windows.Forms
+          $f = New-Object System.Windows.Forms.Form
+          $f.Text = 'capture e2e window'
+          $f.StartPosition = 'Manual'
+          $f.Location = New-Object System.Drawing.Point(40, 40)
+          $f.Size = New-Object System.Drawing.Size(640, 480)
+          $f.TopMost = $true
+          $n = 0
+          $t = New-Object System.Windows.Forms.Timer
+          $t.Interval = 30
+          $t.Add_Tick({ $script:n++; $f.BackColor = [System.Drawing.Color]::FromArgb(($n * 37) % 256, ($n * 91) % 256, ($n * 17) % 256) })
+          $t.Start()
+          [System.Windows.Forms.Application]::Run($f)
+          '@ | Set-Content -Encoding ASCII -Path $form
+          $window = Start-Process -FilePath powershell.exe -ArgumentList '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $form -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while ($true) {
+              $window.Refresh()
+              if ($window.HasExited) { 'windows-capture-e2e: the repainting window exited by itself'; exit 1 }
+              if ($window.MainWindowTitle -eq 'capture e2e window') { break }
+              if ((Get-Date) -gt $deadline) { 'windows-capture-e2e: the repainting window did not open in 30 s'; exit 1 }
+              Start-Sleep -Milliseconds 200
+            }
+            'windows-capture-e2e: the repainting window is open'
+            # Both tests, one after the other (one screen): Windows.Graphics.Capture itself, then DXGI.
+            cargo test --locked --release -p nebul-capture -- --ignored --nocapture --test-threads=1 _delivers_pictures
+            if ($LASTEXITCODE -ne 0) { "windows-capture-e2e: the capture tests failed ($LASTEXITCODE)"; exit 1 }
+          } finally {
+            if (-not $window.HasExited) { $window.Kill() }
+          }

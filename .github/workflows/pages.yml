@@ -43,8 +43,8 @@ on:
       dropped:
         description: Live channels whose candidate web could not be deployed
         value: ${{ jobs.publish.outputs.dropped }}
-# One site, redeployed whole: production at the root and ch/<name>/ for each live
-# channel. auto-release.yml calls this under jaunt-production-release (its release, or its resync of
+# One site, redeployed whole: production's config.json and installers at the root and ch/<name>/config.json for each live
+# channel, never the web client. auto-release.yml calls this under jaunt-production-release (its release, or its resync of
 # the channels); channel.yml calls it with `plan` after a channel build or cleanup, so that a channel
 # reaches the Page whether or not auto-release is enabled. Both runs queue in the one group below, and
 # the `plan` decision is taken inside it, from the ledger as it is then (never from before the wait).
@@ -271,19 +271,22 @@ jobs:
         with:
           pattern: channel-web-*
           path: .channel-webs
+      # Not web/ (docs/DEPLOYMENT.md "What Pages serves"): its config.json and installers, and main's page and service worker.
+      - name: Make the public site
+        run: python .control/scripts/channel_site.py site --web web --site .pages
       - name: Place channel pages and publish their list
         id: assemble
-        run: python .control/scripts/channel_site.py assemble --site web --webs .channel-webs
+        run: python .control/scripts/channel_site.py assemble --site .pages --webs .channel-webs
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNELS: ${{ needs.channels.outputs.channels }}
-      # Which repository serves the Page, for the migration's checks; outside the service worker's cache.
-      - run: printf 'dist\n' > web/pages-origin.txt
+      # Which repository serves the Page, for the migration's checks.
+      - run: printf 'dist\n' > .pages/pages-origin.txt
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       # What actions/upload-pages-artifact v3.0.1 does, inline: it calls upload-artifact by tag,
       # which a repository requiring actions pinned to a commit refuses.
       - name: Archive the site for Pages
-        run: tar --dereference --hard-dereference --directory web -cvf "$RUNNER_TEMP/artifact.tar" --exclude=.git --exclude=.github .
+        run: tar --dereference --hard-dereference --directory .pages -cvf "$RUNNER_TEMP/artifact.tar" --exclude=.git --exclude=.github .
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: github-pages
