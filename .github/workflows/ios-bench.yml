@@ -1,0 +1,182 @@
+name: iOS bench
+# The iOS bench, first step (ticket ops-0023; docs/IOS_BENCH.md, docs/IOS_BENCH_LIMITS.md). On one of GitHub's macOS runners the
+# source at `sha` builds a test iPhone app (app/ios, Tauri 2) for the iOS simulator, unsigned and with no Apple account; an iPhone
+# simulator boots, the app is installed and launched, an XCTest UI test (app/ios/driver) taps the app's page and types on its keyboard,
+# and the page must show both. The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's
+# artifact; the result and that list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
+# Started by hand only: no other workflow names it, its concurrency group is its own, and nothing waits for it, so it never holds a
+# Linux, Windows or Android release (docs/DEPLOYMENT.md "macOS is not required"). GitHub may not hand out a macOS runner: `watch`
+# starts the workflow once more (attempt 2) when none took the job within 30 minutes, and says so in its summary.
+#   gh workflow run ios-bench.yml --repo moukrea/jaunt -f sha=<source commit with app/ios/bench.sh>
+run-name: iOS bench ${{ inputs.sha }} (attempt ${{ inputs.attempt }})
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Source commit to build (40 lowercase hexadecimal characters)'
+        required: true
+        type: string
+      attempt:
+        description: '1 when started by hand; 2 when the first attempt found no macOS runner and started this one'
+        type: choice
+        options: ['1', '2']
+        default: '1'
+permissions: {}
+# It restores and saves nothing (cache-mode, enforced by GitHub's cache service; scripts/check_public_ops.py).
+cache-mode: none
+# Its own group: a newer run for the same commit (the second attempt, or a new dispatch) replaces an older one, and no release or CI
+# run shares it.
+concurrency:
+  group: ios-bench-${{ inputs.sha }}
+  cancel-in-progress: true
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require an exact source commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
+  simulator:
+    needs: guard
+    runs-on: macos-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: '1.91.1'
+      TAURI_CLI_VERSION: 2.12.4
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_ENV_HINTS: '1'
+      BENCH_SHA: ${{ inputs.sha }}
+      BENCH_ATTEMPT: ${{ inputs.attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      # The list of what the bench does not prove goes into the artifact first, so that every proof of this run carries it.
+      - id: bench
+        name: The bench is in this source
+        run: |
+          if [ -f app/ios/bench.sh ] && [ -f app/ios/bench.py ] && [ -f docs/IOS_BENCH_LIMITS.md ]; then
+            mkdir -p "$RUNNER_TEMP/ios-bench"
+            cp docs/IOS_BENCH_LIMITS.md "$RUNNER_TEMP/ios-bench/"
+            echo present=true >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::This commit has no iOS bench (app/ios/bench.sh, app/ios/bench.py, docs/IOS_BENCH_LIMITS.md)"
+            exit 1
+          fi
+      - id: rust
+        name: Rust with the iOS targets (pinned toolchain)
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target aarch64-apple-ios-sim --target aarch64-apple-ios --target x86_64-apple-ios
+      - id: tauri
+        name: Tauri CLI (pinned)
+        run: |
+          cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      # XcodeGen makes both Xcode projects; tauri ios init installs libimobiledevice with Homebrew when it is missing: both come first,
+      # so that a failed download is this step's.
+      - id: tools
+        name: XcodeGen, and the tool tauri ios init asks for (Homebrew)
+        run: |
+          brew install xcodegen libimobiledevice
+          xcodegen --version
+          xcodebuild -version
+      - id: app
+        name: Build the test app (app/ios, Tauri 2, iOS simulator, unsigned)
+        run: bash app/ios/bench.sh app "$RUNNER_TEMP/ios-bench"
+      # Built even when the app failed, so that one run on a scarce runner says as much as it can.
+      - id: driver
+        name: Build the UI test that drives it (app/ios/driver)
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: bash app/ios/bench.sh driver "$RUNNER_TEMP/ios-bench"
+      - name: Simulator - install, launch, touch, keystrokes, screenshots
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        timeout-minutes: 35
+        run: bash app/ios/bench.sh run "$RUNNER_TEMP/ios-bench"
+      - name: Report, with what this bench does not prove
+        if: ${{ always() && steps.bench.outputs.present == 'true' }}
+        run: |
+          bash app/ios/bench.sh report "$RUNNER_TEMP/ios-bench"
+          cat "$RUNNER_TEMP/ios-bench/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: ios-bench-${{ inputs.sha }}-${{ inputs.attempt }}
+          path: ${{ runner.temp }}/ios-bench/
+          retention-days: 1
+          if-no-files-found: warn
+  # GitHub's macOS runners are often not handed out ("The job was not acquired by Runner of type hosted even after multiple attempts",
+  # docs/DEPLOYMENT.md "macOS is not required"). This job watches `simulator` in this run and ends once a runner took it. When none did
+  # within QUEUE_MINUTES, or GitHub ended the job without starting it, the first attempt starts this workflow again for the same commit
+  # (attempt 2, which replaces this run through the concurrency group) and says so; the second only says that the Apple proof is
+  # missing because no macOS runner was free. It reads nothing of the source.
+  watch:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: write
+    env:
+      QUEUE_MINUTES: '30'
+    steps:
+      - id: watch
+        name: Wait for a macOS runner to take the simulator job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: |
+          set -u
+          start=$(date +%s)
+          picked=false
+          seen='never seen in this run'
+          while :; do
+            # status|conclusion|runner|steps ('|', not a tab: read would merge the empty fields between tabs)
+            row=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq \
+              '[.jobs[] | select(.name == "simulator")][0] // {} | [.status // "", .conclusion // "", .runner_name // "", (.steps // [] | length | tostring)] | join("|")') || row=''
+            IFS='|' read -r status conclusion runner steps <<<"$row" || true
+            waited=$(( ($(date +%s) - start) / 60 ))
+            if [ "${status:-}" = in_progress ] || { [ "${status:-}" = completed ] && { [ -n "${runner:-}" ] || [ "${steps:-0}" -gt 0 ]; }; }; then
+              picked=true
+              seen="taken by ${runner:-a runner} after about $waited min"
+              break
+            fi
+            if [ "${status:-}" = completed ]; then
+              seen="ended by GitHub (${conclusion:-no conclusion}) without a runner after about $waited min"
+              break
+            fi
+            if [ "$waited" -ge "$QUEUE_MINUTES" ]; then
+              seen="still ${status:-queued} after $QUEUE_MINUTES min"
+              break
+            fi
+            sleep 30
+          done
+          echo "picked=$picked" >> "$GITHUB_OUTPUT"
+          {
+            echo "### macOS runner for the iOS bench $SHA (attempt $ATTEMPT)"
+            echo "The simulator job was $seen."
+            if [ "$picked" != true ] && [ "$ATTEMPT" = 1 ]; then
+              echo "No macOS runner: this workflow starts again for the same commit (attempt 2), which replaces this run."
+            elif [ "$picked" != true ]; then
+              echo "No macOS runner on the second attempt either: the Apple proof for $SHA is missing until one takes the job (GitHub cancels a job queued for 24 hours). Nothing else waits for it."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$picked" != true ] && [ "$ATTEMPT" != 1 ]; then
+            echo "::warning::iOS bench $SHA: no macOS runner took either attempt within $QUEUE_MINUTES min; the Apple proof is missing"
+          fi
+      - name: Start the second attempt (no macOS runner took the first)
+        if: ${{ steps.watch.outputs.picked != 'true' && inputs.attempt == '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+        run: gh workflow run ios-bench.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f attempt=2
