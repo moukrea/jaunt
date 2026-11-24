@@ -1,9 +1,11 @@
 name: iOS bench
-# The iOS bench, first step (ticket ops-0023; docs/IOS_BENCH.md, docs/IOS_BENCH_LIMITS.md). On one of GitHub's macOS runners the
-# source at `sha` builds a test iPhone app (app/ios, Tauri 2) for the iOS simulator, unsigned and with no Apple account; an iPhone
-# simulator boots, the app is installed and launched, an XCTest UI test (app/ios/driver) taps the app's page and types on its keyboard,
-# and the page must show both. The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's
-# artifact; the result and that list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
+# The iOS bench (ticket ops-0023; docs/IOS_BENCH.md, docs/IOS_BENCH_LIMITS.md). On one of GitHub's macOS runners the source at `sha`
+# builds a test iPhone app (app/ios, Tauri 2) for the iOS simulator, unsigned and with no Apple account; an iPhone simulator boots, the
+# app is installed and launched, an XCTest UI test (app/ios/driver) taps the app's page and types on its keyboard, and the page must
+# show both (step 1). A test jaunt machine runs on the same runner (the Rust host built for it, the test relay, the web client's page):
+# the app opens the machine's page, and the UI test pairs with the machine by typing its code and waits until the app shows it
+# connected (step 2). The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's artifact;
+# the result and that list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
 # Started by hand only: no other workflow names it, its concurrency group is its own, and nothing waits for it, so it never holds a
 # Linux, Windows or Android release (docs/DEPLOYMENT.md "macOS is not required"). GitHub may not hand out a macOS runner: `watch`
 # starts the workflow once more (attempt 2) when none took the job within 30 minutes, and says so in its summary.
@@ -42,7 +44,7 @@ jobs:
   simulator:
     needs: guard
     runs-on: macos-latest
-    timeout-minutes: 100
+    timeout-minutes: 120
     permissions:
       contents: read
     defaults:
@@ -75,6 +77,16 @@ jobs:
             echo "::error::This commit has no iOS bench (app/ios/bench.sh, app/ios/bench.py, docs/IOS_BENCH_LIMITS.md)"
             exit 1
           fi
+      # Python and Node for the test machine (step 2), as the conformance jobs of ci.yml have them: the harness that starts the relay
+      # and the host (tests/browser_e2e.py), and the relay Worker under workerd (Miniflare).
+      - id: python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+      - id: node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
       - id: rust
         name: Rust with the iOS targets (pinned toolchain)
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target aarch64-apple-ios-sim --target aarch64-apple-ios --target x86_64-apple-ios
@@ -99,9 +111,15 @@ jobs:
         name: Build the UI test that drives it (app/ios/driver)
         if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
         run: bash app/ios/bench.sh driver "$RUNNER_TEMP/ios-bench"
-      - name: Simulator - install, launch, touch, keystrokes, screenshots
-        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
-        timeout-minutes: 35
+      # The test machine's pieces (the Rust host for this runner's macOS, the relay's packages, the harness's): built even when the
+      # app failed, so that the relay and the host are still tried.
+      - id: machine
+        name: Build the test machine (the Rust host, the test relay, the web client)
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
+        run: bash app/ios/bench.sh machine "$RUNNER_TEMP/ios-bench"
+      - name: Simulator and test machine - install, launch, touch, keystrokes, pair, connect, screenshots
+        if: ${{ !cancelled() && (steps.app.outcome == 'success' || steps.machine.outcome == 'success') }}
+        timeout-minutes: 50
         run: bash app/ios/bench.sh run "$RUNNER_TEMP/ios-bench"
       - name: Report, with what this bench does not prove
         if: ${{ always() && steps.bench.outputs.present == 'true' }}
