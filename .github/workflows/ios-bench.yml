@@ -4,8 +4,10 @@ name: iOS bench
 # app is installed and launched, an XCTest UI test (app/ios/driver) taps the app's page and types on its keyboard, and the page must
 # show both (step 1). A test jaunt machine runs on the same runner (the Rust host built for it, the test relay, the web client's page):
 # the app opens the machine's page, and the UI test pairs with the machine by typing its code and waits until the app shows it
-# connected (step 2). The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's artifact;
-# the result and that list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
+# connected (step 2); a test notification is handed to the simulator (simctl push) and the UI test must see iOS show it. Built once,
+# that run goes over the simulators the image has, one after the other: the newest iPhone, an iPad, the oldest iOS runtime (step 4).
+# The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's artifact; the result and that
+# list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
 # Started by hand only: no other workflow names it, its concurrency group is its own, and nothing waits for it, so it never holds a
 # Linux, Windows or Android release (docs/DEPLOYMENT.md "macOS is not required"). GitHub may not hand out a macOS runner: `watch`
 # starts the workflow once more (attempt 2) when none took the job within 30 minutes, and says so in its summary.
@@ -117,9 +119,11 @@ jobs:
         name: Build the test machine (the Rust host, the test relay, the web client)
         if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
         run: bash app/ios/bench.sh machine "$RUNNER_TEMP/ios-bench"
-      - name: Simulator and test machine - install, launch, touch, keystrokes, pair, connect, screenshots
+      # One simulator after the other (the newest iPhone, an iPad, the oldest iOS runtime): about 11.5 minutes each; bench.sh
+      # starts a device after the first only while 15 of its 70 minutes are left.
+      - name: Simulators and test machine - install, launch, touch, keystrokes, pair, connect, notification, screenshots
         if: ${{ !cancelled() && (steps.app.outcome == 'success' || steps.machine.outcome == 'success') }}
-        timeout-minutes: 50
+        timeout-minutes: 75
         run: bash app/ios/bench.sh run "$RUNNER_TEMP/ios-bench"
       - name: Report, with what this bench does not prove
         if: ${{ always() && steps.bench.outputs.present == 'true' }}
