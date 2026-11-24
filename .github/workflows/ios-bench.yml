@@ -6,6 +6,9 @@ name: iOS bench
 # the app opens the machine's page, and the UI test pairs with the machine by typing its code and waits until the app shows it
 # connected (step 2); a test notification is handed to the simulator (simctl push) and the UI test must see iOS show it. Built once,
 # that run goes over the simulators the image has, one after the other: the newest iPhone, an iPad, the oldest iOS runtime (step 4).
+# Then, on the same runner, the Tauri Mac app as a person gets it (step 5): the Experimental release's zip, else the one a release would
+# carry, built here; in ~/Downloads with the quarantine a browser's download carries, Gatekeeper's verdict, opened as a person opens it
+# (the words macOS shows), launched as after Open Anyway, its window and a screenshot, then quit.
 # The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's artifact; the result and that
 # list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
 # Started by hand only: no other workflow names it, its concurrency group is its own, and nothing waits for it, so it never holds a
@@ -46,7 +49,8 @@ jobs:
   simulator:
     needs: guard
     runs-on: macos-latest
-    timeout-minutes: 120
+    # (the builds before the run step, up to 25 minutes; the run step's 75; the Mac app's 25 and 20)
+    timeout-minutes: 150
     permissions:
       contents: read
     defaults:
@@ -75,6 +79,8 @@ jobs:
             mkdir -p "$RUNNER_TEMP/ios-bench"
             cp docs/IOS_BENCH_LIMITS.md "$RUNNER_TEMP/ios-bench/"
             echo present=true >> "$GITHUB_OUTPUT"
+            # (step 5, the Mac app: a source from before it has no bench.sh mac-app)
+            if [ -f app/ios/mac_ui.js ]; then echo mac=true >> "$GITHUB_OUTPUT"; fi
           else
             echo "::error::This commit has no iOS bench (app/ios/bench.sh, app/ios/bench.py, docs/IOS_BENCH_LIMITS.md)"
             exit 1
@@ -125,6 +131,19 @@ jobs:
         if: ${{ !cancelled() && (steps.app.outcome == 'success' || steps.machine.outcome == 'success') }}
         timeout-minutes: 75
         run: bash app/ios/bench.sh run "$RUNNER_TEMP/ios-bench"
+      # Step 5, the Mac app, in this job after the simulators: on the runner it already holds (a second job would wait for a second
+      # macOS runner, which may never come, and compile the Tauri CLI again), a runner that is new for every job, where nothing before
+      # opened a Mac app or changed Gatekeeper. Where a person gets it; when the Experimental release has no zip of it for this Mac, the
+      # one a release would carry, built from this source as release-macos.yml builds it.
+      - id: macapp
+        name: The Mac app as a person gets it (the Experimental release, else built as a release builds it)
+        if: ${{ !cancelled() && steps.bench.outputs.mac == 'true' && steps.rust.outcome == 'success' && steps.tauri.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
+        timeout-minutes: 25
+        run: bash app/ios/bench.sh mac-app "$RUNNER_TEMP/ios-bench"
+      - name: Mac app - downloaded, quarantined, Gatekeeper, opened, launched, window, screenshot, paired, quit
+        if: ${{ !cancelled() && steps.macapp.outcome == 'success' }}
+        timeout-minutes: 20
+        run: bash app/ios/bench.sh mac "$RUNNER_TEMP/ios-bench"
       - name: Report, with what this bench does not prove
         if: ${{ always() && steps.bench.outputs.present == 'true' }}
         run: |
