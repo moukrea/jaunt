@@ -84,6 +84,7 @@ jobs:
       parity: ${{ steps.reuse.outputs.parity || steps.plan.outputs.parity }}
       rust_e2e: ${{ steps.reuse.outputs.rust_e2e || steps.plan.outputs.rust_e2e }}
       flake_tests: ${{ steps.plan.outputs.flake_tests }}
+      flake_shards: ${{ steps.plan.outputs.flake_shards }}
       flake_suites: ${{ steps.plan.outputs.flake_suites }}
       flake_e2e: ${{ steps.plan.outputs.flake_e2e }}
     steps:
@@ -119,6 +120,11 @@ jobs:
           # macOS legs are ci-macos.yml's, whatever the source's own plan script lists (an older one still lists them).
           grep -v '^host_matrix=' "$PLAN" >> "$GITHUB_OUTPUT"
           echo "host_matrix=$(sed -n 's/^host_matrix=//p' "$PLAN" | jq -c '[.[] | select(.os | startswith("macos") | not)]')" >> "$GITHUB_OUTPUT"
+          # The flake job's runners (flake_shards): the tests grouped by file, a file's nodes on one runner, at most four runners;
+          # the files with the most nodes are placed first, each on the runner that holds the fewest. Computed here from
+          # flake_tests, so that a source of any age gets it. tests/test_ci_plan.py runs this program.
+          FLAKE_TESTS=$(sed -n 's/^flake_tests=//p' "$PLAN")
+          echo "flake_shards=$(jq -n -c --arg tests "$FLAKE_TESTS" '[$tests | split(" ")[] | select(length > 0)] | group_by(split("::")[0]) | sort_by(-length) as $files | ([4, ($files | length)] | min) as $n | reduce $files[] as $f ([range($n) | []]; (map(length) | index(min)) as $j | .[$j] += $f) | to_entries | map({shard: "\(.key + 1)/\($n)", tests: (.value | join(" "))})')" >> "$GITHUB_OUTPUT"
           cat "$PLAN"
       # A `CI main` run does not repeat what a `CI pr` run of this repository already proved on the same files.
       # Reused only: a job (or matrix leg) that succeeded in a workflow_dispatch run of this repository named
@@ -380,14 +386,17 @@ jobs:
   # The flake gate (scripts/flake_gate.py): the pytest tests and JS tests a change adds or edits run many times
   # with every core busy, on Linux (ci-macos.yml repeats them on macOS, unwaited); one failure fails the
   # change. The e2e suites it adds or edits are repeated the same way by a last step of the job that runs them.
+  # Split by test file over at most four runners (the plan's flake_shards), each with the gate's whole cap: one
+  # runner could not repeat the 54 changed nodes of seven test files (train U, 2026-11-24).
   flake:
+    name: flake (${{ matrix.shard }})
     needs: [guard, plan]
     if: needs.plan.outputs.flake_tests != ''
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        include: ${{ fromJSON(needs.plan.outputs.flake_shards) }}
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: read
@@ -409,7 +418,7 @@ jobs:
       - run: npm run prepare-web
       - name: Repeat the changed tests under load
         env:
-          TESTS: ${{ needs.plan.outputs.flake_tests }}
+          TESTS: ${{ matrix.tests }}
         run: if [ -f scripts/flake_gate.py ]; then python scripts/flake_gate.py run $TESTS; fi
   # The e2e suites a change adds or edits (scripts/flake_gate.py), one runner each, in parallel: a change that touches
   # several suites would not fit one job's time (a batch of six, repeated ten times each, did not). Each suite gets a
