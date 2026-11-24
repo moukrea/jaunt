@@ -47,7 +47,8 @@ jobs:
     # here (a macOS runner may not be handed out for hours). release-macos.yml, which auto-release.yml starts beside this run, builds
     # it unwaited. The release goes out without a macOS agent; the other three are required (scripts/build_release.py refuses
     # a release without them).
-    # A hotfix that reuses the agents of the release it fixes (agents_from) builds none.
+    # A hotfix that reuses the agents of the release it fixes (agents_from) builds none (the pipeline never reuses them for a source whose
+    # production release carries the Rust host: release_pipeline.py `hotfix_select`).
     if: ${{ inputs.agents_from == '' }}
     strategy:
       fail-fast: false
@@ -85,16 +86,27 @@ jobs:
           path: dist/agent-release/
           if-no-files-found: error
           retention-days: 1
-      # The Rust host, its launcher and the terminal emulator library, for an Experimental build only (docs/RUST_HOST.md, "The switch
-      # under the Canary freeze"): a Canary, a Latest and a channel candidate run none of the three steps, so their jobs, matrix and
-      # manifest are what they were (tests/test_release_workflow.py holds that). Each leg builds its own platform's three programs (the Linux ones
-      # in manylinux_2_28, the Windows ones on the runner, as the desktop agent is); a commit without the script ships none.
+      # The Rust host, its launcher and the terminal emulator library (docs/RUST_HOST.md, "M13: Canary on the Rust host"; docs/DEPLOYMENT.md,
+      # "The Rust host on Canary"), on every leg: of an Experimental build (`host-X.Y.Z-exp.N`), and of a production release (`vX.Y.Z-beta.N`,
+      # `host-X.Y.Z`) of a source that has scripts/canary_rust_platforms.txt (what that file lists is where new installs and Python hosts take the
+      # Rust host: the manifest's `rustInstalls`; every Rust host updates from every release, listed or not). A channel candidate, and a production
+      # release of a source without that file, run none of the three steps, so their jobs, matrix and manifest are what they were
+      # (tests/test_release_workflow.py holds that). Each leg builds its own platform's three programs (the Linux ones in manylinux_2_28, the
+      # Windows ones on the runner, as the desktop agent is); a commit without the script ships none.
       - id: rust
         shell: bash
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          if [[ "$TAG" =~ ^host-[0-9]+\.[0-9]+\.[0-9]+-exp\.[0-9]+$ ]] && [ -f scripts/rust_release.sh ]; then echo wanted=true >> "$GITHUB_OUTPUT"; else echo wanted=false >> "$GITHUB_OUTPUT"; fi
+          wanted=false
+          if [ -f scripts/rust_release.sh ]; then
+            if [[ "$TAG" =~ ^host-[0-9]+\.[0-9]+\.[0-9]+-exp\.[0-9]+$ ]]; then
+              wanted=true
+            elif [[ "$TAG" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?|host-[0-9]+\.[0-9]+\.[0-9]+)$ ]] && [ -f scripts/canary_rust_platforms.txt ]; then
+              wanted=true
+            fi
+          fi
+          echo "wanted=$wanted" >> "$GITHUB_OUTPUT"
       - if: ${{ steps.rust.outputs.wanted == 'true' }}
         shell: bash
         env:
@@ -159,13 +171,21 @@ jobs:
         run: |
           python .reuse/scripts/release_pipeline.py reuse-agents --tag "$AGENTS_FROM" --directory dist-agents
           rm -rf .reuse
-      # An Experimental build of a source with the Rust host publishes it for the three platforms (build_release.py refuses one
-      # missing, and refuses it for any other build).
+      # An Experimental build of a source with the Rust host publishes it for the three platforms, and so does a production release of a source
+      # that has scripts/canary_rust_platforms.txt (build_release.py refuses one missing, and refuses it for a channel candidate).
       - id: rust
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          if [[ "$TAG" =~ ^host-[0-9]+\.[0-9]+\.[0-9]+-exp\.[0-9]+$ ]] && [ -f scripts/rust_release.sh ]; then echo wanted=true >> "$GITHUB_OUTPUT"; else echo wanted=false >> "$GITHUB_OUTPUT"; fi
+          wanted=false
+          if [ -f scripts/rust_release.sh ]; then
+            if [[ "$TAG" =~ ^host-[0-9]+\.[0-9]+\.[0-9]+-exp\.[0-9]+$ ]]; then
+              wanted=true
+            elif [[ "$TAG" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?|host-[0-9]+\.[0-9]+\.[0-9]+)$ ]] && [ -f scripts/canary_rust_platforms.txt ]; then
+              wanted=true
+            fi
+          fi
+          echo "wanted=$wanted" >> "$GITHUB_OUTPUT"
       - if: ${{ steps.rust.outputs.wanted == 'true' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
