@@ -204,7 +204,9 @@ jobs:
   # prefix jaunt-downloads-main-: nothing saved before this job existed is ever restored), fetches what is missing, every file
   # checked against main's pins (a mismatch is deleted), saves on a miss, and hands the directory to the jobs as a one-day artifact.
   # They check every file against their own commit's pins before use and download what is missing or differs: a fetch that fails
-  # here fails no run.
+  # here fails no run. The Android app's Gradle dependencies (pinned by android/gradle/verification-metadata.xml, about 740 files that
+  # Maven Central answered 429 Too Many Requests for: CI 44832856126, 45485770937) are a Maven repository in maven/, handed on as
+  # their own artifact (jaunt-maven) to the job that builds that app, not to every job.
   downloads:
     needs: guard
     runs-on: ubuntu-latest
@@ -223,30 +225,40 @@ jobs:
             scripts/ci_downloads.py
             scripts/desktop_assets.py
             desktop/bridge.json
+            android/gradle/verification-metadata.xml
           sparse-checkout-cone-mode: false
       - id: restore
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ${{ runner.temp }}/jaunt-downloads
-          key: jaunt-downloads-main-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json') }}
+          key: jaunt-downloads-main-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json', 'android/gradle/verification-metadata.xml') }}
       - id: fetch
-        name: Every pinned download, and the bridge's package for the Windows jobs, checked against source main's pins
+        name: Every pinned download, the bridge's package for the Windows jobs and the Android app's Gradle dependencies, checked against source main's pins
         continue-on-error: true   # plumbing: a failed fetch fails no run (each job checks its files against its own pins and downloads what is missing)
         run: |
           if [ -f scripts/ci_downloads.py ]; then
             python3 scripts/ci_downloads.py fetch-all "$RUNNER_TEMP/jaunt-downloads"
             python3 scripts/ci_downloads.py bridge "$RUNNER_TEMP/jaunt-downloads" windows-x64
+            if grep -q gradle-fetch scripts/ci_downloads.py; then python3 scripts/ci_downloads.py gradle-fetch "$RUNNER_TEMP/jaunt-downloads/maven"; fi
           fi
       # Saved only complete (every fetch succeeded) and only on a miss: an entry never changes once saved.
       - if: steps.fetch.outcome == 'success' && steps.restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ${{ runner.temp }}/jaunt-downloads
-          key: jaunt-downloads-main-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json') }}
+          key: jaunt-downloads-main-${{ hashFiles('scripts/ci_downloads.py', 'desktop/bridge.json', 'android/gradle/verification-metadata.xml') }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: jaunt-downloads
-          path: ${{ runner.temp }}/jaunt-downloads
+          path: |
+            ${{ runner.temp }}/jaunt-downloads
+            !${{ runner.temp }}/jaunt-downloads/maven/**
+          retention-days: 1
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: jaunt-maven
+          path: ${{ runner.temp }}/jaunt-downloads/maven
           retention-days: 1
           if-no-files-found: ignore
   lint:
@@ -575,7 +587,7 @@ jobs:
   # host byte for byte, also when its original is gone before the page reads it (d044, PickedFiles.java;
   # tests/android_pick_upload_e2e.py). The Java debug build, the one with an x86_64 native link.
   android-emulator:
-    needs: [guard, plan]
+    needs: [guard, plan, downloads]
     if: needs.plan.outputs.android == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -615,6 +627,19 @@ jobs:
         run: npm ci && npm run prepare-web
       - if: steps.present.outputs.present == 'true'
         run: pip install -e . -r requirements-dev.txt
+      # The app's Gradle dependencies from this run's `downloads` job, as an artifact, rather than from Maven Central while the job
+      # runs (429 Too Many Requests: CI 44832856126, 45485770937). Never a cache restore in a job that runs the commit under test. The
+      # script checks every file against this commit's android/gradle/verification-metadata.xml and points Gradle at the components it
+      # holds whole (an init script); Gradle downloads the rest as before and checks every file against the same pins.
+      - if: steps.present.outputs.present == 'true' && hashFiles('scripts/ci_downloads.py') != ''
+        continue-on-error: true   # plumbing: Gradle downloads what the artifact lacks
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: jaunt-maven
+          path: ${{ runner.temp }}/jaunt-downloads/maven
+      - name: The app's pinned Gradle dependencies from the downloads job (checked by SHA-256)
+        if: steps.present.outputs.present == 'true'
+        run: if [ -f scripts/ci_downloads.py ] && grep -q gradle-repo scripts/ci_downloads.py; then python3 scripts/ci_downloads.py gradle-repo "$RUNNER_TEMP/jaunt-downloads/maven"; else echo 'Not in this source'; fi
       - name: The debug APK (x86_64 native link) and the Rust host
         if: steps.present.outputs.present == 'true'
         run: |
