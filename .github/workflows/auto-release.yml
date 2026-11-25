@@ -29,8 +29,10 @@ on:
         default: ''
 # This lock spans prepare, ALL builds, promotion and public verification.
 # Pending notifications may be replaced; prepare scans the durable Git queue.
+# (-2 since 2026-11-25: runs 45513084359 and 45517052513 stayed "queued" with no job for hours, never queued by GitHub, and
+# could not be cancelled or deleted; a new group frees the lock they seem to hold. jaunt-0118.)
 concurrency:
-  group: jaunt-production-release
+  group: jaunt-production-release-2
   cancel-in-progress: false
 permissions: {}
 # No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
