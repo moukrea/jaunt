@@ -2186,6 +2186,10 @@ jobs:
       # Messages between agents as one card per pair, and the whole thread of a pair (the page's own view against a fake host).
       - run: if [ -f tests/rich_exchange_e2e.py ]; then python tests/rich_exchange_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
+      # A program's messages to a Claude Code it started in the background (jaunt-0780): its folder trusted from a device, the dontAsk
+      # footer, a long first message scrolled inside the box; a stand-in Claude Code 2.1.332. The Rust host's: skips on the Python legs.
+      - run: if [ -f tests/rich_background_send_e2e.py ]; then python tests/rich_background_send_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
       - run: python tests/webgl_render_e2e.py
         if: matrix.group == 'agents'
       - run: python tests/android_download_e2e.py
@@ -2249,6 +2253,11 @@ jobs:
         if: matrix.group == 'lifecycle'
       - run: python tests/client_update_e2e.py
         if: matrix.group == 'lifecycle'
+      # A Rust host on Experimental sent back to Canary as Settings asks (jaunt-0770): here its published leg (exp.58 to beta.388, downloaded
+      # from this repository's releases); the job rust-e2e runs it with this source's Rust host too.
+      - run: if [ -f tests/return_to_canary_e2e.py ]; then python tests/return_to_canary_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'lifecycle'
+        continue-on-error: true  # reporting (parity/rust_e2e.toml): it reads two releases over the network; it fails no run until classified required
       # The legacy host fixture is a release of this repository (mirrored from the source's own).
       - name: Download the public legacy host fixture
         if: matrix.group == 'lifecycle'
