@@ -1,0 +1,99 @@
+name: Relay cost campaign
+# jaunt-0662 (for Pricing, pricing-0007): what a GB through the relay costs, measured. One job runs one session of
+# tools/ops/relay_cost_campaign.mjs (source main) with --job, where the admin key already is, so that no machine holds it and no key
+# travels: the gate (spend.status and quota.status: go only if the campaign stays inside what the month includes and crosses no quota
+# alert level; the verdict only, the account's usage and dollars are never printed here), then the campaign's own invite (label
+# "relay-cost campaign (jaunt-0662)", one machine, no TURN), whose key stays in the tool's memory (never printed, written or sent but to
+# the relay), both ends of its one room in this job, that invite's account.get around each run, the invite revoked, the gate again.
+# The log and the one-day artifact relay-cost-campaign hold one JSON line each: UTC times, the read windows Ops reads Cloudflare's
+# billed duration over, what was sent and what the relay counted for that synthetic room (messages, bytes, awake ms: no person's data,
+# no other account's), never a key. `revoke` withdraws a campaign invite a cancelled run left (its id from that run's log), and refuses
+# any other invite. Sessions: trial (t-full, 50 MB: does the runner hold 2.5 MiB/s each way?, any time), A (the five -full runs,
+# web-replay, web-hold: about 2 h, only in Ops' window 02:00-04:00 UTC), B (the five -slow runs: about 2 h 55, only in 22:00-01:00
+# UTC); a session dispatched up to 20 minutes early waits for its window, one whose plan would end after it does nothing. The relay is
+# the variable JAUNT_CAMPAIGN_RELAY_URL (wss://relay.jaunt.one: never workers.dev, whose daily use relay/names.mjs counts before it is
+# turned off; never an input, which could name another host and receive the admin key); unset, nothing runs. The inputs reach the tool
+# through env only, which checks them. Concurrency: one group per action; a session dispatched while another runs waits, and a further
+# dispatch of the same action cancels the one waiting (GitHub's concurrency rule), so dispatch a session once; a revoke never waits
+# behind a session.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'campaign (one session), or revoke (a campaign invite a cancelled run left)'
+        type: choice
+        options: [campaign, revoke]
+        default: campaign
+      session:
+        description: 'campaign: trial (t-full, 50 MB), A (the -full runs, web-replay, web-hold: about 2 h) or B (the -slow runs: about 2 h 55)'
+        type: choice
+        options: [trial, A, B]
+        default: trial
+      id:
+        description: 'revoke: the campaign invite id (inv-...) from the cancelled run''s log; refused for any invite that is not a campaign''s'
+        required: false
+        default: ''
+permissions: {}
+# No Actions cache, neither restored nor saved (cache-mode, enforced by GitHub's cache service): a release, or a workflow
+# holding more than the source read key, never takes files another run saved (scripts/check_public_ops.py).
+cache-mode: none
+concurrency:
+  group: relay-cost-campaign-${{ inputs.action }}
+  cancel-in-progress: false
+jobs:
+  campaign:
+    # Only from the default branch; RELAY_ADMIN_KEY lives in the relay-admin environment, restricted to that branch.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    # Session B is about 2 h 55 (its --plan), after up to 20 minutes' wait for its window; a bound on a hang, under the 6 h a
+    # GitHub-hosted job may run. The session step has its own, shorter bound, so that a hang ends as that step's failure and the
+    # always() steps below still have time to run.
+    timeout-minutes: 240
+    environment: relay-admin
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ vars.JAUNT_SOURCE_REPO }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          ref: main
+          persist-credentials: false
+      # Node 22 or later has WebSocket built in; the tool has no dependency (nothing is installed).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: The session, or the revoke
+        timeout-minutes: 225
+        env:
+          JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
+          JAUNT_CAMPAIGN_RELAY_URL: ${{ vars.JAUNT_CAMPAIGN_RELAY_URL }}
+          ACTION: ${{ inputs.action }}
+          SESSION: ${{ inputs.session }}
+          ID: ${{ inputs.id }}
+          OUT: ${{ runner.temp }}/relay-cost
+        run: |
+          mkdir -p "$OUT"
+          case "$ACTION" in
+            revoke) exec node tools/ops/relay_cost_campaign.mjs --revoke --live --relay "$JAUNT_CAMPAIGN_RELAY_URL" --invite "$ID" ;;
+            campaign) exec node tools/ops/relay_cost_campaign.mjs --job --live --relay "$JAUNT_CAMPAIGN_RELAY_URL" --session "$SESSION" --invite-file "$OUT/invite" --out "$OUT/runs.jsonl" ;;
+            *) echo "Unknown action: campaign or revoke." >&2; exit 2 ;;
+          esac
+      # A cancelled, timed-out or killed session may not have revoked its invite: its id (not a secret) is in the file the session
+      # removes once it has; the key died with the session's process.
+      - name: Revoke the campaign invite the session left
+        if: ${{ always() && inputs.action != 'revoke' }}
+        env:
+          JAUNT_RELAY_ADMIN_KEY: ${{ secrets.RELAY_ADMIN_KEY }}
+          JAUNT_CAMPAIGN_RELAY_URL: ${{ vars.JAUNT_CAMPAIGN_RELAY_URL }}
+          OUT: ${{ runner.temp }}/relay-cost
+        run: |
+          if [ -s "$OUT/invite" ]; then node tools/ops/relay_cost_campaign.mjs --revoke --live --relay "$JAUNT_CAMPAIGN_RELAY_URL" --invite-file "$OUT/invite"; else echo "Nothing to revoke."; fi
+      - name: Keep the lines
+        if: ${{ always() && inputs.action != 'revoke' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: relay-cost-campaign
+          path: ${{ runner.temp }}/relay-cost/runs.jsonl
+          if-no-files-found: ignore
+          retention-days: 1

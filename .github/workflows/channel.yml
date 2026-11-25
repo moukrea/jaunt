@@ -243,6 +243,7 @@ jobs:
       always() && (needs.record.result == 'success' || needs.cleanup.result == 'success' ||
       (needs.prepare.result == 'success' && needs.prepare.outputs.publish == 'false'))
     permissions:
+      actions: read  # pages.yml's publish waits until the run lists its Pages artifact
       contents: read
       pages: write
       id-token: write

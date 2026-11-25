@@ -137,6 +137,7 @@ jobs:
     if: ${{ !cancelled() && needs.channels.result == 'success' && needs.channels.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
     permissions:
+      actions: read  # the wait below lists this run's artifacts
       contents: read
       pages: write
       id-token: write
@@ -297,5 +298,19 @@ jobs:
           path: ${{ runner.temp }}/artifact.tar
           if-no-files-found: error
           retention-days: 1
+      # deploy-pages looks the artifact up in the run's list at once, and that list lags an upload: « No artifacts named
+      # "github-pages" were found » though the upload had finished (auto-release 45546890000, channel 45559337742, 2026-11-25).
+      # Wait until the run lists it (two minutes at most), then a little more for the API deploy-pages reads.
+      - name: Wait until the run lists the Pages artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 24); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[].name' | grep -x github-pages >/dev/null; then
+              sleep 5; exit 0
+            fi
+            sleep 5
+          done
+          echo '::warning::the github-pages artifact is still not listed after two minutes; deploying anyway'
       - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
         id: deployment

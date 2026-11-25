@@ -228,6 +228,7 @@ jobs:
     needs: [prepare, promote]
     if: always() && (needs.promote.result == 'success' || (needs.prepare.result == 'success' && needs.prepare.outputs.site == 'true'))
     permissions:
+      actions: read  # pages.yml's publish waits until the run lists its Pages artifact
       contents: read
       pages: write
       id-token: write
