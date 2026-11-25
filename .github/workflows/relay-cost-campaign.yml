@@ -1,8 +1,10 @@
 name: Relay cost campaign
 # jaunt-0662 (for Pricing, pricing-0007): what a GB through the relay costs, measured. One job runs one session of
 # tools/ops/relay_cost_campaign.mjs (source main) with --job, where the admin key already is, so that no machine holds it and no key
-# travels: the gate (spend.status and quota.status: go only if the campaign stays inside what the month includes and crosses no quota
-# alert level; the verdict only, the account's usage and dollars are never printed here), then the campaign's own invite (label
+# travels: the gate (spend.status and quota.status: go only if the month with the campaign stays under 80 % of each amount the month
+# includes, on the bill estimate, where hibernated WebSocket messages count 1 for 20 as on the invoice, not on the spend switch's own
+# count of them in full; the campaign's own requests in full; no spend or quota alert crossed; the verdict and the names of the figures
+# it used only, the account's usage and dollars are never printed here), then the campaign's own invite (label
 # "relay-cost campaign (jaunt-0662)", one machine, no TURN), whose key stays in the tool's memory (never printed, written or sent but to
 # the relay), both ends of its one room in this job, that invite's account.get around each run, the invite revoked, the gate again.
 # The log and the one-day artifact relay-cost-campaign hold one JSON line each: UTC times, the read windows Ops reads Cloudflare's
