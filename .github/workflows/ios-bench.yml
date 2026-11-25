@@ -1,19 +1,17 @@
 name: iOS bench
-# The iOS bench (ticket ops-0023; docs/IOS_BENCH.md, docs/IOS_BENCH_LIMITS.md). On one of GitHub's macOS runners the source at `sha`
-# builds a test iPhone app (app/ios, Tauri 2) for the iOS simulator, unsigned and with no Apple account; an iPhone simulator boots, the
-# app is installed and launched, an XCTest UI test (app/ios/driver) taps the app's page and types on its keyboard, and the page must
-# show both (step 1). A test jaunt machine runs on the same runner (the Rust host built for it, the test relay, the web client's page):
-# the app opens the machine's page, and the UI test pairs with the machine by typing its code and waits until the app shows it
-# connected (step 2); a test notification is handed to the simulator (simctl push) and the UI test must see iOS show it. Built once,
-# that run goes over the simulators the image has, one after the other: the newest iPhone, an iPad, the oldest iOS runtime (step 4).
-# Then, on the same runner, the Tauri Mac app as a person gets it (step 5): the Experimental release's zip, else the one a release would
-# carry, built here; in ~/Downloads with the quarantine a browser's download carries, Gatekeeper's verdict, opened as a person opens it
-# (the words macOS shows), launched as after Open Anyway, its window and a screenshot, then quit.
-# The screenshots, the logs, result.json and the list of what a simulator does not prove are the run's artifact; the result and that
-# list are its summary. app/ios/bench.sh does each step, so the bench changes with the source, not here.
+# The iOS bench for jaunt (ticket ops-0023; docs/IOS_BENCH.md, docs/IOS_BENCH_LIMITS.md): apple-bench.yml, the bench every product calls
+# (step 6), with jaunt's inputs. On one of GitHub's macOS runners the source at `sha` builds the bench's test iPhone app (app/ios, Tauri
+# 2) for the iOS simulator, unsigned and with no Apple account; the simulators the image has (the newest iPhone, an iPad, the oldest iOS
+# runtime) boot one after the other, the app is installed and launched, an XCTest UI test (app/ios/driver) taps the app's page and
+# types on its keyboard (step 1); a test jaunt machine runs on the same runner (the Rust host built for it, the test relay, the web
+# client's page): the app opens the machine's page, and the UI test pairs with the machine by typing its code and waits until the app
+# shows it connected (step 2), again with a machine reached over IPv6 only (step 3); a test notification is handed to the simulator
+# (simctl push) and the UI test must see iOS show it (step 4). Then, on the same runner, the Tauri Mac app as a person gets it (step 5):
+# the Experimental release's zip, else the one a release would carry, built here; quarantined, Gatekeeper's verdict, launched as after
+# Open Anyway, its window and a screenshot, then quit. app/ios/bench.sh does each step, so the bench changes with the source, not here.
 # Started by hand only: no other workflow names it, its concurrency group is its own, and nothing waits for it, so it never holds a
-# Linux, Windows or Android release (docs/DEPLOYMENT.md "macOS is not required"). GitHub may not hand out a macOS runner: `watch`
-# starts the workflow once more (attempt 2) when none took the job within 30 minutes, and says so in its summary.
+# Linux, Windows or Android release (docs/DEPLOYMENT.md "macOS is not required"). GitHub may not hand out a macOS runner: the bench's
+# `watch` job starts this workflow once more (attempt 2) when none took the job within 30 minutes, and says so in its summary.
 #   gh workflow run ios-bench.yml --repo moukrea/jaunt -f sha=<source commit with app/ios/bench.sh>
 run-name: iOS bench ${{ inputs.sha }} (attempt ${{ inputs.attempt }})
 on:
@@ -29,7 +27,7 @@ on:
         options: ['1', '2']
         default: '1'
 permissions: {}
-# It restores and saves nothing (cache-mode, enforced by GitHub's cache service; scripts/check_public_ops.py).
+# It restores and saves nothing (cache-mode, enforced by GitHub's cache service; scripts/check_public_ops.py), nor does the bench.
 cache-mode: none
 # Its own group: a newer run for the same commit (the second attempt, or a new dispatch) replaces an older one, and no release or CI
 # run shares it.
@@ -37,187 +35,30 @@ concurrency:
   group: ios-bench-${{ inputs.sha }}
   cancel-in-progress: true
 jobs:
-  guard:
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - name: Require an exact source commit
-        env:
-          SHA: ${{ inputs.sha }}
-        run: |
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full commit id (40 lowercase hexadecimal characters)"; exit 1; }
-  simulator:
-    needs: guard
-    runs-on: macos-latest
-    # (the builds before the run step, up to 25 minutes; the run step's 75; the Mac app's 25 and 20)
-    timeout-minutes: 150
+  # jaunt's source holds the bench: its own test app, test machine and Mac app (`bench`), the web client's words for the pairing.
+  bench:
+    uses: ./.github/workflows/apple-bench.yml
     permissions:
       contents: read
-    defaults:
-      run:
-        shell: bash
-    env:
-      RUSTUP_TOOLCHAIN: '1.91.1'
-      TAURI_CLI_VERSION: 2.12.4
-      HOMEBREW_NO_AUTO_UPDATE: '1'
-      HOMEBREW_NO_INSTALL_CLEANUP: '1'
-      HOMEBREW_NO_ENV_HINTS: '1'
-      BENCH_SHA: ${{ inputs.sha }}
-      BENCH_ATTEMPT: ${{ inputs.attempt }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          repository: ${{ vars.JAUNT_SOURCE_REPO }}
-          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
-          ref: ${{ inputs.sha }}
-          persist-credentials: false
-      # The list of what the bench does not prove goes into the artifact first, so that every proof of this run carries it.
-      - id: bench
-        name: The bench is in this source
-        run: |
-          if [ -f app/ios/bench.sh ] && [ -f app/ios/bench.py ] && [ -f docs/IOS_BENCH_LIMITS.md ]; then
-            mkdir -p "$RUNNER_TEMP/ios-bench"
-            cp docs/IOS_BENCH_LIMITS.md "$RUNNER_TEMP/ios-bench/"
-            echo present=true >> "$GITHUB_OUTPUT"
-            # (step 5, the Mac app: a source from before it has no bench.sh mac-app)
-            if [ -f app/ios/mac_ui.js ]; then echo mac=true >> "$GITHUB_OUTPUT"; fi
-          else
-            echo "::error::This commit has no iOS bench (app/ios/bench.sh, app/ios/bench.py, docs/IOS_BENCH_LIMITS.md)"
-            exit 1
-          fi
-      # Python and Node for the test machine (step 2), as the conformance jobs of ci.yml have them: the harness that starts the relay
-      # and the host (tests/browser_e2e.py), and the relay Worker under workerd (Miniflare).
-      - id: python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.13'
-      - id: node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '22'
-      - id: rust
-        name: Rust with the iOS targets (pinned toolchain)
-        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target aarch64-apple-ios-sim --target aarch64-apple-ios --target x86_64-apple-ios
-      - id: tauri
-        name: Tauri CLI (pinned)
-        run: |
-          cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
-          cargo tauri --version
-      # XcodeGen makes both Xcode projects; tauri ios init installs libimobiledevice with Homebrew when it is missing: both come first,
-      # so that a failed download is this step's.
-      - id: tools
-        name: XcodeGen, and the tool tauri ios init asks for (Homebrew)
-        run: |
-          brew install xcodegen libimobiledevice
-          xcodegen --version
-          xcodebuild -version
-      - id: app
-        name: Build the test app (app/ios, Tauri 2, iOS simulator, unsigned)
-        run: bash app/ios/bench.sh app "$RUNNER_TEMP/ios-bench"
-      # Built even when the app failed, so that one run on a scarce runner says as much as it can.
-      - id: driver
-        name: Build the UI test that drives it (app/ios/driver)
-        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
-        run: bash app/ios/bench.sh driver "$RUNNER_TEMP/ios-bench"
-      # The test machine's pieces (the Rust host for this runner's macOS, the relay's packages, the harness's): built even when the
-      # app failed, so that the relay and the host are still tried.
-      - id: machine
-        name: Build the test machine (the Rust host, the test relay, the web client)
-        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
-        run: bash app/ios/bench.sh machine "$RUNNER_TEMP/ios-bench"
-      # One simulator after the other (the newest iPhone, an iPad, the oldest iOS runtime): about 11.5 minutes each; bench.sh
-      # starts a device after the first only while 15 of its 70 minutes are left.
-      - name: Simulators and test machine - install, launch, touch, keystrokes, pair, connect, notification, screenshots
-        if: ${{ !cancelled() && (steps.app.outcome == 'success' || steps.machine.outcome == 'success') }}
-        timeout-minutes: 75
-        run: bash app/ios/bench.sh run "$RUNNER_TEMP/ios-bench"
-      # Step 5, the Mac app, in this job after the simulators: on the runner it already holds (a second job would wait for a second
-      # macOS runner, which may never come, and compile the Tauri CLI again), a runner that is new for every job, where nothing before
-      # opened a Mac app or changed Gatekeeper. Where a person gets it; when the Experimental release has no zip of it for this Mac, the
-      # one a release would carry, built from this source as release-macos.yml builds it.
-      - id: macapp
-        name: The Mac app as a person gets it (the Experimental release, else built as a release builds it)
-        if: ${{ !cancelled() && steps.bench.outputs.mac == 'true' && steps.rust.outcome == 'success' && steps.tauri.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
-        timeout-minutes: 25
-        run: bash app/ios/bench.sh mac-app "$RUNNER_TEMP/ios-bench"
-      - name: Mac app - downloaded, quarantined, Gatekeeper, opened, launched, window, screenshot, paired, quit
-        if: ${{ !cancelled() && steps.macapp.outcome == 'success' }}
-        timeout-minutes: 20
-        run: bash app/ios/bench.sh mac "$RUNNER_TEMP/ios-bench"
-      - name: Report, with what this bench does not prove
-        if: ${{ always() && steps.bench.outputs.present == 'true' }}
-        run: |
-          bash app/ios/bench.sh report "$RUNNER_TEMP/ios-bench"
-          cat "$RUNNER_TEMP/ios-bench/summary.md" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: ios-bench-${{ inputs.sha }}-${{ inputs.attempt }}
-          path: ${{ runner.temp }}/ios-bench/
-          retention-days: 1
-          if-no-files-found: warn
-  # GitHub's macOS runners are often not handed out ("The job was not acquired by Runner of type hosted even after multiple attempts",
-  # docs/DEPLOYMENT.md "macOS is not required"). This job watches `simulator` in this run and ends once a runner took it. When none did
-  # within QUEUE_MINUTES, or GitHub ended the job without starting it, the first attempt starts this workflow again for the same commit
-  # (attempt 2, which replaces this run through the concurrency group) and says so; the second only says that the Apple proof is
-  # missing because no macOS runner was free. It reads nothing of the source.
-  watch:
-    needs: guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
       actions: write
-    env:
-      QUEUE_MINUTES: '30'
-    steps:
-      - id: watch
-        name: Wait for a macOS runner to take the simulator job
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
-          ATTEMPT: ${{ inputs.attempt }}
-        run: |
-          set -u
-          start=$(date +%s)
-          picked=false
-          seen='never seen in this run'
-          while :; do
-            # status|conclusion|runner|steps ('|', not a tab: read would merge the empty fields between tabs)
-            row=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq \
-              '[.jobs[] | select(.name == "simulator")][0] // {} | [.status // "", .conclusion // "", .runner_name // "", (.steps // [] | length | tostring)] | join("|")') || row=''
-            IFS='|' read -r status conclusion runner steps <<<"$row" || true
-            waited=$(( ($(date +%s) - start) / 60 ))
-            if [ "${status:-}" = in_progress ] || { [ "${status:-}" = completed ] && { [ -n "${runner:-}" ] || [ "${steps:-0}" -gt 0 ]; }; }; then
-              picked=true
-              seen="taken by ${runner:-a runner} after about $waited min"
-              break
-            fi
-            if [ "${status:-}" = completed ]; then
-              seen="ended by GitHub (${conclusion:-no conclusion}) without a runner after about $waited min"
-              break
-            fi
-            if [ "$waited" -ge "$QUEUE_MINUTES" ]; then
-              seen="still ${status:-queued} after $QUEUE_MINUTES min"
-              break
-            fi
-            sleep 30
-          done
-          echo "picked=$picked" >> "$GITHUB_OUTPUT"
-          {
-            echo "### macOS runner for the iOS bench $SHA (attempt $ATTEMPT)"
-            echo "The simulator job was $seen."
-            if [ "$picked" != true ] && [ "$ATTEMPT" = 1 ]; then
-              echo "No macOS runner: this workflow starts again for the same commit (attempt 2), which replaces this run."
-            elif [ "$picked" != true ]; then
-              echo "No macOS runner on the second attempt either: the Apple proof for $SHA is missing until one takes the job (GitHub cancels a job queued for 24 hours). Nothing else waits for it."
-            fi
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ "$picked" != true ] && [ "$ATTEMPT" != 1 ]; then
-            echo "::warning::iOS bench $SHA: no macOS runner took either attempt within $QUEUE_MINUTES min; the Apple proof is missing"
-          fi
-      - name: Start the second attempt (no macOS runner took the first)
-        if: ${{ steps.watch.outputs.picked != 'true' && inputs.attempt == '1' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
-        run: gh workflow run ios-bench.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f attempt=2
+    with:
+      product: jaunt
+      repository: ${{ vars.JAUNT_SOURCE_REPO }}
+      sha: ${{ inputs.sha }}
+      attempt: ${{ inputs.attempt }}
+      bundle-id: dev.jaunt.iosbench
+      ios-build: bench
+      machine: bench
+      pair-field: Pairing string or link
+      pair-button: Pair machine
+      connected-text: Encrypted
+      progress-texts: Local connection,Connecting,Verifying host
+      devices: iphone,ipv6,ipad,oldest-ios
+      notification: 'yes'
+      mac: bench
+      rust-toolchain: '1.91.1'
+      tauri-cli: 2.12.4
+      python-version: '3.13'
+      node-version: '22'
+    secrets:
+      PRODUCT_SOURCE_KEY: ${{ secrets.SOURCE_READ_KEY }}

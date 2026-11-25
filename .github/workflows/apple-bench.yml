@@ -1,0 +1,469 @@
+name: Apple bench
+# The Apple bench as a reusable job (ticket ops-0023 step 6; docs/IOS_BENCH.md, "For another product"; docs/IOS_BENCH_LIMITS.md): one
+# bench for every product. On one of GitHub's macOS runners the product's source at `sha` builds its iPhone app for the iOS simulator,
+# unsigned and with no Apple account; the bench's simulators (the newest iPhone, an iPad, the oldest iOS runtime, the same iPhone on a
+# test machine reached over IPv6 only) install and launch it, an XCTest UI test pairs it with the product's test machine on the same
+# runner (its pairing field, its button, the text it shows connected: the caller's inputs) and a test notification is handed to the
+# simulator; then, when the caller names one, the product's Mac app as a person gets it (quarantined, Gatekeeper's verdict, launched,
+# its window, a screenshot, quit). The screenshots, the logs, result.json and the list of what this bench does not prove are the run's
+# artifact; the result and that list are its summary. app/ios/bench.sh of the bench's source does each step.
+#
+# jaunt calls it from ios-bench.yml (its source holds the bench: the inputs `bench` name the bench's own test app, test machine and
+# Mac app); another product calls it from its own public repository, pinned to a commit of this repository:
+#   jobs:
+#     bench:
+#       uses: moukrea/jaunt/.github/workflows/apple-bench.yml@<commit of moukrea/jaunt>
+# with its own inputs and its own secrets, passed by name (never `secrets: inherit`): its source's read-only deploy key when that
+# source is private, and a read-only deploy key of the bench's source (jaunt's) to fetch the bench. A caller can only pass its own
+# repository's secrets: jaunt's SOURCE_READ_KEY is this repository's and never reaches another product's run. The caller is started by
+# hand with `sha` and `attempt` ('1' or '2') inputs, sets its own concurrency group, grants `contents: read` and `actions: write`, and
+# GitHub bills the macOS runner to it. Every input is checked by the guard job before anything runs, and reaches a step through env only.
+on:
+  workflow_call:
+    inputs:
+      product:
+        description: 'The product, for the run''s words: lowercase letters, digits and hyphens (jaunt, daffin)'
+        required: true
+        type: string
+      repository:
+        description: 'The product''s source to build, owner/name (public: no key; private: PRODUCT_SOURCE_KEY)'
+        required: true
+        type: string
+      sha:
+        description: 'Its commit (40 lowercase hexadecimal characters), on one of its own branches: never a pull request''s head from a fork'
+        required: true
+        type: string
+      attempt:
+        description: '1 when started by hand; 2 when the first attempt found no macOS runner and started this one'
+        required: false
+        default: '1'
+        type: string
+      bench-repository:
+        description: 'The repository whose app/ios holds the bench (jaunt''s source, owner/name, read with BENCH_SOURCE_KEY); empty when the product''s source holds it'
+        required: false
+        default: ''
+        type: string
+      bench-sha:
+        description: 'The bench''s commit in bench-repository (40 lowercase hexadecimal characters); empty with it'
+        required: false
+        default: ''
+        type: string
+      bundle-id:
+        description: 'The iOS app''s bundle identifier (CFBundleIdentifier)'
+        required: true
+        type: string
+      ios-build:
+        description: 'bench: the bench''s own test app (app/ios); or the command, a line of words run from the product''s source, that builds its iOS app for the Apple silicon simulator, unsigned'
+        required: true
+        type: string
+      ios-app:
+        description: 'With a command in ios-build: the .app it leaves, a path in the product''s source (no glob)'
+        required: false
+        default: ''
+        type: string
+      machine:
+        description: 'bench: the bench''s own test machine (jaunt''s; its source must be the product''s); none; or the command that serves the product''s test machine (docs/IOS_BENCH.md "The test machine")'
+        required: true
+        type: string
+      machine-build:
+        description: 'With a command in machine: the command that builds the test machine first; empty when there is nothing to build'
+        required: false
+        default: ''
+        type: string
+      pair-field:
+        description: 'The label of the app''s field the pairing code is typed into'
+        required: true
+        type: string
+      pair-button:
+        description: 'The start of the label of the button that pairs once the code is typed'
+        required: true
+        type: string
+      connected-text:
+        description: 'The text the app shows only once connected to the test machine'
+        required: true
+        type: string
+      progress-texts:
+        description: 'The texts it shows while it pairs and connects, comma-separated (a press it took); empty: none'
+        required: false
+        default: ''
+        type: string
+      devices:
+        description: 'The simulators, comma-separated, in this order: iphone, ipv6, ipad, oldest-ios (ipv6 needs a test machine)'
+        required: false
+        default: 'iphone,ipv6,ipad,oldest-ios'
+        type: string
+      notification:
+        description: 'yes: a test notification handed to the simulator and shown by iOS (the app asks for the permission as it starts); no'
+        required: false
+        default: 'yes'
+        type: string
+      mac:
+        description: 'none; bench: the bench''s own Mac app (jaunt''s Tauri app, as a person gets it); or the command that builds the product''s Mac app, a zip'
+        required: false
+        default: 'none'
+        type: string
+      mac-zip:
+        description: 'With a command in mac: the zip it leaves, a path in the product''s source (no glob)'
+        required: false
+        default: ''
+        type: string
+      mac-app:
+        description: 'With a command in mac: the app at the root of that zip (<Name>.app, its executable Contents/MacOS/<Name>)'
+        required: false
+        default: ''
+        type: string
+      rust-toolchain:
+        description: 'The Rust toolchain installed with the iOS targets'
+        required: false
+        default: '1.91.1'
+        type: string
+      tauri-cli:
+        description: 'The Tauri CLI version installed (cargo install tauri-cli --locked)'
+        required: false
+        default: '2.12.4'
+        type: string
+      python-version:
+        description: 'The Python the runner gets (actions/setup-python)'
+        required: false
+        default: '3.13'
+        type: string
+      node-version:
+        description: 'The Node the runner gets (actions/setup-node)'
+        required: false
+        default: '22'
+        type: string
+    secrets:
+      PRODUCT_SOURCE_KEY:
+        description: 'A read-only deploy key of the product''s source, when it is private'
+        required: false
+      BENCH_SOURCE_KEY:
+        description: 'A read-only deploy key of bench-repository, when it is set'
+        required: false
+permissions: {}
+# It restores and saves nothing (cache-mode, enforced by GitHub's cache service; scripts/check_public_ops.py). The caller sets the
+# concurrency group (ios-bench.yml: ios-bench-<sha>): none here, which would cancel its own caller.
+cache-mode: none
+jobs:
+  # Every input, checked before anything uses it: a value that is not what its input says ends the run here.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check the caller's inputs
+        env:
+          PRODUCT: ${{ inputs.product }}
+          REPOSITORY: ${{ inputs.repository }}
+          SHA: ${{ inputs.sha }}
+          ATTEMPT: ${{ inputs.attempt }}
+          BENCH_REPOSITORY: ${{ inputs.bench-repository }}
+          BENCH_SHA: ${{ inputs.bench-sha }}
+          BUNDLE_ID: ${{ inputs.bundle-id }}
+          IOS_BUILD: ${{ inputs.ios-build }}
+          IOS_APP: ${{ inputs.ios-app }}
+          MACHINE: ${{ inputs.machine }}
+          MACHINE_BUILD: ${{ inputs.machine-build }}
+          PAIR_FIELD: ${{ inputs.pair-field }}
+          PAIR_BUTTON: ${{ inputs.pair-button }}
+          CONNECTED_TEXT: ${{ inputs.connected-text }}
+          PROGRESS_TEXTS: ${{ inputs.progress-texts }}
+          DEVICES: ${{ inputs.devices }}
+          NOTIFICATION: ${{ inputs.notification }}
+          MAC: ${{ inputs.mac }}
+          MAC_ZIP: ${{ inputs.mac-zip }}
+          MAC_APP: ${{ inputs.mac-app }}
+          RUST_TOOLCHAIN: ${{ inputs.rust-toolchain }}
+          TAURI_CLI: ${{ inputs.tauri-cli }}
+          PYTHON_VERSION: ${{ inputs.python-version }}
+          NODE_VERSION: ${{ inputs.node-version }}
+        run: |
+          set -u
+          failed=0
+          refuse() { echo "::error::$1"; failed=1; }
+          # A command is a line of words the bench runs as an argument vector from the product's source, never through a shell: letters,
+          # digits and ._/=:,@+- only (no quote, $, ;, |, &, <, >, parenthesis, backquote, backslash), its first word a program or a path
+          # in that source (not an option, not absolute), no .., 300 characters at most.
+          command_ok() {
+            [[ "$1" =~ ^[A-Za-z0-9._/=:,@+-]+( [A-Za-z0-9._/=:,@+-]+)*$ ]] && [ "${#1}" -le 300 ] && [[ "$1" != -* && "$1" != /* && "$1" != *..* ]]
+          }
+          # A path in the product's source, ending in SUFFIX (.app, .zip): relative, its parts of letters, digits and ._- (no glob), no
+          # part . or .., 200 characters at most.
+          path_ok() {
+            [[ "$1" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]] && [[ "$1" == *"$2" && "$1" != "$2" && "$1" != */"$2" ]] && [ "${#1}" -le 200 ] \
+              && [[ "/$1/" != */./* && "/$1/" != */../* ]]
+          }
+          # A label the UI test looks for: one line, no control character, 80 characters at most.
+          label_ok() {
+            [[ "$1" =~ ^[^[:cntrl:]]{1,80}$ ]] && [[ "$1" != ' '* && "$1" != *' ' ]]
+          }
+          [[ "$PRODUCT" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || refuse 'product: lowercase letters, digits and hyphens, 32 at most, a letter first'
+          [[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$ ]] || refuse 'repository: owner/name'
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || refuse 'sha must be a full commit id (40 lowercase hexadecimal characters)'
+          [[ "$ATTEMPT" =~ ^[12]$ ]] || refuse 'attempt: 1 or 2'
+          if [ -n "$BENCH_REPOSITORY$BENCH_SHA" ]; then
+            [[ "$BENCH_REPOSITORY" =~ ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$ ]] || refuse 'bench-repository: owner/name, with bench-sha'
+            [[ "$BENCH_SHA" =~ ^[0-9a-f]{40}$ ]] || refuse 'bench-sha: a full commit id of bench-repository, with it'
+          fi
+          [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] && [ "${#BUNDLE_ID}" -le 155 ] || refuse 'bundle-id: a reverse-DNS bundle identifier'
+          if [ "$IOS_BUILD" = bench ]; then
+            [ -z "$IOS_APP" ] || refuse 'ios-app: empty with ios-build bench (the bench builds its own test app)'
+            [ "$BUNDLE_ID" = dev.jaunt.iosbench ] || refuse 'bundle-id: the bench'"'"'s own test app is dev.jaunt.iosbench (app/ios/tauri.conf.json)'
+          else
+            command_ok "$IOS_BUILD" || refuse 'ios-build: bench, or a command (a line of words: letters, digits and ._/=:,@+- only)'
+            path_ok "$IOS_APP" .app || refuse 'ios-app: the .app ios-build leaves, a path in the product'"'"'s source (no glob, no . or ..)'
+          fi
+          case "$MACHINE" in
+            bench) [ -z "$BENCH_REPOSITORY" ] || refuse 'machine: bench is the bench'"'"'s own test machine, jaunt'"'"'s: only for the bench'"'"'s own source (no bench-repository)'
+                   [ -z "$MACHINE_BUILD" ] || refuse 'machine-build: empty with machine bench (the bench builds its own)' ;;
+            none) [ -z "$MACHINE_BUILD" ] || refuse 'machine-build: empty with machine none'
+                  [[ ",$DEVICES," != *,ipv6,* ]] || refuse 'devices: ipv6 pairs with a test machine, and machine is none' ;;
+            *) command_ok "$MACHINE" || refuse 'machine: bench, none, or a command (a line of words: letters, digits and ._/=:,@+- only)'
+               [ -z "$MACHINE_BUILD" ] || command_ok "$MACHINE_BUILD" || refuse 'machine-build: a command, or empty' ;;
+          esac
+          label_ok "$PAIR_FIELD" || refuse 'pair-field: one line of 80 characters at most'
+          label_ok "$PAIR_BUTTON" || refuse 'pair-button: one line of 80 characters at most'
+          label_ok "$CONNECTED_TEXT" || refuse 'connected-text: one line of 80 characters at most'
+          if [ -n "$PROGRESS_TEXTS" ]; then
+            IFS=, read -r -a texts <<< "$PROGRESS_TEXTS"
+            for text in "${texts[@]}"; do label_ok "$text" || refuse 'progress-texts: labels of one line, comma-separated'; done
+            [[ "$PROGRESS_TEXTS" != *, ]] || refuse 'progress-texts: no empty label'
+          fi
+          [[ "$DEVICES" =~ ^(iphone|ipv6|ipad|oldest-ios)(,(iphone|ipv6|ipad|oldest-ios)){0,3}$ ]] || refuse 'devices: iphone, ipv6, ipad, oldest-ios, comma-separated'
+          [[ "$NOTIFICATION" =~ ^(yes|no)$ ]] || refuse 'notification: yes or no'
+          case "$MAC" in
+            none) [ -z "$MAC_ZIP$MAC_APP" ] || refuse 'mac-zip, mac-app: empty with mac none' ;;
+            bench) [ -z "$BENCH_REPOSITORY" ] || refuse 'mac: bench is the bench'"'"'s own Mac app, jaunt'"'"'s: only for the bench'"'"'s own source (no bench-repository)'
+                   [ -z "$MAC_ZIP$MAC_APP" ] || refuse 'mac-zip, mac-app: empty with mac bench' ;;
+            *) command_ok "$MAC" || refuse 'mac: none, bench, or a command (a line of words: letters, digits and ._/=:,@+- only)'
+               path_ok "$MAC_ZIP" .zip || refuse 'mac-zip: the zip mac leaves, a path in the product'"'"'s source (no glob, no . or ..)'
+               [[ "$MAC_APP" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.app$ ]] || refuse 'mac-app: <Name>.app' ;;
+          esac
+          [[ "$RUST_TOOLCHAIN" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || refuse 'rust-toolchain: a version (1.91.1)'
+          [[ "$TAURI_CLI" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || refuse 'tauri-cli: a version (2.12.4)'
+          [[ "$PYTHON_VERSION" =~ ^3\.[0-9]+(\.[0-9]+)?$ ]] || refuse 'python-version: 3.<minor>'
+          [[ "$NODE_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || refuse 'node-version: a version (22)'
+          exit "$failed"
+  simulator:
+    needs: guard
+    runs-on: macos-latest
+    # (the builds before the run step, up to 25 minutes; the run step's 75; the Mac app's 25 and 20)
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: ${{ inputs.rust-toolchain }}
+      TAURI_CLI_VERSION: ${{ inputs.tauri-cli }}
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_ENV_HINTS: '1'
+      BENCH_SHA: ${{ inputs.sha }}
+      BENCH_ATTEMPT: ${{ inputs.attempt }}
+      # The product (docs/IOS_BENCH.md "For another product"), as app/ios/bench.sh and bench.py read it.
+      BENCH_PRODUCT: ${{ inputs.product }}
+      BENCH_PRODUCT_ROOT: ${{ github.workspace }}
+      BENCH_SOURCE: ${{ inputs.bench-repository }}
+      BENCH_BUNDLE_ID: ${{ inputs.bundle-id }}
+      BENCH_IOS_BUILD: ${{ inputs.ios-build }}
+      BENCH_IOS_APP: ${{ inputs.ios-app }}
+      BENCH_MACHINE_CMD: ${{ inputs.machine }}
+      BENCH_MACHINE_BUILD: ${{ inputs.machine-build }}
+      BENCH_PAIR_FIELD: ${{ inputs.pair-field }}
+      BENCH_PAIR_BUTTON: ${{ inputs.pair-button }}
+      BENCH_CONNECTED_TEXT: ${{ inputs.connected-text }}
+      BENCH_PROGRESS_TEXTS: ${{ inputs.progress-texts }}
+      BENCH_DEVICES: ${{ inputs.devices }}
+      BENCH_NOTIFY: ${{ inputs.notification }}
+      BENCH_MAC_CMD: ${{ inputs.mac }}
+      BENCH_MAC_ZIP: ${{ inputs.mac-zip }}
+      BENCH_MAC_APP: ${{ inputs.mac-app }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ inputs.repository }}
+          ssh-key: ${{ secrets.PRODUCT_SOURCE_KEY }}
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      # Another product's run: the bench's own files from the bench's source, only them (moved out of the product's tree next).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: ${{ inputs.bench-repository != '' }}
+        with:
+          repository: ${{ inputs.bench-repository }}
+          ssh-key: ${{ secrets.BENCH_SOURCE_KEY }}
+          ref: ${{ inputs.bench-sha }}
+          path: .apple-bench
+          persist-credentials: false
+          sparse-checkout: |
+            app/ios/
+            docs/IOS_BENCH_LIMITS.md
+            web/assets/jaunt.png
+          sparse-checkout-cone-mode: false
+      # The list of what the bench does not prove goes into the artifact first, so that every proof of this run carries it.
+      - id: bench
+        name: The bench is in this source
+        run: |
+          bench="$GITHUB_WORKSPACE"
+          if [ -n "$BENCH_SOURCE" ]; then
+            mv .apple-bench "$RUNNER_TEMP/apple-bench"
+            bench="$RUNNER_TEMP/apple-bench"
+          fi
+          if [ -f "$bench/app/ios/bench.sh" ] && [ -f "$bench/app/ios/bench.py" ] && [ -f "$bench/docs/IOS_BENCH_LIMITS.md" ]; then
+            # (another product needs a bench that reads its inputs: from step 6 on; jaunt's own older commits are their own bench)
+            if [ -n "$BENCH_SOURCE" ] && ! grep -q '^BENCH_CONTRACT=1$' "$bench/app/ios/bench.sh"; then
+              echo "::error::The bench at bench-sha reads no product's inputs (app/ios/bench.sh has no BENCH_CONTRACT=1): name a later commit"
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/ios-bench"
+            cp "$bench/docs/IOS_BENCH_LIMITS.md" "$RUNNER_TEMP/ios-bench/"
+            echo "BENCH_DIR=$bench" >> "$GITHUB_ENV"
+            echo present=true >> "$GITHUB_OUTPUT"
+            # (step 5, the Mac app: a source from before it has no bench.sh mac-app)
+            if [ -f "$bench/app/ios/mac_ui.js" ] && [ "$BENCH_MAC_CMD" != none ]; then echo mac=true >> "$GITHUB_OUTPUT"; fi
+          else
+            echo "::error::This commit has no iOS bench (app/ios/bench.sh, app/ios/bench.py, docs/IOS_BENCH_LIMITS.md)"
+            exit 1
+          fi
+      # Python and Node for the test machine (step 2), as the conformance jobs of jaunt's ci.yml have them: the harness that starts the
+      # relay and the host (tests/browser_e2e.py), and the relay Worker under workerd (Miniflare).
+      - id: python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - id: node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - id: rust
+        name: Rust with the iOS targets (pinned toolchain)
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target aarch64-apple-ios-sim --target aarch64-apple-ios --target x86_64-apple-ios
+      - id: tauri
+        name: Tauri CLI (pinned)
+        run: |
+          cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+          cargo tauri --version
+      # XcodeGen makes both Xcode projects; tauri ios init installs libimobiledevice with Homebrew when it is missing: both come first,
+      # so that a failed download is this step's.
+      - id: tools
+        name: XcodeGen, and the tool tauri ios init asks for (Homebrew)
+        run: |
+          brew install xcodegen libimobiledevice
+          xcodegen --version
+          xcodebuild -version
+      - id: app
+        name: Build the iOS app (the bench's test app, or the product's, for the iOS simulator, unsigned)
+        run: bash "$BENCH_DIR/app/ios/bench.sh" app "$RUNNER_TEMP/ios-bench"
+      # Built even when the app failed, so that one run on a scarce runner says as much as it can.
+      - id: driver
+        name: Build the UI test that drives it (app/ios/driver)
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: bash "$BENCH_DIR/app/ios/bench.sh" driver "$RUNNER_TEMP/ios-bench"
+      # The test machine's pieces (the bench's own: the Rust host for this runner's macOS, the relay's packages, the harness's; or the
+      # product's, by its machine-build): built even when the app failed, so that the machine is still tried.
+      - id: machine
+        name: Build the test machine
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
+        run: bash "$BENCH_DIR/app/ios/bench.sh" machine "$RUNNER_TEMP/ios-bench"
+      # One simulator after the other (the newest iPhone, an iPad, the oldest iOS runtime): about 11.5 minutes each; bench.sh
+      # starts a device after the first only while 15 of its 70 minutes are left.
+      - name: Simulators and test machine - install, launch, touch, keystrokes, pair, connect, notification, screenshots
+        if: ${{ !cancelled() && (steps.app.outcome == 'success' || steps.machine.outcome == 'success') }}
+        timeout-minutes: 75
+        run: bash "$BENCH_DIR/app/ios/bench.sh" run "$RUNNER_TEMP/ios-bench"
+      # Step 5, the Mac app, in this job after the simulators: on the runner it already holds (a second job would wait for a second
+      # macOS runner, which may never come, and compile the Tauri CLI again), a runner that is new for every job, where nothing before
+      # opened a Mac app or changed Gatekeeper. The bench's own (jaunt's): where a person gets it, else the one a release would carry,
+      # built from this source as release-macos.yml builds it; another product's: built by its command.
+      - id: macapp
+        name: The Mac app as a person gets it (where a person gets it, else built on the runner)
+        if: ${{ !cancelled() && steps.bench.outputs.mac == 'true' && steps.rust.outcome == 'success' && steps.tauri.outcome == 'success' && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
+        timeout-minutes: 25
+        run: bash "$BENCH_DIR/app/ios/bench.sh" mac-app "$RUNNER_TEMP/ios-bench"
+      - name: Mac app - downloaded, quarantined, Gatekeeper, opened, launched, window, screenshot, paired, quit
+        if: ${{ !cancelled() && steps.macapp.outcome == 'success' }}
+        timeout-minutes: 20
+        run: bash "$BENCH_DIR/app/ios/bench.sh" mac "$RUNNER_TEMP/ios-bench"
+      - name: Report, with what this bench does not prove
+        if: ${{ always() && steps.bench.outputs.present == 'true' }}
+        run: |
+          bash "$BENCH_DIR/app/ios/bench.sh" report "$RUNNER_TEMP/ios-bench"
+          cat "$RUNNER_TEMP/ios-bench/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: ios-bench-${{ inputs.sha }}-${{ inputs.attempt }}
+          path: ${{ runner.temp }}/ios-bench/
+          retention-days: 1
+          if-no-files-found: warn
+  # GitHub's macOS runners are often not handed out ("The job was not acquired by Runner of type hosted even after multiple attempts",
+  # docs/DEPLOYMENT.md "macOS is not required"). This job watches `simulator` in this run and ends once a runner took it. When none did
+  # within QUEUE_MINUTES, or GitHub ended the job without starting it, the first attempt starts the caller's workflow again for the same
+  # commit (attempt 2, which replaces this run through the caller's concurrency group) and says so; the second only says that the Apple
+  # proof is missing because no macOS runner was free. It reads nothing of the source.
+  watch:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: write
+    env:
+      QUEUE_MINUTES: '30'
+    steps:
+      - id: watch
+        name: Wait for a macOS runner to take the simulator job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: |
+          set -u
+          start=$(date +%s)
+          picked=false
+          seen='never seen in this run'
+          while :; do
+            # status|conclusion|runner|steps ('|', not a tab: read would merge the empty fields between tabs). A called workflow's job is
+            # listed under its caller's job: "<caller job> / simulator".
+            row=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq \
+              '[.jobs[] | select(.name == "simulator" or (.name | endswith(" / simulator")))][0] // {} | [.status // "", .conclusion // "", .runner_name // "", (.steps // [] | length | tostring)] | join("|")') || row=''
+            IFS='|' read -r status conclusion runner steps <<<"$row" || true
+            waited=$(( ($(date +%s) - start) / 60 ))
+            if [ "${status:-}" = in_progress ] || { [ "${status:-}" = completed ] && { [ -n "${runner:-}" ] || [ "${steps:-0}" -gt 0 ]; }; }; then
+              picked=true
+              seen="taken by ${runner:-a runner} after about $waited min"
+              break
+            fi
+            if [ "${status:-}" = completed ]; then
+              seen="ended by GitHub (${conclusion:-no conclusion}) without a runner after about $waited min"
+              break
+            fi
+            if [ "$waited" -ge "$QUEUE_MINUTES" ]; then
+              seen="still ${status:-queued} after $QUEUE_MINUTES min"
+              break
+            fi
+            sleep 30
+          done
+          echo "picked=$picked" >> "$GITHUB_OUTPUT"
+          {
+            echo "### macOS runner for the iOS bench $SHA (attempt $ATTEMPT)"
+            echo "The simulator job was $seen."
+            if [ "$picked" != true ] && [ "$ATTEMPT" = 1 ]; then
+              echo "No macOS runner: this workflow starts again for the same commit (attempt 2), which replaces this run."
+            elif [ "$picked" != true ]; then
+              echo "No macOS runner on the second attempt either: the Apple proof for $SHA is missing until one takes the job (GitHub cancels a job queued for 24 hours). Nothing else waits for it."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$picked" != true ] && [ "$ATTEMPT" != 1 ]; then
+            echo "::warning::iOS bench $SHA: no macOS runner took either attempt within $QUEUE_MINUTES min; the Apple proof is missing"
+          fi
+      # The caller's own workflow, dispatched again on the branch it ran from: in a called workflow GITHUB_WORKFLOW_REF is the caller's
+      # (<owner>/<repo>/.github/workflows/<file>@<ref>), and the caller takes `sha` and `attempt`.
+      - name: Start the second attempt (no macOS runner took the first)
+        if: ${{ steps.watch.outputs.picked != 'true' && inputs.attempt == '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          caller=${GITHUB_WORKFLOW_REF%%@*}
+          caller=${caller##*/}
+          gh workflow run "$caller" --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f "sha=$SHA" -f attempt=2
