@@ -120,11 +120,13 @@ jobs:
           # macOS legs are ci-macos.yml's, whatever the source's own plan script lists (an older one still lists them).
           grep -v '^host_matrix=' "$PLAN" >> "$GITHUB_OUTPUT"
           echo "host_matrix=$(sed -n 's/^host_matrix=//p' "$PLAN" | jq -c '[.[] | select(.os | startswith("macos") | not)]')" >> "$GITHUB_OUTPUT"
-          # The flake job's runners (flake_shards): the tests grouped by file, a file's nodes on one runner, at most four runners;
-          # the files with the most nodes are placed first, each on the runner that holds the fewest. Computed here from
-          # flake_tests, so that a source of any age gets it. tests/test_ci_plan.py runs this program.
+          # The flake job's runners (flake_shards): the tests grouped as scripts/flake_gate.py runs them (one entry: a file's nodes
+          # whose own lines changed, another: its nodes there for a fixture alone, `@fixture`), an entry's nodes on one runner, at
+          # most four runners; the entries with the most nodes are placed first, each on the runner that holds the fewest (train W,
+          # 2026-11-24: test_installer_pwsh.py's two entries on one runner took 1,170 s and 110 s a run: the second had no room
+          # left). Computed here from flake_tests, so that a source of any age gets it. tests/test_ci_plan.py runs this program.
           FLAKE_TESTS=$(sed -n 's/^flake_tests=//p' "$PLAN")
-          echo "flake_shards=$(jq -n -c --arg tests "$FLAKE_TESTS" '[$tests | split(" ")[] | select(length > 0)] | group_by(split("::")[0]) | sort_by(-length) as $files | ([4, ($files | length)] | min) as $n | reduce $files[] as $f ([range($n) | []]; (map(length) | index(min)) as $j | .[$j] += $f) | to_entries | map({shard: "\(.key + 1)/\($n)", tests: (.value | join(" "))})')" >> "$GITHUB_OUTPUT"
+          echo "flake_shards=$(jq -n -c --arg tests "$FLAKE_TESTS" '[$tests | split(" ")[] | select(length > 0)] | group_by([split("::")[0], endswith("@fixture")]) | sort_by(-length) as $files | ([4, ($files | length)] | min) as $n | reduce $files[] as $f ([range($n) | []]; (map(length) | index(min)) as $j | .[$j] += $f) | to_entries | map({shard: "\(.key + 1)/\($n)", tests: (.value | join(" "))})')" >> "$GITHUB_OUTPUT"
           cat "$PLAN"
       # A `CI main` run does not repeat what a `CI pr` run of this repository already proved on the same files.
       # Reused only: a job (or matrix leg) that succeeded in a workflow_dispatch run of this repository named
@@ -686,11 +688,21 @@ jobs:
         run: |
           export jaunt_ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
           if [ -f tests/android_pick_upload_e2e.py ]; then python tests/android_pick_upload_e2e.py; else echo 'Not in this source'; fi
+      - name: Android's Share menu offers the app for any file, and a shared file reaches the host (jaunt-0737)
+        if: steps.present.outputs.present == 'true'
+        env:
+          jaunt_HOST_CMD: ${{ github.workspace }}/target/debug/jaunt
+          jaunt_ANDROID_SERIAL: emulator-5554
+        run: |
+          export jaunt_ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+          if [ -f tests/android_share_upload_e2e.py ]; then python tests/android_share_upload_e2e.py; else echo 'Not in this source'; fi
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-emulator-results
-          path: test-results/android-pick-upload
+          path: |
+            test-results/android-pick-upload
+            test-results/android-share-upload
           if-no-files-found: ignore
           retention-days: 1
   installer-fedora:
@@ -2179,6 +2191,9 @@ jobs:
       - run: python tests/android_download_e2e.py
         if: matrix.group == 'agents'
       - run: if [ -f tests/android_notifications_ui_e2e.py ]; then python tests/android_notifications_ui_e2e.py; fi
+        if: matrix.group == 'agents'
+      # Files shared to the Android app from another app (jaunt-0737): the page's side against a real host, the app's bridge emulated.
+      - run: if [ -f tests/android_share_ui_e2e.py ]; then python tests/android_share_ui_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'agents'
       - run: python tests/agents_e2e.py
         if: matrix.group == 'agents'
