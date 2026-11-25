@@ -44,7 +44,7 @@ on:
         description: Live channels whose candidate web could not be deployed
         value: ${{ jobs.publish.outputs.dropped }}
 # One site, redeployed whole: production's config.json and installers at the root and ch/<name>/config.json for each live
-# channel, never the web client. auto-release.yml calls this under jaunt-production-release (its release, or its resync of
+# channel, never the web client. auto-release.yml calls this under jaunt-production-release-2 (its release, or its resync of
 # the channels); channel.yml calls it with `plan` after a channel build or cleanup, so that a channel
 # reaches the Page whether or not auto-release is enabled. Both runs queue in the one group below, and
 # the `plan` decision is taken inside it, from the ledger as it is then (never from before the wait).
@@ -208,9 +208,13 @@ jobs:
           name=manifest['wheel']
           assert pathlib.Path(name).name==name
           assert hashlib.sha256((root/name).read_bytes()).hexdigest()==manifest['sha256']
-          # The desktop agents (from the release that ships them) are listed with their manifest
-          # hashes; the publisher verified their bytes (release_pipeline.verify_assets).
-          agents={a['file']:a['sha256'] for a in (manifest.get('desktopAgent') or {}).values()}
+          # The desktop agents (from the release that ships them), and since M13 a production release's Rust host, launcher,
+          # emulator library and third-party notices (build_release.py: `rustHost`, `launcher`, `emulator`, `notices`), are
+          # listed with their manifest hashes; the publisher verified their bytes (release_pipeline.verify_assets). (auto-release
+          # 45542864100, 2026-11-25: v0.1.0-beta.387's 17 rows failed the old count of wheel, manifest and agents.)
+          agents={}
+          for key in ('desktopAgent','rustHost','launcher','emulator','notices'):
+              agents.update({a['file']:a['sha256'] for a in (manifest.get(key) or {}).values()})
           assert all(pathlib.Path(f).name==f for f in agents)
           rows=(root/'SHA256SUMS').read_text().splitlines()
           assert len(rows)==2+len(agents)
