@@ -3,8 +3,8 @@ name: CI
 # queue: gh workflow run ci.yml -f sha=<commit> -f kind=pr -f pr=<number>, or -f kind=main for a
 # commit of source main. "CI main <commit>" runs are what the queue accepts before publishing that
 # commit. Logs are public: pytest prints one line per failure.
-# macOS is not here: its legs run in ci-macos.yml (job `macos` below dispatches it with the same inputs), which nothing waits
-# for (docs/DEPLOYMENT.md "macOS is not required"): no job of this workflow runs on a macOS runner or needs one that does.
+# macOS is not here: its legs run in ci-macos.yml (job `macos` below dispatches it with the same inputs for a `CI main` run), which
+# nothing waits for (docs/DEPLOYMENT.md "macOS is not required"): no job of this workflow runs on a macOS runner or needs one that does.
 # kind=hotfix (-f base=<production source>) tests a commit of maint/production with the plan of its own diff from that base:
 # "CI hotfix <commit> over <base>", which the release queue accepts in place of CI main for a hotfix of relay/** alone
 # (scripts/release_pipeline.py `validate_hotfix_checks`, docs/DEPLOYMENT.md "Hotfix releases").
@@ -289,9 +289,12 @@ jobs:
       - run: if [ -f scripts/test_inventory.py ]; then python scripts/test_inventory.py; else echo 'Not in this source'; fi
   # macOS runs in ci-macos.yml, started here with the same inputs and never waited for: no job below lists this one in `needs`, the
   # `test` gate and the release job do not read it, and a dispatch that fails (a workflow not yet published, no runner) changes nothing.
+  # Only for a `CI main` run, once per merge: started for every `CI pr` run too it ran 74 times from 2026-11-20 to 2026-11-27, never
+  # green (its host job fails 12 tests that assume Linux, jaunt-0834), and each run held the next CI back while it lasted. A proposed
+  # change is tried on macOS by hand: gh workflow run ci-macos.yml -f sha=<commit> -f kind=pr -f pr=<number>.
   macos:
     needs: guard
-    if: inputs.kind != 'hotfix'   # ci-macos.yml takes pr and main only; a hotfix's own CI is the relay's (release_pipeline.py)
+    if: inputs.kind == 'main'   # not pr (above), not hotfix (ci-macos.yml takes pr and main only; a hotfix's own CI is the relay's)
     runs-on: ubuntu-latest
     continue-on-error: true   # never waited for (macOS is not required, docs/DEPLOYMENT.md): a failed dispatch changes nothing
     permissions:
@@ -2197,6 +2200,10 @@ jobs:
       # The end of an AI session's turn (jaunt-0699): a question in six languages, "done" on request, nothing while work is left behind; the
       # Rust host's, against the installed claude and codex; skips without them and their credentials (every runner), and on the Python legs.
       - run: if [ -f tests/turn_end_real_e2e.py ]; then python tests/turn_end_real_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
+      # The bridge's context at a prompt (jaunt-0819): none for a program's message, the roster kept for the person's next one; a stand-in
+      # Claude Code that runs its settings' hooks. The Rust host's: skips on the Python legs.
+      - run: if [ -f tests/bridge_prompt_context_e2e.py ]; then python tests/bridge_prompt_context_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
       - run: python tests/webgl_render_e2e.py
         if: matrix.group == 'agents'
