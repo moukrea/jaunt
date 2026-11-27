@@ -2194,6 +2194,10 @@ jobs:
       # host's, against the installed claude; skips without claude and its credentials (every runner), and on the Python legs.
       - run: if [ -f tests/rich_stop_real_e2e.py ]; then python tests/rich_stop_real_e2e.py; else echo 'Not in this source'; fi
         if: matrix.group == 'rich'
+      # The end of an AI session's turn (jaunt-0699): a question in six languages, "done" on request, nothing while work is left behind; the
+      # Rust host's, against the installed claude and codex; skips without them and their credentials (every runner), and on the Python legs.
+      - run: if [ -f tests/turn_end_real_e2e.py ]; then python tests/turn_end_real_e2e.py; else echo 'Not in this source'; fi
+        if: matrix.group == 'rich'
       - run: python tests/webgl_render_e2e.py
         if: matrix.group == 'agents'
       - run: python tests/android_download_e2e.py
