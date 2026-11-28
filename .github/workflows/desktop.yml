@@ -6,8 +6,8 @@ name: Desktop app
 # source's pin (desktop/bridge.json). Without one (every source before the move, and any older source
 # the release queue still publishes) only the Electron build runs, as it always did.
 # macOS never blocks a release (docs/DEPLOYMENT.md "macOS is not required") and never waits for one: it has no build leg here (a
-# macOS runner may not be handed out for hours); release-macos.yml, which auto-release.yml starts beside this run, builds it
-# unwaited. scripts/desktop_assets.py require insists on every Linux and Windows package.
+# macOS runner may not be handed out for hours); release-macos.yml builds it, by hand only for now (jaunt-0560), and nothing
+# waits for it. scripts/desktop_assets.py require insists on every Linux and Windows package.
 on:
   workflow_call:
     inputs:

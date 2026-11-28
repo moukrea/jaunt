@@ -44,8 +44,8 @@ jobs:
     # smoke-tested per platform by the release commit's own agent/desktop/ci.sh (release mode), so
     # its build steps change with the source. A commit without that script ships no agent.
     # macOS never blocks a release (docs/DEPLOYMENT.md "macOS is not required"), and never waits for one either: it has no leg
-    # here (a macOS runner may not be handed out for hours). release-macos.yml, which auto-release.yml starts beside this run, builds
-    # it unwaited. The release goes out without a macOS agent; the other three are required (scripts/build_release.py refuses
+    # here (a macOS runner may not be handed out for hours). release-macos.yml builds it, by hand only for
+    # now (jaunt-0560), and nothing waits for it. The release goes out without a macOS agent; the other three are required (scripts/build_release.py refuses
     # a release without them).
     # A hotfix that reuses the agents of the release it fixes (agents_from) builds none (the pipeline never reuses them for a source whose
     # production release carries the Rust host: release_pipeline.py `hotfix_select`).

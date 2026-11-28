@@ -3,8 +3,8 @@ name: CI
 # queue: gh workflow run ci.yml -f sha=<commit> -f kind=pr -f pr=<number>, or -f kind=main for a
 # commit of source main. "CI main <commit>" runs are what the queue accepts before publishing that
 # commit. Logs are public: pytest prints one line per failure.
-# macOS is not here: its legs run in ci-macos.yml (job `macos` below dispatches it with the same inputs for a `CI main` run), which
-# nothing waits for (docs/DEPLOYMENT.md "macOS is not required"): no job of this workflow runs on a macOS runner or needs one that does.
+# macOS is not here: its legs are ci-macos.yml's, which nothing starts for now and nothing waits for (owner, 2026-11-27, jaunt-0560;
+# docs/DEPLOYMENT.md "macOS is not required"): no job of this workflow runs on a macOS runner, needs one that does, or dispatches one.
 # kind=hotfix (-f base=<production source>) tests a commit of maint/production with the plan of its own diff from that base:
 # "CI hotfix <commit> over <base>", which the release queue accepts in place of CI main for a hotfix of relay/** alone
 # (scripts/release_pipeline.py `validate_hotfix_checks`, docs/DEPLOYMENT.md "Hotfix releases").
@@ -287,26 +287,9 @@ jobs:
       - run: python scripts/check_project.py --undefined-names
       # Every test file is run by a job or written down with its reason (scripts/test_inventory.py, docs/DEPLOYMENT.md "Test inventory").
       - run: if [ -f scripts/test_inventory.py ]; then python scripts/test_inventory.py; else echo 'Not in this source'; fi
-  # macOS runs in ci-macos.yml, started here with the same inputs and never waited for: no job below lists this one in `needs`, the
-  # `test` gate and the release job do not read it, and a dispatch that fails (a workflow not yet published, no runner) changes nothing.
-  # Only for a `CI main` run, once per merge: started for every `CI pr` run too it ran 74 times from 2026-11-20 to 2026-11-27, never
-  # green (its host job fails 12 tests that assume Linux, jaunt-0834), and each run held the next CI back while it lasted. A proposed
-  # change is tried on macOS by hand: gh workflow run ci-macos.yml -f sha=<commit> -f kind=pr -f pr=<number>.
-  macos:
-    needs: guard
-    if: inputs.kind == 'main'   # not pr (above), not hotfix (ci-macos.yml takes pr and main only; a hotfix's own CI is the relay's)
-    runs-on: ubuntu-latest
-    continue-on-error: true   # never waited for (macOS is not required, docs/DEPLOYMENT.md): a failed dispatch changes nothing
-    permissions:
-      actions: write
-    steps:
-      - name: Start the macOS workflow (reported on its own, never gating)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
-          KIND: ${{ inputs.kind }}
-          PR: ${{ inputs.pr }}
-        run: gh workflow run ci-macos.yml --repo "$GITHUB_REPOSITORY" --ref main -f "sha=$SHA" -f "kind=$KIND" -f "pr=$PR"
+  # No job starts ci-macos.yml (owner, 2026-11-27, jaunt-0560: nothing of jaunt is offered for macOS yet, and its runs were never
+  # green: 74 from 2026-11-20 to 2026-11-27, jaunt-0834). It runs by hand only: gh workflow run ci-macos.yml -f sha=<commit> -f kind=pr
+  # -f pr=<number>. Bringing it back is docs/DEPLOYMENT.md "macOS is not required".
   test:
     runs-on: ubuntu-latest
     needs: [plan, host, flake, flake-e2e, android-build, android-emulator, browser-and-relay, browser-shells, direct-tls, installer-fedora, windows, desktop-agent, network-bench, client-link, app, app-package, rust-host, conformance, conformance-rust, conformance-desktop, rust-build, rust-e2e, rust-desktop-e2e]
@@ -356,7 +339,7 @@ jobs:
           RUST_DESKTOP_E2E_RESULT: ${{ needs.rust-desktop-e2e.result }}
           RUST_E2E_PLANNED: ${{ needs.plan.outputs.rust_e2e }}
         run: |
-          # No job of this workflow runs on macOS (ci-macos.yml does, and nothing here waits for it), so every planned job is required.
+          # No job of this workflow runs on macOS (ci-macos.yml does, by hand only), so every planned job is required.
           # A job the plan left out is skipped; one it asked for must have succeeded (a skipped one
           # whose predecessor failed is a failure here, not a pass).
           check() { if [ "$3" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
@@ -401,7 +384,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run auto-release.yml --repo "$GITHUB_REPOSITORY" --ref main
   # The flake gate (scripts/flake_gate.py): the pytest tests and JS tests a change adds or edits run many times
-  # with every core busy, on Linux (ci-macos.yml repeats them on macOS, unwaited); one failure fails the
+  # with every core busy, on Linux (ci-macos.yml, run by hand, repeats them on macOS); one failure fails the
   # change. The e2e suites it adds or edits are repeated the same way by a last step of the job that runs them.
   # Split by test file over at most four runners (the plan's flake_shards), each with the gate's whole cap: one
   # runner could not repeat the 54 changed nodes of seven test files (train U, 2026-11-24).

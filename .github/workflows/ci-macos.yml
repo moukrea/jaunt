@@ -1,9 +1,9 @@
 name: CI macOS
 # The macOS legs of CI, apart from ci.yml (docs/DEPLOYMENT.md "macOS is not required"): GitHub may take hours to hand out a macOS
-# runner, so nothing waits for these jobs. ci.yml starts this workflow with the same inputs at the start of a `CI main` run (once per
-# merge; not for `CI pr` runs since jaunt-0833) and never reads its result;
+# runner, so nothing waits for these jobs. Nothing starts this workflow for now (owner, 2026-11-27, jaunt-0560: until then ci.yml
+# started it for each `CI main` run); it runs by hand only, and nothing reads its result;
 # the release queue accepts "CI main <commit>" runs of ci.yml only, and this workflow's name is not "CI", so it starts no release.
-# A run is reported on its own, in its summary. A proposed change is tried here by hand, the same way:
+# A run is reported on its own, in its summary. A commit is tried here by hand:
 # gh workflow run ci-macos.yml -f sha=<commit> -f kind=pr -f pr=<number>
 run-name: CI macOS ${{ inputs.kind }} ${{ inputs.sha }}
 on:

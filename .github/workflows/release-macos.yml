@@ -1,7 +1,9 @@
 name: Release macOS
 # The macOS builds of a release, apart from the release (docs/DEPLOYMENT.md "macOS is not required"): GitHub may take hours to hand out
-# a macOS runner, so no publish, promotion, Pages deployment or receipt of auto-release.yml waits for these jobs. auto-release.yml
-# starts this workflow beside host and desktop with the release commit and never reads its result.
+# a macOS runner, so no publish, promotion, Pages deployment or receipt of auto-release.yml waits for these jobs. Nothing starts this
+# workflow for now (owner, 2026-11-27, jaunt-0560: until then auto-release.yml started it beside host and desktop with the release
+# commit); it runs by hand only (gh workflow run release-macos.yml -f ref=<release commit> -f host=true -f desktop=true), and nothing
+# reads its result.
 # A published release is immutable and its checksums, manifests and receipt cover exactly the files it was published with
 # (scripts/release_pipeline.py verify_assets), so these builds are not added to it: they are built and checked at the release commit,
 # the run's summary reports them, and a day's artifacts hold their files. When macOS has users, its packages join a release through
